@@ -28,7 +28,7 @@ export function TaskLinks({ links, taskId }: TaskLinksProps) {
         return (
           <div key={link.id} className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-secondary hover:bg-hover transition-colors">
             <span className="badge bg-elevated text-muted text-[10px]">{link.link_type}</span>
-            <span>{isSource ? "?" : "?"} {getTaskTitle(otherId)}</span>
+            <span>{isSource ? "←" : "→"} {getTaskTitle(otherId)}</span>
           </div>
         );
       })}

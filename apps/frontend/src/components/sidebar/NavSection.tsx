@@ -67,9 +67,9 @@ export function NavSection() {
                 {count}
               </span>
             )}
-            <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
-              {item.filter === "inbox" ? "I" : item.filter === "today" ? "T" : "N"}
-            </span>
+              <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
+                {item.filter === "inbox" ? "⌘I" : item.filter === "today" ? "⌘T" : "⌘N"}
+              </span>
           </button>
         );
       })}

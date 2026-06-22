@@ -34,6 +34,7 @@ function applyTheme(name: ThemeName) {
   root.style.setProperty("--shadow-sm", c["shadow-sm"]);
   root.style.setProperty("--shadow-md", c["shadow-md"]);
   root.style.setProperty("--shadow-lg", c["shadow-lg"]);
+  root.style.setProperty("--accent-glow", c["accent-glow"]);
   root.setAttribute("data-theme", name);
 }
 

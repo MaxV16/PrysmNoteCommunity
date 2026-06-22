@@ -138,7 +138,15 @@ export function TimelineView() {
     <div className="flex flex-col overflow-hidden bg-base">
       {/* Toolbar */}
       <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
-        <h2 className="text-sm font-semibold text-primary">Timeline</h2>
+        <div className="flex items-center gap-2">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          <h2 className="text-sm font-semibold text-primary">Timeline</h2>
+        </div>
         {filterBadge && (
           <span className="badge bg-accent/15 text-accent gap-1">
             {filterBadge}
@@ -158,10 +166,13 @@ export function TimelineView() {
         </div>
         <button
           onClick={() => setShowTaskForm(!showTaskForm)}
-          className="btn bg-accent px-3 py-1.5 text-xs font-semibold text-base hover:bg-accent-hover gap-1"
+          className="btn btn-primary px-3 py-1.5 text-xs gap-1.5"
         >
-          <span>+</span>
-          <span>Task</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span>New Task</span>
         </button>
       </div>
 

@@ -66,7 +66,11 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     <div className="flex flex-col overflow-hidden border-l border-border bg-surface">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span>🤖</span>
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/10">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+            </svg>
+          </div>
           <h2 className="text-sm font-semibold text-primary">AI Command Center</h2>
         </div>
         <div className="flex items-center gap-2">
@@ -91,8 +95,10 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       <div className="flex-1 overflow-auto px-4 py-3 space-y-4">
         {chatMessages.length === 0 && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 mb-4">
-              <span className="text-xl">{/* AI sparkle */}</span>
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 mb-4 float">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+              </svg>
             </div>
             <p className="text-xs text-secondary leading-relaxed mb-1">
               Your AI-powered task assistant

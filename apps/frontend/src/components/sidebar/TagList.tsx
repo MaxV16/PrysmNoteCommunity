@@ -63,9 +63,9 @@ export function TagList() {
             {tag.name}
             <button
               onClick={() => deleteTag(tag.id)}
-              className="ml-1 opacity-0 group-hover:opacity-100 hover:text-danger transition-opacity text-xs"
+              className="ml-1 opacity-0 group-hover:opacity-100 hover:text-danger transition-opacity text-xs font-bold"
             >
-              ?
+              ✕
             </button>
           </span>
         ))}

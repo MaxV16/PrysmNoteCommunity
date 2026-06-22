@@ -67,10 +67,14 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/10">
-            <span className="text-sm">{/* logo icon */}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
           </div>
           <div>
-            <h1 className="text-sm font-bold text-primary leading-tight">Prysm Note</h1>
+            <h1 className="text-sm font-bold gradient-text leading-tight">Prysm Note</h1>
             <span className="text-[10px] text-muted">AI Task Manager</span>
           </div>
         </div>
@@ -105,13 +109,16 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
         </div>
       )}
 
-      {/* Navigation & Content */}
-      <div className="flex-1 overflow-auto px-3 py-3 space-y-5">
-        <NavSection />
-        <FilterBar />
-        <ProjectList />
-        <TagList />
-      </div>
+        {/* Navigation & Content */}
+        <div className="flex-1 overflow-auto px-3 py-3 space-y-5 scroll-smooth">
+          <NavSection />
+          <div className="divider-gradient" />
+          <FilterBar />
+          <div className="divider-gradient" />
+          <ProjectList />
+          <div className="divider-gradient" />
+          <TagList />
+        </div>
 
       {/* Theme selector in footer */}
       <div className="border-t border-border px-3 py-2">
