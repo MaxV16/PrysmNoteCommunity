@@ -73,7 +73,9 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
       <div className="fade-in">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-primary">Edit Task</h3>
-          <button onClick={() => setEditing(false)} className="text-sm text-secondary hover:text-primary">\u2716</button>
+          <button onClick={() => setEditing(false)} className="text-sm text-secondary hover:text-primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
         <TaskForm onSubmit={handleUpdate} onCancel={() => setEditing(false)} initial={task} />
       </div>
@@ -103,7 +105,9 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
         <div className="flex items-center gap-1.5 shrink-0">
           <button onClick={() => setEditing(true)} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">Edit</button>
           <button onClick={handleDelete} className="btn bg-elevated px-2 py-1 text-xs text-danger hover:bg-hover">Del</button>
-          <button onClick={onClose} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">\u2716</button>
+          <button onClick={onClose} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </div>
       </div>
 

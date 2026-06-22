@@ -150,19 +150,27 @@ export function TimelineView() {
         {filterBadge && (
           <span className="badge bg-accent/15 text-accent gap-1">
             {filterBadge}
-            <button onClick={() => setNavFilter(null)} className="hover:text-primary">\u2716</button>
+            <button onClick={() => setNavFilter(null)} className="hover:text-primary p-0.5">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </span>
         )}
         {projectFilterName && (
           <span className="badge bg-blue-500/15 text-blue-400 gap-1">
             {projectFilterName}
-            <button onClick={() => useAppStore.getState().setSelectedProjectId(null)} className="hover:text-primary">\u2716</button>
+            <button onClick={() => useAppStore.getState().setSelectedProjectId(null)} className="hover:text-primary p-0.5">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </span>
         )}
         <div className="flex-1" />
         <div className="flex items-center gap-1">
-          <button onClick={handlePrevWeek} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">\u25C0</button>
-          <button onClick={handleNextWeek} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">\u25B6</button>
+          <button onClick={handlePrevWeek} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <button onClick={handleNextWeek} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
         </div>
         <button
           onClick={() => setShowTaskForm(!showTaskForm)}
