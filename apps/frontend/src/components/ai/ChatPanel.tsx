@@ -53,6 +53,13 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     return () => window.removeEventListener("prysm-ai-suggest", handler);
   }, [sendMessage, provider]);
 
+  const handleNewChat = () => {
+    const store = useAppStore.getState();
+    store.setChatMessages([]);
+    const newId = crypto.randomUUID();
+    localStorage.setItem("ai_session_id", newId);
+  };
+
   const handleSend = (message: string) => {
     const store = useAppStore.getState();
     const context: Record<string, unknown> = {};
@@ -64,8 +71,8 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
 
   return (
     <div className="flex flex-col overflow-hidden border-l border-border bg-surface">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3 bg-surface/80 backdrop-blur-md">
+        <div className="flex items-center gap-2.5">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/10">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
@@ -74,20 +81,36 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
           <h2 className="text-sm font-semibold text-primary">AI Command Center</h2>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-            className="rounded-md border border-border bg-elevated px-2 py-1 text-xs text-primary outline-none"
+          <div className="relative">
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              className="rounded-full border border-border bg-elevated px-3 py-1.5 text-xs text-primary outline-none appearance-none pr-7 cursor-pointer hover:border-accent/40 transition-colors"
+            >
+              {PROVIDERS.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </select>
+            <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </div>
+          <button
+            onClick={handleNewChat}
+            className="rounded-full px-2.5 py-1 text-[10px] text-secondary hover:bg-hover hover:text-primary transition-colors border border-transparent hover:border-border"
+            title="New Chat"
           >
-            {PROVIDERS.map((p) => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
+            +
+          </button>
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-sm text-secondary hover:bg-hover hover:text-primary transition-colors"
+            title="Close"
           >
-            ✕
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
           </button>
         </div>
       </div>
@@ -106,17 +129,19 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
             <p className="text-[10px] text-muted mb-5">
               Create tasks, search, schedule, and get smart suggestions
             </p>
-            <div className="w-full space-y-1.5">
+            <div className="w-full space-y-2">
               <p className="text-[10px] uppercase tracking-wider text-muted mb-1 pl-1 text-left">Try asking</p>
               {[
-                "\"Create a meeting next Thursday at 2pm\"",
-                "\"Find all tasks due this week\"",
-                "\"Break down: Plan a product launch\"",
+                "\"Schedule GP appointment next Monday at 12pm\"",
+                "\"What deadlines are coming up this week?\"",
+                "\"Find all tasks tagged urgent\"",
+                "\"Break down: Plan product launch\"",
+                "\"Show me my schedule conflicts for tomorrow\"",
               ].map((example) => (
                 <button
                   key={example}
                   onClick={() => handleSend(example.slice(1, -1))}
-                  className="block w-full rounded-lg bg-elevated px-3 py-2 text-xs text-secondary hover:bg-hover hover:text-primary transition-colors text-left border border-transparent hover:border-border/50"
+                  className="block w-full rounded-2xl bg-elevated px-4 py-2.5 text-xs text-secondary hover:bg-hover hover:text-primary transition-all text-left border border-transparent hover:border-border/50 hover:scale-[1.01]"
                 >
                   {example}
                 </button>

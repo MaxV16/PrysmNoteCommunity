@@ -20,6 +20,16 @@ const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "advanced", label: "Advanced", icon: "⚙️" },
 ];
 
+function getLocalKey(provider: string): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(`prysm_key_${provider}`);
+}
+
+function keyStatus(provider: string): "local" | "server" | "both" | "none" {
+  const local = getLocalKey(provider);
+  return local ? "local" : "none";
+}
+
 export default function SettingsPage() {
   const { user, logout, refreshSession } = useAuth();
   const { themeName, setThemeName } = useTheme();
@@ -86,7 +96,7 @@ export default function SettingsPage() {
   }, [saveKey]);
 
   const handleDeleteKey = async (id: string, provider: string) => {
-    await deleteKey(id);
+    await deleteKey(id, provider);
     setKeyMsg(`${provider} key removed.`);
     setTimeout(() => setKeyMsg(""), 3000);
   };
@@ -193,9 +203,25 @@ export default function SettingsPage() {
                   <p className="text-sm text-muted">API keys for LLM providers</p>
                 </div>
               </div>
-              <p className="text-sm text-muted leading-relaxed rounded-xl bg-elevated px-4 py-3 border border-border">
-                Your API keys are encrypted at rest using Fernet (AES-128). Keys are decrypted in-memory only when making AI calls.
-              </p>
+
+              <div className="rounded-2xl bg-elevated border border-border p-4 space-y-2 text-xs text-muted leading-relaxed">
+                <p className="font-semibold text-secondary text-sm">What happens when you provide your API key?</p>
+                <ul className="list-disc list-inside space-y-1 ml-1">
+                  <li>Keys are encrypted with <strong className="text-primary">Fernet (AES-128)</strong> before being stored on our servers.</li>
+                  <li>Keys are also cached locally in your browser (base64-encoded) for instant, direct-to-LLM AI access.</li>
+                  <li>Keys are <strong className="text-primary">only decrypted in-memory</strong> during AI requests — never logged or persisted in plaintext.</li>
+                  <li>You can revoke or rotate keys at any time from your provider dashboard (OpenAI, Google, DeepSeek).</li>
+                </ul>
+              </div>
+
+              <div className="flex items-center gap-2 rounded-xl bg-elevated px-4 py-2 border border-border">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" className="sr-only peer" defaultChecked disabled />
+                  <div className="w-9 h-5 bg-accent/30 rounded-full peer peer-checked:bg-accent peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+                </label>
+                <span className="text-xs text-secondary">Store keys locally (always enabled for direct AI access)</span>
+              </div>
+
               {keyMsg && (
                 <div className="rounded-xl bg-success/10 border border-success/20 px-4 py-2.5 text-sm text-success scale-in">
                   {keyMsg}
@@ -208,7 +234,16 @@ export default function SettingsPage() {
                   { provider: "deepseek", label: "DeepSeek", placeholder: "sk-..." },
                 ].map(({ provider, label, placeholder }) => (
                   <div key={provider}>
-                    <label className="mb-1.5 block text-xs font-semibold text-secondary uppercase tracking-wider">{label}</label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-semibold text-secondary uppercase tracking-wider">{label}</label>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                        getLocalKey(provider)
+                          ? "bg-success/10 text-success border border-success/20"
+                          : "bg-muted/10 text-muted border border-border"
+                      }`}>
+                        {getLocalKey(provider) ? "Local + Server" : "Server Only"}
+                      </span>
+                    </div>
                     {getKeyByProvider(provider) ? (
                       <div className="flex items-center gap-3 rounded-xl bg-elevated px-4 py-2.5 border border-border hover:border-success/30 transition-colors">
                         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-success/20 text-xs">✓</span>
@@ -286,19 +321,74 @@ export default function SettingsPage() {
 
           {/* Advanced */}
           {activeTab === "advanced" && (
-            <section className="card p-6 space-y-5 border-danger/20">
-              <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-danger/15 text-2xl float">
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                  </svg>
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-primary">Advanced</h2>
-                  <p className="text-sm text-muted">Danger zone and account management</p>
+            <section className="space-y-5">
+              <div className="card p-6 space-y-5">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-danger/15 text-2xl float">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3"/>
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-primary">Advanced</h2>
+                    <p className="text-sm text-muted">Danger zone and account management</p>
+                  </div>
                 </div>
               </div>
+
+              <div className="card p-6 space-y-4">
+                <h3 className="text-sm font-semibold text-primary">Data Management</h3>
+                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                  <div>
+                    <p className="text-sm text-secondary">Export all data as JSON</p>
+                    <p className="text-xs text-muted">Download your tasks, projects, and tags</p>
+                  </div>
+                  <button className="btn px-4 py-2 text-sm bg-elevated border border-border text-secondary hover:bg-hover hover:text-primary transition-colors rounded-xl"
+                    onClick={() => alert("Export functionality coming soon")}>
+                    Export
+                  </button>
+                </div>
+              </div>
+
+              <div className="card p-6 space-y-4">
+                <h3 className="text-sm font-semibold text-primary">Cache Management</h3>
+                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                  <div>
+                    <p className="text-sm text-secondary">Clear AI chat cache</p>
+                    <p className="text-xs text-muted">Remove cached conversations from localStorage</p>
+                  </div>
+                  <button className="btn px-4 py-2 text-sm bg-elevated border border-border text-secondary hover:bg-hover hover:text-primary transition-colors rounded-xl"
+                    onClick={() => {
+                      localStorage.removeItem("ai_session_id");
+                      localStorage.removeItem("prysm_key_openai");
+                      localStorage.removeItem("prysm_key_gemini");
+                      localStorage.removeItem("prysm_key_deepseek");
+                      alert("Local cache cleared.");
+                    }}>
+                    Clear Cache
+                  </button>
+                </div>
+              </div>
+
+              <div className="card p-6 space-y-4">
+                <h3 className="text-sm font-semibold text-primary">Debug Information</h3>
+                <div className="rounded-xl bg-elevated px-4 py-3 border border-border space-y-1 font-mono text-xs text-secondary">
+                  <div className="flex justify-between">
+                    <span className="text-muted">API Version</span>
+                    <span>1.0.0</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted">Environment</span>
+                    <span>{process.env.NODE_ENV || "development"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted">API URL</span>
+                    <span className="truncate max-w-[200px]">{process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api"}</span>
+                  </div>
+                </div>
+              </div>
+
               <div className="rounded-xl bg-danger/5 border border-danger/20 p-4 space-y-3">
                 <h3 className="text-sm font-semibold text-danger">Danger Zone</h3>
                 <p className="text-xs text-muted leading-relaxed">

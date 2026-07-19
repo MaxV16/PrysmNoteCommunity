@@ -5,40 +5,64 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.base import get_provider
 
-BASE_SYSTEM_PROMPT = """You are Prysm AI, an intelligent task management assistant integrated into Prysm Note.
-You have full read/write access to the user's complete task database via function calling.
+BASE_SYSTEM_PROMPT = """You are Prysm AI, a hyper-intelligent task management agent. You think like an expert productivity coach + personal assistant + schedule optimizer combined.
 
-CAPABILITIES:
-- Create, read, update, delete tasks and projects
-- Search tasks semantically and by keywords
-- Link tasks across projects (use link_tasks tool)
-- Detect scheduling conflicts with detect_conflicts tool
-- Suggest subtasks with suggest_subtasks tool
-- Check calendar density with check_calendar tool
-- Understand natural language time expressions ("next Thursday", "every 2 weeks")
-- Break down complex projects into actionable subtasks
+CORE BEHAVIOR: When the user gives you a request, follow this protocol:
+1. PARSE: Extract task title, date/time, priority, recurrence, project, dependencies
+2. SEARCH: Always search for similar tasks and schedule conflicts before creating
+3. ANALYZE: Check calendar density for the target date range using list_tasks_by_date_range
+4. CREATE/SUGGEST: Create the task, or if conflicts exist, suggest resolution
+5. EXPLAIN: Briefly explain your decisions (1-2 lines max)
 
-RULES:
-1. ALWAYS use search_tasks before creating a new task to check for duplicates.
-2. If you find a potential duplicate, tell the user and ask how to proceed.
-3. When creating multiple tasks or scheduling on a busy day, run detect_conflicts afterward.
-4. For ambiguous intents ("starting a business"), ask clarifying questions.
-5. When a task is broad enough ("start a business", "plan a trip"), suggest subtasks.
-6. For recurring tasks ("every 2 weeks"), use recurrence_rule with RRULE format.
-7. When creating a task with no date specified, set it to "Inbox" status (no dates).
-8. A day with 5 or more active tasks is overcrowded — warn before adding more to that day."""
+NATURAL LANGUAGE UNDERSTANDING:
+- "gp appointment next week monday at 12pm" → parse to next Monday, 12:00, priority 5 (medical)
+- "call mom every sunday" → recurring task, no end date, priority from context
+- "finish the report by Friday" → due_date this Friday, priority inferred from deadline proximity
+- "maybe learn guitar someday" → backlog status, low priority, no dates
+- "prepare presentation for next Tuesday morning" → start_date next Tuesday, estimated_minutes hints, priority 4
+
+PRIORITY-BASED CONFLICT RESOLUTION:
+- When a new task conflicts with existing tasks on the same day, use detect_conflicts
+- If new task has higher priority, suggest rescheduling lower-priority conflicts
+- If same priority, suggest time slots or adjacent days  
+- A day with 5+ active tasks triggers an automatic overload warning
+- Medical/health appointments default to priority 5 (highest)
+- Work deadlines default to priority 4, personal errands to priority 3
+
+EDGE CASES & IRREGULAR SCENARIOS:
+- "I need this done yesterday" → set to today with highest priority, warn about being overdue
+- "Whenever you get a chance" → inbox/backlog, priority 1
+- "ASAP but before my holiday starts on the 20th" → due_date = 19th, high priority
+- "Same time as my standup" → search for daily standup task, extract its time reference
+- Multi-task creation: "I need: buy groceries, pick up dry cleaning, call dentist" → use batch_create_tasks
+- Vague deadlines: "around next week" → suggest Wednesday of next week, ask confirmation via text
+- Double-booked but both urgent → flag both, ask user to choose
+- Task with no clear action: "think about career change" → create as low-priority backlog with note
+- Time-of-day specificity: "tomorrow morning" → note in description (time is not a field, use estimated_minutes)
+- Relative dates across months: "end of next month" → calculate correctly
+- Overlapping multi-day tasks: detect and warn
+
+ALWAYS:
+- Call search_tasks before creating to check for duplicates or similar existing tasks
+- Call list_tasks_by_date_range or check_calendar when scheduling on a date
+- Use get_upcoming_deadlines when user asks about deadlines or what's coming up
+- Use reschedule_task when moving tasks, not just update_task
+- Use batch_create_tasks when the user asks to create multiple tasks at once"""
 
 TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
             "name": "search_tasks",
-            "description": "Search tasks by query string and optional filters",
+            "description": "Search tasks by query string and optional date/priority filters",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "search query"},
-                    "filters": {"type": "object", "description": "optional status/project filters"},
+                    "date_from": {"type": "string", "description": "YYYY-MM-DD optional start date filter"},
+                    "date_to": {"type": "string", "description": "YYYY-MM-DD optional end date filter"},
+                    "priority_min": {"type": "integer", "description": "minimum priority (1-5)"},
+                    "priority_max": {"type": "integer", "description": "maximum priority (1-5)"},
                 },
                 "required": ["query"],
             },
@@ -58,6 +82,8 @@ TOOL_DEFINITIONS = [
                     "due_date": {"type": "string", "description": "YYYY-MM-DD"},
                     "priority": {"type": "integer", "minimum": 1, "maximum": 5},
                     "recurrence_rule": {"type": "string", "description": "RRULE string"},
+                    "description": {"type": "string"},
+                    "estimated_minutes": {"type": "integer", "description": "estimated time in minutes"},
                 },
                 "required": ["title"],
             },
@@ -149,11 +175,100 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "detect_conflicts",
-            "description": "Detect scheduling conflicts for a task",
+            "description": "Detect scheduling conflicts for a task with priority information",
             "parameters": {
                 "type": "object",
                 "properties": {"task_id": {"type": "string"}},
                 "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reschedule_task",
+            "description": "Reschedule a task to a new date/time with conflict checking",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "new_start_date": {"type": "string", "description": "YYYY-MM-DD"},
+                    "new_due_date": {"type": "string", "description": "YYYY-MM-DD"},
+                    "reason": {"type": "string", "description": "reason for rescheduling"},
+                },
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tasks_by_date_range",
+            "description": "List all tasks in a date range with their priorities",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date_from": {"type": "string", "description": "YYYY-MM-DD"},
+                    "date_to": {"type": "string", "description": "YYYY-MM-DD"},
+                },
+                "required": ["date_from", "date_to"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "suggest_best_time",
+            "description": "Analyze calendar and suggest the best free time slot for scheduling",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "desired_date": {"type": "string", "description": "YYYY-MM-DD preferred date"},
+                    "duration_hours": {"type": "number", "description": "estimated duration in hours"},
+                    "min_priority_to_consider": {"type": "integer", "description": "minimum priority of existing tasks to consider as conflicts (default: 3)"},
+                },
+                "required": ["desired_date", "duration_hours"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_upcoming_deadlines",
+            "description": "Get tasks approaching their due dates, sorted by urgency",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days_ahead": {"type": "integer", "description": "number of days to look ahead (default: 7)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "batch_create_tasks",
+            "description": "Create multiple tasks at once (for compound commands)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "project": {"type": "string"},
+                                "start_date": {"type": "string"},
+                                "due_date": {"type": "string"},
+                                "priority": {"type": "integer"},
+                            },
+                            "required": ["title"],
+                        },
+                    },
+                },
+                "required": ["tasks"],
             },
         },
     },
@@ -220,8 +335,34 @@ async def execute_tool_calls(
         try:
             if name == "search_tasks":
                 query = args.get("query", "")
-                task_list = await search_tasks(session, UUID(user_id), query, limit=10)
-                found = [{"id": str(t.id), "title": t.title, "status": t.status.value if t.status else None} for t in task_list]
+                date_from = args.get("date_from")
+                date_to = args.get("date_to")
+                priority_min = args.get("priority_min")
+                priority_max = args.get("priority_max")
+
+                from sqlalchemy import or_
+                stmt = select(Task).where(
+                    Task.user_id == UUID(user_id),
+                    or_(
+                        Task.title.ilike(func.concat('%', query, '%')),
+                        Task.description.ilike(func.concat('%', query, '%')),
+                    ),
+                )
+                if date_from:
+                    stmt = stmt.where(Task.start_date >= date_from)
+                if date_to:
+                    stmt = stmt.where(Task.start_date <= date_to)
+                if priority_min is not None:
+                    stmt = stmt.where(Task.priority >= priority_min)
+                if priority_max is not None:
+                    stmt = stmt.where(Task.priority <= priority_max)
+                stmt = stmt.limit(20)
+
+                task_list = await session.execute(stmt)
+                tasks = task_list.scalars().all()
+                found = [{"id": str(t.id), "title": t.title, "status": t.status.value if t.status else None,
+                          "priority": t.priority, "start_date": str(t.start_date) if t.start_date else None,
+                          "due_date": str(t.due_date) if t.due_date else None} for t in tasks]
                 results.append({
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
@@ -537,6 +678,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     })
                 else:
                     from sqlalchemy import or_
+
                     overlapping = await session.execute(
                         select(Task)
                         .where(
@@ -552,12 +694,42 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         .order_by(Task.start_date)
                     )
                     conflicts = overlapping.scalars().all()
+
+                    def compute_resolution(new_priority: int, conflict_tasks: list) -> list:
+                        resolutions = []
+                        for ct in conflict_tasks:
+                            if ct.priority < new_priority:
+                                resolutions.append({
+                                    "action": "suggest_reschedule",
+                                    "task_id": str(ct.id),
+                                    "task_title": ct.title,
+                                    "reason": f"Lower priority ({ct.priority}) than new task ({new_priority})",
+                                })
+                            elif ct.priority == new_priority:
+                                resolutions.append({
+                                    "action": "conflict_warning",
+                                    "task_id": str(ct.id),
+                                    "task_title": ct.title,
+                                    "reason": f"Same priority — user should decide",
+                                })
+                            else:
+                                resolutions.append({
+                                    "action": "suggest_move_new_task",
+                                    "task_id": str(ct.id),
+                                    "task_title": ct.title,
+                                    "reason": f"Existing task has higher priority ({ct.priority})",
+                                })
+                        return resolutions
+
+                    resolutions = compute_resolution(task.priority, conflicts)
+
                     results.append({
                         "tool_call_id": tc.get("id"),
                         "role": "tool",
                         "content": json.dumps({
                             "task_id": task_id,
                             "task_title": task.title,
+                            "task_priority": task.priority,
                             "start_date": str(task.start_date),
                             "due_date": str(task.due_date),
                             "conflict_count": len(conflicts),
@@ -565,13 +737,215 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                                 {
                                     "id": str(t.id),
                                     "title": t.title,
+                                    "priority": t.priority,
                                     "start_date": str(t.start_date) if t.start_date else None,
                                     "due_date": str(t.due_date) if t.due_date else None,
                                 }
                                 for t in conflicts
                             ],
+                            "suggested_resolutions": resolutions,
                         }),
                     })
+
+            elif name == "reschedule_task":
+                task_id = args.get("task_id")
+                new_start = args.get("new_start_date")
+                new_due = args.get("new_due_date")
+                reason = args.get("reason", "")
+
+                result = await session.execute(select(Task).where(Task.id == UUID(task_id)))
+                task = result.scalar_one_or_none()
+                if not task:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                else:
+                    if new_start:
+                        task.start_date = new_start
+                    if new_due:
+                        task.due_date = new_due
+                    await session.flush()
+
+                    conflict_info = None
+                    if task.start_date and task.due_date:
+                        from sqlalchemy import or_
+
+                        overlapping = await session.execute(
+                            select(Task).where(
+                                Task.user_id == UUID(user_id),
+                                Task.id != UUID(task_id),
+                                Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+                                or_(
+                                    (Task.start_date <= task.due_date) & (Task.due_date >= task.start_date),
+                                ),
+                            )
+                        )
+                        conflicts = overlapping.scalars().all()
+                        if conflicts:
+                            conflict_info = {
+                                "conflict_count": len(conflicts),
+                                "conflicts": [{"id": str(t.id), "title": t.title, "priority": t.priority} for t in conflicts[:5]],
+                            }
+
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({
+                            "rescheduled": True,
+                            "task_id": task_id,
+                            "new_start_date": str(task.start_date) if task.start_date else None,
+                            "new_due_date": str(task.due_date) if task.due_date else None,
+                            "reason": reason,
+                            "conflicts": conflict_info,
+                        }),
+                    })
+
+            elif name == "list_tasks_by_date_range":
+                date_from = args.get("date_from")
+                date_to = args.get("date_to")
+
+                from sqlalchemy import or_
+
+                result = await session.execute(
+                    select(Task)
+                    .where(
+                        Task.user_id == UUID(user_id),
+                        Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+                        or_(
+                            (Task.start_date >= date_from) & (Task.start_date <= date_to),
+                            (Task.due_date >= date_from) & (Task.due_date <= date_to),
+                            (Task.start_date <= date_from) & (Task.due_date >= date_to),
+                        ),
+                    )
+                    .order_by(Task.start_date)
+                )
+                tasks = result.scalars().all()
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({
+                        "date_from": date_from,
+                        "date_to": date_to,
+                        "count": len(tasks),
+                        "tasks": [
+                            {"id": str(t.id), "title": t.title, "priority": t.priority,
+                             "status": t.status.value if t.status else None,
+                             "start_date": str(t.start_date) if t.start_date else None,
+                             "due_date": str(t.due_date) if t.due_date else None}
+                            for t in tasks
+                        ],
+                    }),
+                })
+
+            elif name == "suggest_best_time":
+                desired_date = args.get("desired_date")
+                duration_hours = args.get("duration_hours", 1)
+                min_priority = args.get("min_priority_to_consider", 3)
+
+                result = await session.execute(
+                    select(Task).where(
+                        Task.user_id == UUID(user_id),
+                        Task.start_date == desired_date,
+                        Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+                        Task.priority >= min_priority,
+                    ).order_by(Task.priority.desc())
+                )
+                day_tasks = result.scalars().all()
+
+                suggestions = []
+                if len(day_tasks) <= 3:
+                    suggestions.append("morning slot (9am-12pm)")
+                    suggestions.append("afternoon slot (1pm-5pm)")
+                elif len(day_tasks) <= 5:
+                    suggestions.append("early morning (7am-9am)")
+                    suggestions.append("late afternoon (4pm-6pm)")
+                else:
+                    suggestions.append("day is crowded — consider adjacent dates")
+                    from datetime import date as dt, timedelta
+                    suggestions.append(f"suggest checking {(dt.today() + timedelta(days=1)).isoformat()} instead")
+
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({
+                        "desired_date": desired_date,
+                        "duration_hours": duration_hours,
+                        "tasks_that_day": len(day_tasks),
+                        "suggestions": suggestions,
+                    }),
+                })
+
+            elif name == "get_upcoming_deadlines":
+                days_ahead = args.get("days_ahead", 7)
+                from datetime import date as dt, timedelta
+
+                today = dt.today()
+                end = today + timedelta(days=days_ahead)
+
+                result = await session.execute(
+                    select(Task)
+                    .where(
+                        Task.user_id == UUID(user_id),
+                        Task.due_date.isnot(None),
+                        Task.due_date >= today,
+                        Task.due_date <= end,
+                        Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+                    )
+                    .order_by(Task.due_date, Task.priority.desc())
+                )
+                tasks = result.scalars().all()
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({
+                        "days_ahead": days_ahead,
+                        "count": len(tasks),
+                        "deadlines": [
+                            {"id": str(t.id), "title": t.title, "priority": t.priority,
+                             "due_date": str(t.due_date), "status": t.status.value if t.status else None}
+                            for t in tasks
+                        ],
+                    }),
+                })
+
+            elif name == "batch_create_tasks":
+                batch = args.get("tasks", [])
+                created = []
+                for t_data in batch:
+                    title = t_data.get("title", "Untitled")
+                    project_name = t_data.get("project")
+                    project_id = None
+                    if project_name:
+                        proj_result = await session.execute(
+                            select(Project).where(Project.user_id == UUID(user_id), Project.name == project_name)
+                        )
+                        proj = proj_result.scalar_one_or_none()
+                        if proj:
+                            project_id = proj.id
+                        else:
+                            proj = Project(user_id=UUID(user_id), name=project_name)
+                            session.add(proj)
+                            await session.flush()
+                            project_id = proj.id
+
+                    task = await create_task(
+                        session,
+                        user_id=UUID(user_id),
+                        title=title,
+                        project_id=project_id,
+                        start_date=t_data.get("start_date"),
+                        due_date=t_data.get("due_date"),
+                        priority=t_data.get("priority", 3),
+                    )
+                    created.append({"id": str(task.id), "title": task.title})
+
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({"created_count": len(created), "tasks": created}),
+                })
 
             else:
                 results.append({

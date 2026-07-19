@@ -9,6 +9,7 @@ import { TimelineGrid } from "@/components/timeline/TimelineGrid";
 import { TimelineLane } from "@/components/timeline/TimelineLane";
 import { TaskDetail } from "@/components/tasks/TaskDetail";
 import { TaskForm } from "@/components/tasks/TaskForm";
+import { Modal } from "@/components/ui/Modal";
 import { useTasks } from "@/hooks/useTasks";
 
 function isToday(dateStr: string | null): boolean {
@@ -41,11 +42,20 @@ function applyNavFilter(tasks: ReturnType<typeof useAppStore.getState>["tasks"],
   }
 }
 
-export function TimelineView() {
-  const { tasks, selectedTaskId, setSelectedTaskId, projects, navFilter, setNavFilter, selectedProjectId } = useAppStore();
-  const { visibleRange, scrollOffset, setScrollOffset, viewDays } = useTimeline(14);
+interface TimelineViewProps {
+  viewDays: number;
+  isMobile: boolean;
+  onSettingsClick: () => void;
+  onAIClick: () => void;
+  rightOpen: boolean;
+}
+
+export function TimelineView({ viewDays, isMobile, onSettingsClick, onAIClick, rightOpen }: TimelineViewProps) {
+  const { tasks, selectedTaskId, setSelectedTaskId, projects, navFilter, setNavFilter, selectedProjectId, selectedTagId } = useAppStore();
+  const { visibleRange, scrollOffset, setScrollOffset } = useTimeline(14);
   const { createTask, updateTask } = useTasks();
   const [showTaskForm, setShowTaskForm] = useState(false);
+  const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -75,13 +85,16 @@ export function TimelineView() {
     if (selectedProjectId) {
       activeTasks = activeTasks.filter((t) => t.project_id === selectedProjectId);
     }
+    if (selectedTagId) {
+      activeTasks = activeTasks.filter((t) => t.tags?.some((tag) => tag.id === selectedTagId));
+    }
     for (const task of activeTasks) {
       const pid = task.project_id || "__none__";
       if (!map[pid]) map[pid] = [];
       map[pid].push(task);
     }
     return map;
-  }, [tasks, navFilter, selectedProjectId]);
+  }, [tasks, navFilter, selectedProjectId, selectedTagId]);
 
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -119,12 +132,22 @@ export function TimelineView() {
   const handleNextWeek = () => setScrollOffset(scrollOffset + 7);
 
   const handleCreateTask = useCallback(
-    async (data: { title: string; description?: string; start_date?: string; due_date?: string; project_id?: string | null }) => {
+    async (data: {
+      title: string; description?: string; start_date?: string; due_date?: string;
+      project_id?: string | null; status?: string; priority?: number;
+      tag_ids?: string[]; recurrence_rule?: string; estimated_minutes?: number;
+    }) => {
       await createTask(data);
       setShowTaskForm(false);
+      setFormDefaultDate(null);
     },
     [createTask]
   );
+
+  const handleDayDoubleClick = useCallback((day: Date) => {
+    setFormDefaultDate(day);
+    setShowTaskForm(true);
+  }, []);
 
   const filterBadge = navFilter
     ? navFilter === "inbox" ? "Inbox" : navFilter === "today" ? "Today" : "Next 7 Days"
@@ -134,10 +157,12 @@ export function TimelineView() {
     ? projects.find((p) => p.id === selectedProjectId)?.name
     : null;
 
+  const hasTasks = Object.keys(tasksByProject).length > 0;
+
   return (
     <div className="flex flex-col overflow-hidden bg-base">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2.5">
+      <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-2">
         <div className="flex items-center gap-2">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
@@ -145,10 +170,10 @@ export function TimelineView() {
             <line x1="8" y1="2" x2="8" y2="6"/>
             <line x1="3" y1="10" x2="21" y2="10"/>
           </svg>
-          <h2 className="text-sm font-semibold text-primary">Timeline</h2>
+          <h2 className="text-sm font-semibold text-primary hidden sm:block">Timeline</h2>
         </div>
         {filterBadge && (
-          <span className="badge bg-accent/15 text-accent gap-1">
+          <span className="badge bg-accent/15 text-accent gap-1 text-[10px] px-2">
             {filterBadge}
             <button onClick={() => setNavFilter(null)} className="hover:text-primary p-0.5">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -156,7 +181,7 @@ export function TimelineView() {
           </span>
         )}
         {projectFilterName && (
-          <span className="badge bg-blue-500/15 text-blue-400 gap-1">
+          <span className="badge bg-blue-500/15 text-blue-400 gap-1 text-[10px] px-2">
             {projectFilterName}
             <button onClick={() => useAppStore.getState().setSelectedProjectId(null)} className="hover:text-primary p-0.5">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -172,49 +197,88 @@ export function TimelineView() {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </div>
+        {!isMobile && (
+          <button
+            onClick={onSettingsClick}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-surface/80 border border-border text-secondary hover:bg-hover hover:text-primary transition-all shadow-sm"
+            title="Settings"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+        )}
+        {!rightOpen && !isMobile && (
+          <button
+            onClick={onAIClick}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-accent to-purple-500 text-base hover:from-accent-hover hover:to-purple-600 transition-all shadow-glow animate-pulse-subtle"
+            title="AI Command Center"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+            </svg>
+          </button>
+        )}
         <button
-          onClick={() => setShowTaskForm(!showTaskForm)}
+          onClick={() => { setFormDefaultDate(null); setShowTaskForm(!showTaskForm); }}
           className="btn btn-primary px-3 py-1.5 text-xs gap-1.5"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19"/>
             <line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
-          <span>New Task</span>
+          <span className="hidden sm:inline">New Task</span>
         </button>
       </div>
 
-      {/* Task creation form */}
-      {showTaskForm && (
+      {/* Inline task creation form */}
+      {showTaskForm && !formDefaultDate && (
         <div className="border-b border-border bg-surface px-4 py-3 slide-up">
           <TaskForm onSubmit={handleCreateTask} onCancel={() => setShowTaskForm(false)} />
         </div>
       )}
 
+      {/* Task creation modal (day double-click) */}
+      <Modal
+        isOpen={showTaskForm && !!formDefaultDate}
+        onClose={() => { setShowTaskForm(false); setFormDefaultDate(null); }}
+        title="Create Task"
+      >
+        <TaskForm
+          onSubmit={handleCreateTask}
+          onCancel={() => { setShowTaskForm(false); setFormDefaultDate(null); }}
+          defaultDate={formDefaultDate?.toISOString().split("T")[0]}
+        />
+      </Modal>
+
       {/* Timeline area */}
       <div className="flex-1 overflow-auto">
         <TimelineHeader days={days} />
-        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+        <DndContext sensors={!isMobile ? sensors : undefined} onDragEnd={!isMobile ? handleDragEnd : undefined}>
           <div className="relative">
             <TimelineGrid days={days} />
-            {Object.entries(tasksByProject).map(([projectId, projectTasks]) => {
-              const project = projects.find((p) => p.id === projectId);
-              const label = projectId === "__none__" ? "No Project" : project?.name || "Unknown";
-              return (
-                <TimelineLane
-                  key={projectId}
-                  label={label}
-                  tasks={projectTasks}
-                  days={days}
-                  projectId={projectId}
-                  onTaskClick={(id) => setSelectedTaskId(id)}
-                />
-              );
-            })}
-            {Object.keys(tasksByProject).length === 0 && (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
+            {hasTasks ? (
+              Object.entries(tasksByProject).map(([projectId, projectTasks]) => {
+                const project = projects.find((p) => p.id === projectId);
+                const label = projectId === "__none__" ? "No Project" : project?.name || "Unknown";
+                return (
+                  <TimelineLane
+                    key={projectId}
+                    label={label}
+                    tasks={projectTasks}
+                    days={days}
+                    projectId={projectId}
+                    onTaskClick={(id) => setSelectedTaskId(id)}
+                    onDayDoubleClick={handleDayDoubleClick}
+                  />
+                );
+              })
+            ) : (
+              <div className="relative z-10 flex flex-col items-center justify-center py-24 text-center">
                 <span className="text-4xl mb-3">📋</span>
-                <p className="text-sm text-muted">No tasks scheduled. Create a task to see it on the timeline.</p>
+                <p className="text-sm text-muted">No tasks scheduled</p>
+                <p className="text-xs text-muted mt-1">Double-click a day column or create a task to get started</p>
               </div>
             )}
           </div>

@@ -18,6 +18,7 @@ interface AppState {
   chatMessages: ChatMessage[];
   selectedTaskId: string | null;
   selectedProjectId: string | null;
+  selectedTagId: string | null;
   searchQuery: string;
   navFilter: NavFilter;
   setTasks: (tasks: Task[]) => void;
@@ -29,6 +30,7 @@ interface AppState {
   addChatMessage: (msg: ChatMessage) => void;
   setSelectedTaskId: (id: string | null) => void;
   setSelectedProjectId: (id: string | null) => void;
+  setSelectedTagId: (id: string | null) => void;
   setSearchQuery: (query: string) => void;
   setNavFilter: (filter: NavFilter) => void;
 }
@@ -40,6 +42,7 @@ export const useAppStore = create<AppState>((set) => ({
   chatMessages: [],
   selectedTaskId: null,
   selectedProjectId: null,
+  selectedTagId: null,
   searchQuery: "",
   navFilter: null,
   setTasks: (tasks) => set({ tasks }),
@@ -52,6 +55,7 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({ chatMessages: [...state.chatMessages, msg] })),
   setSelectedTaskId: (id) => set({ selectedTaskId: id }),
   setSelectedProjectId: (id) => set({ selectedProjectId: id }),
+  setSelectedTagId: (id) => set({ selectedTagId: id }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setNavFilter: (filter) => set({ navFilter: filter }),
 }));

@@ -50,6 +50,7 @@ export function ThreePaneLayout() {
   const [rightOpen, setRightOpen] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [isTablet, setIsTablet] = useState(false);
   const { fetchTasks } = useTasks();
   const { fetchProjects } = useProjects();
   const { fetchTags } = useTags();
@@ -57,11 +58,32 @@ export function ThreePaneLayout() {
   const router = useRouter();
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    const check = () => {
+      const w = window.innerWidth;
+      setIsMobile(w < 768);
+      setIsTablet(w >= 768 && w < 1024);
+      if (w < 1024) setLeftCollapsed(true);
+    };
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
   }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        const input = document.querySelector<HTMLInputElement>("[data-search-input]");
+        input?.focus();
+        if (leftCollapsed && document.querySelector<HTMLInputElement>("[data-search-input]")) {
+          setLeftCollapsed(false);
+          setTimeout(() => input?.focus(), 100);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [leftCollapsed]);
 
   useEffect(() => {
     (async () => {
@@ -69,6 +91,8 @@ export function ThreePaneLayout() {
       setDataLoaded(true);
     })();
   }, [fetchTasks, fetchProjects, fetchTags]);
+
+  const viewDays = isMobile ? 3 : isTablet ? 7 : 14;
 
   return (
     <ErrorBoundaryInner>
@@ -88,37 +112,15 @@ export function ThreePaneLayout() {
             />
           )}
 
-          {/* Main area: timeline + overlays */}
+          {/* Main area */}
           <div className="flex-1 relative flex flex-col overflow-hidden">
-            {/* Top bar with settings always visible */}
-            <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
-              {user && (
-                <button
-                  onClick={() => router.push("/settings")}
-                  className="flex h-8 w-8 items-center justify-center rounded-xl bg-surface/80 backdrop-blur-sm border border-border text-secondary hover:bg-hover hover:text-primary transition-all shadow-sm"
-                  title="Settings"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                  </svg>
-                </button>
-              )}
-              {/* AI toggle button — top-right on desktop, hidden when panel is open */}
-              {!rightOpen && (
-                <button
-                  onClick={() => setRightOpen(true)}
-                  className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-accent to-purple-500 text-base hover:from-accent-hover hover:to-purple-600 transition-all shadow-glow"
-                  title="Open AI Chat"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-                  </svg>
-                </button>
-              )}
-            </div>
-
-            <TimelineView />
+            <TimelineView
+              viewDays={viewDays}
+              isMobile={isMobile}
+              onSettingsClick={() => router.push("/settings")}
+              onAIClick={() => setRightOpen(true)}
+              rightOpen={rightOpen}
+            />
           </div>
 
           {/* Right AI Panel */}
@@ -134,7 +136,7 @@ export function ThreePaneLayout() {
               {!rightOpen ? (
                 <button
                   onClick={() => setRightOpen(true)}
-                  className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-accent to-purple-500 text-white shadow-lg shadow-accent/30 hover:shadow-xl hover:shadow-accent/40 active:scale-95 transition-all"
+                  className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-accent to-purple-500 text-white shadow-lg shadow-accent/30 hover:shadow-xl hover:shadow-accent/40 active:scale-95 transition-all"
                   title="Open AI Chat"
                 >
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

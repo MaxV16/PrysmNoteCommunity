@@ -45,13 +45,13 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           value={input}
           onChange={(e) => setInput(e.target.value.slice(0, MAX_LENGTH))}
           onKeyDown={handleKeyDown}
-          placeholder="Ask the AI assistant... (Enter to send, Shift+Enter for new line)"
-          className="input-field resize-none pr-16 text-sm"
+          placeholder="What would you like me to do? e.g., 'Schedule GP appointment next Monday at 12pm'"
+          className="input-field resize-none pr-12 text-sm rounded-2xl shadow-inner"
           rows={1}
           disabled={disabled}
           autoFocus
         />
-        <div className="absolute right-2 bottom-2 flex items-center gap-1">
+        <div className="absolute right-2 bottom-2 flex items-center gap-1.5">
           {input.length > 0 && (
             <span className={`text-[10px] ${isNearLimit ? "text-warning" : "text-muted"}`}>
               {remaining}
@@ -60,12 +60,20 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           <button
             type="submit"
             disabled={disabled || !input.trim()}
-            className="flex h-7 w-7 items-center justify-center rounded-md bg-accent text-base text-sm hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-accent to-purple-500 text-base text-sm hover:from-accent-hover hover:to-purple-600 hover:shadow-glow disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none transition-all"
           >
-            &#8593;
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
           </button>
         </div>
       </div>
+      {input.length > 5 && (
+        <span className={`text-[10px] text-muted ${isNearLimit ? "text-warning" : ""}`}>
+          {remaining} characters remaining
+        </span>
+      )}
     </form>
   );
 }

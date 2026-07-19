@@ -16,6 +16,7 @@ export function FilterBar() {
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search tasks..."
           className="input-field pl-8 pr-8 text-xs"
+          data-search-input
         />
         {searchQuery && (
           <button

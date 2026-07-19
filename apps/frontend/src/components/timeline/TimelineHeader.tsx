@@ -34,13 +34,13 @@ export function TimelineHeader({ days }: TimelineHeaderProps) {
             className="flex flex-col items-center justify-end border-r border-border pb-1.5 pt-2"
             style={{ width: dayWidth }}
           >
-            <span className={`text-[10px] font-medium uppercase tracking-wide ${
+            <span className={`text-[10px] font-medium uppercase tracking-wide font-mono-timeline ${
               isToday ? "text-accent" : "text-muted"
             }`}>
               {dayName}
             </span>
             <span
-              className={`mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+              className={`mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold font-mono-timeline ${
                 isToday ? "bg-accent text-base" : "text-secondary"
               }`}
             >

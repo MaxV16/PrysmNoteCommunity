@@ -6,6 +6,8 @@ import { useTags } from "@/hooks/useTags";
 
 export function TagList() {
   const tags = useAppStore((s) => s.tags);
+  const selectedTagId = useAppStore((s) => s.selectedTagId);
+  const setSelectedTagId = useAppStore((s) => s.setSelectedTagId);
   const { createTag, deleteTag } = useTags();
   const [isAdding, setIsAdding] = useState(false);
   const [newName, setNewName] = useState("");
@@ -17,6 +19,10 @@ export function TagList() {
     await createTag({ name: newName.trim(), color });
     setNewName("");
     setIsAdding(false);
+  };
+
+  const handleTagClick = (tagId: string) => {
+    setSelectedTagId(selectedTagId === tagId ? null : tagId);
   };
 
   return (
@@ -47,28 +53,38 @@ export function TagList() {
         </div>
       )}
       <div className="flex flex-wrap gap-1.5">
-        {tags.map((tag) => (
-          <span
-            key={tag.id}
-            className="badge gap-1.5 cursor-default group"
-            style={{
-              backgroundColor: (tag.color || "#333") + "30",
-              color: tag.color || "var(--text-secondary)",
-            }}
-          >
+        {tags.map((tag) => {
+          const isActive = selectedTagId === tag.id;
+          return (
             <span
-              className="h-2 w-2 rounded-full shrink-0"
-              style={{ backgroundColor: tag.color || "var(--text-muted)" }}
-            />
-            {tag.name}
-            <button
-              onClick={() => deleteTag(tag.id)}
-              className="ml-1 opacity-0 group-hover:opacity-100 hover:text-danger transition-opacity text-xs font-bold"
+              key={tag.id}
+              onClick={() => handleTagClick(tag.id)}
+              className={`badge gap-1.5 cursor-pointer group transition-all ${
+                isActive ? "ring-2 ring-accent/50 scale-105" : ""
+              }`}
+              style={{
+                backgroundColor: (tag.color || "#333") + (isActive ? "50" : "30"),
+                color: tag.color || "var(--text-secondary)",
+              }}
             >
-              ✕
-            </button>
-          </span>
-        ))}
+              <span
+                className="h-2 w-2 rounded-full shrink-0"
+                style={{ backgroundColor: tag.color || "var(--text-muted)" }}
+              />
+              {tag.name}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteTag(tag.id);
+                  if (isActive) setSelectedTagId(null);
+                }}
+                className="ml-1 opacity-0 group-hover:opacity-100 hover:text-danger transition-opacity text-xs font-bold"
+              >
+                ✕
+              </button>
+            </span>
+          );
+        })}
         {tags.length === 0 && !isAdding && (
           <p className="px-1 text-xs text-muted">No tags yet</p>
         )}

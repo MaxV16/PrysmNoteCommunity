@@ -4,6 +4,9 @@ const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      fontFamily: {
+        "mono-timeline": ["'DM Mono'", "'SF Mono'", "Consolas", "monospace"],
+      },
       colors: {
         base: "var(--bg-base)",
         surface: "var(--bg-surface)",

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
+import { useAppStore } from "@/stores/app-store";
 import type { ThemeName } from "@/types/theme";
 import { THEMES } from "@/types/theme";
 import { NavSection } from "@/components/sidebar/NavSection";
@@ -20,6 +21,8 @@ const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
 export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
   const { user, logout } = useAuth();
   const { themeName, setThemeName, toggleTheme } = useTheme();
+  const selectedTagId = useAppStore((s) => s.selectedTagId);
+  const setSelectedTagId = useAppStore((s) => s.setSelectedTagId);
   const router = useRouter();
 
   const handleLogout = () => {

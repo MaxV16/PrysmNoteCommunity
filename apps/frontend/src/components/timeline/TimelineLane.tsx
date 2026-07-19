@@ -10,6 +10,7 @@ interface TimelineLaneProps {
   days: Date[];
   projectId?: string;
   onTaskClick?: (id: string) => void;
+  onDayDoubleClick?: (day: Date) => void;
 }
 
 function getTaskPosition(task: Task, days: Date[]) {
@@ -50,7 +51,9 @@ function getTaskPosition(task: Task, days: Date[]) {
   };
 }
 
-export function TimelineLane({ label, tasks, days, onTaskClick }: TimelineLaneProps) {
+export function TimelineLane({ label, tasks, days, onTaskClick, onDayDoubleClick }: TimelineLaneProps) {
+  const dayWidth = `${100 / days.length}%`;
+
   const positionedTasks = useMemo(
     () =>
       tasks
@@ -69,7 +72,7 @@ export function TimelineLane({ label, tasks, days, onTaskClick }: TimelineLanePr
           </span>
         )}
       </div>
-      <div className="relative flex-1" style={{ minHeight: 36 }}>
+      <div className="relative flex-1" style={{ minHeight: 48 }}>
         {positionedTasks.map(({ task, pos }) => (
           <TaskBar
             key={task.id}
@@ -78,6 +81,18 @@ export function TimelineLane({ label, tasks, days, onTaskClick }: TimelineLanePr
             onClick={() => onTaskClick?.(task.id)}
           />
         ))}
+        {onDayDoubleClick && (
+          <div className="absolute inset-0 flex pointer-events-none">
+            {days.map((day) => (
+              <div
+                key={day.toISOString()}
+                className="pointer-events-auto"
+                style={{ width: dayWidth }}
+                onDoubleClick={() => onDayDoubleClick(day)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

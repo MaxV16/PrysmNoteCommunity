@@ -20,16 +20,16 @@ export function ChatMessage({ message }: ChatMessageProps) {
   }
 
   return (
-    <div className={`flex gap-2.5 ${isUser ? "justify-end" : "justify-start"} fade-in`}>
+    <div className={`flex gap-2.5 ${isUser ? "justify-end" : "justify-start"} slide-up`}>
       {!isUser && (
         <Avatar name="AI" size="sm" className="shrink-0 mt-0.5 ring-0" />
       )}
       <div className="flex flex-col gap-0.5 max-w-[85%]">
         <div
-          className={`rounded-xl px-3.5 py-2 text-sm leading-relaxed ${
+          className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
             isUser
-              ? "bg-accent text-base rounded-tr-sm"
-              : "bg-elevated text-primary rounded-tl-sm"
+              ? "bg-gradient-to-br from-accent to-purple-500 text-base rounded-br-md"
+              : "bg-surface-secondary text-primary rounded-bl-md border border-border/50"
           }`}
         >
           {message.content ? (
@@ -53,8 +53,8 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
 function ToolCallCard({ message }: { message: ChatMessageType }) {
   return (
-    <div className="flex justify-center fade-in">
-      <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-elevated/50 px-3 py-1.5 text-xs text-muted">
+    <div className="flex justify-center slide-up">
+      <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-elevated/50 px-3 py-2 text-xs text-secondary border-l-2 border-l-accent">
         <span className="text-accent">&#9880;</span>
         <span>{message.content}</span>
       </div>

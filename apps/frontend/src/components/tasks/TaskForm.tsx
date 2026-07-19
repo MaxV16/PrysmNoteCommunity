@@ -14,9 +14,12 @@ interface TaskFormProps {
     priority?: number;
     project_id?: string | null;
     tag_ids?: string[];
+    recurrence_rule?: string;
+    estimated_minutes?: number;
   }) => void;
   onCancel: () => void;
   initial?: Task | null;
+  defaultDate?: string;
 }
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
@@ -27,16 +30,18 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
   { value: "cancelled", label: "Cancelled" },
 ];
 
-export function TaskForm({ onSubmit, onCancel, initial }: TaskFormProps) {
+export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormProps) {
   const { projects, tags } = useAppStore();
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
-  const [startDate, setStartDate] = useState(initial?.start_date || "");
-  const [dueDate, setDueDate] = useState(initial?.due_date || "");
+  const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || "");
+  const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || "");
   const [status, setStatus] = useState<TaskStatus>(initial?.status || "todo");
   const [priority, setPriority] = useState(initial?.priority || 3);
   const [projectId, setProjectId] = useState(initial?.project_id || "");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [recurrenceRule, setRecurrenceRule] = useState(initial?.recurrence_rule || "");
+  const [estimatedMinutes, setEstimatedMinutes] = useState(initial?.estimated_minutes?.toString() || "");
 
   const isEdit = !!initial;
 
@@ -52,6 +57,8 @@ export function TaskForm({ onSubmit, onCancel, initial }: TaskFormProps) {
       priority: isEdit ? priority : undefined,
       project_id: projectId || null,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
+      recurrence_rule: recurrenceRule || undefined,
+      estimated_minutes: estimatedMinutes ? Number(estimatedMinutes) : undefined,
     });
   };
 
@@ -130,6 +137,29 @@ export function TaskForm({ onSubmit, onCancel, initial }: TaskFormProps) {
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
+      </div>
+      <div className="flex gap-3">
+        <div className="flex-1">
+          <label className="mb-1 block text-xs text-muted">Recurrence (RRULE)</label>
+          <input
+            type="text"
+            value={recurrenceRule}
+            onChange={(e) => setRecurrenceRule(e.target.value)}
+            placeholder="e.g., FREQ=WEEKLY;BYDAY=MO"
+            className="input-field text-xs"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="mb-1 block text-xs text-muted">Est. Minutes</label>
+          <input
+            type="number"
+            value={estimatedMinutes}
+            onChange={(e) => setEstimatedMinutes(e.target.value)}
+            placeholder="e.g., 30"
+            className="input-field"
+            min={1}
+          />
+        </div>
       </div>
       {tags.length > 0 && (
         <div>

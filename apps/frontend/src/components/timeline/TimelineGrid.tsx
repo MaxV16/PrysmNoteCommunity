@@ -20,7 +20,7 @@ export function TimelineGrid({ days }: TimelineGridProps) {
   }, [days]);
 
   return (
-    <div className="absolute inset-0 top-0 pointer-events-none flex">
+    <div className="absolute inset-0 pointer-events-none flex min-h-full">
       {days.map((day, i) => {
         const d = new Date(day);
         d.setHours(0, 0, 0, 0);
@@ -30,7 +30,7 @@ export function TimelineGrid({ days }: TimelineGridProps) {
         return (
           <div
             key={day.toISOString()}
-            className="border-r border-border/50"
+            className="border-r border-border/80 min-h-full"
             style={{ width: dayWidth }}
           >
             {isToday && (

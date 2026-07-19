@@ -20,12 +20,15 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 class CreateTaskRequest(BaseModel):
     title: str
     project_id: str | None = None
+    project_name: str | None = None
     parent_task_id: str | None = None
     description: str | None = None
     status: str = "backlog"
     priority: int = 3
     start_date: str | None = None
     due_date: str | None = None
+    recurrence_rule: str | None = None
+    estimated_minutes: int | None = None
     tag_ids: list[str] | None = None
 
     @field_validator("title")
@@ -84,6 +87,7 @@ class UpdateTaskRequest(BaseModel):
     project_id: str | None = None
     parent_task_id: str | None = None
     is_archived: bool | None = None
+    tag_ids: list[str] | None = None
 
     @field_validator("title")
     @classmethod
@@ -179,18 +183,40 @@ async def create_task_route(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
+    project_id = None
+
+    if request.project_name:
+        from app.models.project import Project
+        proj_result = await session.execute(
+            select(Project).where(Project.user_id == user.id, Project.name == request.project_name)
+        )
+        proj = proj_result.scalar_one_or_none()
+        if proj:
+            project_id = proj.id
+        else:
+            proj = Project(user_id=user.id, name=request.project_name)
+            session.add(proj)
+            await session.flush()
+            project_id = proj.id
+    elif request.project_id:
+        project_id = UUID(request.project_id)
+
     task = await create_task(
         session,
         user_id=user.id,
         title=request.title,
-        project_id=UUID(request.project_id) if request.project_id else None,
+        project_id=project_id,
         parent_task_id=UUID(request.parent_task_id) if request.parent_task_id else None,
         description=request.description,
         status=request.status,
         priority=request.priority,
         start_date=request.start_date,
         due_date=request.due_date,
+        recurrence_rule=request.recurrence_rule,
     )
+
+    if request.estimated_minutes is not None:
+        task.estimated_minutes = request.estimated_minutes
 
     if request.tag_ids:
         from app.models.task_tag import TaskTag
@@ -226,6 +252,17 @@ async def update_task_route(
         await generate_and_store_embedding(
             session, task.id, user.id, task.title, task.description
         )
+
+    if request.tag_ids is not None:
+        from app.models.task_tag import TaskTag
+        existing_tags = await session.execute(
+            select(TaskTag).where(TaskTag.task_id == task.id)
+        )
+        for et in existing_tags.scalars().all():
+            await session.delete(et)
+        for tag_id in request.tag_ids:
+            session.add(TaskTag(task_id=task.id, tag_id=UUID(tag_id)))
+        await session.flush()
 
     return {"id": str(task.id), "title": task.title, "status": task.status.value}
 
@@ -297,6 +334,153 @@ async def update_subtask(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subtask not found")
     updated = await update_task(session, UUID(subtask_id), request.to_fields_dict())
     return {"id": str(updated.id), "title": updated.title, "status": updated.status.value}
+@router.get("/search")
+async def search_tasks_route(
+    q: str,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    priority_min: int | None = None,
+    priority_max: int | None = None,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from app.models.task import Task
+    from sqlalchemy import or_
+
+    stmt = select(Task).where(
+        Task.user_id == user.id,
+        or_(
+            Task.title.ilike(f"%{q}%"),
+            Task.description.ilike(f"%{q}%"),
+        ),
+    )
+
+    if date_from:
+        stmt = stmt.where(Task.start_date >= date_from)
+    if date_to:
+        stmt = stmt.where(Task.start_date <= date_to)
+    if priority_min is not None:
+        stmt = stmt.where(Task.priority >= priority_min)
+    if priority_max is not None:
+        stmt = stmt.where(Task.priority <= priority_max)
+
+    stmt = stmt.limit(20)
+    result = await session.execute(stmt)
+    tasks = result.scalars().all()
+
+    return [
+        {
+            "id": str(t.id),
+            "title": t.title,
+            "status": t.status.value if t.status else None,
+            "priority": t.priority,
+            "start_date": str(t.start_date) if t.start_date else None,
+            "due_date": str(t.due_date) if t.due_date else None,
+        }
+        for t in tasks
+    ]
+
+
+@router.get("/date-range")
+async def list_tasks_by_date_range(
+    date_from: str,
+    date_to: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import or_
+
+    result = await session.execute(
+        select(Task)
+        .where(
+            Task.user_id == user.id,
+            Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+            or_(
+                (Task.start_date >= date_from) & (Task.start_date <= date_to),
+                (Task.due_date >= date_from) & (Task.due_date <= date_to),
+                (Task.start_date <= date_from) & (Task.due_date >= date_to),
+            ),
+        )
+        .order_by(Task.start_date)
+    )
+    tasks = result.scalars().all()
+
+    return [
+        {
+            "id": str(t.id),
+            "title": t.title,
+            "status": t.status.value if t.status else None,
+            "priority": t.priority,
+            "start_date": str(t.start_date) if t.start_date else None,
+            "due_date": str(t.due_date) if t.due_date else None,
+            "project_id": str(t.project_id) if t.project_id else None,
+        }
+        for t in tasks
+    ]
+
+
+@router.get("/upcoming-deadlines")
+async def get_upcoming_deadlines(
+    days_ahead: int = 7,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from datetime import date, timedelta
+
+    today = date.today()
+    end = today + timedelta(days=days_ahead)
+
+    result = await session.execute(
+        select(Task)
+        .where(
+            Task.user_id == user.id,
+            Task.due_date.isnot(None),
+            Task.due_date >= today,
+            Task.due_date <= end,
+            Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+        )
+        .order_by(Task.due_date, Task.priority.desc())
+    )
+    tasks = result.scalars().all()
+
+    return [
+        {
+            "id": str(t.id),
+            "title": t.title,
+            "status": t.status.value if t.status else None,
+            "priority": t.priority,
+            "due_date": str(t.due_date),
+            "start_date": str(t.start_date) if t.start_date else None,
+        }
+        for t in tasks
+    ]
+
+
+class BatchCreateRequest(BaseModel):
+    tasks: list[dict]
+
+
+@router.post("/batch")
+async def batch_create_tasks(
+    request: BatchCreateRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    created = []
+    for t_data in request.tasks:
+        task = await create_task(
+            session,
+            user_id=user.id,
+            title=t_data.get("title", "Untitled"),
+            start_date=t_data.get("start_date"),
+            due_date=t_data.get("due_date"),
+            priority=t_data.get("priority", 3),
+        )
+        created.append({"id": str(task.id), "title": task.title})
+
+    return {"created": len(created), "tasks": created}
+
+
 @router.post("/expand-recurring")
 async def expand_recurring(
     user: User = Depends(get_current_user),

@@ -76,6 +76,18 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
         <span className={`truncate ${isDone ? "line-through" : ""}`}>
           {task.title}
         </span>
+        {task.tags && task.tags.length > 0 && (
+          <span className="flex shrink-0 gap-0.5 ml-auto">
+            {task.tags.slice(0, 3).map((tag) => (
+              <span
+                key={tag.id}
+                className="h-2 w-2 rounded-full shrink-0"
+                style={{ backgroundColor: tag.color || "var(--text-muted)" }}
+                title={tag.name}
+              />
+            ))}
+          </span>
+        )}
       </div>
       {isInProgress && (
         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">

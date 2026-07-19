@@ -94,7 +94,58 @@ async def save_key(
     return {"status": "saved", "provider": request.provider}
 
 
-@router.delete("/{key_id}")
+class SyncKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, v: str) -> str:
+        if v not in VALID_PROVIDERS:
+            raise ValueError(f"Invalid provider. Must be one of: {', '.join(sorted(VALID_PROVIDERS))}")
+        return v
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 8:
+            raise ValueError("API key too short")
+        if len(v) > 256:
+            raise ValueError("API key too long")
+        return v
+
+
+@router.post("/sync")
+async def sync_key(
+    request: SyncKeyRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    result = await session.execute(
+        select(ApiKey).where(
+            ApiKey.user_id == user.id,
+            ApiKey.provider == request.provider,
+        )
+    )
+    existing = result.scalar_one_or_none()
+    encrypted = encrypt_api_key(request.api_key)
+
+    if existing:
+        existing.encrypted_key = encrypted
+        existing.key_prefix = request.api_key[:8]
+        existing.is_active = True
+    else:
+        key = ApiKey(
+            user_id=user.id,
+            provider=request.provider,
+            encrypted_key=encrypted,
+            key_prefix=request.api_key[:8],
+        )
+        session.add(key)
+
+    await session.commit()
+    return {"status": "synced", "provider": request.provider}
 async def delete_key(
     key_id: str,
     user: User = Depends(get_current_user),
