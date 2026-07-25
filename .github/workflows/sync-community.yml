@@ -698,14 +698,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config commit.gpgsign false
+          git config tag.gpgsign false
 
           git add -A
-          git commit -m "Sync from private repo" || echo "No changes to commit"
+          git commit --no-gpg-sign -m "Sync from private repo" || echo "No changes to commit"
 
-          # Use GIT_ASKPASS to supply the PAT non-interactively
-          echo "#!/bin/sh
-          echo \"\${GH_TOKEN}\"" > /tmp/git-askpass.sh
-          chmod +x /tmp/git-askpass.sh
-          export GIT_ASKPASS=/tmp/git-askpass.sh
+          # Clear any cached credentials
+          git config --unset-all credential.helper 2>/dev/null || true
 
-          git push --force "https://github.com/${COMMUNITY_REPO}.git" HEAD:main
+          git push --force "https://oauth2:${GH_TOKEN}@github.com/${COMMUNITY_REPO}.git" HEAD:main
