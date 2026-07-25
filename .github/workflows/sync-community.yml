@@ -538,7 +538,7 @@ jobs:
 
             A patent license is "discriminatory" if it does not include within
           the scope of its coverage, prohibits the exercise of, or is
-          conditioned on the non-exercise of one or more of the rights that are
+          conditioned on the non-existence of one or more of the rights that are
           specifically granted under this License.  You may not convey a covered
           work if you are a party to an arrangement with a third party that is
           in the business of distributing software, under which you make payment
@@ -699,7 +699,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          git remote add community "https://github.com/${COMMUNITY_REPO}.git"
+          git remote set-url --push community "https://github.com/${COMMUNITY_REPO}.git"
+
           git add -A
           git commit -m "Sync from private repo" || echo "No changes to commit"
 
-          git push --force "https://git:${GH_TOKEN}@github.com/${COMMUNITY_REPO}.git" HEAD:main
+          git push --force "https://${GH_TOKEN}@github.com/${COMMUNITY_REPO}.git" HEAD:main
