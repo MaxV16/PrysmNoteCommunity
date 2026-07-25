@@ -1,7 +1,13 @@
 # AGENTS.md — Prysm Note
 
 ## Project Overview
-Prysm Note is an AI-powered task management application with a 3-pane UI (sidebar, timeline, AI chat). Built as a folder-based monorepo.
+Prysm Note is an AI-powered task management application with a 3-pane UI (sidebar, timeline, AI chat). Built as a folder-based monorepo. **Open-core model**: the `ee/` directory contains proprietary enterprise features not shipped in the community release.
+
+## Enterprise Edition (EE)
+
+All **business**, **commercial**, **premium**, **enterprise**, **paid**, **pro**, or **team** features
+MUST be placed under the `ee/` directory. See `ee/EE_AGENTS.md` for details on
+integration patterns and directory structure.
 
 ## Architecture
 
@@ -10,6 +16,11 @@ prysm-note/
 ├── apps/
 │   ├── frontend/        # Next.js 14 App Router + Tailwind CSS
 │   └── backend/         # FastAPI + SQLAlchemy (async) + PostgreSQL/pgvector
+├── ee/                  # Enterprise Edition (proprietary, not in community release)
+│   ├── apps/
+│   │   ├── backend/ee/  # EE backend package
+│   │   └── frontend/ee/ # EE frontend package
+│   └── EE_AGENTS.md     # EE coding instructions for agents
 ├── docker/              # Dockerfiles + DB init scripts
 ├── docker-compose.yml
 └── turbo.json           # Turborepo pipeline

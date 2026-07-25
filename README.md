@@ -164,6 +164,3 @@ docker-compose up # Full stack with Docker
 | Calendar | Google Calendar API |
 | Infrastructure | Docker, Docker Compose, Turborepo |
 
-## License
-
-MIT License. See `LICENSE`.
