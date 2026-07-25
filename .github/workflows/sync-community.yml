@@ -700,21 +700,18 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global commit.gpgsign false
 
-          # Remove current origin (private repo), add community as origin
-          git remote set-url origin "https://github.com/${COMMUNITY_REPO}.git"
+          git add -A
+          git commit --no-gpg-sign -m "Sync from private repo" || echo "No changes to commit"
 
-          # Git will use the credential helper from actions/checkout which
-          # is configured for the PRIVATE repo's GITHUB_TOKEN. We need to replace it.
-          # Use git credential reject + approve to swap in our PAT
-          echo "protocol=https
-          host=github.com
-          path=/${COMMUNITY_REPO}.git
-          username=token
-          password=${GH_TOKEN}
-          " | git credential-store store
+          # Use gh to push - gh CLI is pre-installed on ubuntu-latest runners
+          # GH_TOKEN env var is automatically used by gh for auth
+          gh repo clone "${COMMUNITY_REPO}" /tmp/community-repo
+          cd /tmp/community-repo
+          git checkout main 2>/dev/null || git checkout -b main
 
-          git config credential.helper 'store --file ~/.git-credentials'
+          # Copy all files from the stripped source
+          rsync -a --delete ${{ github.workspace }}/ ./ --exclude=.git
 
           git add -A
           git commit --no-gpg-sign -m "Sync from private repo" || echo "No changes to commit"
-          git push --force origin main
+          git push origin main
