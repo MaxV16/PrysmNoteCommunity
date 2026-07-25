@@ -73,10 +73,14 @@ export function TagList() {
               />
               {tag.name}
               <button
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
-                  deleteTag(tag.id);
-                  if (isActive) setSelectedTagId(null);
+                  try {
+                    await deleteTag(tag.id);
+                    if (isActive) setSelectedTagId(null);
+                  } catch {
+                    // tag delete failed silently
+                  }
                 }}
                 className="ml-1 opacity-0 group-hover:opacity-100 hover:text-danger transition-opacity text-xs font-bold"
               >

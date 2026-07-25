@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
 import { useApiKeys } from "@/hooks/useApiKeys";
@@ -9,14 +10,20 @@ import { api } from "@/lib/api";
 import type { ThemeName } from "@/types/theme";
 import { THEMES } from "@/types/theme";
 
+const PremiumSettings = dynamic(
+  () => import("../../../ee/components/PremiumSettings").then((m) => m.PremiumSettings),
+  { ssr: false }
+);
+
 const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
 
-type SettingsTab = "profile" | "api-keys" | "appearance" | "advanced";
+type SettingsTab = "profile" | "api-keys" | "appearance" | "premium" | "advanced";
 
 const TABS: { id: SettingsTab; label: string; icon: string }[] = [
   { id: "profile", label: "Profile", icon: "👤" },
   { id: "api-keys", label: "AI Keys", icon: "🔑" },
   { id: "appearance", label: "Appearance", icon: "🎨" },
+  { id: "premium", label: "Premium", icon: "💎" },
   { id: "advanced", label: "Advanced", icon: "⚙️" },
 ];
 
@@ -47,6 +54,7 @@ export default function SettingsPage() {
   const [deepseekKey, setDeepseekKey] = useState("");
   const [keyMsg, setKeyMsg] = useState("");
   const [keySaving, setKeySaving] = useState<string | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   useEffect(() => {
     if (!user) { router.push("/login"); return; }
@@ -99,6 +107,19 @@ export default function SettingsPage() {
     await deleteKey(id, provider);
     setKeyMsg(`${provider} key removed.`);
     setTimeout(() => setKeyMsg(""), 3000);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!window.confirm("This permanently deletes your account and all data. Are you sure?")) return;
+    setDeletingAccount(true);
+    try {
+      await api.delete("/auth/me");
+      logout();
+      router.push("/login");
+    } catch {
+      setDeletingAccount(false);
+      alert("Failed to delete account. Please try again.");
+    }
   };
 
   if (!user) return <div className="flex h-screen items-center justify-center bg-base" />;
@@ -319,6 +340,9 @@ export default function SettingsPage() {
             </section>
           )}
 
+          {/* Premium */}
+          {activeTab === "premium" && <PremiumSettings />}
+
           {/* Advanced */}
           {activeTab === "advanced" && (
             <section className="space-y-5">
@@ -394,9 +418,11 @@ export default function SettingsPage() {
                 <p className="text-xs text-muted leading-relaxed">
                   Permanently delete your account and all associated data. This action cannot be undone.
                 </p>
-                <button disabled
-                  className="btn bg-danger/10 border border-danger/30 px-5 py-2 text-sm font-medium text-danger/50 cursor-not-allowed rounded-xl">
-                  Delete Account (coming soon)
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={deletingAccount}
+                  className="btn bg-danger/10 border border-danger/30 px-5 py-2 text-sm font-medium text-danger hover:bg-danger/20 hover:border-danger/50 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed">
+                  {deletingAccount ? "Deleting..." : "Delete Account"}
                 </button>
               </div>
             </section>

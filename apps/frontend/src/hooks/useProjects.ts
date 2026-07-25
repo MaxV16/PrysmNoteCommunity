@@ -22,5 +22,17 @@ export function useProjects() {
     [fetchProjects]
   );
 
-  return { projects, fetchProjects, createProject };
+  const deleteProject = useCallback(
+    async (id: string) => {
+      useAppStore.getState().removeProject(id);
+      try {
+        await api.delete(`/projects/${id}`);
+      } catch {
+        // project delete failed silently — already removed from local state
+      }
+    },
+    []
+  );
+
+  return { projects, fetchProjects, createProject, deleteProject };
 }

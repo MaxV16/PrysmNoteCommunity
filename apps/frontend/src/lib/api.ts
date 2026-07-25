@@ -40,6 +40,9 @@ async function request<T>(
     ...options,
     headers,
     credentials: "include",
+  }).catch((err) => {
+    console.error(`[API] Failed to connect to ${API_URL}${path}:`, err);
+    throw new Error(`Cannot reach server at ${API_URL}. Is the backend running?`);
   });
 
   if (res.status === 401 && !_retried) {

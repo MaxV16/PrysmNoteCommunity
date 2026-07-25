@@ -142,4 +142,12 @@ describe("api", () => {
 
     await expect(api.get("/tasks")).rejects.toThrow("Internal Server Error");
   });
+
+  it("throws descriptive error when fetch fails (network down)", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("Failed to fetch"));
+
+    await expect(api.get("/tasks")).rejects.toThrow(
+      "Cannot reach server at http://localhost:8000/api. Is the backend running?"
+    );
+  });
 });

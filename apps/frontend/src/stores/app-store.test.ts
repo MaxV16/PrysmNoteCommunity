@@ -61,6 +61,18 @@ describe("app-store", () => {
     expect(useAppStore.getState().tags).toEqual([]);
   });
 
+  it("removeProject removes a project by id", () => {
+    useAppStore.getState().setProjects([{ id: "p1", name: "Work" } as any]);
+    useAppStore.getState().removeProject("p1");
+    expect(useAppStore.getState().projects).toEqual([]);
+  });
+
+  it("removeProject does nothing for non-existent id", () => {
+    useAppStore.getState().setProjects([{ id: "p1", name: "Work" } as any]);
+    useAppStore.getState().removeProject("nonexistent");
+    expect(useAppStore.getState().projects).toHaveLength(1);
+  });
+
   it("addChatMessage appends to chat", () => {
     const msg = { role: "user", content: "hello" } as any;
     useAppStore.getState().addChatMessage(msg);

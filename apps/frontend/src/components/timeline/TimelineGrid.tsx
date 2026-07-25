@@ -30,11 +30,12 @@ export function TimelineGrid({ days }: TimelineGridProps) {
         return (
           <div
             key={day.toISOString()}
-            className="border-r border-border/80 min-h-full"
+            className="border-r border-border/30 rounded-b-lg overflow-hidden"
             style={{ width: dayWidth }}
           >
+            <div className="h-full w-full bg-hover/25" />
             {isToday && (
-              <div className="h-full w-full bg-accent/5" />
+              <div className="absolute inset-0 bg-accent/5" />
             )}
           </div>
         );

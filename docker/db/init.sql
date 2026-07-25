@@ -153,6 +153,17 @@ CREATE TABLE IF NOT EXISTS calendar_events (
   sync_action sync_action NOT NULL DEFAULT 'push'
 );
 
+-- Token blacklist (revoked refresh tokens)
+CREATE TABLE IF NOT EXISTS token_blacklist (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  jti VARCHAR(64) UNIQUE NOT NULL,
+  user_id UUID NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_jti ON token_blacklist(jti);
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires ON token_blacklist(expires_at);
+
 -- User OAuth tokens (Google Calendar, etc.)
 CREATE TABLE IF NOT EXISTS user_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

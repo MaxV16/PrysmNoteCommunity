@@ -22,7 +22,9 @@ async def test_tool_definitions_have_all_tools():
     expected = {
         "search_tasks", "create_task", "update_task", "delete_task",
         "get_task_details", "link_tasks", "check_calendar",
-        "suggest_subtasks", "detect_conflicts",
+        "suggest_subtasks", "detect_conflicts", "reschedule_task",
+        "list_tasks_by_date_range", "suggest_best_time",
+        "get_upcoming_deadlines", "batch_create_tasks",
     }
     assert tool_names == expected, f"Missing tools: {expected - tool_names}"
 
@@ -359,3 +361,115 @@ async def test_execute_invalid_tool_args(db_session: AsyncSession):
     results = await execute_tool_calls(tool_calls, str(uuid4()), db_session)
     assert len(results) == 1
     assert "Invalid" in results[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_execute_reschedule_task(db_session: AsyncSession):
+    from app.models.task import Task
+    user_id = uuid4()
+    task = Task(user_id=user_id, title="Move Me", start_date="2025-06-01", due_date="2025-06-05")
+    db_session.add(task)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_resched",
+        "function": {
+            "name": "reschedule_task",
+            "arguments": json.dumps({
+                "task_id": str(task.id),
+                "new_start_date": "2025-07-01",
+                "new_due_date": "2025-07-05",
+                "reason": "Conflict with other task",
+            }),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert content["rescheduled"] is True
+    assert content["new_start_date"] == "2025-07-01"
+    assert content["new_due_date"] == "2025-07-05"
+
+
+@pytest.mark.asyncio
+async def test_execute_reschedule_task_not_found(db_session: AsyncSession):
+    tool_calls = [{
+        "id": "call_resched_nf",
+        "function": {
+            "name": "reschedule_task",
+            "arguments": json.dumps({"task_id": str(uuid4())}),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(uuid4()), db_session)
+    content = json.loads(results[0]["content"])
+    assert "error" in content
+
+
+@pytest.mark.asyncio
+async def test_execute_list_tasks_by_date_range(db_session: AsyncSession):
+    from app.models.task import Task
+    user_id = uuid4()
+    task = Task(user_id=user_id, title="In Range", start_date="2025-06-10", due_date="2025-06-15")
+    db_session.add(task)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_range",
+        "function": {
+            "name": "list_tasks_by_date_range",
+            "arguments": json.dumps({"date_from": "2025-06-01", "date_to": "2025-06-30"}),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert "count" in content
+    assert "tasks" in content
+    assert content["count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_execute_get_upcoming_deadlines(db_session: AsyncSession):
+    from app.models.task import Task
+    from datetime import date
+    user_id = uuid4()
+    due = date(2025, 6, 20)
+    task = Task(user_id=user_id, title="Urgent", due_date=due)
+    db_session.add(task)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_deadline",
+        "function": {
+            "name": "get_upcoming_deadlines",
+            "arguments": json.dumps({"days_ahead": 30}),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert "deadlines" in content
+    assert "count" in content
+
+
+@pytest.mark.asyncio
+async def test_execute_batch_create_tasks(db_session: AsyncSession):
+    user_id = uuid4()
+    tool_calls = [{
+        "id": "call_batch",
+        "function": {
+            "name": "batch_create_tasks",
+            "arguments": json.dumps({
+                "tasks": [
+                    {"title": "Batch Task 1", "priority": 3},
+                    {"title": "Batch Task 2", "priority": 5},
+                ],
+            }),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert content["created_count"] == 2
+    assert len(content["tasks"]) == 2

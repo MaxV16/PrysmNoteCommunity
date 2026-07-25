@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import re
 import time
 from uuid import UUID
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.token_blacklist import TokenBlacklist
 from app.models.user import User
 from app.services.auth_service import (
     create_access_token,
@@ -141,6 +143,14 @@ async def refresh(
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
+    jti = payload.get("jti")
+    if jti:
+        result = await session.execute(
+            select(TokenBlacklist).where(TokenBlacklist.jti == jti)
+        )
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
+
     result = await session.execute(select(User).where(User.id == UUID(user_id)))
     user = result.scalar_one_or_none()
     if not user:
@@ -160,10 +170,72 @@ async def refresh(
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(
+    response: Response,
+    refresh_token: str | None = Cookie(None),
+    session: AsyncSession = Depends(get_db),
+):
+    if refresh_token:
+        try:
+            payload = jwt.decode(refresh_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+            jti = payload.get("jti")
+            exp = payload.get("exp")
+            user_id = payload.get("sub")
+            if jti and exp and user_id:
+                expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+                entry = TokenBlacklist(
+                    jti=jti,
+                    user_id=UUID(user_id),
+                    expires_at=expires_at,
+                )
+                session.add(entry)
+                await session.flush()
+        except (JWTError, Exception):
+            pass
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
     return {"status": "logged_out"}
+
+
+@router.delete("/me")
+async def delete_account(
+    response: Response,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    await session.delete(user)
+    await session.flush()
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+    return {"status": "deleted"}
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if len(v) > 128:
+            raise ValueError("Password must be at most 128 characters")
+        return v
+
+
+@router.post("/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    if not user.password_hash or not verify_password(request.current_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
+    from app.services.auth_service import hash_password
+    user.password_hash = hash_password(request.new_password)
+    await session.flush()
+    return {"status": "password_updated"}
 
 
 @router.get("/me")

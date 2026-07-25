@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import { encryptString, decryptString, clearCryptoKey } from "@/lib/crypto-utils";
 
 interface ApiKey {
   id: string;
@@ -12,26 +13,10 @@ interface ApiKey {
 
 const LOCAL_KEY_PREFIX = "prysm_key_";
 
-function btoaUnicode(str: string): string {
-  return btoa(
-    encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_match, p1) =>
-      String.fromCharCode(parseInt(p1, 16))
-    )
-  );
-}
-
-function atobUnicode(str: string): string {
-  return decodeURIComponent(
-    atob(str)
-      .split("")
-      .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-      .join("")
-  );
-}
-
-function cacheKeyLocally(provider: string, apiKey: string) {
+async function cacheKeyLocally(provider: string, apiKey: string) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(`${LOCAL_KEY_PREFIX}${provider}`, btoaUnicode(apiKey));
+  const encrypted = await encryptString(apiKey);
+  localStorage.setItem(`${LOCAL_KEY_PREFIX}${provider}`, encrypted);
 }
 
 function removeLocalKey(provider: string) {
@@ -39,15 +24,11 @@ function removeLocalKey(provider: string) {
   localStorage.removeItem(`${LOCAL_KEY_PREFIX}${provider}`);
 }
 
-function getLocalKey(provider: string): string | null {
+async function getLocalKey(provider: string): Promise<string | null> {
   if (typeof window === "undefined") return null;
-  const encoded = localStorage.getItem(`${LOCAL_KEY_PREFIX}${provider}`);
-  if (!encoded) return null;
-  try {
-    return atobUnicode(encoded);
-  } catch {
-    return null;
-  }
+  const encrypted = localStorage.getItem(`${LOCAL_KEY_PREFIX}${provider}`);
+  if (!encrypted) return null;
+  return decryptString(encrypted);
 }
 
 export function useApiKeys() {
@@ -67,7 +48,7 @@ export function useApiKeys() {
   }, []);
 
   const saveKey = useCallback(async (provider: string, apiKey: string) => {
-    cacheKeyLocally(provider, apiKey);
+    await cacheKeyLocally(provider, apiKey);
     await api.post("/keys/", { provider, api_key: apiKey });
     await fetchKeys();
   }, [fetchKeys]);
@@ -79,7 +60,7 @@ export function useApiKeys() {
   }, [fetchKeys]);
 
   const syncKey = useCallback(async (provider: string, apiKey: string) => {
-    cacheKeyLocally(provider, apiKey);
+    await cacheKeyLocally(provider, apiKey);
     await api.post("/keys/sync", { provider, api_key: apiKey });
   }, []);
 

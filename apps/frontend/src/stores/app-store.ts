@@ -31,6 +31,7 @@ interface AppState {
   setSelectedTaskId: (id: string | null) => void;
   setSelectedProjectId: (id: string | null) => void;
   setSelectedTagId: (id: string | null) => void;
+  removeProject: (id: string) => void;
   setSearchQuery: (query: string) => void;
   setNavFilter: (filter: NavFilter) => void;
 }
@@ -56,6 +57,7 @@ export const useAppStore = create<AppState>((set) => ({
   setSelectedTaskId: (id) => set({ selectedTaskId: id }),
   setSelectedProjectId: (id) => set({ selectedProjectId: id }),
   setSelectedTagId: (id) => set({ selectedTagId: id }),
+  removeProject: (id) => set((state) => ({ projects: state.projects.filter((p) => p.id !== id) })),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setNavFilter: (filter) => set({ navFilter: filter }),
 }));

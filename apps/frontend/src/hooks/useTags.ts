@@ -29,8 +29,12 @@ export function useTags() {
 
   const deleteTag = useCallback(
     async (id: string) => {
-      await api.delete(`/tags/${id}`);
       removeTag(id);
+      try {
+        await api.delete(`/tags/${id}`);
+      } catch {
+        // tag delete failed silently — already removed from local state
+      }
     },
     [removeTag]
   );

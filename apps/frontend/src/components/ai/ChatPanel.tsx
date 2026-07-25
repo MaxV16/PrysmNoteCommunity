@@ -19,7 +19,22 @@ interface ChatPanelProps {
 
 export function ChatPanel({ onClose }: ChatPanelProps) {
   const { chatMessages, sendMessage, isLoading } = useAIChat();
-  const [provider, setProvider] = useState("openai");
+
+  const LAST_PROVIDER_KEY = "prysm_last_provider";
+
+  function getInitialProvider(): string {
+    if (typeof window === "undefined") return "openai";
+    const last = localStorage.getItem(LAST_PROVIDER_KEY);
+    if (last && PROVIDERS.some((p) => p.value === last)) return last;
+    const found = PROVIDERS.find((p) => localStorage.getItem(`prysm_key_${p.value}`));
+    return found ? found.value : "openai";
+  }
+
+  const [provider, setProvider] = useState(getInitialProvider);
+
+  useEffect(() => {
+    localStorage.setItem(LAST_PROVIDER_KEY, provider);
+  }, [provider]);
 
   useEffect(() => {
     const handler = (e: Event) => {

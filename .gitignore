@@ -40,3 +40,11 @@ Thumbs.db
 
 # Electron
 electron/out/
+
+
+# Kilo agent plans
+.kilo/
+
+# Turborepo artifacts
+.turbo/
+apps/frontend/.turbo/

@@ -43,7 +43,15 @@ services:
     depends_on:
       - backend
     environment:
+      NODE_ENV: development
       NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./apps/frontend:/app
+      - ./ee/apps/frontend/ee:/app/ee
+      - /app/node_modules
+      - /app/.next
+    command: npx next dev -p 3000
 
 volumes:
   postgres_data:

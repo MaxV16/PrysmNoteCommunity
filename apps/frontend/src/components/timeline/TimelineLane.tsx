@@ -82,11 +82,11 @@ export function TimelineLane({ label, tasks, days, onTaskClick, onDayDoubleClick
           />
         ))}
         {onDayDoubleClick && (
-          <div className="absolute inset-0 flex pointer-events-none">
+          <div className="absolute inset-0 flex pointer-events-none z-10">
             {days.map((day) => (
               <div
                 key={day.toISOString()}
-                className="pointer-events-auto"
+                className="pointer-events-auto cursor-pointer"
                 style={{ width: dayWidth }}
                 onDoubleClick={() => onDayDoubleClick(day)}
               />

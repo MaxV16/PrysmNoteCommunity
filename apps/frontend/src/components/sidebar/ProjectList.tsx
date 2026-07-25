@@ -10,7 +10,7 @@ export function ProjectList() {
   const tasks = useAppStore((s) => s.tasks);
   const selectedProjectId = useAppStore((s) => s.selectedProjectId);
   const setSelectedProjectId = useAppStore((s) => s.setSelectedProjectId);
-  const { createProject } = useProjects();
+  const { createProject, deleteProject } = useProjects();
   const [isAdding, setIsAdding] = useState(false);
   const [newName, setNewName] = useState("");
 
@@ -22,6 +22,11 @@ export function ProjectList() {
     await createProject({ name: newName.trim() });
     setNewName("");
     setIsAdding(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("Delete this list? Tasks will be unassigned.")) return;
+    await deleteProject(id);
   };
 
   return (
@@ -62,6 +67,7 @@ export function ProjectList() {
             count={projectCounts(project.id)}
             isSelected={selectedProjectId === project.id}
             onClick={(id) => setSelectedProjectId(selectedProjectId === id ? null : id)}
+            onDelete={handleDelete}
           />
         ))}
         {projects.length === 0 && !isAdding && (

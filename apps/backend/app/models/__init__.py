@@ -11,6 +11,8 @@ from app.models.ai_conversation import AiConversation
 from app.models.calendar_event import CalendarEvent
 from app.models.user_token import UserToken
 
+from app.models.token_blacklist import TokenBlacklist
+
 __all__ = [
     "Base",
     "User",

@@ -3,14 +3,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import func, select
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from app.config import settings
 from app.database import async_session_factory
-from app.middleware.csrf import CSRFSecurityMiddleware
+from app.models.token_blacklist import TokenBlacklist
 from app.models.user_token import UserToken
 from app.routers import auth, tasks, projects, tags, search, ai, keys, calendar, task_links
 from app.routers.ai import start_rate_limit_pruner
@@ -57,6 +57,23 @@ async def lifespan(app: FastAPI):
     _prune_task = start_rate_limit_pruner()
     _background_tasks.append(_prune_task)
 
+    async def blacklist_cleanup(session_factory):
+        while True:
+            try:
+                async with session_factory() as session:
+                    await session.execute(
+                        TokenBlacklist.__table__.delete().where(
+                            TokenBlacklist.expires_at < func.now()
+                        )
+                    )
+                    await session.commit()
+            except Exception:
+                pass
+            await asyncio.sleep(3600)
+
+    _cleanup_task = asyncio.create_task(blacklist_cleanup(async_session_factory))
+    _background_tasks.append(_cleanup_task)
+
     async def gcal_pull_background_loop(session_factory):
         while True:
             try:
@@ -100,7 +117,6 @@ app.add_middleware(
 
 app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(CSPSecurityMiddleware)
-app.add_middleware(CSRFSecurityMiddleware)
 
 app.include_router(auth.router)
 app.include_router(tasks.router)
