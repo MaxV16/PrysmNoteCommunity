@@ -702,4 +702,4 @@ jobs:
           git add -A
           git commit -m "Sync from private repo" || echo "No changes to commit"
 
-          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${COMMUNITY_REPO}.git" HEAD:main
+          git push --force "https://git:${GH_TOKEN}@github.com/${COMMUNITY_REPO}.git" HEAD:main
