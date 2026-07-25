@@ -696,6 +696,8 @@ jobs:
           COMMUNITY_REPO: MaxV16/PrysmNoteCommunity
           GH_TOKEN: ${{ secrets.COMMUNITY_REPO_TOKEN }}
         run: |
+          set -euo pipefail
+
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global commit.gpgsign false
@@ -703,15 +705,14 @@ jobs:
           git add -A
           git commit --no-gpg-sign -m "Sync from private repo" || echo "No changes to commit"
 
-          # Use gh to push - gh CLI is pre-installed on ubuntu-latest runners
-          # GH_TOKEN env var is automatically used by gh for auth
+          # gh CLI is pre-installed on ubuntu-latest.
+          # GH_TOKEN env var authenticates all gh commands automatically.
           gh repo clone "${COMMUNITY_REPO}" /tmp/community-repo
           cd /tmp/community-repo
           git checkout main 2>/dev/null || git checkout -b main
 
-          # Copy all files from the stripped source
-          rsync -a --delete ${{ github.workspace }}/ ./ --exclude=.git
+          rsync -a --delete "${{ github.workspace }}/" ./ --exclude=.git
 
           git add -A
-          git commit --no-gpg-sign -m "Sync from private repo" || echo "No changes to commit"
+          git diff --cached --exit-code --quiet && echo "No changes" || git commit --no-gpg-sign -m "Sync from private repo"
           git push origin main
