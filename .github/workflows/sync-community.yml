@@ -699,12 +699,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config commit.gpgsign false
-          git config tag.gpgsign false
 
           git add -A
           git commit --no-gpg-sign -m "Sync from private repo" || echo "No changes to commit"
 
-          # Clear any cached credentials
-          git config --unset-all credential.helper 2>/dev/null || true
+          # Store the PAT as the credential for the community repo
+          git config --global credential.helper "!f() { echo username=token; echo password=${GH_TOKEN}; }; f"
 
-          git push --force "https://oauth2:${GH_TOKEN}@github.com/${COMMUNITY_REPO}.git" HEAD:main
+          git push --force "https://github.com/${COMMUNITY_REPO}.git" HEAD:main
