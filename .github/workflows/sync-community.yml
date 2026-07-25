@@ -702,4 +702,6 @@ jobs:
           git add -A
           git commit -m "Sync from private repo" || echo "No changes to commit"
 
+          # Pull community HEAD first, then rebase our stripped changes on top
+          git pull --rebase "https://x-access-token:${GH_TOKEN}@github.com/${COMMUNITY_REPO}.git" main || true
           git push "https://x-access-token:${GH_TOKEN}@github.com/${COMMUNITY_REPO}.git" HEAD:main
