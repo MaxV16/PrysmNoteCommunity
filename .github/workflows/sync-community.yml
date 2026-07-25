@@ -694,7 +694,6 @@ jobs:
       - name: Push to community repo
         env:
           COMMUNITY_REPO: MaxV16/PrysmNoteCommunity
-          GH_TOKEN: ${{ secrets.COMMUNITY_REPO_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -702,7 +701,10 @@ jobs:
           git add -A
           git commit -m "Sync from private repo" || echo "No changes to commit"
 
-          echo "https://x-access-token:${GH_TOKEN}@github.com" > ~/.git-credentials
-          git config credential.helper store
-
-          git push --force "https://github.com/${COMMUNITY_REPO}.git" HEAD:main
+      - name: Push via gh CLI
+        env:
+          GH_TOKEN: ${{ secrets.COMMUNITY_REPO_TOKEN }}
+        run: |
+          gh auth setup-git
+          git remote add community "https://github.com/${COMMUNITY_REPO}.git"
+          git push --force community HEAD:main
