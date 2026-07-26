@@ -14,6 +14,35 @@ from app.services.task_service import create_task, delete_task, get_task, search
 
 VALID_STATUSES = {s.value for s in TaskStatus}
 
+from datetime import date as date_type
+from app.models.task_tag import TaskTag
+from app.models.tag import Tag
+
+
+def _serialize_task(task: Task) -> dict:
+    return {
+        "id": str(task.id),
+        "user_id": str(task.user_id),
+        "project_id": str(task.project_id) if task.project_id else None,
+        "parent_task_id": str(task.parent_task_id) if task.parent_task_id else None,
+        "title": task.title,
+        "description": task.description,
+        "status": task.status.value,
+        "priority": task.priority,
+        "start_date": task.start_date.isoformat() if task.start_date else None,
+        "due_date": task.due_date.isoformat() if task.due_date else None,
+        "is_all_day": task.is_all_day,
+        "estimated_minutes": task.estimated_minutes,
+        "recurrence_rule": task.recurrence_rule,
+        "recurrence_end_date": task.recurrence_end_date.isoformat() if task.recurrence_end_date else None,
+        "sort_order": task.sort_order,
+        "is_archived": task.is_archived,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+    }
+
+
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
@@ -160,9 +189,9 @@ async def list_tasks(
     if query:
         return await search_tasks(session, user.id, query)
     result = await session.execute(
-        select(Task).where(Task.user_id == user.id).offset(offset).limit(limit)
+        select(Task).where(Task.user_id == user.id).order_by(Task.created_at.desc()).offset(offset).limit(limit)
     )
-    return [{"id": str(t.id), "title": t.title, "status": t.status.value} for t in result.scalars().all()]
+    return [_serialize_task(t) for t in result.scalars().all()]
 
 
 @router.get("/{task_id}")
@@ -174,7 +203,7 @@ async def get_task_route(
     task = await get_task(session, UUID(task_id))
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return task
+    return _serialize_task(task)
 
 
 @router.post("/")
@@ -233,7 +262,7 @@ async def create_task_route(
         session, task.id, user.id, task.title, task.description
     )
 
-    return {"id": str(task.id), "title": task.title, "status": task.status.value}
+    return _serialize_task(task)
 
 
 @router.patch("/{task_id}")
@@ -264,7 +293,7 @@ async def update_task_route(
             session.add(TaskTag(task_id=task.id, tag_id=UUID(tag_id)))
         await session.flush()
 
-    return {"id": str(task.id), "title": task.title, "status": task.status.value}
+    return _serialize_task(task)
 
 
 @router.delete("/{task_id}")
