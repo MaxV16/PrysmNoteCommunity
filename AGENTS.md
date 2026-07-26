@@ -9,7 +9,14 @@ After every meaningful set of file changes, you MUST:
 
 Batch related changes into a single commit. Do not create one commit per file or per micro-edit.
 
-**Do NOT start or run any docker containers or development servers.** Only compile/build to verify changes (`npm run build` in apps/frontend, `pytest` in apps/backend). The user runs the app via their own script.
+**CRITICAL: Do NOT start, run, or restart any Docker containers, dev servers, databases, or localhost processes.** The user runs the app exclusively via their own start.bat script.
+
+Allowed build-only commands that self-terminate:
+- `npm run build` (frontend) — verify compilation, then stop
+- `npm run test` (frontend) — run tests, then stop  
+- `pytest` (backend) — run tests, then stop
+
+If Docker containers are running when you start working, kill them immediately with `docker compose down`. Never leave processes running after your work is done. Never use `docker compose up`, `npm run dev`, `uvicorn`, `next dev`, or any other long-running command.
 
 ## Project Overview
 Prysm Note is an AI-powered task management application with a 3-pane UI (sidebar, timeline, AI chat). Built as a folder-based monorepo. **Open-core model**: the `ee/` directory contains proprietary enterprise features not shipped in the community release.
