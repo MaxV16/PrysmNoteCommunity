@@ -49,7 +49,7 @@ services:
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./apps/frontend:/app
-      - ./ee/apps/frontend/ee:/app/ee
+      - ./ee:/app/ee
       - /app/node_modules
       - /app/.next
     command: npx next dev -p 3000

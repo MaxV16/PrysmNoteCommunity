@@ -27,7 +27,7 @@
         "./src/*"
       ],
       "@ee/*": [
-        "../../ee/apps/frontend/ee/*"
+        "./ee/apps/frontend/ee/*"
       ]
     }
   },
