@@ -16,6 +16,7 @@ function findEeDir(): string {
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  trailingSlash: true,
   typescript: {
     ignoreBuildErrors: true,
   },
