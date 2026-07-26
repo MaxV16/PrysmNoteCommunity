@@ -44,8 +44,7 @@ services:
       - backend
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_URL: /api
-      API_PROXY: http://backend:8000
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./apps/frontend:/app

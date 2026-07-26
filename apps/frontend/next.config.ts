@@ -28,19 +28,6 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-  async rewrites() {
-    const backend = process.env.API_PROXY || "http://backend:8000";
-    return [
-      {
-        source: "/api/:path+",
-        destination: `${backend}/api/:path+/`,
-      },
-      {
-        source: "/api",
-        destination: `${backend}/api/`,
-      },
-    ];
-  },
 };
 
 export default nextConfig;
