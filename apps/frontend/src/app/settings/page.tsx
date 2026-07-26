@@ -8,15 +8,15 @@ import { useTheme } from "@/lib/theme-context";
 import { useApiKeys } from "@/hooks/useApiKeys";
 import { api } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
-import type { ThemeName } from "@/types/theme";
-import { THEMES } from "@/types/theme";
+import type { ThemeName, ThemeColors, BackgroundPreset } from "@/types/theme";
+import { THEMES, FONT_PRESETS, BACKGROUND_PRESETS } from "@/types/theme";
 
 const PremiumSettings = dynamic(
   () => import("../../../ee/components/PremiumSettings").then((m) => m.PremiumSettings),
   { ssr: false }
 );
 
-const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
+const THEME_NAMES: ThemeName[] = [...(Object.keys(THEMES) as ThemeName[]), "custom"];
 
 type SettingsTab =
   | "account"
@@ -134,7 +134,8 @@ function stStr(key: string, fallback = ""): [string, (v: string) => void] {
 
 export default function SettingsPage() {
   const { user, logout, refreshSession } = useAuth();
-  const { themeName, setThemeName } = useTheme();
+  const { themeName, setThemeName, fontFamily, setFontFamily, background, setBackgroundPreset, setBackgroundImage, clearBackground, customTheme, setCustomTheme } =
+    useTheme();
   const router = useRouter();
   const { keys, fetchKeys, saveKey, deleteKey } = useApiKeys();
   const { tasks, projects } = useAppStore();
@@ -174,8 +175,6 @@ export default function SettingsPage() {
   const [dateFormat, setDateFormat] = stStr("prysm_date_format", "dd/mm/yyyy");
   const [timezone, setTimezone] = stStr("prysm_tz", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 
-  const [customAccent, setCustomAccent] = stStr("prysm_custom_accent", "");
-
   const [lastExport, setLastExport] = stStr("prysm_last_export");
 
   const [notificationStatus, setNotificationStatus] = useState<"idle" | "granted" | "denied">("idle");
@@ -194,6 +193,14 @@ export default function SettingsPage() {
   const [collabTeams, setCollabTeams] = useState<{ name: string }[]>(() =>
     lsGet<{ name: string }[]>("prysm_collab_teams", [])
   );
+
+  const [editingCustomTheme, setEditingCustomTheme] = useState(false);
+  const [customThemeColors, setCustomThemeColors] = useState<ThemeColors>(() => {
+    const base = THEMES[themeName] || THEMES.dark;
+    return customTheme ? { ...base.colors, ...Object.fromEntries(Object.entries(customTheme)) } as unknown as ThemeColors : { ...base.colors };
+  });
+  const [customFontInput, setCustomFontInput] = useState("");
+  const [fontInputOpen, setFontInputOpen] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -215,14 +222,6 @@ export default function SettingsPage() {
       setNotificationStatus(Notification.permission as "granted" | "denied" | "idle");
     }
   }, []);
-
-  useEffect(() => {
-    if (customAccent) {
-      document.documentElement.style.setProperty("--accent", customAccent);
-      document.documentElement.style.setProperty("--accent-hover", customAccent + "CC");
-      document.documentElement.style.setProperty("--accent-glow", customAccent + "4D");
-    }
-  }, [customAccent]);
 
   const handleSaveProfile = async () => {
     if (!displayName.trim() && !email.trim()) return;
@@ -326,6 +325,22 @@ export default function SettingsPage() {
     if (!("Notification" in window)) return;
     const perm = await Notification.requestPermission();
     setNotificationStatus(perm as "granted" | "denied" | "idle");
+  };
+
+  const handleImageUpload = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setBackgroundImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
   };
 
   const handleCreateTeam = () => {
@@ -664,7 +679,7 @@ export default function SettingsPage() {
 
           {/* === APPEARANCE === */}
           {activeTab === "appearance" && (
-            <section className="card p-6 space-y-5">
+            <section className="card p-6 space-y-6">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -673,39 +688,188 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-primary">Appearance</h2>
-                  <p className="text-sm text-muted">Customize your theme and colors</p>
+                  <p className="text-sm text-muted">Customize your theme, fonts, and colors</p>
                 </div>
               </div>
+
               <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider">Theme</h3>
-              <div className="grid grid-cols-6 gap-3">
-                {THEME_NAMES.map((name) => (
+              <div className="grid grid-cols-5 gap-2">
+                {THEME_NAMES.map((name) => {
+                  const isBuiltin = name in THEMES;
+                  const info = isBuiltin ? THEMES[name as keyof typeof THEMES] : { label: "My Custom", colors: customTheme };
+                  const active = name === "custom" ? themeName === "custom" && !!customTheme : themeName === name && (!customTheme || name !== "custom");
+                  return (
+                    <button
+                      key={name}
+                      onClick={() => {
+                        if (name === "custom") {
+                          if (customTheme) setThemeName("custom");
+                          else setEditingCustomTheme(true);
+                        } else {
+                          setThemeName(name);
+                          setCustomTheme(null);
+                        }
+                      }}
+                      className={`rounded-2xl border-2 p-2.5 text-center transition-all duration-200 ${
+                        active ? "border-accent bg-accent/10 shadow-glow scale-105" : "border-border bg-elevated hover:border-text-muted hover:bg-hover"
+                      }`}
+                    >
+                      <div
+                        className="h-6 w-full rounded-lg mb-1.5 shadow-inner"
+                        style={{ backgroundColor: isBuiltin ? (info as typeof THEMES["dark"]).colors.accent : (info as ThemeColors)?.accent || "#888" }}
+                      />
+                      <span className={`text-[10px] font-semibold ${active ? "text-accent" : "text-secondary"}`}>
+                        {isBuiltin ? (info as typeof THEMES["dark"]).label : "Custom"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => {
+                  const base = THEMES[themeName === "custom" ? "dark" : themeName] || THEMES.dark;
+                  setCustomThemeColors({ ...base.colors });
+                  setEditingCustomTheme(true);
+                }}
+                className="btn bg-accent text-white px-5 py-2 text-sm rounded-xl"
+              >
+                + Create Custom Theme
+              </button>
+
+              {editingCustomTheme && (
+                <div className="rounded-2xl bg-elevated border border-border p-4 space-y-4">
+                  <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider">Custom Theme Editor</h4>
+                  <div className="grid grid-cols-3 gap-3">
+                    {Object.keys(customThemeColors).map((key) => {
+                      const k = key as keyof ThemeColors;
+                      return (
+                        <div key={k}>
+                          <label className="text-[10px] text-muted block mb-1">{k.replace("accent-hover", "ahover").replace("shadow-sm", "shadowS").replace("shadow-md", "shadowM").replace("shadow-lg", "shadowL").replace("accent-glow", "glow")}</label>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="color"
+                              value={customThemeColors[k].startsWith("#") || customThemeColors[k].startsWith("rgb") ? (customThemeColors[k].startsWith("#") ? customThemeColors[k] : "#000000") : "#000000"}
+                              onChange={(e) => {
+                                setCustomThemeColors((prev) => ({ ...prev, [k]: e.target.value }));
+                              }}
+                              className="w-7 h-7 rounded cursor-pointer border-0 p-0"
+                            />
+                            <input
+                              className="input-field flex-1 text-[10px]"
+                              value={customThemeColors[k]}
+                              onChange={(e) => {
+                                setCustomThemeColors((prev) => ({ ...prev, [k]: e.target.value }));
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setCustomTheme({ ...customThemeColors });
+                        setEditingCustomTheme(false);
+                      }}
+                      className="btn bg-accent text-white px-5 py-2 text-sm rounded-xl"
+                    >
+                      Apply Custom Theme
+                    </button>
+                    <button
+                      onClick={() => setEditingCustomTheme(false)}
+                      className="btn bg-elevated border border-border text-secondary px-4 py-2 text-sm rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider pt-2">Font Family</h3>
+              <div className="space-y-3">
+                <select
+                  className="input-field"
+                  value={FONT_PRESETS.includes(fontFamily) ? fontFamily : "__custom__"}
+                  onChange={(e) => {
+                    if (e.target.value === "__custom__") {
+                      setFontInputOpen(true);
+                    } else {
+                      setFontInputOpen(false);
+                      setFontFamily(e.target.value);
+                    }
+                  }}
+                >
+                  {FONT_PRESETS.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                  <option value="__custom__">Custom font...</option>
+                </select>
+                {fontInputOpen && (
+                  <div className="flex gap-2">
+                    <input
+                      className="input-field flex-1"
+                      placeholder="Type any Google Font name..."
+                      value={customFontInput}
+                      onChange={(e) => setCustomFontInput(e.target.value)}
+                    />
+                    <button
+                      onClick={() => {
+                        if (customFontInput.trim()) {
+                          setFontFamily(customFontInput.trim());
+                          setFontInputOpen(false);
+                        }
+                      }}
+                      className="btn bg-accent text-white px-4 py-2 text-sm rounded-xl"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                )}
+                <p className="text-[11px] text-muted">
+                  Preview:{" "}
+                  <span style={{ fontFamily: fontFamily }} className="text-primary">
+                    The quick brown fox jumps over the lazy dog.
+                  </span>
+                </p>
+              </div>
+
+              <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider pt-2">Background</h3>
+              <div className="grid grid-cols-4 gap-2">
+                {BACKGROUND_PRESETS.map((p) => (
                   <button
-                    key={name}
-                    onClick={() => { setThemeName(name); setCustomAccent(""); }}
-                    className={`rounded-2xl border-2 p-3 text-center transition-all duration-200 ${themeName === name ? "border-accent bg-accent/10 shadow-glow scale-105" : "border-border bg-elevated hover:border-text-muted hover:bg-hover"}`}
+                    key={p.id}
+                    onClick={() => setBackgroundPreset(p)}
+                    className={`rounded-xl border-2 p-3 text-center transition-all ${
+                      background.value === p.value && background.type !== "image"
+                        ? "border-accent bg-accent/10"
+                        : "border-border bg-elevated hover:border-text-muted"
+                    }`}
                   >
-                    <div className="h-7 w-full rounded-xl mb-2 shadow-inner" style={{ backgroundColor: THEMES[name].colors.accent }} />
-                    <span className={`text-[11px] font-semibold ${themeName === name ? "text-accent" : "text-secondary"}`}>
-                      {THEMES[name].label}
-                    </span>
+                    <div
+                      className="h-10 w-full rounded-lg mb-1"
+                      style={p.type === "none" ? { backgroundColor: "var(--bg-base)", border: "1px solid var(--border)" } : { background: p.value, backgroundSize: p.size || "cover" }}
+                    />
+                    <span className="text-[10px] text-secondary">{p.label}</span>
                   </button>
                 ))}
               </div>
-              <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider pt-2">Accent Color</h3>
-              <div className="flex gap-3 flex-wrap">
-                {ACCENT_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setCustomAccent(c)}
-                    className={`w-9 h-9 rounded-full transition-all hover:scale-110 ${customAccent === c ? "ring-2 ring-offset-2 ring-offset-base ring-white scale-110" : ""}`}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-                {customAccent && (
-                  <button onClick={() => setCustomAccent("")} className="text-xs text-muted hover:text-primary ml-1 self-center">
-                    Reset
-                  </button>
-                )}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleImageUpload}
+                  className="btn bg-elevated border border-border text-secondary px-4 py-2 text-xs rounded-xl hover:text-primary"
+                >
+                  Upload Image
+                </button>
+                <button
+                  onClick={clearBackground}
+                  className="btn bg-elevated border border-border text-secondary px-4 py-2 text-xs rounded-xl hover:text-primary"
+                >
+                  Remove Background
+                </button>
               </div>
             </section>
           )}

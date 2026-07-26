@@ -6,6 +6,7 @@ const config: Config = {
     extend: {
       fontFamily: {
         "mono-timeline": ["'DM Mono'", "'SF Mono'", "Consolas", "monospace"],
+        ui: ["var(--font-ui)"],
       },
       colors: {
         base: "var(--bg-base)",

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { DynamicFontLoader } from "@/lib/dynamic-font-loader";
 import { AuthProvider } from "@/lib/auth-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { ToastProvider } from "@/lib/toast-context";
@@ -23,6 +24,7 @@ export default function RootLayout({
       </head>
       <body>
         <ThemeProvider>
+          <DynamicFontLoader />
           <AuthProvider>
             <ToastProvider>{children}</ToastProvider>
           </AuthProvider>
