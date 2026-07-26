@@ -30,12 +30,57 @@ prysm-note/
 └── turbo.json           # Turborepo pipeline
 ```
 
+## Docker & Build Critical Context
+
+### Docker Desktop for Windows Path Issue
+On Docker Desktop for Windows, `process.cwd()` and `__dirname` inside containers resolve to Windows host paths (e.g. `C:\Users\...`) rather than container paths (e.g. `/app/`). This breaks any build-time path resolution that relies on these globals.
+
+**ALWAYS use the `src/ee/` directory approach for EE file access:**
+- In `docker/frontend.Dockerfile`: `COPY ee/apps/frontend/ee ./src/ee/`
+- In source code: `import from "@/ee/components/..."` (uses the `@/*` → `./src/*` alias)
+- The `next.config.ts` webpack alias `@/ee` falls back to `../../ee/apps/frontend/ee` for local dev
+- A local junction from `apps/frontend/src/ee/` → `../../ee/apps/frontend/ee/` may be needed for local dev
+- Do NOT rely on tsconfig `paths` for `@ee/*` — it breaks in Docker because the path resolves to host absolute paths
+
+### Docker Compose Dev Mode (Volume Mounts)
+The `docker-compose.yml` mounts `./apps/frontend:/app` in dev mode, OVERRIDING the Dockerfile build output. The container runs `npx next dev`, so changes to source files take effect immediately.
+
+**EE volume mount:** `./ee/apps/frontend/ee:/app/ee` (NOT `./ee:/app/ee` which puts files at the wrong path)
+
+### API Proxy Setup
+`NEXT_PUBLIC_API_URL=/api` — browsers use same-origin requests. Next.js rewrites proxy `/api/*` to `http://backend:8000/api/*` via the internal Docker network. This avoids CORS and host-port mapping issues.
+
+**`next.config.ts` rewrites:**
+```ts
+async rewrites() {
+  return [
+    { source: "/api/:path*", destination: `${process.env.API_PROXY || "http://backend:8000"}/api/:path*" },
+  ];
+}
+```
+Set `API_PROXY=http://backend:8000` in docker-compose frontend environment.
+
+### Rebuild & Restart Commands
+```bash
+# Full clean rebuild (required when Dockerfile, package.json, or next.config.ts change)
+docker compose build --no-cache frontend
+docker compose up -d
+
+# Restart containers (when only source files changed via volume mounts)
+docker compose restart frontend
+```
+
+### Known Docker Build Failures
+1. **Module not found: `@ee/components/*`** — EE files not copied to `src/ee/` in Dockerfile, or volume mount at wrong path in dev mode. Fix: `COPY ee/apps/frontend/ee ./src/ee/` and import as `@/ee/...`
+2. **`@ee` alias resolves to host path** — tsconfig `paths` for `@ee/*` cause this. Fix: use only webpack alias in `next.config.ts`, not tsconfig paths
+3. **Build succeeds locally but fails in Docker** — `process.cwd()`/`__dirname` path resolution difference. Fix: use `fs.existsSync` to probe multiple locations in the webpack alias
+
 ## Quick Start
 
 ### Docker (recommended)
 ```bash
 cp .env.example .env
-docker-compose up
+docker compose up
 # Open http://localhost:3000
 ```
 
@@ -61,7 +106,9 @@ cd apps/frontend && npm run dev
 | `npm run lint` | root | Lint frontend via Turborepo |
 | `uvicorn app.main:app --reload` | apps/backend | Run backend dev server |
 | `alembic upgrade head` | apps/backend | Run DB migrations |
-| `docker-compose up` | root | Start all services |
+| `docker compose up` | root | Start all services |
+| `docker compose build --no-cache frontend` | root | Full frontend rebuild |
+| `docker compose down` | root | Stop all containers |
 
 ## Environment Variables
 
@@ -76,6 +123,7 @@ See `.env.example` for the full list. Key variables:
 - PostgreSQL 16 with `pgvector` extension for AI embeddings
 - Alembic migrations in `apps/backend/alembic/`
 - All tables have RLS (Row-Level Security) policies keyed on `app.user_id` session variable
+- **Date columns** (`start_date`, `due_date`, `recurrence_end_date`) are `Mapped[date | None]` in SQLAlchemy models. **ALWAYS** convert string dates to `datetime.date` objects using `date.fromisoformat()` before assignment. Never pass raw strings — asyncpg requires `date` objects and will throw `'str' object has no attribute 'toordinal'`. See `app/services/task_service.py::_parse_date()`.
 
 ## Key Backend Patterns
 
