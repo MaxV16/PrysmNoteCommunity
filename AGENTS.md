@@ -9,6 +9,8 @@ After every meaningful set of file changes, you MUST:
 
 Batch related changes into a single commit. Do not create one commit per file or per micro-edit.
 
+**Do NOT start or run any docker containers or development servers.** Only compile/build to verify changes (`npm run build` in apps/frontend, `pytest` in apps/backend). The user runs the app via their own script.
+
 ## Project Overview
 Prysm Note is an AI-powered task management application with a 3-pane UI (sidebar, timeline, AI chat). Built as a folder-based monorepo. **Open-core model**: the `ee/` directory contains proprietary enterprise features not shipped in the community release.
 

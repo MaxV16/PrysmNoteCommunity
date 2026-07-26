@@ -32,7 +32,6 @@ services:
         condition: service_healthy
     volumes:
       - ./apps/backend:/app
-      - ./ee:/app/ee
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
@@ -49,7 +48,6 @@ services:
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./apps/frontend:/app
-      - ./ee:/app/ee
       - /app/node_modules
       - /app/.next
     command: npx next dev -p 3000
