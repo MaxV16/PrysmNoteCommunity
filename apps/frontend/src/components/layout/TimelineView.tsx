@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useCallback, useState } from "react";
+import { useMemo, useCallback, useState, useEffect } from "react";
 import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useAppStore, type NavFilter } from "@/stores/app-store";
 import { useTimeline } from "@/hooks/useTimeline";
@@ -11,6 +11,7 @@ import { TaskDetail } from "@/components/tasks/TaskDetail";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
 import { useTasks } from "@/hooks/useTasks";
+import { useRouter } from "next/navigation";
 
 function isToday(dateStr: string | null): boolean {
   if (!dateStr) return false;
@@ -43,21 +44,29 @@ function applyNavFilter(tasks: ReturnType<typeof useAppStore.getState>["tasks"],
 }
 
 interface TimelineViewProps {
-  viewDays: number;
-  isMobile: boolean;
-  rightOpen: boolean;
+  onToggleRight?: () => void;
+  onOpenSticky?: () => void;
 }
 
-export function TimelineView({ viewDays, isMobile, rightOpen }: TimelineViewProps) {
+export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps) {
+  const [isMobile, setIsMobile] = useState(false);
   const { tasks, selectedTaskId, setSelectedTaskId, projects, navFilter, setNavFilter, selectedProjectId, selectedTagId } = useAppStore();
   const { visibleRange, scrollOffset, setScrollOffset } = useTimeline(14);
   const { createTask, updateTask } = useTasks();
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
+  const [kanbanMode, setKanbanMode] = useState(false);
+  const router = useRouter();
+
+  useEffect(() => {
+    setIsMobile(window.innerWidth < 768);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
+
+  const viewDays = 14;
 
   const days = useMemo(() => {
     const result: Date[] = [];
@@ -67,7 +76,7 @@ export function TimelineView({ viewDays, isMobile, rightOpen }: TimelineViewProp
       current.setDate(current.getDate() + 1);
     }
     return result;
-  }, [visibleRange.start, viewDays]);
+  }, [visibleRange.start]);
 
   const selectedTask = useMemo(
     () => tasks.find((t) => t.id === selectedTaskId) || null,
@@ -98,18 +107,12 @@ export function TimelineView({ viewDays, isMobile, rightOpen }: TimelineViewProp
     async (event: DragEndEvent) => {
       const { active, delta } = event;
       if (!active) return;
-
       const taskId = active.id as string;
-      const timelineEl = document.querySelector("[data-timeline-container]");
-      const timelineWidth = timelineEl ? timelineEl.clientWidth : window.innerWidth;
-      const dayWidth = timelineWidth / viewDays;
+      const dayWidth = (document.querySelector("[data-timeline-body]") as HTMLElement)?.clientWidth / viewDays || 100;
       const daysShifted = Math.round(delta.x / dayWidth);
-
       if (daysShifted === 0) return;
-
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
-
       const fields: Record<string, string> = {};
       if (task.start_date) {
         const d = new Date(task.start_date);
@@ -122,10 +125,9 @@ export function TimelineView({ viewDays, isMobile, rightOpen }: TimelineViewProp
         fields.due_date = d.toISOString().split("T")[0];
       }
       if (!task.start_date && !task.due_date) return;
-
       await updateTask(taskId, fields);
     },
-    [tasks, updateTask, viewDays]
+    [tasks, updateTask]
   );
 
   const handlePrevWeek = () => setScrollOffset(scrollOffset - 7);
@@ -160,63 +162,70 @@ export function TimelineView({ viewDays, isMobile, rightOpen }: TimelineViewProp
   const hasTasks = Object.keys(tasksByProject).length > 0;
 
   return (
-    <div className="flex flex-col overflow-hidden bg-base">
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-2">
-        <div className="flex items-center gap-2">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-          </svg>
-          <h2 className="text-sm font-semibold text-primary hidden sm:block">Timeline</h2>
-        </div>
+    <div className="flex flex-col bg-base" style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+      {/* Compact toolbar */}
+      <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-1.5 shrink-0">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        <span className="text-xs font-semibold text-primary mr-2 hidden sm:block">Timeline</span>
+
         {filterBadge && (
-          <span className="badge bg-accent/15 text-accent gap-1 text-[10px] px-2">
+          <span className="inline-flex items-center gap-1 bg-accent/15 text-accent text-[10px] px-2 py-0.5 rounded">
             {filterBadge}
-            <button onClick={() => setNavFilter(null)} className="hover:text-primary p-0.5">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
+            <button onClick={() => setNavFilter(null)} className="hover:text-primary">✕</button>
           </span>
         )}
-        {projectFilterName && (
-          <span className="badge bg-blue-500/15 text-blue-400 gap-1 text-[10px] px-2">
-            {projectFilterName}
-            <button onClick={() => useAppStore.getState().setSelectedProjectId(null)} className="hover:text-primary p-0.5">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          </span>
-        )}
+
         <div className="flex-1" />
+
         <div className="flex items-center gap-1">
-          <button onClick={handlePrevWeek} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          <button onClick={handlePrevWeek} className="btn bg-elevated px-1.5 py-0.5 text-xs text-secondary hover:bg-hover rounded">
+            ◀
           </button>
-          <button onClick={handleNextWeek} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          <button onClick={handleNextWeek} className="btn bg-elevated px-1.5 py-0.5 text-xs text-secondary hover:bg-hover rounded">
+            ▶
           </button>
         </div>
+
+        <button
+          onClick={() => setKanbanMode(v => !v)}
+          className={`btn text-[10px] px-2 py-1 rounded ${kanbanMode ? "bg-accent text-white" : "bg-elevated border border-border text-secondary hover:text-primary"}`}
+        >
+          {kanbanMode ? "Timeline" : "Kanban"}
+        </button>
+
+        <button onClick={onOpenSticky} className="btn bg-elevated border border-border text-[10px] px-2 py-1 rounded text-secondary hover:text-primary">
+          Notes
+        </button>
+
         <button
           onClick={() => { setFormDefaultDate(null); setShowTaskForm(!showTaskForm); }}
-          className="btn btn-primary px-3 py-1.5 text-xs gap-1.5"
+          className="btn btn-primary px-2 py-1 text-[10px]"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19"/>
-            <line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          <span className="hidden sm:inline">New Task</span>
+          + New
+        </button>
+
+        <button onClick={() => router.push("/settings")} className="btn bg-elevated border border-border text-xs px-2 py-1 rounded text-secondary hover:text-primary" title="Settings">
+          ⚙
+        </button>
+
+        <button onClick={() => onToggleRight?.()} className="flex h-6 w-6 items-center justify-center rounded bg-gradient-to-br from-accent to-purple-500 text-white hover:from-accent-hover text-xs" title="AI">
+          ⚡
         </button>
       </div>
 
-      {/* Inline task creation form */}
+      {/* Inline task form */}
       {showTaskForm && !formDefaultDate && (
-        <div className="border-b border-border bg-surface px-4 py-3 slide-up">
+        <div className="border-b border-border bg-surface px-4 py-2 shrink-0">
           <TaskForm onSubmit={handleCreateTask} onCancel={() => setShowTaskForm(false)} />
         </div>
       )}
 
-      {/* Task creation modal (day double-click) */}
+      {/* Modal for day double-click */}
       <Modal
         isOpen={showTaskForm && !!formDefaultDate}
         onClose={() => { setShowTaskForm(false); setFormDefaultDate(null); }}
@@ -229,52 +238,66 @@ export function TimelineView({ viewDays, isMobile, rightOpen }: TimelineViewProp
         />
       </Modal>
 
-      {/* Timeline area */}
-      <div className="flex-1 overflow-auto" data-timeline-container>
-        <TimelineHeader days={days} />
-        <DndContext sensors={!isMobile ? sensors : undefined} onDragEnd={!isMobile ? handleDragEnd : undefined}>
-          <div className="relative">
-            <TimelineGrid days={days} />
-            {hasTasks ? (
-              Object.entries(tasksByProject).map(([projectId, projectTasks]) => {
-                const project = projects.find((p) => p.id === projectId);
-                const label = projectId === "__none__" ? "No Project" : project?.name || "Unknown";
-                return (
+      {/* Timeline Gantt-chart area */}
+      <div className="flex" style={{ flex: 1, minHeight: 0 }}>
+        {/* Middle category column: fixed 200px Y-axis labels */}
+        <div className="shrink-0 border-r border-border bg-surface overflow-y-auto" style={{ width: 200 }}>
+          <div className="sticky top-0 z-10 h-10 border-b border-border flex items-center px-3 bg-surface">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Projects</span>
+          </div>
+          {hasTasks ? (
+            Object.keys(tasksByProject).map((pid) => {
+              const project = projects.find((p) => p.id === pid);
+              const label = pid === "__none__" ? "No Project" : project?.name || "Unknown";
+              const count = tasksByProject[pid].length;
+              return (
+                <div key={pid} className="flex items-center gap-2 border-b border-border/60 px-3" style={{ minHeight: 48 }}>
+                  <div className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: project?.color || "var(--text-muted)" }} />
+                  <span className="truncate text-xs font-medium text-secondary flex-1">{label}</span>
+                  <span className="text-[10px] text-muted">{count}</span>
+                </div>
+              );
+            })
+          ) : (
+            <div className="flex items-center justify-center px-3 py-8 text-xs text-muted">
+              No tasks
+            </div>
+          )}
+        </div>
+
+        {/* Right timeline canvas */}
+        <div className="flex flex-col" data-timeline-canvas style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+          <TimelineHeader days={days} />
+          <div className="flex flex-col" data-timeline-body style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
+            <DndContext sensors={!isMobile ? sensors : undefined} onDragEnd={!isMobile ? handleDragEnd : undefined}>
+              <div className="relative" style={{ minHeight: "100%" }}>
+                <TimelineGrid days={days} />
+                {hasTasks ? (
+                  Object.entries(tasksByProject).map(([projectId, projectTasks]) => (
+                    <TimelineLane
+                      key={projectId}
+                      tasks={projectTasks}
+                      days={days}
+                      onTaskClick={(id) => setSelectedTaskId(id)}
+                      onDayDoubleClick={handleDayDoubleClick}
+                    />
+                  ))
+                ) : (
                   <TimelineLane
-                    key={projectId}
-                    label={label}
-                    tasks={projectTasks}
+                    tasks={[]}
                     days={days}
-                    projectId={projectId}
-                    onTaskClick={(id) => setSelectedTaskId(id)}
                     onDayDoubleClick={handleDayDoubleClick}
                   />
-                );
-              })
-            ) : (
-              <TimelineLane
-                label=""
-                tasks={[]}
-                days={days}
-                onDayDoubleClick={handleDayDoubleClick}
-              />
-            )}
-            {!hasTasks && (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center pointer-events-none">
-                <div className="flex flex-col items-center gap-3">
-                  <span className="text-4xl">📋</span>
-                  <p className="text-sm text-muted">No tasks scheduled</p>
-                  <p className="text-xs text-muted">Double-click a day column or create a task to get started</p>
-                </div>
+                )}
               </div>
-            )}
+            </DndContext>
           </div>
-        </DndContext>
+        </div>
       </div>
 
-      {/* Task detail panel */}
+      {/* Task detail bottom panel */}
       {selectedTask && (
-        <div className="border-t border-border bg-surface slide-up" style={{ maxHeight: "40vh", overflow: "auto" }}>
+        <div className="shrink-0 border-t border-border bg-surface overflow-auto" style={{ maxHeight: "30vh" }}>
           <div className="px-4 py-3">
             <TaskDetail task={selectedTask} onClose={() => setSelectedTaskId(null)} />
           </div>

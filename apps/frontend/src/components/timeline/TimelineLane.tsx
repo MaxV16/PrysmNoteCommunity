@@ -5,10 +5,8 @@ import type { Task } from "@/types/task";
 import { TaskBar } from "./TaskBar";
 
 interface TimelineLaneProps {
-  label: string;
   tasks: Task[];
   days: Date[];
-  projectId?: string;
   onTaskClick?: (id: string) => void;
   onDayDoubleClick?: (day: Date) => void;
 }
@@ -22,12 +20,11 @@ function getTaskPosition(task: Task, days: Date[]) {
   startOfFirstDay.setHours(0, 0, 0, 0);
   const endOfLastDay = new Date(days[days.length - 1]);
   endOfLastDay.setHours(23, 59, 59, 999);
-  const dayWidth = 100 / days.length;
 
   const refDate = taskStart || taskEnd!;
   if (refDate < startOfFirstDay || refDate > endOfLastDay) return null;
 
-  let dayIndex = 0;
+  let dayIndex = -1;
   for (let i = 0; i < days.length; i++) {
     const d = new Date(days[i]);
     d.setHours(0, 0, 0, 0);
@@ -38,6 +35,7 @@ function getTaskPosition(task: Task, days: Date[]) {
       break;
     }
   }
+  if (dayIndex === -1) return null;
 
   let span = 1;
   if (taskStart && taskEnd) {
@@ -46,14 +44,12 @@ function getTaskPosition(task: Task, days: Date[]) {
   }
 
   return {
-    left: `${dayIndex * dayWidth}%`,
-    width: `${span * dayWidth}%`,
+    left: `${dayIndex * (100 / days.length)}%`,
+    width: `${span * (100 / days.length)}%`,
   };
 }
 
-export function TimelineLane({ label, tasks, days, onTaskClick, onDayDoubleClick }: TimelineLaneProps) {
-  const dayWidth = `${100 / days.length}%`;
-
+export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick }: TimelineLaneProps) {
   const positionedTasks = useMemo(
     () =>
       tasks
@@ -63,37 +59,27 @@ export function TimelineLane({ label, tasks, days, onTaskClick, onDayDoubleClick
   );
 
   return (
-    <div className="group flex border-b border-border/60 hover:bg-hover/20 transition-colors">
-      <div className="flex w-40 shrink-0 items-center gap-2 border-r border-border px-3 py-2">
-        <span className="truncate text-xs font-medium text-secondary">{label}</span>
-        {tasks.length > 0 && (
-          <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity">
-            {tasks.length}
-          </span>
-        )}
-      </div>
-      <div className="relative flex-1" style={{ minHeight: 48 }}>
-        {positionedTasks.map(({ task, pos }) => (
-          <TaskBar
-            key={task.id}
-            task={task}
-            style={{ left: pos.left, width: pos.width, top: task.priority === 1 ? 2 : 4 }}
-            onClick={() => onTaskClick?.(task.id)}
-          />
-        ))}
-        {onDayDoubleClick && (
-          <div className="absolute inset-0 flex pointer-events-none z-10">
-            {days.map((day) => (
-              <div
-                key={day.toISOString()}
-                className="pointer-events-auto cursor-pointer"
-                style={{ width: dayWidth }}
-                onDoubleClick={() => onDayDoubleClick(day)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+    <div className="relative border-b border-border/60 hover:bg-hover/10 transition-colors" style={{ minHeight: 48 }}>
+      {positionedTasks.map(({ task, pos }) => (
+        <TaskBar
+          key={task.id}
+          task={task}
+          style={{ left: pos.left, width: pos.width, top: 4 }}
+          onClick={() => onTaskClick?.(task.id)}
+        />
+      ))}
+      {onDayDoubleClick && (
+        <div className="absolute inset-0 flex pointer-events-none z-10">
+          {days.map((day) => (
+            <div
+              key={day.toISOString()}
+              className="pointer-events-auto cursor-pointer"
+              style={{ minWidth: 120, flex: 1 }}
+              onDoubleClick={() => onDayDoubleClick(day)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

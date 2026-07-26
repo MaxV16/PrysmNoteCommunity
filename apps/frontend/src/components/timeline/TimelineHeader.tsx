@@ -7,8 +7,6 @@ interface TimelineHeaderProps {
 }
 
 export function TimelineHeader({ days }: TimelineHeaderProps) {
-  const dayWidth = `${100 / days.length}%`;
-
   const dayRows = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -23,24 +21,21 @@ export function TimelineHeader({ days }: TimelineHeaderProps) {
   }, [days]);
 
   return (
-    <div className="flex border-b border-border bg-surface sticky top-0 z-20">
-      {/* Label column spacer */}
-      <div className="flex w-40 shrink-0 items-end border-r border-border" />
-      {/* Day columns */}
-      <div className="flex flex-1">
+    <div className="flex border-b border-border bg-surface sticky top-0 z-20 shrink-0">
+      <div className="flex" style={{ width: "100%", minWidth: 0 }}>
         {dayRows.map(({ dayName, dayNum, isToday, key }) => (
           <div
             key={key}
-            className="flex flex-col items-center justify-end border-r border-border pb-1.5 pt-2"
-            style={{ width: dayWidth }}
+            className="flex flex-col items-center justify-end border-r border-border pb-1 pt-2"
+            style={{ minWidth: 120, flex: 1 }}
           >
-            <span className={`text-[10px] font-medium uppercase tracking-wide font-mono-timeline ${
+            <span className={`text-[10px] font-medium uppercase tracking-wide ${
               isToday ? "text-accent" : "text-muted"
             }`}>
               {dayName}
             </span>
             <span
-              className={`mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold font-mono-timeline ${
+              className={`mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
                 isToday ? "bg-accent text-base" : "text-secondary"
               }`}
             >

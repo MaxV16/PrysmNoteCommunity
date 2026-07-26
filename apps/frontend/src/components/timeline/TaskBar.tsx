@@ -9,20 +9,12 @@ interface TaskBarProps {
   onClick?: () => void;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  backlog: "var(--text-muted)",
-  todo: "var(--accent)",
-  in_progress: "var(--warning)",
-  done: "var(--success)",
-  cancelled: "var(--danger)",
-};
-
-const PRIORITY_COLORS: Record<number, string> = {
-  1: "#ef5350",
-  2: "#ffa726",
-  3: "#4fc3f7",
-  4: "#66bb6a",
-  5: "#9e9e9e",
+const BAR_COLORS: Record<number, { bg: string; border: string; text: string }> = {
+  1: { bg: "#ef5350", border: "#ef5350", text: "#ffffff" },
+  2: { bg: "#ffa726", border: "#ffa726", text: "#1a1a2e" },
+  3: { bg: "#4fc3f7", border: "#4fc3f7", text: "#1a1a2e" },
+  4: { bg: "#66bb6a", border: "#66bb6a", text: "#1a1a2e" },
+  5: { bg: "#9e9e9e", border: "#9e9e9e", text: "#ffffff" },
 };
 
 const PRIORITY_LABELS: Record<number, string> = {
@@ -38,18 +30,26 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
     id: task.id,
   });
 
-  const barColor = PRIORITY_COLORS[task.priority] || STATUS_COLORS[task.status] || "var(--text-muted)";
+  const colors = BAR_COLORS[task.priority] || BAR_COLORS[5];
   const isDone = task.status === "done";
   const isInProgress = task.status === "in_progress";
 
   const barStyle: React.CSSProperties = {
     ...style,
-    backgroundColor: barColor + "25",
-    borderLeftColor: barColor,
+    position: "absolute",
+    height: 28,
+    backgroundColor: colors.bg + "20",
+    borderLeft: `3px solid ${colors.border}`,
+    borderRadius: 4,
+    padding: "0 8px",
+    display: "flex",
+    alignItems: "center",
+    cursor: "grab",
     transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
     zIndex: isDragging ? 100 : undefined,
     opacity: isDone ? 0.5 : 1,
-    boxShadow: isDragging ? "var(--shadow-lg)" : undefined,
+    boxShadow: isDragging ? "0 4px 12px rgba(0,0,0,0.3)" : undefined,
+    overflow: "hidden",
   };
 
   return (
@@ -57,23 +57,21 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`task-bar group ${
-        isDragging ? "ring-2 ring-accent/50 scale-[1.02]" : ""
-      } ${
-        isInProgress ? "animate-pulse-subtle" : ""
-      }`}
       style={barStyle}
       onClick={(e) => {
         e.stopPropagation();
         onClick?.();
       }}
       title={`${task.title}${task.description ? " - " + task.description : ""}`}
+      className={isDragging ? "ring-2 ring-white/30 scale-[1.02]" : isInProgress ? "animate-pulse-subtle" : ""}
     >
-      <div className="flex items-center gap-1.5 truncate">
+      <div className="flex items-center gap-1.5 truncate w-full">
         {task.priority <= 2 && (
-          <span className="shrink-0 text-[10px] opacity-70">{PRIORITY_LABELS[task.priority]}</span>
+          <span className="shrink-0 text-[9px] font-semibold uppercase" style={{ color: colors.text }}>
+            {PRIORITY_LABELS[task.priority]}
+          </span>
         )}
-        <span className={`truncate ${isDone ? "line-through" : ""}`}>
+        <span className="truncate text-xs font-medium" style={{ color: colors.border }}>
           {task.title}
         </span>
         {task.tags && task.tags.length > 0 && (
@@ -81,7 +79,7 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
             {task.tags.slice(0, 3).map((tag) => (
               <span
                 key={tag.id}
-                className="h-2 w-2 rounded-full shrink-0"
+                className="h-1.5 w-1.5 rounded-full shrink-0"
                 style={{ backgroundColor: tag.color || "var(--text-muted)" }}
                 title={tag.name}
               />
@@ -89,14 +87,6 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
           </span>
         )}
       </div>
-      {isInProgress && (
-        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
-          <div
-            className="h-full rounded-full bg-accent/50 animate-pulse"
-            style={{ width: "60%" }}
-          />
-        </div>
-      )}
     </div>
   );
 }
