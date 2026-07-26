@@ -1,11 +1,22 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useAIChat } from "@/hooks/useAIChat";
 import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAppStore } from "@/stores/app-store";
+
+const VoiceInput = dynamic(
+  () => import("../../../../ee/apps/frontend/ee/components/VoiceInput").then((m) => m.VoiceInput),
+  { ssr: false }
+);
+
+const VoiceFeedback = dynamic(
+  () => import("../../../../ee/apps/frontend/ee/components/VoiceFeedback").then((m) => m.VoiceFeedback),
+  { ssr: false }
+);
 
 const PROVIDERS = [
   { value: "openai", label: "OpenAI" },
@@ -19,6 +30,8 @@ interface ChatPanelProps {
 
 export function ChatPanel({ onClose }: ChatPanelProps) {
   const { chatMessages, sendMessage, isLoading } = useAIChat();
+  const voiceInitiatedRef = useRef(false);
+  const [voiceFeedbackText, setVoiceFeedbackText] = useState<string | null>(null);
 
   const LAST_PROVIDER_KEY = "prysm_last_provider";
 
@@ -68,6 +81,15 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     return () => window.removeEventListener("prysm-ai-suggest", handler);
   }, [sendMessage, provider]);
 
+  useEffect(() => {
+    if (!voiceInitiatedRef.current || isLoading) return;
+    const lastMsg = chatMessages[chatMessages.length - 1];
+    if (lastMsg && lastMsg.role === "assistant" && lastMsg.content) {
+      voiceInitiatedRef.current = false;
+      setVoiceFeedbackText(lastMsg.content);
+    }
+  }, [chatMessages, isLoading]);
+
   const handleNewChat = () => {
     const store = useAppStore.getState();
     store.setChatMessages([]);
@@ -75,14 +97,21 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     localStorage.setItem("ai_session_id", newId);
   };
 
-  const handleSend = (message: string) => {
+  const handleSend = useCallback((message: string, voiceInitiated = false) => {
     const store = useAppStore.getState();
     const context: Record<string, unknown> = {};
     if (store.navFilter) {
       context.view_filter = store.navFilter;
     }
+    if (voiceInitiated) {
+      voiceInitiatedRef.current = true;
+    }
     sendMessage(message, provider, Object.keys(context).length > 0 ? context : undefined);
-  };
+  }, [sendMessage, provider]);
+
+  const handleVoiceTranscript = useCallback((text: string) => {
+    handleSend(text, true);
+  }, [handleSend]);
 
   return (
     <div className="flex flex-col overflow-hidden border-l border-border bg-surface">
@@ -175,8 +204,20 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       </div>
 
       <div className="border-t border-border px-4 py-3">
-        <ChatInput onSend={handleSend} disabled={isLoading} />
+        <ChatInput
+          onSend={(msg) => handleSend(msg)}
+          disabled={isLoading}
+          additionalAction={<VoiceInput onTranscript={handleVoiceTranscript} disabled={isLoading} />}
+        />
       </div>
+
+      {voiceFeedbackText && (
+        <VoiceFeedback
+          key={voiceFeedbackText.slice(0, 40)}
+          text={voiceFeedbackText}
+          onEnd={() => setVoiceFeedbackText(null)}
+        />
+      )}
     </div>
   );
 }

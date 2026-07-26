@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 
 interface ChatInputProps {
   onSend: (message: string) => void;
   disabled?: boolean;
+  additionalAction?: ReactNode;
 }
 
 const MAX_LENGTH = 2000;
 
-export function ChatInput({ onSend, disabled }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, additionalAction }: ChatInputProps) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -52,6 +53,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           autoFocus
         />
         <div className="absolute right-2 bottom-2 flex items-center gap-1.5">
+          {additionalAction}
           {input.length > 0 && (
             <span className={`text-[10px] ${isNearLimit ? "text-warning" : "text-muted"}`}>
               {remaining}
