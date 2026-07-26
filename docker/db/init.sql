@@ -178,6 +178,29 @@ CREATE TABLE IF NOT EXISTS user_tokens (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Habits table
+CREATE TABLE IF NOT EXISTS habits (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(500) NOT NULL,
+  frequency VARCHAR(20) NOT NULL DEFAULT 'daily',
+  target_count INT NOT NULL DEFAULT 1,
+  color VARCHAR(7),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id);
+
+-- Habit logs table
+CREATE TABLE IF NOT EXISTS habit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  habit_id UUID NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  completed_at DATE NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_habit_logs_habit ON habit_logs(habit_id);
+CREATE INDEX IF NOT EXISTS idx_habit_logs_habit_date ON habit_logs(habit_id, completed_at);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_tasks_user_start_date ON tasks(user_id, start_date);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_due_date ON tasks(user_id, due_date);
@@ -202,6 +225,8 @@ ALTER TABLE task_embeddings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE calendar_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE habits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE habit_logs ENABLE ROW LEVEL SECURITY;
 
 -- RLS policies using session variable app.user_id
 CREATE OR REPLACE FUNCTION rls_user_id() RETURNS UUID AS $$
@@ -242,6 +267,12 @@ CREATE POLICY user_isolation ON calendar_events
 CREATE POLICY user_isolation ON user_tokens
   USING (user_id = rls_user_id());
 
+CREATE POLICY user_isolation ON habits
+  USING (user_id = rls_user_id());
+
+CREATE POLICY user_isolation ON habit_logs
+  USING (user_id = rls_user_id());
+
 -- Feature requests (EE: user-submitted feature ideas)
 CREATE TABLE IF NOT EXISTS feature_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -266,4 +297,3 @@ CREATE TABLE IF NOT EXISTS ee_contact_submissions (
   message TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
