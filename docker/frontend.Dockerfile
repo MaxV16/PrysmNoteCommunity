@@ -6,7 +6,7 @@ COPY apps/frontend/package.json .
 RUN npm install
 
 COPY apps/frontend/ .
-COPY ee/apps/frontend/ee ./ee
+COPY ee/ /ee/
 RUN npm run build
 
 FROM node:20-alpine AS runner
