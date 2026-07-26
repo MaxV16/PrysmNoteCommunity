@@ -7,6 +7,7 @@ import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAppStore } from "@/stores/app-store";
+import { getItem, setItem } from "@/lib/local-storage";
 
 const VoiceInput = dynamic(
   () => import("@ee/components/VoiceInput").then((m) => m.VoiceInput),
@@ -24,14 +25,43 @@ const PROVIDERS = [
   { value: "deepseek", label: "DeepSeek" },
 ];
 
+const CHAT_HISTORY_KEY = "prysm_ai_chat_history";
+const ACTIVE_CHAT_KEY = "prysm_ai_active_chat";
+
 interface ChatPanelProps {
   onClose: () => void;
+}
+
+interface ChatSession {
+  id: string;
+  title: string;
+  messages: any[];
+  timestamp: string;
+}
+
+function saveMessages(messages: any[]) {
+  setItem(ACTIVE_CHAT_KEY, messages);
+}
+
+function loadMessages(): any[] {
+  return getItem<any[]>(ACTIVE_CHAT_KEY, []);
+}
+
+function loadChatHistory(): ChatSession[] {
+  return getItem<ChatSession[]>(CHAT_HISTORY_KEY, []);
+}
+
+function saveChatHistory(sessions: ChatSession[]) {
+  setItem(CHAT_HISTORY_KEY, sessions);
 }
 
 export function ChatPanel({ onClose }: ChatPanelProps) {
   const { chatMessages, sendMessage, isLoading } = useAIChat();
   const voiceInitiatedRef = useRef(false);
   const [voiceFeedbackText, setVoiceFeedbackText] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   const LAST_PROVIDER_KEY = "prysm_last_provider";
 
@@ -48,6 +78,24 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
   useEffect(() => {
     localStorage.setItem(LAST_PROVIDER_KEY, provider);
   }, [provider]);
+
+  useEffect(() => {
+    if (!hasLoaded) {
+      const saved = loadMessages();
+      if (saved.length > 0) {
+        const store = useAppStore.getState();
+        store.setChatMessages(saved);
+      }
+      setChatHistory(loadChatHistory());
+      setHasLoaded(true);
+    }
+  }, [hasLoaded]);
+
+  useEffect(() => {
+    if (hasLoaded && chatMessages.length > 0) {
+      saveMessages(chatMessages);
+    }
+  }, [chatMessages, hasLoaded]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -92,9 +140,35 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
 
   const handleNewChat = () => {
     const store = useAppStore.getState();
+    if (store.chatMessages.length > 0) {
+      const firstMsg = store.chatMessages.find((m) => m.role === "user");
+      const session: ChatSession = {
+        id: crypto.randomUUID(),
+        title: firstMsg ? firstMsg.content.slice(0, 60) : "New Chat",
+        messages: store.chatMessages,
+        timestamp: new Date().toISOString(),
+      };
+      const updated = [session, ...chatHistory].slice(0, 50);
+      setChatHistory(updated);
+      saveChatHistory(updated);
+    }
     store.setChatMessages([]);
+    saveMessages([]);
     const newId = crypto.randomUUID();
     localStorage.setItem("ai_session_id", newId);
+  };
+
+  const handleLoadSession = (session: ChatSession) => {
+    const store = useAppStore.getState();
+    store.setChatMessages(session.messages);
+    saveMessages(session.messages);
+    setHistoryOpen(false);
+  };
+
+  const handleDeleteSession = (id: string) => {
+    const updated = chatHistory.filter((s) => s.id !== id);
+    setChatHistory(updated);
+    saveChatHistory(updated);
   };
 
   const handleSend = useCallback((message: string, voiceInitiated = false) => {
@@ -138,6 +212,27 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
             <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="6 9 12 15 18 9"/>
             </svg>
+          </div>
+          <div className="relative">
+            <button
+              onClick={() => setHistoryOpen(!historyOpen)}
+              className="rounded-full px-2 py-1 text-[10px] text-secondary hover:bg-hover hover:text-primary transition-colors border border-transparent hover:border-border"
+              title="Chat History"
+            >
+              📋
+            </button>
+            {historyOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 w-64 max-h-80 overflow-auto rounded-xl border border-border bg-surface p-2 shadow-lg">
+                <p className="text-[10px] uppercase tracking-wider text-muted px-2 py-1">Chat History</p>
+                {chatHistory.length === 0 && <p className="text-xs text-muted px-2 py-3 text-center">No saved chats</p>}
+                {chatHistory.map((s) => (
+                  <div key={s.id} className="flex items-center gap-1 rounded-lg px-2 py-1.5 hover:bg-hover transition-colors group">
+                    <button onClick={() => handleLoadSession(s)} className="flex-1 text-left text-xs text-secondary truncate">{s.title}</button>
+                    <button onClick={() => handleDeleteSession(s.id)} className="text-[10px] text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <button
             onClick={handleNewChat}

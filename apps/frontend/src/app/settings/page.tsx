@@ -132,6 +132,42 @@ function stStr(key: string, fallback = ""): [string, (v: string) => void] {
   return [v, set];
 }
 
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      className="relative w-11 h-6 rounded-full transition-colors"
+      style={{ backgroundColor: value ? 'var(--accent)' : 'var(--border)' }}
+    >
+      <span
+        className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-all"
+        style={{ transform: value ? 'translateX(1.25rem)' : 'translateX(0)' }}
+      />
+    </button>
+  );
+}
+
+function IntegrationRow({ label, description, connected, onConnect, onDisconnect }: { label: string; description: string; connected: boolean; onConnect: () => void; onDisconnect?: () => void }) {
+  return (
+    <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+      <div>
+        <p className="text-sm text-secondary">{label}</p>
+        <p className="text-xs text-muted">{description}</p>
+      </div>
+      {connected ? (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success border border-success/20">Connected</span>
+          {onDisconnect && (
+            <button onClick={onDisconnect} className="btn bg-elevated border border-border text-xs text-danger px-3 py-1 rounded-xl hover:bg-danger/10">Disconnect</button>
+          )}
+        </div>
+      ) : (
+        <button onClick={onConnect} className="btn bg-accent text-white px-4 py-1.5 text-xs rounded-xl hover:bg-accent-hover">Connect</button>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { user, logout, refreshSession } = useAuth();
   const { themeName, setThemeName, fontFamily, setFontFamily, background, setBackgroundPreset, setBackgroundImage, clearBackground, customTheme, setCustomTheme } =
@@ -201,6 +237,19 @@ export default function SettingsPage() {
   });
   const [customFontInput, setCustomFontInput] = useState("");
   const [fontInputOpen, setFontInputOpen] = useState(false);
+
+  const [passwordResetOpen, setPasswordResetOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordMsg, setPasswordMsg] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+
+  const [googleConnected, setGoogleConnected] = useState(() => !!lsGet("prysm_integration_google", ""));
+  const [slackConnected, setSlackConnected] = useState(() => !!lsGet("prysm_integration_slack_webhook", ""));
+  const [githubConnected, setGithubConnected] = useState(() => !!lsGet("prysm_integration_github_token", ""));
+  const [siriConnected, setSiriConnected] = useState(() => !!lsGet("prysm_integration_siri_url", ""));
+
+  const [inviteEmailCheck, setInviteEmailCheck] = useState("");
 
   useEffect(() => {
     if (!user) {
@@ -281,6 +330,22 @@ export default function SettingsPage() {
     }
   };
 
+  const handleChangePassword = async () => {
+    if (!currentPassword.trim() || !newPassword.trim()) return;
+    setPasswordSaving(true);
+    try {
+      await api.post("/auth/change-password", { current_password: currentPassword, new_password: newPassword });
+      setPasswordMsg("Password changed successfully.");
+      setCurrentPassword("");
+      setNewPassword("");
+      setTimeout(() => { setPasswordMsg(""); setPasswordResetOpen(false); }, 2000);
+    } catch {
+      setPasswordMsg("Failed to change password.");
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
   const handleExport = () => {
     const data = { tasks, projects, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -355,9 +420,65 @@ export default function SettingsPage() {
 
   const handleInvite = () => {
     if (!collabInviteEmail.trim()) return;
-    setCollabMsg(`Invitation sent to ${collabInviteEmail.trim()}.`);
+    const knownUsers: string[] = lsGet<string[]>("prysm_known_users", []);
+    if (!knownUsers.includes(collabInviteEmail.trim())) {
+      setCollabMsg(`This user doesn't have an account. Creating pending invite for ${collabInviteEmail.trim()}.`);
+    } else {
+      setCollabMsg(`Invitation sent to ${collabInviteEmail.trim()}.`);
+    }
     setCollabInviteEmail("");
-    setTimeout(() => setCollabMsg(""), 2000);
+    setTimeout(() => setCollabMsg(""), 3000);
+  };
+
+  const handleConnectGoogle = () => {
+    lsSet("prysm_integration_google", "connected");
+    setGoogleConnected(true);
+  };
+
+  const handleDisconnectGoogle = () => {
+    localStorage.removeItem("prysm_integration_google");
+    setGoogleConnected(false);
+  };
+
+  const handleConnectSlack = () => {
+    const webhook = prompt("Enter Slack Webhook URL:");
+    if (webhook && webhook.trim()) {
+      lsSet("prysm_integration_slack_webhook", webhook.trim());
+      setSlackConnected(true);
+    }
+  };
+
+  const handleDisconnectSlack = () => {
+    localStorage.removeItem("prysm_integration_slack_webhook");
+    setSlackConnected(false);
+  };
+
+  const handleConnectGithub = () => {
+    const token = prompt("Enter GitHub Personal Access Token:");
+    if (token && token.trim()) {
+      lsSet("prysm_integration_github_token", token.trim());
+      setGithubConnected(true);
+    }
+  };
+
+  const handleDisconnectGithub = () => {
+    localStorage.removeItem("prysm_integration_github_token");
+    setGithubConnected(false);
+  };
+
+  const handleConnectSiri = () => {
+    lsSet("prysm_integration_siri_url", "prysmnote://");
+    setSiriConnected(true);
+    alert("Siri Shortcuts URL scheme: prysmnote://\nUse this in the Shortcuts app to deep-link into Prysm Note.");
+  };
+
+  const handleDisconnectSiri = () => {
+    localStorage.removeItem("prysm_integration_siri_url");
+    setSiriConnected(false);
+  };
+
+  const handleOpenWidgets = () => {
+    window.open('/widgets', 'prysm-widgets', 'width=400,height=600');
   };
 
   const statuses = ["backlog", "todo", "in_progress", "done", "cancelled"] as const;
@@ -451,7 +572,7 @@ export default function SettingsPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-2xl space-y-6 p-8 fade-in">
+        <div className="mx-auto w-full max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8 fade-in">
 
           {/* === ACCOUNT === */}
           {activeTab === "account" && (
@@ -489,6 +610,45 @@ export default function SettingsPage() {
                   {lsGet("prysm_premium", false) ? "Premium · €5/month" : "Free"}
                 </p>
               </div>
+
+              <div className="border-t border-border pt-4 space-y-4">
+                <h3 className="text-sm font-semibold text-primary">Security</h3>
+                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                  <div>
+                    <p className="text-sm text-secondary">Password</p>
+                    <p className="text-xs text-muted">Change your account password</p>
+                  </div>
+                  <button onClick={() => setPasswordResetOpen(true)} className="btn bg-accent text-white px-4 py-1.5 text-xs rounded-xl">Reset Password</button>
+                </div>
+              </div>
+
+              {passwordResetOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                  <div className="card p-6 w-full max-w-md mx-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-primary">Change Password</h3>
+                      <button onClick={() => { setPasswordResetOpen(false); setPasswordMsg(""); }} className="text-sm text-secondary hover:text-primary">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      </button>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-secondary">Current Password</label>
+                      <input type="password" className="input-field" placeholder="Current password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-secondary">New Password</label>
+                      <input type="password" className="input-field" placeholder="New password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={handleChangePassword} disabled={passwordSaving || !currentPassword.trim() || !newPassword.trim()} className="btn btn-primary flex-1 px-4 py-2 text-sm disabled:opacity-50">
+                        {passwordSaving ? "Changing..." : "Change Password"}
+                      </button>
+                      <button onClick={() => { setPasswordResetOpen(false); setPasswordMsg(""); }} className="btn bg-elevated border border-border text-secondary px-4 py-2 text-sm rounded-xl">Cancel</button>
+                    </div>
+                    {passwordMsg && <p className={`text-sm ${passwordMsg.includes("Failed") ? "text-danger" : "text-success"}`}>{passwordMsg}</p>}
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
@@ -521,12 +681,7 @@ export default function SettingsPage() {
                       <p className="text-sm text-secondary">{f.label}</p>
                       <p className="text-xs text-muted">{f.desc}</p>
                     </div>
-                    <button
-                      onClick={() => f.set(!f.value)}
-                      className={`w-11 h-6 rounded-full transition-colors relative ${f.value ? "bg-accent" : "bg-border"}`}
-                    >
-                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${f.value ? "translate-x-5" : "translate-x-0.5"}`} />
-                    </button>
+                    <Toggle value={f.value} onChange={f.set} />
                   </div>
                 ))}
               </div>
@@ -557,12 +712,7 @@ export default function SettingsPage() {
                 ].map((s) => (
                   <div key={s.label} className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
                     <span className="text-sm font-medium text-primary">{s.label}</span>
-                    <button
-                      onClick={() => s.set(!s.value)}
-                      className={`w-11 h-6 rounded-full transition-colors relative ${s.value ? "bg-accent" : "bg-border"}`}
-                    >
-                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${s.value ? "translate-x-5" : "translate-x-0.5"}`} />
-                    </button>
+                    <Toggle value={s.value} onChange={s.set} />
                   </div>
                 ))}
               </div>
@@ -600,12 +750,7 @@ export default function SettingsPage() {
                       Enable
                     </button>
                   ) : (
-                    <button
-                      onClick={() => setNotifPush(!notifPush)}
-                      className={`w-11 h-6 rounded-full transition-colors relative ${notifPush && notificationStatus === "granted" ? "bg-accent" : "bg-border"}`}
-                    >
-                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${notifPush && notificationStatus === "granted" ? "translate-x-5" : "translate-x-0.5"}`} />
-                    </button>
+                    <Toggle value={notifPush && notificationStatus === "granted"} onChange={setNotifPush} />
                   )}
                 </div>
                 {[
@@ -619,12 +764,7 @@ export default function SettingsPage() {
                       <p className="text-sm text-secondary">{n.label}</p>
                       <p className="text-xs text-muted">{n.desc}</p>
                     </div>
-                    <button
-                      onClick={() => n.set(!n.value)}
-                      className={`w-11 h-6 rounded-full transition-colors relative ${n.value ? "bg-accent" : "bg-border"}`}
-                    >
-                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${n.value ? "translate-x-5" : "translate-x-0.5"}`} />
-                    </button>
+                    <Toggle value={n.value} onChange={n.set} />
                   </div>
                 ))}
               </div>
@@ -693,7 +833,7 @@ export default function SettingsPage() {
               </div>
 
               <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider">Theme</h3>
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-5 gap-2">
                 {THEME_NAMES.map((name) => {
                   const isBuiltin = name in THEMES;
                   const info = isBuiltin ? THEMES[name as keyof typeof THEMES] : { label: "My Custom", colors: customTheme };
@@ -740,7 +880,7 @@ export default function SettingsPage() {
               {editingCustomTheme && (
                 <div className="rounded-2xl bg-elevated border border-border p-4 space-y-4">
                   <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider">Custom Theme Editor</h4>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {Object.keys(customThemeColors).map((key) => {
                       const k = key as keyof ThemeColors;
                       return (
@@ -838,7 +978,7 @@ export default function SettingsPage() {
               </div>
 
               <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider pt-2">Background</h3>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                 {BACKGROUND_PRESETS.map((p) => (
                   <button
                     key={p.id}
@@ -948,24 +1088,10 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
-                  <div><p className="text-sm text-secondary">Google Calendar</p><p className="text-xs text-muted">Sync tasks with Google Calendar</p></div>
-                  <button className="btn bg-elevated border border-border text-secondary px-4 py-1.5 text-xs rounded-xl hover:text-primary">
-                    Connect
-                  </button>
-                </div>
-                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border opacity-50">
-                  <div><p className="text-sm text-secondary">Slack</p><p className="text-xs text-muted">Coming soon</p></div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted">Soon</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border opacity-50">
-                  <div><p className="text-sm text-secondary">GitHub</p><p className="text-xs text-muted">Coming soon</p></div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted">Soon</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border opacity-50">
-                  <div><p className="text-sm text-secondary">Siri Shortcuts</p><p className="text-xs text-muted">Coming soon</p></div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted">Soon</span>
-                </div>
+                <IntegrationRow label="Google Calendar" description="Sync tasks with Google Calendar" connected={googleConnected} onConnect={handleConnectGoogle} onDisconnect={handleDisconnectGoogle} />
+                <IntegrationRow label="Slack" description="Receive task notifications in Slack" connected={slackConnected} onConnect={handleConnectSlack} onDisconnect={handleDisconnectSlack} />
+                <IntegrationRow label="GitHub" description="Link issues and pull requests to tasks" connected={githubConnected} onConnect={handleConnectGithub} onDisconnect={handleDisconnectGithub} />
+                <IntegrationRow label="Siri Shortcuts" description="Deep-link into Prysm Note from Shortcuts" connected={siriConnected} onConnect={handleConnectSiri} onDisconnect={handleDisconnectSiri} />
               </div>
               <div className="border-t border-border pt-5 space-y-3">
                 <h3 className="text-sm font-semibold text-primary">Data Import/Export</h3>
@@ -1054,9 +1180,7 @@ export default function SettingsPage() {
                 </div>
                 <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
                   <div><p className="text-sm text-secondary">Auto-show on Launch</p><p className="text-xs text-muted">Show sticky notes when app opens</p></div>
-                  <button onClick={() => setStickyAutoShow(!stickyAutoShow)} className={`w-11 h-6 rounded-full transition-colors relative ${stickyAutoShow ? "bg-accent" : "bg-border"}`}>
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${stickyAutoShow ? "translate-x-5" : "translate-x-0.5"}`} />
-                  </button>
+                  <Toggle value={stickyAutoShow} onChange={setStickyAutoShow} />
                 </div>
               </div>
             </section>
@@ -1084,12 +1208,13 @@ export default function SettingsPage() {
                 ].map((w) => (
                   <div key={w.label} className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
                     <div><p className="text-sm text-secondary">{w.label}</p><p className="text-xs text-muted">{w.desc}</p></div>
-                    <button onClick={() => w.set(!w.value)} className={`w-11 h-6 rounded-full transition-colors relative ${w.value ? "bg-accent" : "bg-border"}`}>
-                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${w.value ? "translate-x-5" : "translate-x-0.5"}`} />
-                    </button>
+                    <Toggle value={w.value} onChange={w.set} />
                   </div>
                 ))}
               </div>
+              <button onClick={handleOpenWidgets} className="btn bg-accent text-white px-5 py-2 text-sm rounded-xl w-full">
+                Open Widgets
+              </button>
             </section>
           )}
 
@@ -1210,9 +1335,9 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-2 pt-2">
-                <a href="#" className="block text-sm text-accent hover:underline">Privacy Policy</a>
-                <a href="#" className="block text-sm text-accent hover:underline">Terms of Service</a>
-                <a href="https://github.com/MaxV16/PrysmNoteDev" className="block text-sm text-accent hover:underline" target="_blank" rel="noopener">GitHub Repository</a>
+                <a href="/privacy" className="block text-sm text-accent hover:underline">Privacy Policy</a>
+                <a href="/tos" className="block text-sm text-accent hover:underline">Terms of Service</a>
+                <a href="https://github.com/MaxV16/PrysmNoteCommunity" className="block text-sm text-accent hover:underline" target="_blank" rel="noopener">GitHub Repository</a>
               </div>
             </section>
           )}

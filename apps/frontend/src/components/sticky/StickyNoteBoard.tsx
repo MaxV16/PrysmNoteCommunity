@@ -42,6 +42,7 @@ interface StickyBoardContextValue {
   toggle: () => void;
   open: () => void;
   close: () => void;
+  addNoteWithContent: (title: string, content: string) => void;
 }
 
 const StickyBoardContext = createContext<StickyBoardContextValue>({
@@ -49,6 +50,7 @@ const StickyBoardContext = createContext<StickyBoardContextValue>({
   toggle: () => {},
   open: () => {},
   close: () => {},
+  addNoteWithContent: () => {},
 });
 
 export function useStickyBoard(): StickyBoardContextValue {
@@ -57,12 +59,45 @@ export function useStickyBoard(): StickyBoardContextValue {
 
 export function StickyBoardProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [notes, setNotes] = useState<StickyNote[]>([]);
+
+  useEffect(() => {
+    setNotes(loadNotes());
+  }, [isOpen]);
+
+  const persist = useCallback(
+    (updated: StickyNote[]) => {
+      setNotes(updated);
+      saveNotes(updated);
+    },
+    []
+  );
+
   const toggle = useCallback(() => setIsOpen((v) => !v), []);
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
+  const addNoteWithContent = useCallback((title: string, content: string) => {
+    const cx = typeof window !== "undefined" ? window.innerWidth / 2 - 130 : 300;
+    const cy = typeof window !== "undefined" ? window.innerHeight / 2 - 100 : 200;
+    const note: StickyNote = {
+      id: generateId(),
+      x: cx,
+      y: cy,
+      width: 260,
+      height: 200,
+      title,
+      content,
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    };
+    const current = loadNotes();
+    current.push(note);
+    saveNotes(current);
+    setNotes(current);
+    setIsOpen(true);
+  }, []);
 
   return (
-    <StickyBoardContext.Provider value={{ isOpen, toggle, open, close }}>
+    <StickyBoardContext.Provider value={{ isOpen, toggle, open, close, addNoteWithContent }}>
       {children}
       <StickyNoteBoard />
     </StickyBoardContext.Provider>
@@ -75,6 +110,8 @@ function StickyNoteBoard() {
   const [_, setRender] = useState(0);
   const dragRef = useRef<{ noteId: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const resizeRef = useRef<{ noteId: string; startW: number; startH: number; origX: number; origY: number; startX: number; startY: number; edge: string } | null>(null);
+
+  const isMobileOrTablet = typeof window !== "undefined" && (/Mobi|Android|iPad|iPhone|iPod/.test(navigator.userAgent) || window.innerWidth < 1024);
 
   useEffect(() => {
     setNotes(loadNotes());
@@ -162,7 +199,7 @@ function StickyNoteBoard() {
     };
   }, [notes, updateNote]);
 
-  if (!isOpen) return null;
+  if (!isOpen || isMobileOrTablet) return null;
 
   return (
     <div className="fixed inset-0 z-50 pointer-events-none">

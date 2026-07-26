@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
@@ -16,6 +17,13 @@ interface SidebarLeftProps {
   onToggle: () => void;
 }
 
+interface TeamMember {
+  name: string;
+  email: string;
+  role: string;
+  avatar?: string;
+}
+
 const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
 
 export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
@@ -23,6 +31,14 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
   const { themeName, setThemeName, toggleTheme } = useTheme();
   const selectedTagId = useAppStore((s) => s.selectedTagId);
   const setSelectedTagId = useAppStore((s) => s.setSelectedTagId);
+  const [teamExpanded, setTeamExpanded] = useState(false);
+  const [teamMembers] = useState<TeamMember[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem("prysm_team_members");
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
   const router = useRouter();
 
   const handleLogout = () => {
@@ -124,6 +140,43 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
           <div className="divider-gradient" />
           <ProjectList />
           <div className="divider-gradient" />
+          {teamMembers.length > 0 && (
+            <>
+              <div>
+                <button
+                  onClick={() => setTeamExpanded(!teamExpanded)}
+                  className="flex items-center justify-between w-full px-1 py-1 text-xs font-semibold text-secondary uppercase tracking-wider hover:text-primary transition-colors"
+                >
+                  <span>Team</span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className={`transition-transform ${teamExpanded ? "rotate-180" : ""}`}
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                {teamExpanded && (
+                  <div className="mt-1 space-y-0.5">
+                    {teamMembers.map((m, i) => (
+                      <div key={i} className="sidebar-item cursor-default">
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/20 text-[9px] font-bold text-accent shrink-0">
+                          {m.name[0]?.toUpperCase() || "?"}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-primary truncate">{m.name}</p>
+                          <p className="text-[9px] text-muted">{m.role}</p>
+                        </div>
+                      </div>
+                    ))}
+                    <button className="sidebar-item w-full text-[10px] text-muted hover:text-primary">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                      <span>Filter by assignee</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="divider-gradient" />
+            </>
+          )}
           <TagList />
         </div>
 

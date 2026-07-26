@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../../tailwind.config.ts";
 
 :root {
   --bg-base: #07070b;
@@ -184,6 +183,8 @@ body::before {
   opacity: var(--bg-opacity, 0);
   z-index: -1;
   pointer-events: none;
+  display: var(--bg-image-display, none);
+  transition: opacity 0.3s ease;
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }

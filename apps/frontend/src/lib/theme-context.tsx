@@ -70,8 +70,10 @@ function applyBackground(type: string, value: string, size?: string) {
     root.style.removeProperty("--bg-image");
     root.style.removeProperty("--bg-size");
     root.style.removeProperty("--bg-opacity");
+    root.style.removeProperty("--bg-image-display");
     return;
   }
+  root.style.setProperty("--bg-image-display", "block");
   if (type === "image") {
     root.style.setProperty("--bg-image", `url(${value})`);
     root.style.setProperty("--bg-size", "cover");

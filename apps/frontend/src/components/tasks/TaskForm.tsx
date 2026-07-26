@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/stores/app-store";
 import type { Task, TaskStatus } from "@/types/task";
+import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 
 interface TaskFormProps {
   onSubmit: (data: {
@@ -151,6 +152,7 @@ function CalendarPicker({ value, onChange, placeholder }: { value: string; onCha
 
 export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormProps) {
   const { projects, tags } = useAppStore();
+  const { addNoteWithContent } = useStickyBoard();
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
   const today = new Date().toISOString().split("T")[0];
@@ -163,6 +165,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     initial?.estimated_minutes?.toString() || (initial ? "" : "30")
   );
+  const [addStickyNote, setAddStickyNote] = useState(false);
 
   const initRecurrence = initial?.recurrence_rule || "";
   const [recurrencePreset, setRecurrencePreset] = useState(() => {
@@ -187,6 +190,9 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    if (!initial && addStickyNote) {
+      addNoteWithContent(title.trim(), (description || "").trim());
+    }
     onSubmit({
       title: title.trim(),
       description: description.trim() || undefined,
@@ -304,6 +310,12 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
             );
           })}
         </div>
+      )}
+      {!isEdit && (
+        <label className="flex items-center gap-2 text-xs text-secondary cursor-pointer">
+          <input type="checkbox" checked={addStickyNote} onChange={(e) => setAddStickyNote(e.target.checked)} className="rounded border-border accent-accent" />
+          Also create as sticky note
+        </label>
       )}
       <div className="flex gap-2 pt-1">
         <button type="submit" className="btn flex-1 bg-accent py-1.5 text-xs font-semibold text-base hover:bg-accent-hover">

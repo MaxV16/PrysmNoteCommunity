@@ -7,6 +7,7 @@ import { TaskChecklist } from "./TaskChecklist";
 import { TaskLinks } from "./TaskLinks";
 import { useTasks } from "@/hooks/useTasks";
 import { useAppStore } from "@/stores/app-store";
+import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 
 function isBroadTask(title: string): boolean {
   const broadKeywords = [
@@ -34,6 +35,7 @@ const STATUS_COLORS: Record<string, string> = {
 export function TaskDetail({ task, onClose }: TaskDetailProps) {
   const [editing, setEditing] = useState(false);
   const { updateTask, deleteTask } = useTasks();
+  const { addNoteWithContent } = useStickyBoard();
 
   const handleUpdate = async (data: {
     title: string;
@@ -103,6 +105,7 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <button onClick={() => addNoteWithContent(task.title, task.description || "")} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">📝</button>
           <button onClick={() => setEditing(true)} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">Edit</button>
           <button onClick={handleDelete} className="btn bg-elevated px-2 py-1 text-xs text-danger hover:bg-hover">Del</button>
           <button onClick={onClose} className="btn bg-elevated px-2 py-1 text-xs text-secondary hover:bg-hover hover:text-primary">

@@ -11,11 +11,19 @@ interface Tag {
 
 export type NavFilter = "inbox" | "today" | "next7" | null;
 
+interface ChatSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  timestamp: string;
+}
+
 interface AppState {
   tasks: Task[];
   projects: Project[];
   tags: Tag[];
   chatMessages: ChatMessage[];
+  chatSessions: ChatSession[];
   selectedTaskId: string | null;
   selectedProjectId: string | null;
   selectedTagId: string | null;
@@ -28,6 +36,7 @@ interface AppState {
   removeTag: (id: string) => void;
   setChatMessages: (msgs: ChatMessage[]) => void;
   addChatMessage: (msg: ChatMessage) => void;
+  setChatSessions: (sessions: ChatSession[]) => void;
   setSelectedTaskId: (id: string | null) => void;
   setSelectedProjectId: (id: string | null) => void;
   setSelectedTagId: (id: string | null) => void;
@@ -41,6 +50,7 @@ export const useAppStore = create<AppState>((set) => ({
   projects: [],
   tags: [],
   chatMessages: [],
+  chatSessions: [],
   selectedTaskId: null,
   selectedProjectId: null,
   selectedTagId: null,
@@ -54,6 +64,7 @@ export const useAppStore = create<AppState>((set) => ({
   setChatMessages: (msgs) => set({ chatMessages: msgs }),
   addChatMessage: (msg) =>
     set((state) => ({ chatMessages: [...state.chatMessages, msg] })),
+  setChatSessions: (sessions) => set({ chatSessions: sessions }),
   setSelectedTaskId: (id) => set({ selectedTaskId: id }),
   setSelectedProjectId: (id) => set({ selectedProjectId: id }),
   setSelectedTagId: (id) => set({ selectedTagId: id }),

@@ -10,6 +10,7 @@ import { useTasks } from "@/hooks/useTasks";
 import { useProjects } from "@/hooks/useProjects";
 import { useTags } from "@/hooks/useTags";
 import { useAuth } from "@/lib/auth-context";
+import { useTheme } from "@/lib/theme-context";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 import { StickyBoardProvider, useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { HabitTracker } from "@/components/habits/HabitTracker";
@@ -57,11 +58,13 @@ export function ThreePaneLayout() {
   const [isTablet, setIsTablet] = useState(false);
   const [kanbanMode, setKanbanMode] = useState(false);
   const [habitsOpen, setHabitsOpen] = useState(false);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
   const { open: openSticky } = useStickyBoard();
   const { fetchTasks } = useTasks();
   const { fetchProjects } = useProjects();
   const { fetchTags } = useTags();
   const { user } = useAuth();
+  const { toggleTheme } = useTheme();
   const router = useRouter();
 
   useEffect(() => {
@@ -87,10 +90,29 @@ export function ThreePaneLayout() {
           setTimeout(() => input?.focus(), 100);
         }
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === "n") {
+        e.preventDefault();
+        setNewTaskOpen(true);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "b") {
+        e.preventDefault();
+        setLeftCollapsed(!leftCollapsed);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "J") {
+        e.preventDefault();
+        setRightOpen(v => !v);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "T") {
+        e.preventDefault();
+        toggleTheme();
+      }
+      if (e.key === "Escape") {
+        setNewTaskOpen(false);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [leftCollapsed]);
+  }, [leftCollapsed, toggleTheme]);
 
   useEffect(() => {
     (async () => {
