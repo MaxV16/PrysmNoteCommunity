@@ -2,16 +2,37 @@
 > prysm-note-frontend@0.1.0 build
 > next build
 
-   ▲ Next.js 15.5.19
+   ▲ Next.js 15.5.22
 
    Creating an optimized production build ...
- ✓ Compiled successfully in 7.2s
-   Linting and checking validity of types ...
+ ✓ Compiled successfully in 9.0s
+   Skipping validation of types
+   Skipping linting
    Collecting page data ...
-   Generating static pages (0/7) ...
-   Generating static pages (1/7) 
-   Generating static pages (3/7) 
-   Generating static pages (5/7) 
- ✓ Generating static pages (7/7)
+   Generating static pages (0/10) ...
+   Generating static pages (2/10) 
+   Generating static pages (4/10) 
+   Generating static pages (7/10) 
+ ✓ Generating static pages (10/10)
    Finalizing page optimization ...
    Collecting build traces ...
+
+Route (app)                                 Size  First Load JS
+┌ ○ /                                    42.4 kB         150 kB
+├ ○ /_not-found                            987 B         104 kB
+├ ○ /login                               1.85 kB         108 kB
+├ ○ /privacy                               126 B         103 kB
+├ ○ /register                            1.97 kB         108 kB
+├ ○ /settings                            13.6 kB         121 kB
+├ ○ /tos                                   126 B         103 kB
+└ ○ /widgets                             1.48 kB         107 kB
++ First Load JS shared by all             103 kB
+  ├ chunks/18-6904d02802e458a1.js        46.3 kB
+  ├ chunks/87c73c54-24122e7b92478d00.js  54.2 kB
+  └ other shared chunks (total)          2.05 kB
+
+
+ƒ Middleware                             34.3 kB
+
+○  (Static)  prerendered as static content
+
