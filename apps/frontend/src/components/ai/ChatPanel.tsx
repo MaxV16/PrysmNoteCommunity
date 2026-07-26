@@ -10,12 +10,12 @@ import { useAppStore } from "@/stores/app-store";
 import { getItem, setItem } from "@/lib/local-storage";
 
 const VoiceInput = dynamic(
-  () => import("@ee/components/VoiceInput").then((m) => m.VoiceInput),
+  () => import("@/ee/components/VoiceInput").then((m) => m.VoiceInput),
   { ssr: false }
 );
 
 const VoiceFeedback = dynamic(
-  () => import("@ee/components/VoiceFeedback").then((m) => m.VoiceFeedback),
+  () => import("@/ee/components/VoiceFeedback").then((m) => m.VoiceFeedback),
   { ssr: false }
 );
 
