@@ -16,7 +16,6 @@ function findEeDir(): string {
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  trailingSlash: true,
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -30,10 +29,15 @@ const nextConfig: NextConfig = {
     return config;
   },
   async rewrites() {
+    const backend = process.env.API_PROXY || "http://backend:8000";
     return [
       {
-        source: "/api/:path*",
-        destination: `${process.env.API_PROXY || "http://backend:8000"}/api/:path*`,
+        source: "/api/:path+",
+        destination: `${backend}/api/:path+/`,
+      },
+      {
+        source: "/api",
+        destination: `${backend}/api/`,
       },
     ];
   },
