@@ -260,10 +260,12 @@ export function TimelineView({ viewDays, isMobile, rightOpen }: TimelineViewProp
               />
             )}
             {!hasTasks && (
-              <div className="relative z-10 flex flex-col items-center justify-center py-24 text-center pointer-events-none -mt-12">
-                <span className="text-4xl mb-3">📋</span>
-                <p className="text-sm text-muted">No tasks scheduled</p>
-                <p className="text-xs text-muted mt-1">Double-click a day column or create a task to get started</p>
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center pointer-events-none">
+                <div className="flex flex-col items-center gap-3">
+                  <span className="text-4xl">📋</span>
+                  <p className="text-sm text-muted">No tasks scheduled</p>
+                  <p className="text-xs text-muted">Double-click a day column or create a task to get started</p>
+                </div>
               </div>
             )}
           </div>
