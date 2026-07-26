@@ -1,5 +1,14 @@
 # AGENTS.md — Prysm Note
 
+## Git Workflow
+
+After every file change (every single invocation of write/edit tool), you MUST:
+1. Stage the changed files: `git add <files>`
+2. Create a commit with a conventional commit message: `git commit -m "type(scope): description"`
+3. Push immediately: `git push`
+
+Never batch multiple changes into a single commit. One commit per tool invocation that modifies files.
+
 ## Project Overview
 Prysm Note is an AI-powered task management application with a 3-pane UI (sidebar, timeline, AI chat). Built as a folder-based monorepo. **Open-core model**: the `ee/` directory contains proprietary enterprise features not shipped in the community release.
 
