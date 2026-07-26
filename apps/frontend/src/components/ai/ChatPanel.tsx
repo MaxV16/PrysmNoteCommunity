@@ -9,12 +9,12 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useAppStore } from "@/stores/app-store";
 
 const VoiceInput = dynamic(
-  () => import("../../../../ee/apps/frontend/ee/components/VoiceInput").then((m) => m.VoiceInput),
+  () => import("@ee/components/VoiceInput").then((m) => m.VoiceInput),
   { ssr: false }
 );
 
 const VoiceFeedback = dynamic(
-  () => import("../../../../ee/apps/frontend/ee/components/VoiceFeedback").then((m) => m.VoiceFeedback),
+  () => import("@ee/components/VoiceFeedback").then((m) => m.VoiceFeedback),
   { ssr: false }
 );
 

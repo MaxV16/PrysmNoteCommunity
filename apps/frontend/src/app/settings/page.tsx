@@ -12,7 +12,7 @@ import type { ThemeName, ThemeColors, BackgroundPreset } from "@/types/theme";
 import { THEMES, FONT_PRESETS, BACKGROUND_PRESETS } from "@/types/theme";
 
 const PremiumSettings = dynamic(
-  () => import("../../../../ee/apps/frontend/ee/components/PremiumSettings").then((m) => m.PremiumSettings),
+  () => import("@ee/components/PremiumSettings").then((m) => m.PremiumSettings),
   { ssr: false }
 );
 
