@@ -11,18 +11,17 @@
     "lint": "turbo run lint"
   },
   "overrides": {
-    "postcss": "^8.5.10"
+    "postcss": "^8.5.23"
   },
   "packageManager": "npm@11.16.0",
   "devDependencies": {
-    "concurrently": "^10.0.3",
+    "concurrently": "^10.0.4",
     "electron": "^42.3.3",
-    "electron-builder": "^26.15.2",
-    "turbo": "^2.9.16",
-    "wait-on": "^9.0.10"
+    "electron-builder": "^26.15.3",
+    "turbo": "^2.10.7",
+    "wait-on": "^9.1.0"
   },
   "allowScripts": {
     "electron@42.3.3": true
   }
 }
-
