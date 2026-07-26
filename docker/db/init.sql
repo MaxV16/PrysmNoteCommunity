@@ -242,3 +242,28 @@ CREATE POLICY user_isolation ON calendar_events
 CREATE POLICY user_isolation ON user_tokens
   USING (user_id = rls_user_id());
 
+-- Feature requests (EE: user-submitted feature ideas)
+CREATE TABLE IF NOT EXISTS feature_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(500) NOT NULL,
+  description TEXT NOT NULL,
+  category VARCHAR(50) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE feature_requests ENABLE ROW LEVEL SECURITY;
+CREATE POLICY user_isolation ON feature_requests
+  USING (user_id = rls_user_id());
+
+-- Contact submissions (EE: Team/Company contact form)
+CREATE TABLE IF NOT EXISTS ee_contact_submissions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email VARCHAR(255) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  tier VARCHAR(20) NOT NULL,
+  company_name VARCHAR(500),
+  team_size VARCHAR(50),
+  message TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+

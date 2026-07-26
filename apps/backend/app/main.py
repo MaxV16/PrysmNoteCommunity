@@ -1,5 +1,7 @@
 import asyncio
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +18,12 @@ from app.routers import auth, tasks, projects, tags, search, ai, keys, calendar,
 from app.routers.ai import start_rate_limit_pruner
 from app.services.calendar_service import pull_and_import_events
 from app.services.recurring_task_service import recurring_task_background_loop
+
+_repo_root = Path(__file__).resolve().parent.parent.parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+from ee.apps.backend.ee.routers.ee_premium import router as ee_premium_router
 
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
 
@@ -127,6 +135,7 @@ app.include_router(ai.router)
 app.include_router(keys.router)
 app.include_router(calendar.router)
 app.include_router(task_links.router)
+app.include_router(ee_premium_router)
 
 
 @app.get("/api/health")

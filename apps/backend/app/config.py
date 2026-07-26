@@ -32,6 +32,12 @@ class Settings(BaseSettings):
 
     redis_url: str = ""
 
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    admin_email: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @field_validator("jwt_secret_key", "encryption_key")
