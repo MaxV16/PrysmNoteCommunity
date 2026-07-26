@@ -45,12 +45,10 @@ function applyNavFilter(tasks: ReturnType<typeof useAppStore.getState>["tasks"],
 interface TimelineViewProps {
   viewDays: number;
   isMobile: boolean;
-  onSettingsClick: () => void;
-  onAIClick: () => void;
   rightOpen: boolean;
 }
 
-export function TimelineView({ viewDays, isMobile, onSettingsClick, onAIClick, rightOpen }: TimelineViewProps) {
+export function TimelineView({ viewDays, isMobile, rightOpen }: TimelineViewProps) {
   const { tasks, selectedTaskId, setSelectedTaskId, projects, navFilter, setNavFilter, selectedProjectId, selectedTagId } = useAppStore();
   const { visibleRange, scrollOffset, setScrollOffset } = useTimeline(14);
   const { createTask, updateTask } = useTasks();
@@ -102,7 +100,9 @@ export function TimelineView({ viewDays, isMobile, onSettingsClick, onAIClick, r
       if (!active) return;
 
       const taskId = active.id as string;
-      const dayWidth = (window.innerWidth - 320) / viewDays;
+      const timelineEl = document.querySelector("[data-timeline-container]");
+      const timelineWidth = timelineEl ? timelineEl.clientWidth : window.innerWidth;
+      const dayWidth = timelineWidth / viewDays;
       const daysShifted = Math.round(delta.x / dayWidth);
 
       if (daysShifted === 0) return;
@@ -197,29 +197,6 @@ export function TimelineView({ viewDays, isMobile, onSettingsClick, onAIClick, r
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </div>
-        {!isMobile && (
-          <button
-            onClick={onSettingsClick}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-surface/80 border border-border text-secondary hover:bg-hover hover:text-primary transition-all shadow-sm"
-            title="Settings"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-          </button>
-        )}
-        {!rightOpen && !isMobile && (
-          <button
-            onClick={onAIClick}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-accent to-purple-500 text-base hover:from-accent-hover hover:to-purple-600 transition-all shadow-glow animate-pulse-subtle"
-            title="AI Command Center"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-            </svg>
-          </button>
-        )}
         <button
           onClick={() => { setFormDefaultDate(null); setShowTaskForm(!showTaskForm); }}
           className="btn btn-primary px-3 py-1.5 text-xs gap-1.5"
@@ -253,7 +230,7 @@ export function TimelineView({ viewDays, isMobile, onSettingsClick, onAIClick, r
       </Modal>
 
       {/* Timeline area */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto" data-timeline-container>
         <TimelineHeader days={days} />
         <DndContext sensors={!isMobile ? sensors : undefined} onDragEnd={!isMobile ? handleDragEnd : undefined}>
           <div className="relative">

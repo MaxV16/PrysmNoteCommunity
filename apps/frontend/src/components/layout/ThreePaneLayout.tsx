@@ -12,6 +12,7 @@ import { useTags } from "@/hooks/useTags";
 import { useAuth } from "@/lib/auth-context";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 import { StickyBoardProvider, useStickyBoard } from "@/components/sticky/StickyNoteBoard";
+import { HabitTracker } from "@/components/habits/HabitTracker";
 import { HabitForm } from "@/components/habits/HabitForm";
 
 class ErrorBoundaryInner extends React.Component<
@@ -120,49 +121,72 @@ export function ThreePaneLayout() {
           )}
 
           {/* Main area */}
-          <div className="flex-1 relative flex flex-col overflow-hidden">
-            <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface/50 shrink-0">
-              <button
-                onClick={() => setLeftCollapsed(!leftCollapsed)}
-                className="btn bg-elevated border border-border text-xs text-secondary px-3 py-1 rounded-xl hover:text-primary"
-              >
-                {leftCollapsed ? "Show" : "Hide"} Sidebar
-              </button>
-              <div className="flex-1" />
+          <div className="flex-1 relative flex flex-col min-w-0 overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface/50 shrink-0 overflow-x-auto">
+              {!isMobile && (
+                <button
+                  onClick={() => setLeftCollapsed(!leftCollapsed)}
+                  className="btn bg-elevated border border-border text-xs text-secondary px-3 py-1 rounded-xl hover:text-primary shrink-0"
+                >
+                  {leftCollapsed ? "Show" : "Hide"} Sidebar
+                </button>
+              )}
               <button
                 onClick={() => setHabitsOpen(!habitsOpen)}
-                className={`btn text-xs px-3 py-1 rounded-xl ${habitsOpen ? "bg-accent text-white" : "bg-elevated border border-border text-secondary hover:text-primary"}`}
+                className={`btn text-xs px-3 py-1 rounded-xl shrink-0 ${habitsOpen ? "bg-accent text-white" : "bg-elevated border border-border text-secondary hover:text-primary"}`}
               >
                 Habits
               </button>
               <button
                 onClick={() => setKanbanMode(!kanbanMode)}
-                className={`btn text-xs px-3 py-1 rounded-xl ${kanbanMode ? "bg-accent text-white" : "bg-elevated border border-border text-secondary hover:text-primary"}`}
+                className={`btn text-xs px-3 py-1 rounded-xl shrink-0 ${kanbanMode ? "bg-accent text-white" : "bg-elevated border border-border text-secondary hover:text-primary"}`}
               >
                 {kanbanMode ? "Timeline" : "Kanban"}
               </button>
               <button
                 onClick={() => openSticky()}
-                className="btn text-xs px-3 py-1 rounded-xl bg-elevated border border-border text-secondary hover:text-primary"
+                className="btn text-xs px-3 py-1 rounded-xl shrink-0 bg-elevated border border-border text-secondary hover:text-primary"
               >
                 Notes
               </button>
+              <div className="flex-1 min-w-4" />
+              {!isMobile && (
+                <button
+                  onClick={() => router.push("/settings")}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-surface/80 border border-border text-secondary hover:bg-hover hover:text-primary transition-all shadow-sm shrink-0"
+                  title="Settings"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                  </svg>
+                </button>
+              )}
+              {!isMobile && (
+                <button
+                  onClick={() => setRightOpen(true)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-accent to-purple-500 text-base hover:from-accent-hover hover:to-purple-600 transition-all shadow-glow animate-pulse-subtle shrink-0"
+                  title="AI Command Center"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                  </svg>
+                </button>
+              )}
             </div>
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex min-h-0 overflow-hidden">
               {kanbanMode ? (
                 <KanbanBoard />
               ) : (
                 <TimelineView
                   viewDays={viewDays}
                   isMobile={isMobile}
-                  onSettingsClick={() => router.push("/settings")}
-                  onAIClick={() => setRightOpen(true)}
                   rightOpen={rightOpen}
                 />
               )}
 
               {habitsOpen && (
-                <div className="w-[320px] shrink-0 border-l border-border overflow-auto p-4 space-y-4">
+                <div className="w-80 max-w-full shrink-0 border-l border-border overflow-auto p-4 space-y-4">
                   <HabitTracker />
                   <HabitForm onCreated={() => {}} />
                 </div>
@@ -172,7 +196,7 @@ export function ThreePaneLayout() {
 
           {/* Right AI Panel */}
           {rightOpen && !isMobile && (
-            <div className="relative w-[400px] shrink-0 border-l border-border">
+            <div className="relative w-96 max-w-full shrink-0 border-l border-border">
               <ChatPanel onClose={() => setRightOpen(false)} />
             </div>
           )}
