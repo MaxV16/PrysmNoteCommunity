@@ -13,7 +13,6 @@ import { useAuth } from "@/lib/auth-context";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 import { StickyBoardProvider, useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { HabitForm } from "@/components/habits/HabitForm";
-import { HabitForm } from "@/components/habits/HabitForm";
 
 class ErrorBoundaryInner extends React.Component<
   { children: ReactNode; fallback?: ReactNode },
