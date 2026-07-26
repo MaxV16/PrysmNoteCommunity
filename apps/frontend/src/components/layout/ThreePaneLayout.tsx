@@ -10,6 +10,10 @@ import { useTasks } from "@/hooks/useTasks";
 import { useProjects } from "@/hooks/useProjects";
 import { useTags } from "@/hooks/useTags";
 import { useAuth } from "@/lib/auth-context";
+import { KanbanBoard } from "@/components/kanban/KanbanBoard";
+import { StickyBoardProvider, useStickyBoard } from "@/components/sticky/StickyNoteBoard";
+import { HabitForm } from "@/components/habits/HabitForm";
+import { HabitForm } from "@/components/habits/HabitForm";
 
 class ErrorBoundaryInner extends React.Component<
   { children: ReactNode; fallback?: ReactNode },
@@ -51,6 +55,9 @@ export function ThreePaneLayout() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isTablet, setIsTablet] = useState(false);
+  const [kanbanMode, setKanbanMode] = useState(false);
+  const [habitsOpen, setHabitsOpen] = useState(false);
+  const { open: openSticky } = useStickyBoard();
   const { fetchTasks } = useTasks();
   const { fetchProjects } = useProjects();
   const { fetchTags } = useTags();
@@ -104,6 +111,7 @@ export function ThreePaneLayout() {
           </div>
         </div>
       ) : (
+        <StickyBoardProvider>
         <div className="h-screen flex overflow-hidden bg-base">
           {!isMobile && (
             <SidebarLeft
@@ -114,13 +122,53 @@ export function ThreePaneLayout() {
 
           {/* Main area */}
           <div className="flex-1 relative flex flex-col overflow-hidden">
-            <TimelineView
-              viewDays={viewDays}
-              isMobile={isMobile}
-              onSettingsClick={() => router.push("/settings")}
-              onAIClick={() => setRightOpen(true)}
-              rightOpen={rightOpen}
-            />
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface/50 shrink-0">
+              <button
+                onClick={() => setLeftCollapsed(!leftCollapsed)}
+                className="btn bg-elevated border border-border text-xs text-secondary px-3 py-1 rounded-xl hover:text-primary"
+              >
+                {leftCollapsed ? "Show" : "Hide"} Sidebar
+              </button>
+              <div className="flex-1" />
+              <button
+                onClick={() => setHabitsOpen(!habitsOpen)}
+                className={`btn text-xs px-3 py-1 rounded-xl ${habitsOpen ? "bg-accent text-white" : "bg-elevated border border-border text-secondary hover:text-primary"}`}
+              >
+                Habits
+              </button>
+              <button
+                onClick={() => setKanbanMode(!kanbanMode)}
+                className={`btn text-xs px-3 py-1 rounded-xl ${kanbanMode ? "bg-accent text-white" : "bg-elevated border border-border text-secondary hover:text-primary"}`}
+              >
+                {kanbanMode ? "Timeline" : "Kanban"}
+              </button>
+              <button
+                onClick={() => openSticky()}
+                className="btn text-xs px-3 py-1 rounded-xl bg-elevated border border-border text-secondary hover:text-primary"
+              >
+                Notes
+              </button>
+            </div>
+            <div className="flex-1 flex overflow-hidden">
+              {kanbanMode ? (
+                <KanbanBoard />
+              ) : (
+                <TimelineView
+                  viewDays={viewDays}
+                  isMobile={isMobile}
+                  onSettingsClick={() => router.push("/settings")}
+                  onAIClick={() => setRightOpen(true)}
+                  rightOpen={rightOpen}
+                />
+              )}
+
+              {habitsOpen && (
+                <div className="w-[320px] shrink-0 border-l border-border overflow-auto p-4 space-y-4">
+                  <HabitTracker />
+                  <HabitForm onCreated={() => {}} />
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Right AI Panel */}
@@ -151,6 +199,7 @@ export function ThreePaneLayout() {
             </div>
           )}
         </div>
+        </StickyBoardProvider>
       )}
     </ErrorBoundaryInner>
   );

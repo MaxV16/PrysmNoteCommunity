@@ -61,7 +61,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleTheme = useCallback(() => {
-    const themes: ThemeName[] = ["dark", "light", "dracula", "nord", "monokai"];
+    const themes: ThemeName[] = ["dark", "light", "dracula", "nord", "monokai", "slate"];
     const idx = themes.indexOf(themeName);
     const next = themes[(idx + 1) % themes.length];
     setThemeName(next);

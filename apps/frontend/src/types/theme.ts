@@ -1,4 +1,4 @@
-export type ThemeName = "dark" | "light" | "dracula" | "nord" | "monokai";
+export type ThemeName = "dark" | "light" | "dracula" | "nord" | "monokai" | "slate";
 
 export interface Theme {
   name: ThemeName;
@@ -140,6 +140,29 @@ export const THEMES: Record<ThemeName, Theme> = {
       "shadow-md": "0 8px 24px rgba(0,0,0,0.5)",
       "shadow-lg": "0 16px 48px rgba(0,0,0,0.55)",
       "accent-glow": "rgba(102,217,239,0.35)",
+    },
+  },
+  slate: {
+    name: "slate",
+    label: "Slate Pro",
+    colors: {
+      base: "#191919",
+      surface: "#1F1F1F",
+      elevated: "#2C2C2C",
+      hover: "#333333",
+      border: "#3F3F46",
+      primary: "#FFFFFF",
+      secondary: "#A1A1AA",
+      muted: "#6B7280",
+      accent: "#4C7EFF",
+      "accent-hover": "#3B6CE8",
+      danger: "#FF4757",
+      success: "#22C55E",
+      warning: "#FF9500",
+      "shadow-sm": "0 2px 8px rgba(0,0,0,0.6)",
+      "shadow-md": "0 8px 24px rgba(0,0,0,0.7)",
+      "shadow-lg": "0 16px 48px rgba(0,0,0,0.8)",
+      "accent-glow": "rgba(76,126,255,0.3)",
     },
   },
 };
