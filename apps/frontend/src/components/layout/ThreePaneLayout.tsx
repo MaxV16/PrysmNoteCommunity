@@ -55,7 +55,9 @@ export function ThreePaneLayout() {
 
   useEffect(() => {
     (async () => {
-      await Promise.all([fetchTasks(), fetchProjects(), fetchTags()]);
+      try { await fetchTasks(); } catch {}
+      try { await fetchProjects(); } catch {}
+      try { await fetchTags(); } catch {}
       setDataLoaded(true);
     })();
   }, [fetchTasks, fetchProjects, fetchTags]);
