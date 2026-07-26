@@ -2,12 +2,12 @@
 
 ## Git Workflow
 
-After every file change (every single invocation of write/edit tool), you MUST:
-1. Stage the changed files: `git add <files>`
+After every meaningful set of file changes, you MUST:
+1. Stage all changed files: `git add <files>`
 2. Create a commit with a conventional commit message: `git commit -m "type(scope): description"`
 3. Push immediately: `git push`
 
-Never batch multiple changes into a single commit. One commit per tool invocation that modifies files.
+Batch related changes into a single commit. Do not create one commit per file or per micro-edit.
 
 ## Project Overview
 Prysm Note is an AI-powered task management application with a 3-pane UI (sidebar, timeline, AI chat). Built as a folder-based monorepo. **Open-core model**: the `ee/` directory contains proprietary enterprise features not shipped in the community release.
