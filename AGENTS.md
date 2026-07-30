@@ -28,10 +28,6 @@ prysm-note/
 ├── apps/
 │   ├── frontend/        # Next.js 14 App Router + Tailwind CSS
 │   └── backend/         # FastAPI + SQLAlchemy (async) + PostgreSQL/pgvector
-│   ├── apps/
-│   │   ├── backend/ee/  # EE backend package
-│   │   └── frontend/ee/ # EE frontend package
-│   └── EE_AGENTS.md     # EE coding instructions for agents
 ├── docker/              # Dockerfiles + DB init scripts
 ├── docker-compose.yml
 └── turbo.json           # Turborepo pipeline
