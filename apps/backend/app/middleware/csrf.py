@@ -4,6 +4,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+
+def _cookie_secure(request: Request) -> bool:
+    return request.url.scheme == "https"
+
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 CSRF_COOKIE_NAME = "csrf_token"
 CSRF_HEADER_NAME = "X-CSRF-Token"
@@ -23,7 +27,7 @@ class CSRFSecurityMiddleware(BaseHTTPMiddleware):
                     key=CSRF_COOKIE_NAME,
                     value=csrf_token,
                     httponly=False,
-                    secure=True,
+                    secure=_cookie_secure(request),
                     samesite="lax",
                     path="/",
                     max_age=86400,

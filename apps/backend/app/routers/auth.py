@@ -4,6 +4,10 @@ import time
 from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+
+
+def _cookie_secure(request: Request) -> bool:
+    return request.url.scheme == "https"
 from jose import JWTError, jwt
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
@@ -79,6 +83,7 @@ class RefreshRequest(BaseModel):
 
 @router.post("/register")
 async def register(request: RegisterRequest, response: Response, req: Request, session: AsyncSession = Depends(get_db)):
+    secure = _cookie_secure(req)
     ip = _get_client_ip(req)
     if ip in _IP_BLOCKLIST:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="IP blocked")
@@ -91,17 +96,18 @@ async def register(request: RegisterRequest, response: Response, req: Request, s
     refresh_token = create_refresh_token(str(user.id))
     response.set_cookie(
         key="access_token", value=access_token,
-        httponly=True, secure=True, samesite="lax", max_age=15 * 60, path="/"
+        httponly=True, secure=secure, samesite="lax", max_age=15 * 60, path="/"
     )
     response.set_cookie(
         key="refresh_token", value=refresh_token,
-        httponly=True, secure=True, samesite="lax", max_age=7 * 24 * 60 * 60, path="/"
+        httponly=True, secure=secure, samesite="lax", max_age=7 * 24 * 60 * 60, path="/"
     )
     return {"id": str(user.id), "email": user.email, "display_name": user.display_name}
 
 
 @router.post("/login")
 async def login(request: LoginRequest, response: Response, req: Request, session: AsyncSession = Depends(get_db)):
+    secure = _cookie_secure(req)
     ip = _get_client_ip(req)
     if ip in _IP_BLOCKLIST:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="IP blocked")
@@ -114,11 +120,11 @@ async def login(request: LoginRequest, response: Response, req: Request, session
     refresh_token = create_refresh_token(str(user.id))
     response.set_cookie(
         key="access_token", value=access_token,
-        httponly=True, secure=True, samesite="lax", max_age=15 * 60, path="/"
+        httponly=True, secure=secure, samesite="lax", max_age=15 * 60, path="/"
     )
     response.set_cookie(
         key="refresh_token", value=refresh_token,
-        httponly=True, secure=True, samesite="lax", max_age=7 * 24 * 60 * 60, path="/"
+        httponly=True, secure=secure, samesite="lax", max_age=7 * 24 * 60 * 60, path="/"
     )
     return {"id": str(user.id), "email": user.email, "display_name": user.display_name}
 
@@ -128,6 +134,7 @@ async def refresh(
     response: Response,
     request: RefreshRequest | None = None,
     refresh_token: str | None = Cookie(None),
+    req: Request = None,
     session: AsyncSession = Depends(get_db),
 ):
     token = refresh_token or (request.refresh_token if request else None)
@@ -156,15 +163,16 @@ async def refresh(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
+    secure = _cookie_secure(req)
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
     response.set_cookie(
         key="access_token", value=access_token,
-        httponly=True, secure=True, samesite="lax", max_age=15 * 60, path="/"
+        httponly=True, secure=secure, samesite="lax", max_age=15 * 60, path="/"
     )
     response.set_cookie(
         key="refresh_token", value=refresh_token,
-        httponly=True, secure=True, samesite="lax", max_age=7 * 24 * 60 * 60, path="/"
+        httponly=True, secure=secure, samesite="lax", max_age=7 * 24 * 60 * 60, path="/"
     )
     return {"id": str(user.id), "email": user.email, "display_name": user.display_name}
 
