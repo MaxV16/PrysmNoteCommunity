@@ -1,6 +1,9 @@
 [project]
 name = "prysm-note-backend"
 version = "0.1.0"
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio", "httpx", "aiosqlite"]
 description = "Prysm Note - AI-powered task management backend"
 requires-python = ">=3.11"
 dependencies = [
