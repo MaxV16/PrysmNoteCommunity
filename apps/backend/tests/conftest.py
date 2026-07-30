@@ -4,6 +4,8 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import JSON, event
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.main import app
@@ -16,6 +18,23 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 _test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
+
+
+# Make PostgreSQL-only types work with SQLite test database
+@event.listens_for(Base.metadata, "before_create")
+def _adjust_for_sqlite(target, connection, **kw):
+    for table in target.tables.values():
+        for col in table.columns:
+            # Replace JSONB with JSON for SQLite compatibility
+            if isinstance(col.type, JSONB):
+                col.type = JSON()
+            # Replace server_default=func.gen_random_uuid() — not supported by SQLite
+            sd = col.server_default
+            if sd is not None and sd.arg is not None:
+                raw = str(sd.arg.compile(dialect=connection.dialect))
+                if "gen_random_uuid" in raw:
+                    col.server_default = None
+                    col.default = None
 
 
 @pytest.fixture(scope="session")
