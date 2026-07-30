@@ -208,7 +208,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-2 overflow-y-auto max-h-[60vh]" style={{ minHeight: 0 }}>
       <input
         type="text"
         value={title}

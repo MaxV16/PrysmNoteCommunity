@@ -44,11 +44,34 @@ class ErrorBoundaryInner extends React.Component<
   }
 }
 
-export function ThreePaneLayout() {
+function MainLayout() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
-  const [dataLoaded, setDataLoaded] = useState(false);
   const { open: openSticky } = useStickyBoard();
+
+  return (
+    <div className="flex bg-base" style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
+      <SidebarLeft
+        collapsed={leftCollapsed}
+        onToggle={() => setLeftCollapsed(!leftCollapsed)}
+      />
+      <div className="flex flex-col" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+        <TimelineView
+          onToggleRight={() => setRightOpen(v => !v)}
+          onOpenSticky={openSticky}
+        />
+      </div>
+      {rightOpen && (
+        <div className="shrink-0 border-l border-border bg-base" style={{ width: 384 }}>
+          <ChatPanel onClose={() => setRightOpen(false)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function ThreePaneLayout() {
+  const [dataLoaded, setDataLoaded] = useState(false);
   const { fetchTasks } = useTasks();
   const { fetchProjects } = useProjects();
   const { fetchTags } = useTags();
@@ -73,25 +96,7 @@ export function ThreePaneLayout() {
         </div>
       ) : (
         <StickyBoardProvider>
-          <div className="flex bg-base" style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
-            <SidebarLeft
-              collapsed={leftCollapsed}
-              onToggle={() => setLeftCollapsed(!leftCollapsed)}
-            />
-
-            <div className="flex flex-col" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-              <TimelineView
-                onToggleRight={() => setRightOpen(v => !v)}
-                onOpenSticky={openSticky}
-              />
-            </div>
-
-            {rightOpen && (
-              <div className="shrink-0 border-l border-border bg-base" style={{ width: 384 }}>
-                <ChatPanel onClose={() => setRightOpen(false)} />
-              </div>
-            )}
-          </div>
+          <MainLayout />
         </StickyBoardProvider>
       )}
     </ErrorBoundaryInner>

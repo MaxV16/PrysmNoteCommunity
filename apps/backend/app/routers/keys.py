@@ -146,6 +146,71 @@ async def sync_key(
 
     await session.commit()
     return {"status": "synced", "provider": request.provider}
+
+
+class TestKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, v: str) -> str:
+        if v not in VALID_PROVIDERS:
+            raise ValueError(f"Invalid provider. Must be one of: {', '.join(sorted(VALID_PROVIDERS))}")
+        return v
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 8:
+            raise ValueError("API key too short")
+        if len(v) > 256:
+            raise ValueError("API key too long")
+        return v
+
+
+@router.post("/test")
+async def test_key(request: TestKeyRequest):
+    import httpx
+    provider = request.provider
+    api_key = request.api_key
+
+    try:
+        if provider == "openai":
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=10,
+                )
+                return {"valid": resp.status_code == 200, "error": None if resp.status_code == 200 else f"HTTP {resp.status_code}"}
+
+        elif provider == "deepseek":
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://api.deepseek.com/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=10,
+                )
+                return {"valid": resp.status_code == 200, "error": None if resp.status_code == 200 else f"HTTP {resp.status_code}"}
+
+        elif provider == "gemini":
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+                    timeout=10,
+                )
+                return {"valid": resp.status_code == 200, "error": None if resp.status_code == 200 else f"HTTP {resp.status_code}"}
+
+        return {"valid": False, "error": f"Unknown provider: {provider}"}
+    except httpx.TimeoutException:
+        return {"valid": False, "error": "Request timed out — check network connectivity"}
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
+
+
+@router.delete("/{key_id}")
 async def delete_key(
     key_id: str,
     user: User = Depends(get_current_user),

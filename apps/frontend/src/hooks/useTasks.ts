@@ -37,7 +37,7 @@ export function useTasks() {
   const updateTask = useCallback(
     async (id: string, fields: Record<string, unknown>) => {
       try {
-        const data = await api.patch<Task>(`/tasks/${id}`, { fields });
+        const data = await api.patch<Task>(`/tasks/${id}`, fields);
         await fetchTasks();
         return data;
       } catch {

@@ -9,6 +9,7 @@ import { TimelineGrid } from "@/components/timeline/TimelineGrid";
 import { TimelineLane } from "@/components/timeline/TimelineLane";
 import { TaskDetail } from "@/components/tasks/TaskDetail";
 import { TaskForm } from "@/components/tasks/TaskForm";
+import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 import { Modal } from "@/components/ui/Modal";
 import { useTasks } from "@/hooks/useTasks";
 import { useRouter } from "next/navigation";
@@ -220,7 +221,7 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
 
       {/* Inline task form */}
       {showTaskForm && !formDefaultDate && (
-        <div className="border-b border-border bg-surface px-4 py-2 shrink-0">
+        <div className="border-b border-border bg-surface px-4 py-2 shrink-0 max-h-[50vh] overflow-y-auto">
           <TaskForm onSubmit={handleCreateTask} onCancel={() => setShowTaskForm(false)} />
         </div>
       )}
@@ -238,7 +239,10 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
         />
       </Modal>
 
-      {/* Timeline Gantt-chart area */}
+      {/* Timeline Gantt-chart area or Kanban */}
+      {kanbanMode ? (
+        <KanbanBoard />
+      ) : (
       <div className="flex" style={{ flex: 1, minHeight: 0 }}>
         {/* Middle category column: fixed 200px Y-axis labels */}
         <div className="shrink-0 border-r border-border bg-surface overflow-y-auto" style={{ width: 200 }}>
@@ -294,6 +298,7 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
           </div>
         </div>
       </div>
+      )}
 
       {/* Task detail bottom panel */}
       {selectedTask && (

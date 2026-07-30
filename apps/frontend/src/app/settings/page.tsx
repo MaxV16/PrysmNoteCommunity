@@ -187,6 +187,8 @@ export default function SettingsPage() {
   const [deepseekKey, setDeepseekKey] = useState("");
   const [keyMsg, setKeyMsg] = useState("");
   const [keySaving, setKeySaving] = useState<string | null>(null);
+  const [testingKey, setTestingKey] = useState<string | null>(null);
+  const [keyTestResults, setKeyTestResults] = useState<Record<string, { valid: boolean; error?: string } | null>>({});
   const [deletingAccount, setDeletingAccount] = useState(false);
 
   const [calendarOn, setCalendarOn] = stBool("prysm_feature_calendar", true);
@@ -309,6 +311,19 @@ export default function SettingsPage() {
     },
     [saveKey],
   );
+
+  const handleTestKey = async (provider: string, key: string) => {
+    setTestingKey(provider);
+    setKeyTestResults((prev) => ({ ...prev, [provider]: null }));
+    try {
+      const res = await api.post<{ valid: boolean; error?: string }>("/keys/test", { provider, api_key: key });
+      setKeyTestResults((prev) => ({ ...prev, [provider]: res }));
+    } catch (e: unknown) {
+      setKeyTestResults((prev) => ({ ...prev, [provider]: { valid: false, error: e instanceof Error ? e.message : "Request failed" } }));
+    } finally {
+      setTestingKey(null);
+    }
+  };
 
   const handleDeleteKey = async (id: string, provider: string) => {
     await deleteKey(id, provider);
@@ -1258,10 +1273,20 @@ export default function SettingsPage() {
                       </span>
                     </div>
                     {getKeyByProvider(provider) ? (
+                      <div className="space-y-2">
                       <div className="flex items-center gap-3 rounded-xl bg-elevated px-4 py-2.5 border border-border hover:border-success/30 transition-colors">
                         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-success/20 text-xs">✓</span>
                         <span className="flex-1 text-sm text-success font-medium">Key configured: {getKeyByProvider(provider)?.key_prefix}...</span>
+                        <button onClick={() => handleTestKey(provider, provider === "openai" ? openaiKey : provider === "gemini" ? geminiKey : deepseekKey)} disabled={testingKey === provider} className="rounded-lg px-2.5 py-1 text-xs text-secondary hover:bg-hover font-medium transition-colors border border-border">
+                          {testingKey === provider ? "Testing..." : "Test"}
+                        </button>
                         <button onClick={() => handleDeleteKey(getKeyByProvider(provider)!.id, provider)} className="rounded-lg px-2.5 py-1 text-xs text-danger hover:bg-danger/10 font-medium transition-colors">Remove</button>
+                      </div>
+                      {keyTestResults[provider] && (
+                        <div className={`rounded-lg px-3 py-1.5 text-xs ${keyTestResults[provider]?.valid ? "bg-success/10 text-success" : "bg-danger/10 text-danger"}`}>
+                          {keyTestResults[provider]?.valid ? "✓ Key is valid" : `✗ ${keyTestResults[provider]?.error || "Invalid key"}`}
+                        </div>
+                      )}
                       </div>
                     ) : (
                       <div className="flex gap-2">

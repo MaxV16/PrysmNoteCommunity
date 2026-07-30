@@ -29,24 +29,20 @@ const API_URLS: Record<LLMProvider, string> = {
 
 const LOCAL_KEY_PREFIX = "prysm_key_";
 
-export function getLocalApiKey(provider: LLMProvider): string | null {
+export async function getLocalApiKey(provider: LLMProvider): Promise<string | null> {
   if (typeof window === "undefined") return null;
+  const { decryptString } = await import("./crypto-utils");
   const encoded = localStorage.getItem(`${LOCAL_KEY_PREFIX}${provider}`);
   if (!encoded) return null;
   try {
-    return decodeURIComponent(
-      atob(encoded)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
+    return await decryptString(encoded);
   } catch {
     return null;
   }
 }
 
-export function hasLocalKey(provider: LLMProvider): boolean {
-  return getLocalApiKey(provider) !== null;
+export async function hasLocalKey(provider: LLMProvider): Promise<boolean> {
+  return (await getLocalApiKey(provider)) !== null;
 }
 
 async function openAIStream(
@@ -155,13 +151,13 @@ async function deepseekStream(
   return res.body!;
 }
 
-export function streamChat(
+export async function streamChat(
   provider: LLMProvider,
   messages: Array<{ role: string; content: string; tool_calls?: ToolCall[] }>,
   tools?: Array<unknown>,
   signal?: AbortSignal
 ): Promise<ReadableStream<Uint8Array>> {
-  const apiKey = getLocalApiKey(provider);
+  const apiKey = await getLocalApiKey(provider);
   if (!apiKey) {
     throw new Error(`No local API key for ${provider}`);
   }
@@ -183,9 +179,10 @@ export function streamChat(
 export async function chat(
   provider: LLMProvider,
   messages: Array<{ role: string; content: string; tool_calls?: ToolCall[] }>,
-  tools?: Array<unknown>
+  tools?: Array<unknown>,
+  signal?: AbortSignal
 ): Promise<{ content: string; tool_calls?: ToolCall[] }> {
-  const apiKey = getLocalApiKey(provider);
+  const apiKey = await getLocalApiKey(provider);
   if (!apiKey) {
     throw new Error(`No local API key for ${provider}`);
   }
@@ -222,7 +219,7 @@ export async function chat(
     };
   }
 
-  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error?.message || `${provider} error ${res.status}`);

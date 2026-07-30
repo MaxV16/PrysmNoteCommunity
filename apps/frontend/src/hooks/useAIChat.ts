@@ -180,7 +180,10 @@ function buildFullContext(): string {
   return ctx;
 }
 
-async function executeToolOnBackend(toolCall: { function: { name: string; arguments: string } }): Promise<string> {
+async function executeToolOnBackend(
+  toolCall: { function: { name: string; arguments: string } },
+  undoStack?: Array<{ type: string; data: unknown }>
+): Promise<string> {
   const token = getToken();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -214,7 +217,12 @@ async function executeToolOnBackend(toolCall: { function: { name: string; argume
         credentials: "include",
         body: JSON.stringify(body),
       });
-      return res.json().then((d) => JSON.stringify(d));
+      const created = await res.json();
+      if (undoStack && created.id) {
+        undoStack.push({ type: "create_task", data: { id: created.id } });
+        if (undoStack.length > 5) undoStack.shift();
+      }
+      return JSON.stringify(created);
     }
     case "update_task":
     case "reschedule_task": {
@@ -222,6 +230,18 @@ async function executeToolOnBackend(toolCall: { function: { name: string; argume
       if (args.fields) Object.assign(fields, args.fields);
       if (args.new_start_date) fields.start_date = args.new_start_date;
       if (args.new_due_date) fields.due_date = args.new_due_date;
+      if (undoStack) {
+        const store = useAppStore.getState();
+        const task = store.tasks.find((t) => t.id === args.task_id);
+        if (task) {
+          const previous: Record<string, unknown> = {};
+          for (const key of Object.keys(fields)) {
+            (previous as Record<string, unknown>)[key] = (task as Record<string, unknown>)[key];
+          }
+          undoStack.push({ type: "update_task", data: { id: args.task_id, previous } });
+          if (undoStack.length > 5) undoStack.shift();
+        }
+      }
       const res = await fetch(`${API_URL}/tasks/${args.task_id}`, {
         method: "PATCH",
         headers,
@@ -264,6 +284,38 @@ export function useAIChat() {
   const { chatMessages, addChatMessage, setChatMessages, tasks, projects, tags } = useAppStore();
   const sessionIdRef = useRef<string>(getStoredSessionId());
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const undoStackRef = useRef<Array<{ type: string; data: unknown }>>([]);
+  const [hasUndo, setHasUndo] = useState(false);
+
+  const abort = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsLoading(false);
+  }, []);
+
+  const undoLastAction = useCallback(() => {
+    const entry = undoStackRef.current.pop();
+    if (!entry) return;
+    (async () => {
+      const store = useAppStore.getState();
+      if (entry.type === "create_task") {
+        const taskId = (entry.data as { id: string }).id;
+        try {
+          await fetch(`${API_URL}/tasks/${taskId}`, { method: "DELETE", credentials: "include" });
+          store.setTasks(store.tasks.filter((t) => t.id !== taskId));
+        } catch {}
+      } else if (entry.type === "update_task") {
+        const d = entry.data as { id: string; previous: Record<string, unknown> };
+        try {
+          await fetch(`${API_URL}/tasks/${d.id}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(d.previous),
+          });
+          store.setTasks(store.tasks.map((t) => (t.id === d.id ? { ...t, ...d.previous } : t)));
+        } catch {}
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     const sid = sessionIdRef.current;
@@ -319,19 +371,21 @@ export function useAIChat() {
       });
 
       const providerKey = provider as "openai" | "gemini" | "deepseek";
-      const useDirectLLM = hasLocalKey(providerKey);
+      const useDirectLLM = await hasLocalKey(providerKey);
 
       if (useDirectLLM) {
+        abortRef.current = new AbortController();
         await sendViaDirectLLM(content, providerKey, sessionId, assistantId, context);
       } else {
+        abortRef.current = new AbortController();
         await sendViaBackend(content, provider, sessionId, assistantId, context);
       }
 
       setIsLoading(false);
+      abortRef.current = null;
     },
-    [chatMessages, addChatMessage, tasks, projects, tags]
+    [addChatMessage, tasks, projects, tags]
   );
-
   const updateAssistant = (assistantId: string, text: string) => {
     const store = useAppStore.getState();
     store.setChatMessages(
@@ -392,7 +446,7 @@ ${buildFullContext()}`;
         { role: "user", content },
       ];
 
-      const response = await chat(provider, messages as Array<{ role: string; content: string }>, TOOL_DEFINITIONS);
+      const response = await chat(provider, messages as Array<{ role: string; content: string }>, TOOL_DEFINITIONS, abortRef.current?.signal);
 
       if (response.tool_calls && response.tool_calls.length > 0) {
         const toolNames = response.tool_calls.map((tc: { function: { name: string } }) => tc.function.name).join(", ");
@@ -400,9 +454,10 @@ ${buildFullContext()}`;
 
         const toolResults: Array<{ role: string; content: string }> = [];
         for (const tc of response.tool_calls) {
-          const result = await executeToolOnBackend(tc);
+          const result = await executeToolOnBackend(tc, undoStackRef.current);
           toolResults.push({ role: "tool", content: result });
         }
+        setHasUndo(undoStackRef.current.length > 0);
 
         messages.push({ role: "assistant", content: response.content || "" });
         messages.push(...toolResults);
@@ -410,7 +465,7 @@ ${buildFullContext()}`;
         const body = new ReadableStream({
           async start(controller) {
             try {
-              const stream = await streamChat(provider, messages, TOOL_DEFINITIONS);
+              const stream = await streamChat(provider, messages, TOOL_DEFINITIONS, abortRef.current?.signal);
               const reader = stream.getReader();
               const decoder = new TextDecoder();
               let streamBuf = "";
@@ -461,7 +516,7 @@ ${buildFullContext()}`;
         const body = new ReadableStream({
           async start(controller) {
             try {
-              const stream = await streamChat(provider, messages, TOOL_DEFINITIONS);
+              const stream = await streamChat(provider, messages, TOOL_DEFINITIONS, abortRef.current?.signal);
               const reader = stream.getReader();
               const decoder = new TextDecoder();
               let streamBuf = "";
@@ -576,5 +631,5 @@ ${buildFullContext()}`;
     }
   };
 
-  return { chatMessages, sendMessage, isLoading };
+  return { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo };
 }

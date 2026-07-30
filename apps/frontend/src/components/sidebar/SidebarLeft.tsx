@@ -83,7 +83,7 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
   return (
     <div className="flex flex-col border-r border-border bg-surface overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/10">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -106,102 +106,104 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
         </button>
       </div>
 
-      {/* User section */}
-      {user && (
-        <div className="flex items-center justify-between border-b border-border/50 px-4 py-2.5">
-          <button
-            onClick={() => router.push("/settings")}
-            className="flex items-center gap-2 text-xs text-muted hover:text-primary transition-colors"
-          >
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent/20 text-xs font-bold text-accent">
-              {(user.display_name || user.email || "U")[0].toUpperCase()}
-            </span>
-            <span className="truncate max-w-[140px]">{user.display_name || user.email}</span>
-          </button>
-          <button
-            onClick={handleLogout}
-            className="rounded p-1 text-xs text-muted hover:text-danger transition-colors"
-            title="Log out"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-              <polyline points="16 17 21 12 16 7"/>
-              <line x1="21" y1="12" x2="9" y2="12"/>
-            </svg>
-          </button>
-        </div>
-      )}
-
-        {/* Navigation & Content */}
-        <div className="flex-1 overflow-auto px-3 py-3 space-y-5 scroll-smooth">
-          <NavSection />
-          <div className="divider-gradient" />
-          <FilterBar />
-          <div className="divider-gradient" />
-          <ProjectList />
-          <div className="divider-gradient" />
-          {teamMembers.length > 0 && (
-            <>
-              <div>
-                <button
-                  onClick={() => setTeamExpanded(!teamExpanded)}
-                  className="flex items-center justify-between w-full px-1 py-1 text-xs font-semibold text-secondary uppercase tracking-wider hover:text-primary transition-colors"
-                >
-                  <span>Team</span>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                    className={`transition-transform ${teamExpanded ? "rotate-180" : ""}`}
-                  >
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </button>
-                {teamExpanded && (
-                  <div className="mt-1 space-y-0.5">
-                    {teamMembers.map((m, i) => (
-                      <div key={i} className="sidebar-item cursor-default">
-                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/20 text-[9px] font-bold text-accent shrink-0">
-                          {m.name[0]?.toUpperCase() || "?"}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-primary truncate">{m.name}</p>
-                          <p className="text-[9px] text-muted">{m.role}</p>
-                        </div>
-                      </div>
-                    ))}
-                    <button className="sidebar-item w-full text-[10px] text-muted hover:text-primary">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-                      <span>Filter by assignee</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div className="divider-gradient" />
-            </>
-          )}
-          <TagList />
-        </div>
-
-      {/* Theme selector in footer */}
-      <div className="border-t border-border px-3 py-2">
-        <div className="flex items-center justify-between">
-          <button
-            onClick={toggleTheme}
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-secondary hover:bg-hover hover:text-primary transition-colors"
-          >
-            <span>🎨</span>
-            <span>{THEMES[themeName].label}</span>
-          </button>
-          <div className="flex gap-1">
-            {THEME_NAMES.map((name) => (
+      {/* Navigation & Content */}
+      <div className="flex-1 overflow-auto px-3 py-3 space-y-5 scroll-smooth">
+        <NavSection />
+        <div className="divider-gradient" />
+        <FilterBar />
+        <div className="divider-gradient" />
+        <ProjectList />
+        <div className="divider-gradient" />
+        {teamMembers.length > 0 && (
+          <>
+            <div>
               <button
-                key={name}
-                onClick={() => setThemeName(name)}
-                className={`h-4 w-4 rounded-full border-2 transition-all ${
-                  themeName === name ? "border-accent scale-125" : "border-transparent"
-                }`}
-                style={{ backgroundColor: THEMES[name].colors.accent }}
-                title={THEMES[name].label}
-              />
-            ))}
+                onClick={() => setTeamExpanded(!teamExpanded)}
+                className="flex items-center justify-between w-full px-1 py-1 text-xs font-semibold text-secondary uppercase tracking-wider hover:text-primary transition-colors"
+              >
+                <span>Team</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  className={`transition-transform ${teamExpanded ? "rotate-180" : ""}`}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              {teamExpanded && (
+                <div className="mt-1 space-y-0.5">
+                  {teamMembers.map((m, i) => (
+                    <div key={i} className="sidebar-item cursor-default">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/20 text-[9px] font-bold text-accent shrink-0">
+                        {m.name[0]?.toUpperCase() || "?"}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-primary truncate">{m.name}</p>
+                        <p className="text-[9px] text-muted">{m.role}</p>
+                      </div>
+                    </div>
+                  ))}
+                  <button className="sidebar-item w-full text-[10px] text-muted hover:text-primary">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                    <span>Filter by assignee</span>
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="divider-gradient" />
+          </>
+        )}
+        <TagList />
+      </div>
+
+      {/* Footer: user + theme */}
+      <div className="border-t border-border shrink-0">
+        {user && (
+          <div className="flex items-center justify-between border-b border-border/50 px-4 py-2.5">
+            <button
+              onClick={() => router.push("/settings")}
+              className="flex items-center gap-2 text-xs text-muted hover:text-primary transition-colors"
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent/20 text-xs font-bold text-accent">
+                {(user.display_name || user.email || "U")[0].toUpperCase()}
+              </span>
+              <span className="truncate max-w-[140px]">{user.display_name || user.email}</span>
+            </button>
+            <button
+              onClick={handleLogout}
+              className="rounded p-1 text-xs text-muted hover:text-danger transition-colors"
+              title="Log out"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                <polyline points="16 17 21 12 16 7"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* Theme selector */}
+        <div className="px-3 py-2">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={toggleTheme}
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-secondary hover:bg-hover hover:text-primary transition-colors"
+            >
+              <span>🎨</span>
+              <span>{THEMES[themeName].label}</span>
+            </button>
+            <div className="flex gap-1">
+              {THEME_NAMES.map((name) => (
+                <button
+                  key={name}
+                  onClick={() => setThemeName(name)}
+                  className={`h-4 w-4 rounded-full border-2 transition-all ${
+                    themeName === name ? "border-accent scale-125" : "border-transparent"
+                  }`}
+                  style={{ backgroundColor: THEMES[name].colors.accent }}
+                  title={THEMES[name].label}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </div>

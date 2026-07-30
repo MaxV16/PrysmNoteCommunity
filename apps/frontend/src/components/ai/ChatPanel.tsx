@@ -8,6 +8,7 @@ import { ChatInput } from "./ChatInput";
 import { Spinner } from "@/components/ui/Spinner";
 import { useAppStore } from "@/stores/app-store";
 import { getItem, setItem } from "@/lib/local-storage";
+import { decryptString } from "@/lib/crypto-utils";
 
 const VoiceInput = dynamic(
   () => import("@/ee/components/VoiceInput").then((m) => m.VoiceInput),
@@ -56,7 +57,7 @@ function saveChatHistory(sessions: ChatSession[]) {
 }
 
 export function ChatPanel({ onClose }: ChatPanelProps) {
-  const { chatMessages, sendMessage, isLoading } = useAIChat();
+  const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo } = useAIChat();
   const voiceInitiatedRef = useRef(false);
   const [voiceFeedbackText, setVoiceFeedbackText] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
@@ -65,15 +66,29 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
 
   const LAST_PROVIDER_KEY = "prysm_last_provider";
 
-  function getInitialProvider(): string {
-    if (typeof window === "undefined") return "openai";
-    const last = localStorage.getItem(LAST_PROVIDER_KEY);
-    if (last && PROVIDERS.some((p) => p.value === last)) return last;
-    const found = PROVIDERS.find((p) => localStorage.getItem(`prysm_key_${p.value}`));
-    return found ? found.value : "openai";
-  }
+  const [provider, setProvider] = useState("openai");
 
-  const [provider, setProvider] = useState(getInitialProvider);
+  useEffect(() => {
+    (async () => {
+      if (typeof window === "undefined") return;
+      const last = localStorage.getItem(LAST_PROVIDER_KEY);
+      if (last && PROVIDERS.some((p) => p.value === last)) {
+        setProvider(last);
+        return;
+      }
+      for (const p of PROVIDERS) {
+        const encrypted = localStorage.getItem(`prysm_key_${p.value}`);
+        if (encrypted) {
+          const decrypted = await decryptString(encrypted);
+          if (decrypted) {
+            setProvider(p.value);
+            return;
+          }
+        }
+      }
+      setProvider("openai");
+    })();
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(LAST_PROVIDER_KEY, provider);
@@ -298,7 +313,27 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         )}
       </div>
 
-      <div className="border-t border-border px-4 py-3">
+      <div className="border-t border-border px-4 py-3 space-y-2">
+        <div className="flex gap-2">
+          {isLoading && (
+            <button
+              onClick={abort}
+              className="flex items-center gap-1.5 rounded-full bg-danger/10 px-3 py-1.5 text-xs text-danger hover:bg-danger/20 transition-colors"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              Stop
+            </button>
+          )}
+          {hasUndo && (
+            <button
+              onClick={undoLastAction}
+              className="flex items-center gap-1.5 rounded-full bg-elevated px-3 py-1.5 text-xs text-secondary hover:text-primary hover:bg-hover transition-colors border border-border"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+              Undo
+            </button>
+          )}
+        </div>
         <ChatInput
           onSend={(msg) => handleSend(msg)}
           disabled={isLoading}
