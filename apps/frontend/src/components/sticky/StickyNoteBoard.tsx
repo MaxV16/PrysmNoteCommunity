@@ -105,7 +105,7 @@ export function StickyBoardProvider({ children }: { children: ReactNode }) {
 }
 
 function StickyNoteBoard() {
-  const { isOpen } = useContext(StickyBoardContext);
+  const { isOpen, close } = useContext(StickyBoardContext);
   const [notes, setNotes] = useState<StickyNote[]>([]);
   const [_, setRender] = useState(0);
   const dragRef = useRef<{ noteId: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -202,15 +202,24 @@ function StickyNoteBoard() {
   if (!isOpen || isMobileOrTablet) return null;
 
   return (
-    <div className="fixed inset-0 z-50 pointer-events-none">
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-auto">
-        <button
-          onClick={addNote}
-          className="btn bg-accent text-base px-4 py-2 rounded-lg shadow-lg hover:opacity-90 transition-opacity text-sm font-medium"
-        >
-          + New Note
-        </button>
-      </div>
+    <>
+      <div className="fixed inset-0 z-40 bg-black/20 pointer-events-auto" onClick={close} />
+      <div className="fixed inset-0 z-50 pointer-events-none">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-auto flex items-center gap-2">
+          <button
+            onClick={close}
+            className="btn bg-elevated border border-border text-secondary px-3 py-2 rounded-lg shadow-lg hover:bg-hover hover:text-primary transition-colors text-sm"
+            title="Close"
+          >
+            ✕
+          </button>
+          <button
+            onClick={addNote}
+            className="btn bg-accent text-base px-4 py-2 rounded-lg shadow-lg hover:opacity-90 transition-opacity text-sm font-medium"
+          >
+            + New Note
+          </button>
+        </div>
 
       {notes.map((note) => (
         <div
@@ -307,5 +316,6 @@ function StickyNoteBoard() {
         </div>
       )}
     </div>
+    </>
   );
 }

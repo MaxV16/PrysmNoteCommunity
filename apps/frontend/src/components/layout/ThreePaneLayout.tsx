@@ -47,7 +47,7 @@ class ErrorBoundaryInner extends React.Component<
 function MainLayout() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
-  const { open: openSticky } = useStickyBoard();
+  const { toggle: toggleSticky } = useStickyBoard();
 
   return (
     <div className="flex bg-base" style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
@@ -58,7 +58,7 @@ function MainLayout() {
       <div className="flex flex-col" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
         <TimelineView
           onToggleRight={() => setRightOpen(v => !v)}
-          onOpenSticky={openSticky}
+          onOpenSticky={toggleSticky}
         />
       </div>
       {rightOpen && (
