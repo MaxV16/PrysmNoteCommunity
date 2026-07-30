@@ -1,10 +1,10 @@
 import asyncio
-from uuid import uuid4 as _gen_uuid
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy import JSON, event
+from sqlalchemy import JSON, event, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -25,16 +25,13 @@ _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, ex
 def _adjust_for_sqlite(target, connection, **kw):
     for table in target.tables.values():
         for col in table.columns:
-            # Replace JSONB with JSON for SQLite compatibility
             if isinstance(col.type, JSONB):
                 col.type = JSON()
-            # Replace server_default=func.gen_random_uuid() — not supported by SQLite
             sd = col.server_default
             if sd is not None and sd.arg is not None:
                 raw = str(sd.arg.compile(dialect=connection.dialect))
                 if "gen_random_uuid" in raw:
-                    col.server_default = None
-                    col.default = _gen_uuid
+                    col.server_default = text("(lower(hex(randomblob(16))))")
 
 
 @pytest.fixture(scope="session")
