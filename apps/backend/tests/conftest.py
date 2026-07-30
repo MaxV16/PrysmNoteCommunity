@@ -28,7 +28,7 @@ def _adjust_for_sqlite(target, connection, **kw):
             if isinstance(col.type, JSONB):
                 col.type = JSON()
             sd = col.server_default
-            if sd is not None and sd.arg is not None:
+            if sd is not None and hasattr(sd, "arg") and sd.arg is not None:
                 raw = str(sd.arg.compile(dialect=connection.dialect))
                 if "gen_random_uuid" in raw:
                     col.server_default = text("(lower(hex(randomblob(16))))")
