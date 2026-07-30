@@ -29,10 +29,12 @@ def _adjust_for_sqlite(target, connection, **kw):
                 col.type = JSON()
             sd = col.server_default
             if sd is not None and hasattr(sd, "arg") and sd.arg is not None:
-                raw = str(sd.arg.compile(dialect=connection.dialect))
+                try:
+                    raw = str(sd.arg.compile(dialect=connection.dialect))
+                except AttributeError:
+                    continue
                 if "gen_random_uuid" in raw:
-                    from sqlalchemy.schema import ColumnDefault
-                    col.server_default = ColumnDefault(uuid4)
+                    col.server_default = text("(lower(hex(randomblob(16))))")
 
 
 @pytest.fixture(scope="session")
