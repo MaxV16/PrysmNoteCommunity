@@ -10,15 +10,7 @@ import { useAppStore } from "@/stores/app-store";
 import { getItem, setItem } from "@/lib/local-storage";
 import { decryptString } from "@/lib/crypto-utils";
 
-const VoiceInput = dynamic(
-  () => import("@/ee/components/VoiceInput").then((m) => m.VoiceInput),
-  { ssr: false }
-);
 
-const VoiceFeedback = dynamic(
-  () => import("@/ee/components/VoiceFeedback").then((m) => m.VoiceFeedback),
-  { ssr: false }
-);
 
 const PROVIDERS = [
   { value: "openai", label: "OpenAI" },
@@ -59,7 +51,6 @@ function saveChatHistory(sessions: ChatSession[]) {
 export function ChatPanel({ onClose }: ChatPanelProps) {
   const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo } = useAIChat();
   const voiceInitiatedRef = useRef(false);
-  const [voiceFeedbackText, setVoiceFeedbackText] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -149,7 +140,6 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     const lastMsg = chatMessages[chatMessages.length - 1];
     if (lastMsg && lastMsg.role === "assistant" && lastMsg.content) {
       voiceInitiatedRef.current = false;
-      setVoiceFeedbackText(lastMsg.content);
     }
   }, [chatMessages, isLoading]);
 
@@ -337,17 +327,3 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         <ChatInput
           onSend={(msg) => handleSend(msg)}
           disabled={isLoading}
-          additionalAction={<VoiceInput onTranscript={handleVoiceTranscript} disabled={isLoading} />}
-        />
-      </div>
-
-      {voiceFeedbackText && (
-        <VoiceFeedback
-          key={voiceFeedbackText.slice(0, 40)}
-          text={voiceFeedbackText}
-          onEnd={() => setVoiceFeedbackText(null)}
-        />
-      )}
-    </div>
-  );
-}

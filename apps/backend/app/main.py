@@ -23,8 +23,6 @@ _repo_root = Path(__file__).resolve().parent.parent.parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from ee.apps.backend.ee.routers.ee_premium import router as ee_premium_router
-
 MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
 
 
@@ -136,7 +134,6 @@ app.include_router(keys.router)
 app.include_router(calendar.router)
 app.include_router(task_links.router)
 app.include_router(habits.router)
-app.include_router(ee_premium_router)
 
 
 @app.get("/api/health")

@@ -11,10 +11,6 @@ import { useAppStore } from "@/stores/app-store";
 import type { ThemeName, ThemeColors, BackgroundPreset } from "@/types/theme";
 import { THEMES, FONT_PRESETS, BACKGROUND_PRESETS } from "@/types/theme";
 
-const PremiumSettings = dynamic(
-  () => import("@/ee/components/PremiumSettings").then((m) => m.PremiumSettings),
-  { ssr: false }
-);
 
 const THEME_NAMES: ThemeName[] = [...(Object.keys(THEMES) as ThemeName[]), "custom"];
 
@@ -668,7 +664,6 @@ export default function SettingsPage() {
           )}
 
           {/* === PREMIUM === */}
-          {activeTab === "premium" && <PremiumSettings />}
 
           {/* === FEATURES === */}
           {activeTab === "features" && (
