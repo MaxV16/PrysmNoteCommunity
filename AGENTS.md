@@ -1,11 +1,26 @@
 # AGENTS.md — Prysm Note
 
+## Prerequisites
+
+The GitHub CLI (`gh`) is required for commit/push verification. If not installed:
+```bash
+brew install gh
+gh auth login
+```
+
 ## Git Workflow
 
 After every meaningful set of file changes, you MUST:
 1. Stage all changed files: `git add <files>`
 2. Create a commit with a conventional commit message: `git commit -m "type(scope): description"`
 3. Push immediately: `git push`
+4. **Wait for CI and sync workflows to complete, then check for failures:**
+   ```bash
+   gh run list --workflow=CI --limit 1 --json conclusion,databaseId,displayTitle,url
+   gh run list --workflow="Sync to Community Edition" --limit 1 --json conclusion,databaseId,displayTitle,url
+   ```
+5. If any workflow failed, inspect the error with `gh run view <databaseId> --log | grep -E "Error|error|FAILED|exit code"` and fix the root cause, then commit and push the fix.
+6. Repeat steps 4-5 until both workflows pass.
 
 Batch related changes into a single commit. Do not create one commit per file or per micro-edit.
 
