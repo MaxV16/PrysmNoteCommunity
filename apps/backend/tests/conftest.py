@@ -1,5 +1,5 @@
 import asyncio
-from uuid import uuid4
+from uuid import uuid4 as _gen_uuid
 
 import pytest
 import pytest_asyncio
@@ -34,7 +34,7 @@ def _adjust_for_sqlite(target, connection, **kw):
                 raw = str(sd.arg.compile(dialect=connection.dialect))
                 if "gen_random_uuid" in raw:
                     col.server_default = None
-                    col.default = None
+                    col.default = _gen_uuid
 
 
 @pytest.fixture(scope="session")
