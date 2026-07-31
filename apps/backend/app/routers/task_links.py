@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/task-links", tags=["task_links"])
 class CreateTaskLinkRequest(BaseModel):
     source_task_id: str
     target_task_id: str
-    link_type: str = "related"
+    link_type: TaskLinkType = TaskLinkType.RELATED
 
 
 @router.get("/")
@@ -76,7 +76,7 @@ async def create_link_route(
         user_id=user.id,
         source_task_id=UUID(request.source_task_id),
         target_task_id=UUID(request.target_task_id),
-        link_type=TaskLinkType(request.link_type),
+        link_type=request.link_type,
     )
     session.add(link)
     await session.flush()
@@ -84,7 +84,7 @@ async def create_link_route(
         "id": str(link.id),
         "source_task_id": request.source_task_id,
         "target_task_id": request.target_task_id,
-        "link_type": request.link_type,
+        "link_type": request.link_type.value,
     }
 
 

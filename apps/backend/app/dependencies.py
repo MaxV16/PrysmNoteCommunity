@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.models.token_blacklist import TokenBlacklist
 from app.models.user import User
 from app.utils.rls import set_rls_user_id
 
@@ -35,6 +36,14 @@ async def get_current_user(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    jti = payload.get("jti")
+    if jti:
+        blacklisted = await session.execute(
+            select(TokenBlacklist).where(TokenBlacklist.jti == jti)
+        )
+        if blacklisted.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
 
     result = await session.execute(select(User).where(User.id == UUID(user_id)))
     user = result.scalar_one_or_none()

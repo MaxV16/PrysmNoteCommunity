@@ -293,6 +293,7 @@ async def update_task_route(
             session.add(TaskTag(task_id=task.id, tag_id=UUID(tag_id)))
         await session.flush()
 
+    await session.refresh(task)
     return _serialize_task(task)
 
 
@@ -342,11 +343,12 @@ async def create_subtask(
         parent_task_id=UUID(task_id),
         title=request.title,
         description=request.description,
-        status="todo",
+        status=TaskStatus.TODO,
     )
     session.add(subtask)
     await session.flush()
 
+    await session.refresh(subtask)
     return {"id": str(subtask.id), "title": subtask.title, "status": subtask.status.value}
 
 

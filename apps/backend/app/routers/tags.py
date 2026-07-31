@@ -1,8 +1,9 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -17,6 +18,20 @@ router = APIRouter(prefix="/api/tags", tags=["tags"])
 
 class CreateTagRequest(BaseModel):
     name: str
+    color: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("name must not be empty")
+        if len(v) > 50:
+            raise ValueError("name must be 50 characters or fewer")
+        return v
+
+
+class UpdateTagRequest(BaseModel):
+    name: str | None = None
     color: str | None = None
 
 
@@ -42,7 +57,53 @@ async def create_tag_route(
 ):
     tag = Tag(user_id=user.id, name=request.name, color=request.color)
     session.add(tag)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A tag with this name already exists")
+    return {"id": str(tag.id), "name": tag.name, "color": tag.color}
+
+
+@router.get("/{tag_id}")
+async def get_tag_route(
+    tag_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    result = await session.execute(
+        select(Tag).where(Tag.id == UUID(tag_id), Tag.user_id == user.id)
+    )
+    tag = result.scalar_one_or_none()
+    if not tag:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+    return {"id": str(tag.id), "name": tag.name, "color": tag.color}
+
+
+@router.patch("/{tag_id}")
+async def update_tag_route(
+    tag_id: str,
+    request: UpdateTagRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    result = await session.execute(
+        select(Tag).where(Tag.id == UUID(tag_id), Tag.user_id == user.id)
+    )
+    tag = result.scalar_one_or_none()
+    if not tag:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+    if request.name is not None:
+        if not request.name.strip():
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="name must not be empty")
+        tag.name = request.name
+    if request.color is not None:
+        tag.color = request.color
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A tag with this name already exists")
     return {"id": str(tag.id), "name": tag.name, "color": tag.color}
 
 
@@ -53,7 +114,7 @@ async def delete_tag_route(
     session: AsyncSession = Depends(get_db),
 ):
     result = await session.execute(
-        select(Tag).where(Tag.id == tag_id, Tag.user_id == user.id)
+        select(Tag).where(Tag.id == UUID(tag_id), Tag.user_id == user.id)
     )
     tag = result.scalar_one_or_none()
     if not tag:

@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from uuid import uuid4
 
 import pytest
@@ -53,8 +54,8 @@ async def test_build_messages_limits_chat_history(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_create_task(db_session: AsyncSession):
-    user_id = uuid4()
+async def test_execute_create_task(db_session: AsyncSession, ai_user):
+    user_id = ai_user
     tool_calls = [{
         "id": "call_1",
         "function": {
@@ -71,10 +72,10 @@ async def test_execute_create_task(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_create_task_in_project(db_session: AsyncSession):
+async def test_execute_create_task_in_project(db_session: AsyncSession, ai_user):
     from app.models.project import Project
     from uuid import UUID
-    user_id = uuid4()
+    user_id = ai_user
     project = Project(user_id=user_id, name="AI Project")
     db_session.add(project)
     await db_session.flush()
@@ -94,8 +95,8 @@ async def test_execute_create_task_in_project(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_search_tasks(db_session: AsyncSession):
-    user_id = uuid4()
+async def test_execute_search_tasks(db_session: AsyncSession, ai_user):
+    user_id = ai_user
     tool_calls = [{
         "id": "call_2",
         "function": {
@@ -112,9 +113,9 @@ async def test_execute_search_tasks(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_update_task(db_session: AsyncSession):
+async def test_execute_update_task(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
+    user_id = ai_user
     task = Task(user_id=user_id, title="Original")
     db_session.add(task)
     await db_session.flush()
@@ -148,9 +149,9 @@ async def test_execute_update_task_not_found(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_delete_task(db_session: AsyncSession):
+async def test_execute_delete_task(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
+    user_id = ai_user
     task = Task(user_id=user_id, title="Delete Me")
     db_session.add(task)
     await db_session.flush()
@@ -183,9 +184,9 @@ async def test_execute_delete_task_not_found(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_get_task_details(db_session: AsyncSession):
+async def test_execute_get_task_details(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
+    user_id = ai_user
     task = Task(user_id=user_id, title="Details Please")
     db_session.add(task)
     await db_session.flush()
@@ -204,9 +205,9 @@ async def test_execute_get_task_details(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_link_tasks(db_session: AsyncSession):
+async def test_execute_link_tasks(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
+    user_id = ai_user
     t1 = Task(user_id=user_id, title="Source")
     t2 = Task(user_id=user_id, title="Target")
     db_session.add_all([t1, t2])
@@ -230,10 +231,10 @@ async def test_execute_link_tasks(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_check_calendar(db_session: AsyncSession):
+async def test_execute_check_calendar(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
-    task = Task(user_id=user_id, title="Scheduled", start_date="2025-06-01", due_date="2025-06-01")
+    user_id = ai_user
+    task = Task(user_id=user_id, title="Scheduled", start_date=date(2025, 6, 1), due_date=date(2025, 6, 1))
     db_session.add(task)
     await db_session.flush()
 
@@ -252,11 +253,11 @@ async def test_execute_check_calendar(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_detect_conflicts(db_session: AsyncSession):
+async def test_execute_detect_conflicts(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
-    t1 = Task(user_id=user_id, title="Main", start_date="2025-06-15", due_date="2025-06-20")
-    t2 = Task(user_id=user_id, title="Overlap", start_date="2025-06-18", due_date="2025-06-22")
+    user_id = ai_user
+    t1 = Task(user_id=user_id, title="Main", start_date=date(2025, 6, 15), due_date=date(2025, 6, 20))
+    t2 = Task(user_id=user_id, title="Overlap", start_date=date(2025, 6, 18), due_date=date(2025, 6, 22))
     db_session.add_all([t1, t2])
     await db_session.flush()
 
@@ -275,9 +276,9 @@ async def test_execute_detect_conflicts(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_detect_conflicts_no_dates(db_session: AsyncSession):
+async def test_execute_detect_conflicts_no_dates(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
+    user_id = ai_user
     task = Task(user_id=user_id, title="No Dates")
     db_session.add(task)
     await db_session.flush()
@@ -296,9 +297,9 @@ async def test_execute_detect_conflicts_no_dates(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_suggest_subtasks(db_session: AsyncSession):
+async def test_execute_suggest_subtasks(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
+    user_id = ai_user
     task = Task(user_id=user_id, title="Plan Event")
     db_session.add(task)
     await db_session.flush()
@@ -364,10 +365,10 @@ async def test_execute_invalid_tool_args(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_reschedule_task(db_session: AsyncSession):
+async def test_execute_reschedule_task(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
-    task = Task(user_id=user_id, title="Move Me", start_date="2025-06-01", due_date="2025-06-05")
+    user_id = ai_user
+    task = Task(user_id=user_id, title="Move Me", start_date=date(2025, 6, 1), due_date=date(2025, 6, 5))
     db_session.add(task)
     await db_session.flush()
 
@@ -407,10 +408,10 @@ async def test_execute_reschedule_task_not_found(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_list_tasks_by_date_range(db_session: AsyncSession):
+async def test_execute_list_tasks_by_date_range(db_session: AsyncSession, ai_user):
     from app.models.task import Task
-    user_id = uuid4()
-    task = Task(user_id=user_id, title="In Range", start_date="2025-06-10", due_date="2025-06-15")
+    user_id = ai_user
+    task = Task(user_id=user_id, title="In Range", start_date=date(2025, 6, 10), due_date=date(2025, 6, 15))
     db_session.add(task)
     await db_session.flush()
 
@@ -430,10 +431,10 @@ async def test_execute_list_tasks_by_date_range(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_get_upcoming_deadlines(db_session: AsyncSession):
+async def test_execute_get_upcoming_deadlines(db_session: AsyncSession, ai_user):
     from app.models.task import Task
     from datetime import date
-    user_id = uuid4()
+    user_id = ai_user
     due = date(2025, 6, 20)
     task = Task(user_id=user_id, title="Urgent", due_date=due)
     db_session.add(task)
@@ -454,8 +455,8 @@ async def test_execute_get_upcoming_deadlines(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_execute_batch_create_tasks(db_session: AsyncSession):
-    user_id = uuid4()
+async def test_execute_batch_create_tasks(db_session: AsyncSession, ai_user):
+    user_id = ai_user
     tool_calls = [{
         "id": "call_batch",
         "function": {

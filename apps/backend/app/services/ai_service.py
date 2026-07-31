@@ -301,7 +301,7 @@ def build_messages(chat_history: list[dict], user_message: str, context: dict | 
                     system_content += f"\n\nSCHEDULE ALERT: The following days have 5+ tasks (overcrowded): {days_str}. Be cautious when scheduling on these dates."
 
     messages = [{"role": "system", "content": system_content}]
-    messages.extend(chat_history)
+    messages.extend(chat_history[-20:])
     messages.append({"role": "user", "content": user_message})
     return messages
 
@@ -317,8 +317,17 @@ async def execute_tool_calls(
     client = None,
 ) -> list[dict]:
     import json
+    from datetime import date as _date
     from app.models.task import Task, TaskStatus
     from app.models.project import Project
+
+    def _parse_date_arg(value):
+        if value is None or isinstance(value, _date):
+            return value
+        try:
+            return _date.fromisoformat(value)
+        except (ValueError, TypeError):
+            return None
     from app.services.task_service import create_task, search_tasks
 
     results = []
@@ -349,9 +358,9 @@ async def execute_tool_calls(
                     ),
                 )
                 if date_from:
-                    stmt = stmt.where(Task.start_date >= date_from)
+                    stmt = stmt.where(Task.start_date >= _parse_date_arg(date_from))
                 if date_to:
-                    stmt = stmt.where(Task.start_date <= date_to)
+                    stmt = stmt.where(Task.start_date <= _parse_date_arg(date_to))
                 if priority_min is not None:
                     stmt = stmt.where(Task.priority >= priority_min)
                 if priority_max is not None:
@@ -551,8 +560,8 @@ async def execute_tool_calls(
 
             elif name == "check_calendar":
                 from sqlalchemy import func as sa_func
-                date_from = args.get("date_from")
-                date_to = args.get("date_to")
+                date_from = _parse_date_arg(args.get("date_from"))
+                date_to = _parse_date_arg(args.get("date_to"))
                 count_result = await session.execute(
                     select(
                         Task.start_date,
@@ -574,7 +583,7 @@ async def execute_tool_calls(
                 results.append({
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
-                    "content": json.dumps({"date_from": date_from, "date_to": date_to, "density": density}),
+                    "content": json.dumps({"date_from": str(date_from), "date_to": str(date_to), "density": density}),
                 })
 
             elif name == "suggest_subtasks":
@@ -763,9 +772,9 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     })
                 else:
                     if new_start:
-                        task.start_date = new_start
+                        task.start_date = _parse_date_arg(new_start)
                     if new_due:
-                        task.due_date = new_due
+                        task.due_date = _parse_date_arg(new_due)
                     await session.flush()
 
                     conflict_info = None
@@ -803,8 +812,8 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     })
 
             elif name == "list_tasks_by_date_range":
-                date_from = args.get("date_from")
-                date_to = args.get("date_to")
+                date_from = _parse_date_arg(args.get("date_from"))
+                date_to = _parse_date_arg(args.get("date_to"))
 
                 from sqlalchemy import or_
 
@@ -826,8 +835,8 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
                     "content": json.dumps({
-                        "date_from": date_from,
-                        "date_to": date_to,
+                        "date_from": str(date_from) if date_from else None,
+                        "date_to": str(date_to) if date_to else None,
                         "count": len(tasks),
                         "tasks": [
                             {"id": str(t.id), "title": t.title, "priority": t.priority,

@@ -16,21 +16,18 @@ def expand_recurring_instances(
     max_occurrences: int = 52,
 ) -> list[dict]:
     dtstart = datetime.combine(start_date, datetime.min.time())
-    until = datetime.combine(recurrence_end_date, datetime.min.time()) if recurrence_end_date else None
 
-    kwargs = {"dtstart": dtstart}
-    if until:
-        kwargs["until"] = until
-    if max_occurrences:
-        kwargs["count"] = max_occurrences
-
-    rule = rrulestr(f"RRULE:{recurrence_rule}", **kwargs)
+    rule = rrulestr(f"RRULE:{recurrence_rule}", dtstart=dtstart)
     instances = []
 
     for dt in rule:
         if len(instances) >= max_occurrences:
             break
+        if recurrence_end_date and dt.date() > recurrence_end_date:
+            break
         instance_date = dt.date()
+        if instance_date < start_date:
+            continue
         instances.append({
             "start_date": instance_date.isoformat(),
             "due_date": instance_date.isoformat(),

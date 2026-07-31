@@ -4,6 +4,7 @@ import time
 from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi.security import HTTPAuthorizationCredentials
 
 
 def _cookie_secure(request: Request) -> bool:
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, security_optional
 from app.models.token_blacklist import TokenBlacklist
 from app.models.user import User
 from app.services.auth_service import (
@@ -78,7 +79,7 @@ class AuthResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str | None = None
 
 
 @router.post("/register")
@@ -182,24 +183,34 @@ async def logout(
     response: Response,
     refresh_token: str | None = Cookie(None),
     session: AsyncSession = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
 ):
+    tokens = {}
     if refresh_token:
+        tokens["refresh"] = refresh_token
+    if credentials and credentials.credentials:
+        tokens["access"] = credentials.credentials
+    for _type, token in tokens.items():
         try:
-            payload = jwt.decode(refresh_token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+            payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
             jti = payload.get("jti")
             exp = payload.get("exp")
             user_id = payload.get("sub")
             if jti and exp and user_id:
                 expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
-                entry = TokenBlacklist(
-                    jti=jti,
-                    user_id=UUID(user_id),
-                    expires_at=expires_at,
+                exists = await session.execute(
+                    select(TokenBlacklist).where(TokenBlacklist.jti == jti)
                 )
-                session.add(entry)
-                await session.flush()
+                if not exists.scalar_one_or_none():
+                    entry = TokenBlacklist(
+                        jti=jti,
+                        user_id=UUID(user_id),
+                        expires_at=expires_at,
+                    )
+                    session.add(entry)
         except (JWTError, Exception):
             pass
+    await session.flush()
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
     return {"status": "logged_out"}
