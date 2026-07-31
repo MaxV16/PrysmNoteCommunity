@@ -22,5 +22,5 @@ class TaskLink(Base):
     user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     source_task_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
     target_task_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
-    link_type: Mapped[TaskLinkType] = mapped_column(Enum(TaskLinkType), nullable=False)
+    link_type: Mapped[TaskLinkType] = mapped_column(Enum(TaskLinkType, values_callable=lambda x: [e.value for e in x]), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

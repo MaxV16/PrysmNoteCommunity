@@ -23,4 +23,4 @@ class CalendarEvent(Base):
     google_event_id: Mapped[str] = mapped_column(String(500), nullable=False)
     calendar_id: Mapped[str] = mapped_column(String(500), nullable=False)
     last_synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    sync_action: Mapped[SyncAction] = mapped_column(Enum(SyncAction), default=SyncAction.PUSH, nullable=False)
+    sync_action: Mapped[SyncAction] = mapped_column(Enum(SyncAction, values_callable=lambda x: [e.value for e in x]), default=SyncAction.PUSH, nullable=False)
