@@ -4,7 +4,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.task import Task
+from app.models.task import Task, TaskStatus
 
 
 def _parse_date(value: str | None) -> date_type | None:
@@ -14,6 +14,12 @@ def _parse_date(value: str | None) -> date_type | None:
         return date_type.fromisoformat(value)
     except (ValueError, TypeError):
         return None
+
+
+def _coerce_status(status: str | TaskStatus) -> TaskStatus:
+    if isinstance(status, TaskStatus):
+        return status
+    return TaskStatus(status)
 
 
 async def create_task(
@@ -35,7 +41,7 @@ async def create_task(
         parent_task_id=parent_task_id,
         title=title,
         description=description,
-        status=status,
+        status=_coerce_status(status),
         priority=priority,
         start_date=_parse_date(start_date),
         due_date=_parse_date(due_date),
@@ -70,6 +76,8 @@ async def update_task(session: AsyncSession, task_id: UUID, fields: dict) -> Tas
         if key in ALLOWED_UPDATE_FIELDS:
             if key in DATE_FIELDS:
                 value = _parse_date(value)
+            if key == "status":
+                value = _coerce_status(value)
             setattr(task, key, value)
     await session.flush()
     return task
