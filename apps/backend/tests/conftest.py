@@ -1,4 +1,3 @@
-import asyncio
 import os
 from uuid import uuid4
 
@@ -7,6 +6,7 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.main import app
 from app.database import get_db
@@ -19,15 +19,8 @@ TEST_DATABASE_URL = os.getenv(
     "sqlite+aiosqlite:///:memory:",
 )
 
-_test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+_test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest_asyncio.fixture(autouse=True)
