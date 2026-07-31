@@ -35,9 +35,16 @@ async def setup_db():
         await conn.run_sync(Base.metadata.drop_all)
 
 
+_current_test_user_id = None
+
+
 async def _get_test_db():
     async with _test_session_factory() as session:
         try:
+            if _test_engine.dialect.name == "postgresql" and _current_test_user_id:
+                from app.utils.rls import set_rls_user_id
+                await session.execute(text("SELECT 1"))
+                await set_rls_user_id(session, _current_test_user_id)
             yield session
             await session.commit()
         except Exception:
@@ -63,12 +70,16 @@ async def test_user(db_session: AsyncSession) -> User:
 
     )
     db_session.add(user)
-    await db_session.flush()
+    await db_session.commit()
+    await db_session.refresh(user)
     return user
 
 
 @pytest_asyncio.fixture
 async def client(test_user: User):
+    global _current_test_user_id
+    _current_test_user_id = test_user.id
+
     app.dependency_overrides[get_db] = _get_test_db
 
     async def override_get_current_user():
@@ -81,3 +92,7 @@ async def client(test_user: User):
         yield ac
 
     app.dependency_overrides.clear()
+
+
+def pytest_configure(config):
+    config.option.asyncio_mode = "auto"
