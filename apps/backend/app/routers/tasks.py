@@ -262,6 +262,7 @@ async def create_task_route(
         session, task.id, user.id, task.title, task.description
     )
 
+    await session.refresh(task)
     return _serialize_task(task)
 
 
