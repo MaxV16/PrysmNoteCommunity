@@ -1,11 +1,11 @@
 import asyncio
+import os
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy import JSON, event, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.main import app
@@ -14,27 +14,13 @@ from app.models.base import Base
 from app.dependencies import get_current_user
 from app.models.user import User
 
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+TEST_DATABASE_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "sqlite+aiosqlite:///:memory:",
+)
 
 _test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
-
-
-# Make PostgreSQL-only types work with SQLite test database
-@event.listens_for(Base.metadata, "before_create")
-def _adjust_for_sqlite(target, connection, **kw):
-    for table in target.tables.values():
-        for col in table.columns:
-            if isinstance(col.type, JSONB):
-                col.type = JSON()
-            sd = col.server_default
-            if sd is not None and hasattr(sd, "arg") and sd.arg is not None:
-                try:
-                    raw = str(sd.arg.compile(dialect=connection.dialect))
-                except AttributeError:
-                    continue
-                if "gen_random_uuid" in raw:
-                    col.server_default = text("(lower(hex(randomblob(16))))")
 
 
 @pytest.fixture(scope="session")
@@ -47,6 +33,9 @@ def event_loop():
 @pytest_asyncio.fixture(autouse=True)
 async def setup_db():
     async with _test_engine.begin() as conn:
+        if _test_engine.dialect.name == "postgresql":
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with _test_engine.begin() as conn:
