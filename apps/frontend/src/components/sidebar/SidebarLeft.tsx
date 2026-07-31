@@ -107,7 +107,7 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
       </div>
 
       {/* Navigation & Content */}
-      <div className="flex-1 overflow-auto px-3 py-3 space-y-5 scroll-smooth">
+      <div className="flex-1 overflow-auto px-3 py-3 space-y-6 scroll-smooth">
         <NavSection />
         <div className="divider-gradient" />
         <FilterBar />

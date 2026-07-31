@@ -59,12 +59,12 @@ export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick }: Tim
   );
 
   return (
-    <div className="relative border-b border-border/60 hover:bg-hover/10 transition-colors" style={{ minHeight: 48 }}>
+    <div className="relative border-b border-border/30 hover:bg-hover/10 transition-colors" style={{ minHeight: 48 }}>
       {positionedTasks.map(({ task, pos }) => (
         <TaskBar
           key={task.id}
           task={task}
-          style={{ left: pos.left, width: pos.width, top: 4 }}
+          style={{ left: pos.left, width: pos.width, top: 5 }}
           onClick={() => onTaskClick?.(task.id)}
         />
       ))}

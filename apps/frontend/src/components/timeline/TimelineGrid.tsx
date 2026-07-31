@@ -24,26 +24,21 @@ export function TimelineGrid({ days }: TimelineGridProps) {
           return (
             <div
               key={day.toISOString()}
-              className="border-r border-border/30"
+              data-day-column
+              data-is-today={isToday ? "true" : "false"}
+              className="relative"
               style={{
                 minWidth: 120,
                 flex: 1,
-                backgroundColor: isToday ? "var(--accent)" : undefined,
-                opacity: isToday ? 0.04 : undefined,
+                backgroundColor: isToday ? "color-mix(in srgb, var(--accent) 10%, transparent)" : undefined,
               }}
             >
               {isToday && (
-                <div className="absolute inset-y-0" style={{ left: "50%", width: 2, transform: "translateX(-50%)", backgroundColor: "var(--accent)", boxShadow: "0 0 8px var(--accent), 0 0 16px var(--accent-glow)" }} />
+                <div className="absolute inset-y-0" style={{ left: "50%", width: 2, transform: "translateX(-50%)", backgroundColor: "var(--accent)", opacity: 0.8, boxShadow: "0 0 8px var(--accent), 0 0 16px var(--accent-glow)" }} />
               )}
             </div>
           );
         })}
-      </div>
-      {/* Horizontal grid lines */}
-      <div className="absolute inset-0 flex flex-col pointer-events-none" style={{ paddingTop: 0 }}>
-        {Array.from({ length: 20 }, (_, i) => (
-          <div key={i} className="border-b border-border/10" style={{ flex: 1, minHeight: 48 }} />
-        ))}
       </div>
     </div>
   );

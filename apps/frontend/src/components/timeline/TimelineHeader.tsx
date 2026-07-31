@@ -26,18 +26,14 @@ export function TimelineHeader({ days }: TimelineHeaderProps) {
         {dayRows.map(({ dayName, dayNum, isToday, key }) => (
           <div
             key={key}
-            className="flex flex-col items-center justify-end border-r border-border pb-1 pt-2"
+            className="flex flex-col items-center justify-center py-3"
             style={{ minWidth: 120, flex: 1 }}
           >
-            <span className={`text-[10px] font-medium uppercase tracking-wide ${
-              isToday ? "text-accent" : "text-muted"
-            }`}>
+            <span className={`text-xs font-medium ${isToday ? "text-accent" : "text-secondary"}`}>
               {dayName}
             </span>
             <span
-              className={`mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
-                isToday ? "bg-accent text-base" : "text-secondary"
-              }`}
+              className={`mt-1 text-2xl font-semibold tabular-nums leading-none ${isToday ? "text-accent" : "text-primary"}`}
             >
               {dayNum}
             </span>

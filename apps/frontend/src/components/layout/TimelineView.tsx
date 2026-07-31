@@ -172,7 +172,7 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
           <line x1="8" y1="2" x2="8" y2="6"/>
           <line x1="3" y1="10" x2="21" y2="10"/>
         </svg>
-        <span className="text-xs font-semibold text-primary mr-2 hidden sm:block">Timeline</span>
+        <span className="text-lg font-bold text-primary mr-2 hidden sm:block">Timeline</span>
 
         {filterBadge && (
           <span className="inline-flex items-center gap-1 bg-accent/15 text-accent text-[10px] px-2 py-0.5 rounded">
@@ -184,37 +184,37 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
         <div className="flex-1" />
 
         <div className="flex items-center gap-1">
-          <button onClick={handlePrevWeek} className="btn bg-elevated px-1.5 py-0.5 text-xs text-secondary hover:bg-hover rounded">
+          <button onClick={handlePrevWeek} className="btn bg-elevated px-3 py-1.5 text-xs text-secondary hover:bg-hover">
             ◀
           </button>
-          <button onClick={handleNextWeek} className="btn bg-elevated px-1.5 py-0.5 text-xs text-secondary hover:bg-hover rounded">
+          <button onClick={handleNextWeek} className="btn bg-elevated px-3 py-1.5 text-xs text-secondary hover:bg-hover">
             ▶
           </button>
         </div>
 
         <button
           onClick={() => setKanbanMode(v => !v)}
-          className={`btn text-[10px] px-2 py-1 rounded ${kanbanMode ? "bg-accent text-white" : "bg-elevated border border-border text-secondary hover:text-primary"}`}
+          className={`btn text-xs px-3 py-1.5 rounded-full ${kanbanMode ? "bg-accent text-white" : "bg-elevated border border-border text-secondary hover:text-primary"}`}
         >
           {kanbanMode ? "Timeline" : "Kanban"}
         </button>
 
-        <button onClick={onOpenSticky} className="btn bg-elevated border border-border text-[10px] px-2 py-1 rounded text-secondary hover:text-primary">
+        <button onClick={onOpenSticky} className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary">
           Notes
         </button>
 
         <button
           onClick={() => { setFormDefaultDate(null); setShowTaskForm(!showTaskForm); }}
-          className="btn btn-primary px-2 py-1 text-[10px]"
+          className="btn btn-primary px-4 py-1.5 text-xs"
         >
           + New
         </button>
 
-        <button onClick={() => router.push("/settings")} className="btn bg-elevated border border-border text-xs px-2 py-1 rounded text-secondary hover:text-primary" title="Settings">
+        <button onClick={() => router.push("/settings")} className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary" title="Settings">
           ⚙
         </button>
 
-        <button onClick={() => onToggleRight?.()} className="flex h-6 w-6 items-center justify-center rounded bg-gradient-to-br from-accent to-purple-500 text-white hover:from-accent-hover text-xs" title="AI">
+        <button onClick={() => onToggleRight?.()} className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-accent to-purple-500 text-white hover:from-accent-hover text-base" title="AI">
           ⚡
         </button>
       </div>
@@ -245,8 +245,8 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
       ) : (
       <div className="flex" style={{ flex: 1, minHeight: 0 }}>
         {/* Middle category column: fixed 200px Y-axis labels */}
-        <div className="shrink-0 border-r border-border bg-surface overflow-y-auto" style={{ width: 200 }}>
-          <div className="sticky top-0 z-10 h-10 border-b border-border flex items-center px-3 bg-surface">
+        <div className="shrink-0 border-r border-border/40 bg-surface overflow-y-auto" style={{ width: 200 }}>
+          <div className="sticky top-0 z-10 h-10 border-b border-border/40 flex items-center px-3 bg-surface">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Projects</span>
           </div>
           {hasTasks ? (
@@ -255,7 +255,7 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
               const label = pid === "__none__" ? "No Project" : project?.name || "Unknown";
               const count = tasksByProject[pid].length;
               return (
-                <div key={pid} className="flex items-center gap-2 border-b border-border/60 px-3" style={{ minHeight: 48 }}>
+                <div key={pid} className="flex items-center gap-2 border-b border-border/30 px-3" style={{ minHeight: 48 }}>
                   <div className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: project?.color || "var(--text-muted)" }} />
                   <span className="truncate text-xs font-medium text-secondary flex-1">{label}</span>
                   <span className="text-[10px] text-muted">{count}</span>

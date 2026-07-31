@@ -16,7 +16,7 @@ export function ProjectItem({ project, count, isSelected, onClick, onDelete }: P
       onClick={() => onClick?.(project.id)}
       className={`sidebar-item group ${isSelected ? "active" : ""}`}
     >
-      {project.icon && <span className="text-sm">{project.icon}</span>}
+      {project.icon && <span className="text-base">{project.icon}</span>}
       <span
         className="h-2.5 w-2.5 shrink-0 rounded-full"
         style={{ backgroundColor: project.color || "var(--text-muted)" }}

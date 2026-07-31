@@ -37,11 +37,14 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
   const barStyle: React.CSSProperties = {
     ...style,
     position: "absolute",
-    height: 28,
+    height: 38,
     backgroundColor: colors.bg + "20",
+    border: `1px solid ${colors.border}33`,
     borderLeft: `3px solid ${colors.border}`,
-    borderRadius: 4,
-    padding: "0 8px",
+    borderRadius: 8,
+    padding: "6px 12px",
+    marginLeft: 4,
+    marginRight: 4,
     display: "flex",
     alignItems: "center",
     cursor: "grab",
@@ -71,7 +74,7 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
             {PRIORITY_LABELS[task.priority]}
           </span>
         )}
-        <span className="truncate text-xs font-medium" style={{ color: colors.border }}>
+        <span className="truncate text-sm font-medium" style={{ color: colors.border }}>
           {task.title}
         </span>
         {task.tags && task.tags.length > 0 && (

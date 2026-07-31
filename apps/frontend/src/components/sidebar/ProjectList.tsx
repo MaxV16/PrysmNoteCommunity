@@ -31,7 +31,7 @@ export function ProjectList() {
 
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between px-1">
+      <div className="mb-2 flex items-center justify-between px-1 pt-1">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted">Lists</h3>
         <button
           onClick={() => setIsAdding(!isAdding)}

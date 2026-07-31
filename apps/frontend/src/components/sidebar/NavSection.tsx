@@ -56,18 +56,18 @@ export function NavSection() {
             onClick={() => setNavFilter(isActive ? null : item.filter)}
             className={`sidebar-item group ${isActive ? "active" : ""}`}
           >
-            <span className="text-base">{item.icon}</span>
+            <span className="text-lg">{item.icon}</span>
             <span className="flex-1 text-left">{item.label}</span>
             {count > 0 && (
               <span
-                className={`badge ${
+                className={`badge ml-auto ${
                   isActive ? "bg-accent/20 text-accent" : "bg-elevated text-muted"
                 }`}
               >
                 {count}
               </span>
             )}
-              <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
+              <span className="text-[10px] text-muted opacity-0 group-hover:opacity-100 transition-opacity ml-1">
                 {item.filter === "inbox" ? "⌘I" : item.filter === "today" ? "⌘T" : "⌘N"}
               </span>
           </button>
