@@ -1,20 +1,29 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
 
-export function useTimeline(viewDays = 14) {
+export function useTimeline(initialDays = 14) {
   const tasks = useAppStore((s) => s.tasks);
+  const [days, setDays] = useState(initialDays);
   const [scrollOffset, setScrollOffset] = useState(0);
+
+  const expandBackward = useCallback((amount: number) => {
+    setScrollOffset((prev) => prev - amount);
+  }, []);
+
+  const expandForward = useCallback((amount: number) => {
+    setScrollOffset((prev) => prev + amount);
+  }, []);
 
   const visibleRange = useMemo(() => {
     const now = new Date();
     const start = new Date(now);
     start.setDate(start.getDate() + scrollOffset);
     const end = new Date(start);
-    end.setDate(end.getDate() + viewDays);
+    end.setDate(end.getDate() + days);
     return { start, end };
-  }, [scrollOffset, viewDays]);
+  }, [scrollOffset, days]);
 
   const visibleTasks = useMemo(
     () =>
@@ -31,6 +40,8 @@ export function useTimeline(viewDays = 14) {
     visibleRange,
     scrollOffset,
     setScrollOffset,
-    viewDays,
+    viewDays: days,
+    expandBackward,
+    expandForward,
   };
 }

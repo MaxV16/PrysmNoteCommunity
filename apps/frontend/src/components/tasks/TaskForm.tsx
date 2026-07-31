@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/stores/app-store";
 import type { Task, TaskStatus } from "@/types/task";
-import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 
 interface TaskFormProps {
   onSubmit: (data: {
@@ -96,7 +95,7 @@ function CalendarPicker({ value, onChange, placeholder }: { value: string; onCha
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="input-field text-left text-xs h-8 flex items-center"
+        className="input-field text-left text-xs h-10 flex items-center"
       >
         {value ? formatDateInput(value) : <span className="text-muted">{placeholder}</span>}
       </button>
@@ -152,12 +151,10 @@ function CalendarPicker({ value, onChange, placeholder }: { value: string; onCha
 
 export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormProps) {
   const { projects, tags } = useAppStore();
-  const { addNoteWithContent } = useStickyBoard();
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
-  const today = new Date().toISOString().split("T")[0];
-  const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || today);
-  const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || today);
+  const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || "");
+  const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || "");
   const [status, setStatus] = useState<TaskStatus>(initial?.status || "todo");
   const [priority, setPriority] = useState(initial?.priority || 3);
   const [projectId, setProjectId] = useState(initial?.project_id || "");
@@ -165,7 +162,6 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     initial?.estimated_minutes?.toString() || (initial ? "" : "30")
   );
-  const [addStickyNote, setAddStickyNote] = useState(false);
 
   const initRecurrence = initial?.recurrence_rule || "";
   const [recurrencePreset, setRecurrencePreset] = useState(() => {
@@ -190,9 +186,6 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
-    if (!initial && addStickyNote) {
-      addNoteWithContent(title.trim(), (description || "").trim());
-    }
     onSubmit({
       title: title.trim(),
       description: description.trim() || undefined,
@@ -208,86 +201,116 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2 overflow-y-auto max-h-[60vh]" style={{ minHeight: 0 }}>
-      <input
-        type="text"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder="What needs to be done?"
-        className="input-field text-sm h-8"
-        autoFocus
-      />
-      <textarea
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        placeholder="Description"
-        rows={2}
-        className="input-field resize-none text-xs"
-      />
-      <div className="flex gap-2">
-        <CalendarPicker value={startDate} onChange={setStartDate} placeholder="Start date" />
-        <CalendarPicker value={dueDate} onChange={setDueDate} placeholder="Due date" />
-      </div>
-      <div className="flex gap-2">
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value as TaskStatus)}
-          className="input-field text-xs h-8 flex-1"
-        >
-          {STATUS_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-        <select
-          value={priority}
-          onChange={(e) => setPriority(Number(e.target.value))}
-          className="input-field text-xs h-8 flex-1"
-        >
-          {[1, 2, 3, 4, 5].map((p) => (
-            <option key={p} value={p}>P{p}</option>
-          ))}
-        </select>
-      </div>
-      <select
-        value={projectId}
-        onChange={(e) => setProjectId(e.target.value)}
-        className="input-field text-xs h-8"
-      >
-        <option value="">No Project</option>
-        {projects.map((p) => (
-          <option key={p.id} value={p.id}>{p.name}</option>
-        ))}
-      </select>
-      <div className="flex gap-2">
-        <select
-          value={recurrencePreset}
-          onChange={(e) => handlePresetChange(e.target.value)}
-          className="input-field text-xs h-8 flex-1"
-        >
-          {RECURRENCE_PRESETS.map((p) => (
-            <option key={p.value} value={p.value}>{p.label}</option>
-          ))}
-        </select>
-        {recurrencePreset === "custom" && (
-          <input
-            type="text"
-            value={recurrenceRule}
-            onChange={(e) => setRecurrenceRule(e.target.value)}
-            placeholder="RRULE"
-            className="input-field text-xs h-8 flex-1"
-          />
-        )}
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-y-auto max-h-[60vh]" style={{ minHeight: 0 }}>
+      <div>
+        <label className="text-xs font-medium text-secondary mb-1.5 block">Task Title</label>
         <input
-          type="number"
-          value={estimatedMinutes}
-          onChange={(e) => setEstimatedMinutes(e.target.value)}
-          placeholder="min"
-          className="input-field text-xs h-8 w-16 shrink-0"
-          min={1}
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="What needs to be done?"
+          className="input-field text-sm placeholder:text-secondary"
+          autoFocus
         />
       </div>
+      <div>
+        <label className="text-xs font-medium text-secondary mb-1.5 block">Description</label>
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Add details..."
+          rows={2}
+          className="input-field resize-none text-xs placeholder:text-secondary"
+        />
+      </div>
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-xs font-medium text-secondary mb-1.5 block">Start Date</label>
+          <CalendarPicker value={startDate} onChange={setStartDate} placeholder="Not set" />
+        </div>
+        <div className="flex-1">
+          <label className="text-xs font-medium text-secondary mb-1.5 block">Due Date</label>
+          <CalendarPicker value={dueDate} onChange={setDueDate} placeholder="Not set" />
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-xs font-medium text-secondary mb-1.5 block">Status</label>
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as TaskStatus)}
+            className="input-field text-xs h-10"
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1">
+          <label className="text-xs font-medium text-secondary mb-1.5 block">Priority</label>
+          <select
+            value={priority}
+            onChange={(e) => setPriority(Number(e.target.value))}
+            className="input-field text-xs h-10"
+          >
+            {[1, 2, 3, 4, 5].map((p) => (
+              <option key={p} value={p}>P{p}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div>
+        <label className="text-xs font-medium text-secondary mb-1.5 block">Project</label>
+        <select
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+          className="input-field text-xs h-10"
+        >
+          <option value="">No Project</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-xs font-medium text-secondary mb-1.5 block">Recurrence</label>
+          <select
+            value={recurrencePreset}
+            onChange={(e) => handlePresetChange(e.target.value)}
+            className="input-field text-xs h-10"
+          >
+            {RECURRENCE_PRESETS.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+        {recurrencePreset === "custom" && (
+          <div className="flex-1">
+            <label className="text-xs font-medium text-secondary mb-1.5 block">RRULE</label>
+            <input
+              type="text"
+              value={recurrenceRule}
+              onChange={(e) => setRecurrenceRule(e.target.value)}
+              placeholder="FREQ=DAILY"
+              className="input-field text-xs h-10"
+            />
+          </div>
+        )}
+        <div>
+          <label className="text-xs font-medium text-secondary mb-1.5 block">Duration (mins)</label>
+          <input
+            type="number"
+            value={estimatedMinutes}
+            onChange={(e) => setEstimatedMinutes(e.target.value)}
+            placeholder="30"
+            className="input-field text-xs h-10 w-24 shrink-0"
+            min={1}
+          />
+        </div>
+      </div>
       {tags.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           {tags.map((tag) => {
             const isSelected = selectedTags.includes(tag.id);
             return (
@@ -311,18 +334,12 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           })}
         </div>
       )}
-      {!isEdit && (
-        <label className="flex items-center gap-2 text-xs text-secondary cursor-pointer">
-          <input type="checkbox" checked={addStickyNote} onChange={(e) => setAddStickyNote(e.target.checked)} className="rounded border-border accent-accent" />
-          Also create as sticky note
-        </label>
-      )}
-      <div className="flex gap-2 pt-1">
-        <button type="submit" className="btn flex-1 bg-accent py-1.5 text-xs font-semibold text-base hover:bg-accent-hover">
-          {isEdit ? "Update Task" : "Create Task"}
-        </button>
-        <button type="button" onClick={onCancel} className="btn bg-elevated px-3 py-1.5 text-xs text-secondary hover:bg-hover hover:text-primary">
+      <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-border/40">
+        <button type="button" onClick={onCancel} className="btn bg-elevated border border-border px-4 py-2 text-sm text-secondary hover:bg-hover hover:text-primary">
           Cancel
+        </button>
+        <button type="submit" className="btn btn-primary px-6 py-2 text-sm">
+          {isEdit ? "Update Task" : "Create Task"}
         </button>
       </div>
     </form>

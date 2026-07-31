@@ -59,6 +59,7 @@ function MainLayout() {
         <TimelineView
           onToggleRight={() => setRightOpen(v => !v)}
           onOpenSticky={toggleSticky}
+          hideProjects={leftCollapsed}
         />
       </div>
       {rightOpen && (
