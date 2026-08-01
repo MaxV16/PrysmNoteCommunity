@@ -540,3 +540,43 @@ async def test_router_agent_loop_creates_task(client, ai_user, monkeypatch):
 
 async def _dummy_key(session, user, provider):
     return "test-key"
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_calls_accepts_uuid_object_user_id(db_session: AsyncSession, ai_user):
+    """The router passes user.id, which SQLAlchemy gives us as a uuid.UUID object
+    (NOT a string). execute_tool_calls must normalize it internally; otherwise
+    every tool crashes with \"'UUID' object has no attribute 'replace'\"."""
+    from uuid import UUID as _UUID
+    user_id = _UUID(str(ai_user))
+
+    tool_calls = [{
+        "id": "call_uuid",
+        "function": {
+            "name": "create_task",
+            "arguments": json.dumps({"title": "UUID Task", "start_date": "2026-08-03"}),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, user_id, db_session)
+    assert len(results) == 1
+    content = json.loads(results[0]["content"])
+    assert content["created"] is True, f"create_task failed with UUID user_id: {results}"
+
+
+@pytest.mark.asyncio
+async def test_execute_search_accepts_uuid_object_user_id(db_session: AsyncSession, ai_user):
+    from uuid import UUID as _UUID
+    user_id = _UUID(str(ai_user))
+
+    tool_calls = [{
+        "id": "call_uuid_s",
+        "function": {
+            "name": "search_tasks",
+            "arguments": json.dumps({"query": "nonexistent"}),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, user_id, db_session)
+    content = json.loads(results[0]["content"])
+    assert "found" in content, f"search_tasks failed with UUID user_id: {results}"

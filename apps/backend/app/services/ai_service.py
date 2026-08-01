@@ -29,13 +29,13 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_task",
-            "description": "Create a new task",
+            "description": "Create a new task. IMPORTANT: if the user mentions a date/time or relative day (tomorrow, next Monday, Friday, etc.), resolve it to an exact ISO date using TODAY'S DATE and ALWAYS pass it in start_date (and due_date if relevant). Do not create date-less tasks when the user gave a date.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "title": {"type": "string"},
                     "project": {"type": "string", "description": "project name"},
-                    "start_date": {"type": "string", "description": "YYYY-MM-DD"},
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD. REQUIRED whenever the user mentions a date/time."},
                     "due_date": {"type": "string", "description": "YYYY-MM-DD"},
                     "priority": {"type": "integer", "minimum": 1, "maximum": 5},
                     "recurrence_rule": {"type": "string", "description": "RRULE string"},
@@ -248,7 +248,8 @@ CORE BEHAVIOR: When the user gives you a request, follow this protocol:
 
 DECISION RULES:
 - When the user asks to add/schedule/create a task (e.g. "schedule GP appointment next Monday at 12pm", "add a reminder to call mom"), CALL create_task (or batch_create_tasks for several). Only skip creating if you genuinely cannot parse the details — then ask ONE clarifying question.
-- "12pm", "morning", "in the afternoon" have no time field; capture them in description and set estimated_minutes if useful.
+- If the user's request includes ANY date/time ("next Monday", "tomorrow", "Friday", "at 12pm", "next week"), you MUST compute the exact YYYY-MM-DD from TODAY'S DATE and pass it as start_date. NEVER create a date-less task when a date was given.
+- "12pm", "morning", "in the afternoon" have no date field; capture them in description and set estimated_minutes if useful.
 - If the user asks "what's coming up / deadlines", use get_upcoming_deadlines and summarize.
 - If the user asks to find tasks, use search_tasks.
 - If the user asks to move a task, use reschedule_task. If they ask to edit fields, use update_task.
@@ -309,6 +310,11 @@ async def execute_tool_calls(
     from datetime import date as _date
     from app.models.task import Task, TaskStatus
     from app.models.project import Project
+
+    # Normalize user_id to a string. The router passes user.id, which SQLAlchemy
+    # hands over as a uuid.UUID object; wrapping UUID(uuid.UUID) in the tool
+    # handlers crashes with "'UUID' object has no attribute 'replace'".
+    user_id = str(user_id)
 
     def _parse_date_arg(value):
         if value is None or isinstance(value, _date):
