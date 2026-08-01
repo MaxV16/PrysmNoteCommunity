@@ -58,8 +58,24 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(error.detail || "Request failed");
+    let message: string;
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === "string") {
+        message = body.detail;
+      } else if (Array.isArray(body?.detail) && body.detail.length > 0) {
+        // FastAPI validation errors: pick the first field message.
+        const first = body.detail[0];
+        message = first?.msg || String(first) || "Request failed";
+      } else if (typeof body?.message === "string") {
+        message = body.message;
+      } else {
+        message = res.statusText || "Request failed";
+      }
+    } catch {
+      message = res.statusText || "Request failed";
+    }
+    throw new Error(message);
   }
 
   return res.json();

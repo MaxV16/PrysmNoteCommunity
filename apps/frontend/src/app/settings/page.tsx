@@ -167,7 +167,7 @@ export default function SettingsPage() {
   const { themeName, setThemeName, fontFamily, setFontFamily, background, setBackgroundPreset, setBackgroundImage, clearBackground, customTheme, setCustomTheme } =
     useTheme();
   const router = useRouter();
-  const { keys, fetchKeys, saveKey, deleteKey } = useApiKeys();
+  const { keys, fetchKeys, saveKey, deleteKey, getLocalKey: getApiLocalKey } = useApiKeys();
   const { tasks, projects } = useAppStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("account");
@@ -306,11 +306,23 @@ export default function SettingsPage() {
     [saveKey],
   );
 
-  const handleTestKey = async (provider: string, key: string) => {
+  const handleTestKey = async (provider: string, key?: string) => {
     setTestingKey(provider);
     setKeyTestResults((prev) => ({ ...prev, [provider]: null }));
     try {
-      const res = await api.post<{ valid: boolean; error?: string }>("/keys/test", { provider, api_key: key });
+      // Prefer the decrypted locally-cached key so "Test" validates the actual
+      // configured key (not the cleared input box). Fall back to the typed key.
+      let apiKey = key?.trim() || "";
+      if (!apiKey) {
+        const local = await getApiLocalKey(provider);
+        if (local) apiKey = local;
+      }
+      if (!apiKey) {
+        setKeyTestResults((prev) => ({ ...prev, [provider]: { valid: false, error: "No API key to test" } }));
+        return;
+      }
+      const res = await api.post<{ valid: boolean; error?: string }>("/keys/test", { provider, api_key: apiKey });
+      // The backend may return a readable `detail` for provider/validation issues.
       setKeyTestResults((prev) => ({ ...prev, [provider]: res }));
     } catch (e: unknown) {
       setKeyTestResults((prev) => ({ ...prev, [provider]: { valid: false, error: e instanceof Error ? e.message : "Request failed" } }));
