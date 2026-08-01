@@ -451,7 +451,6 @@ async def execute_tool_calls(
                             Task.user_id == UUID(user_id),
                             Task.id != task.id,
                             Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
-                            Task.start_date.isnot(None),
                             or_(
                                 Task.start_date == ts,
                                 Task.due_date == te,

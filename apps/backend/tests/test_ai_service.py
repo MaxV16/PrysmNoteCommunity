@@ -615,6 +615,36 @@ async def test_execute_create_task_conflict_enrichment(db_session: AsyncSession,
 
 
 @pytest.mark.asyncio
+async def test_execute_create_task_conflict_enrichment_due_date_only(db_session: AsyncSession, ai_user):
+    """An existing task that only has a due_date (no start_date) landing on the
+    new task's date must still be flagged as a conflict (regression for a dead
+    SQL disjunct that made due-date-only tasks undetectable)."""
+    from app.models.task import Task
+    user_id = ai_user
+    existing = Task(
+        user_id=user_id, title="Payment Due",
+        due_date=date(2026, 8, 3), priority=2,
+    )
+    db_session.add(existing)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_duedate_conflict",
+        "function": {
+            "name": "create_task",
+            "arguments": json.dumps({"title": "Client Call", "start_date": "2026-08-03", "priority": 4}),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert content["created"] is True
+    assert "conflict_warning" in content, f"expected due-date-only conflict warning: {content}"
+    warn = content["conflict_warning"]
+    assert any(c["title"] == "Payment Due" for c in warn["conflicts"])
+
+
+@pytest.mark.asyncio
 async def test_execute_create_task_no_conflict_on_distinct_day(db_session: AsyncSession, ai_user):
     from app.models.task import Task
     user_id = ai_user

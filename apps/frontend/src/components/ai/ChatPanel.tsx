@@ -169,6 +169,9 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       saveChatHistory(updated);
     }
     newChat();
+    // Persist the cleared state so a refresh does not resurrect the previous
+    // chat under a brand-new session id.
+    saveMessages([]);
   };
 
   const handleLoadServerSession = async (sessionId: string) => {
