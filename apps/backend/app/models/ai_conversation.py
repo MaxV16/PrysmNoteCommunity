@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Uuid, DateTime, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -10,9 +10,9 @@ from app.models.base import Base
 class AiConversation(Base):
     __tablename__ = "ai_conversations"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    session_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    user_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    session_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), nullable=False)
     role: Mapped[str] = mapped_column(String(10), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

@@ -1,7 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -10,8 +9,8 @@ from app.models.base import Base
 class UserToken(Base):
     __tablename__ = "user_tokens"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    user_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     access_token: Mapped[str] = mapped_column(Text, nullable=False)
     refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
