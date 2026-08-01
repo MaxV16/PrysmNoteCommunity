@@ -20,7 +20,7 @@ export default function TosPage() {
 
         <section className="space-y-4 text-sm text-secondary leading-relaxed">
           <h2 className="text-lg font-semibold text-primary">2. Description of Service</h2>
-          <p>Prysm Note is an AI-powered task management application that helps users organize, prioritize, and complete their work. The Service is provided under an open-core model, with the Community Edition available under AGPL-3.0 and Enterprise features available under a commercial license.</p>
+          <p>Prysm Note is an AI-powered task management application that helps users organize, prioritize, and complete their work. The Service is provided under an open-core model, provided as open source under the AGPL-3.0 license.</p>
         </section>
 
         <section className="space-y-4 text-sm text-secondary leading-relaxed">

@@ -34,7 +34,6 @@ Allowed build-only commands that self-terminate:
 If Docker containers are running when you start working, kill them immediately with `docker compose down`. Never leave processes running after your work is done. Never use `docker compose up`, `npm run dev`, `uvicorn`, `next dev`, or any other long-running command.
 
 ## Project Overview
-Prysm Note is an AI-powered task management application with a 3-pane UI (sidebar, timeline, AI chat). Built as a folder-based monorepo. **Open-core model**: the `ee/` directory contains proprietary enterprise features not shipped in the community release.
 
 ## Architecture
 
@@ -47,46 +46,6 @@ prysm-note/
 ├── docker-compose.yml
 └── turbo.json           # Turborepo pipeline
 ```
-
-## Docker & Build Critical Context
-
-### Docker Desktop for Windows Path Issue
-On Docker Desktop for Windows, `process.cwd()` and `__dirname` inside containers resolve to Windows host paths (e.g. `C:\Users\...`) rather than container paths (e.g. `/app/`). This breaks any build-time path resolution that relies on these globals.
-
-**ALWAYS use the `src/ee/` directory approach for EE file access:**
-- In `docker/frontend.Dockerfile`: `COPY ee/apps/frontend/ee ./src/ee/`
-- A local junction from `apps/frontend/src/ee/` → `../../ee/apps/frontend/ee/` may be needed for local dev
-
-### Docker Compose Dev Mode (Volume Mounts)
-The `docker-compose.yml` mounts `./apps/frontend:/app` in dev mode, OVERRIDING the Dockerfile build output. The container runs `npx next dev`, so changes to source files take effect immediately.
-
-**EE volume mount:** `./ee/apps/frontend/ee:/app/ee` (NOT `./ee:/app/ee` which puts files at the wrong path)
-
-### API Proxy Setup
-`NEXT_PUBLIC_API_URL=/api` — browsers use same-origin requests. Next.js rewrites proxy `/api/*` to `http://backend:8000/api/*` via the internal Docker network. This avoids CORS and host-port mapping issues.
-
-**`next.config.ts` rewrites:**
-```ts
-async rewrites() {
-  return [
-    { source: "/api/:path*", destination: `${process.env.API_PROXY || "http://backend:8000"}/api/:path*" },
-  ];
-}
-```
-Set `API_PROXY=http://backend:8000` in docker-compose frontend environment.
-
-### Rebuild & Restart Commands
-```bash
-# Full clean rebuild (required when Dockerfile, package.json, or next.config.ts change)
-docker compose build --no-cache frontend
-docker compose up -d
-
-# Restart containers (when only source files changed via volume mounts)
-docker compose restart frontend
-```
-
-### Known Docker Build Failures
-3. **Build succeeds locally but fails in Docker** — `process.cwd()`/`__dirname` path resolution difference. Fix: use `fs.existsSync` to probe multiple locations in the webpack alias
 
 ## Quick Start
 
