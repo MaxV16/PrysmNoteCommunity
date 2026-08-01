@@ -150,6 +150,11 @@ async def chat(
         tool_results = await execute_tool_calls(tool_calls, user.id, session, client)
         messages.extend(tool_results)
 
+        if _round == MAX_TOOL_ROUNDS - 1:
+            fallback = await client.chat(messages, tools=None)
+            content = (fallback.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
+            tool_calls = None
+
     await persist_conversation(session, user.id, session_id, "user", request.message)
     await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
     await session.commit()

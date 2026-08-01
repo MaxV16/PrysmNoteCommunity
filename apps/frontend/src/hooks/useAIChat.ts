@@ -275,10 +275,12 @@ export function useAIChat() {
       });
 
       abortRef.current = new AbortController();
-      await sendViaBackendRef.current(content, provider, sessionId, assistantId, context, abortRef.current?.signal);
-
-      setIsLoading(false);
-      abortRef.current = null;
+      try {
+        await sendViaBackendRef.current(content, provider, sessionId, assistantId, context, abortRef.current?.signal);
+      } finally {
+        setIsLoading(false);
+        abortRef.current = null;
+      }
     },
     [addChatMessage]
   );

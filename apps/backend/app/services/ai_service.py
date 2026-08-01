@@ -838,7 +838,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 })
 
             elif name == "suggest_best_time":
-                desired_date = args.get("desired_date")
+                desired_date = _parse_date_arg(args.get("desired_date"))
                 duration_hours = args.get("duration_hours", 1)
                 min_priority = args.get("min_priority_to_consider", 3)
 
@@ -868,7 +868,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
                     "content": json.dumps({
-                        "desired_date": desired_date,
+                        "desired_date": str(desired_date) if desired_date else None,
                         "duration_hours": duration_hours,
                         "tasks_that_day": len(day_tasks),
                         "suggestions": suggestions,
