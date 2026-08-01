@@ -6,22 +6,9 @@ import type { Task } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
+import { TIER_COLORS, normalizePriority } from "@/lib/priority";
 
-const PRIORITY_COLORS: Record<number, string> = {
-  1: "#EF5350",
-  2: "#FFA726",
-  3: "#4FC3F7",
-  4: "#66BB6A",
-  5: "#9E9E9E",
-};
-
-const PRIORITY_LABELS: Record<number, string> = {
-  1: "Urgent",
-  2: "High",
-  3: "Medium",
-  4: "Low",
-  5: "None",
-};
+const PRIORITY_COLORS: Record<number, string> = TIER_COLORS;
 
 export function ListView() {
   const tasks = useAppStore((s) => s.tasks);
@@ -146,7 +133,7 @@ export function ListView() {
                   </button>
                   <span
                     className="h-2 w-2 rounded-full shrink-0"
-                    style={{ backgroundColor: PRIORITY_COLORS[task.priority] || "#9E9E9E" }}
+                    style={{ backgroundColor: PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E" }}
                   />
                   <div className="flex-1 min-w-0">
                     <span className={`text-sm truncate block ${isDone ? "line-through text-muted" : "text-primary"}`}>

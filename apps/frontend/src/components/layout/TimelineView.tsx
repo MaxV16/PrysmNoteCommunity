@@ -7,7 +7,7 @@ import { useTimeline } from "@/hooks/useTimeline";
 import { TimelineHeader } from "@/components/timeline/TimelineHeader";
 import { TimelineGrid } from "@/components/timeline/TimelineGrid";
 import { TimelineLane } from "@/components/timeline/TimelineLane";
-import { TaskDetail } from "@/components/tasks/TaskDetail";
+import { TaskDetailDrawer } from "@/components/tasks/TaskDetailDrawer";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 import { CalendarView } from "@/components/calendar/CalendarView";
@@ -18,9 +18,8 @@ import { useUiModule } from "@/lib/ui-module-registry";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { useRouter } from "next/navigation";
 import { parseLocalDate, toLocalDateString } from "@/lib/utils";
+import { DAY_WIDTH } from "@/components/timeline/constants";
 
-// Fixed width, in px, of each day column in the infinite timeline.
-const DAY_WIDTH = 120;
 // How many days to prepend/append per expansion step.
 const EXPAND_STEP = 7;
 
@@ -465,13 +464,9 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
       </div>
       )}
 
-      {/* Task detail bottom panel */}
+      {/* Task detail drawer */}
       {selectedTask && (
-        <div className="shrink-0 border-t border-border bg-surface overflow-auto" style={{ maxHeight: "30vh" }}>
-          <div className="px-4 py-3">
-            <TaskDetail task={selectedTask} onClose={() => setSelectedTaskId(null)} />
-          </div>
-        </div>
+        <TaskDetailDrawer task={selectedTask} onClose={() => setSelectedTaskId(null)} />
       )}
     </div>
   );

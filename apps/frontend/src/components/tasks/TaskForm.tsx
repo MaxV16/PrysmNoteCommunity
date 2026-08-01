@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/stores/app-store";
 import type { Task, TaskStatus } from "@/types/task";
 import { toLocalDateString } from "@/lib/utils";
+import { TIER_LABELS, TIER_VALUES, normalizePriority, type PriorityTier } from "@/lib/priority";
 
 interface TaskFormProps {
   onSubmit: (data: {
@@ -157,7 +158,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || "");
   const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || "");
   const [status, setStatus] = useState<TaskStatus>(initial?.status || "todo");
-  const [priority, setPriority] = useState(initial?.priority || 3);
+  const [priority, setPriority] = useState<PriorityTier>(initial?.priority ? normalizePriority(initial.priority) : 2);
   const [projectId, setProjectId] = useState(initial?.project_id || "");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [estimatedMinutes, setEstimatedMinutes] = useState(
@@ -257,11 +258,11 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           <label className="text-xs font-medium text-secondary mb-1.5 block">Priority</label>
           <select
             value={priority}
-            onChange={(e) => setPriority(Number(e.target.value))}
+            onChange={(e) => setPriority(Number(e.target.value) as PriorityTier)}
             className="input-field text-xs h-10"
           >
-            {[1, 2, 3, 4, 5].map((p) => (
-              <option key={p} value={p}>P{p}</option>
+            {TIER_VALUES.map((p) => (
+              <option key={p} value={p}>{TIER_LABELS[p]}</option>
             ))}
           </select>
         </div>

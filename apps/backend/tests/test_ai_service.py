@@ -30,6 +30,9 @@ async def test_tool_definitions_have_all_tools():
         "suggest_subtasks", "detect_conflicts", "reschedule_task",
         "list_tasks_by_date_range", "suggest_best_time",
         "get_upcoming_deadlines", "batch_create_tasks",
+        "get_subtasks", "create_subtask", "update_subtask", "delete_subtask",
+        "reorder_subtasks", "convert_description_to_subtasks",
+        "convert_subtasks_to_description",
     }
     assert tool_names == expected, f"Missing tools: {expected - tool_names}"
 
@@ -584,14 +587,14 @@ async def test_execute_search_accepts_uuid_object_user_id(db_session: AsyncSessi
 
 @pytest.mark.asyncio
 async def test_execute_create_task_conflict_enrichment(db_session: AsyncSession, ai_user):
-    """Creating a dated task that overlaps an existing higher-priority (medical,
-    priority 5) task must surface a conflict_warning with outranks_new, so the
-    model warns instead of silently double-booking."""
+    """Creating a dated task that overlaps an existing higher-priority (high,
+    tier 1, e.g. medical) task must surface a conflict_warning with outranks_new,
+    so the model warns instead of silently double-booking."""
     from app.models.task import Task
     user_id = ai_user
     existing = Task(
         user_id=user_id, title="GP Appointment",
-        start_date=date(2026, 8, 3), due_date=date(2026, 8, 3), priority=5,
+        start_date=date(2026, 8, 3), due_date=date(2026, 8, 3), priority=1,
     )
     db_session.add(existing)
     await db_session.flush()
@@ -600,7 +603,7 @@ async def test_execute_create_task_conflict_enrichment(db_session: AsyncSession,
         "id": "call_conflict_create",
         "function": {
             "name": "create_task",
-            "arguments": json.dumps({"title": "Team Meeting", "start_date": "2026-08-03", "priority": 3}),
+            "arguments": json.dumps({"title": "Team Meeting", "start_date": "2026-08-03", "priority": 2}),
         },
     }]
 

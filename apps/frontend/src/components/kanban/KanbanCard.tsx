@@ -4,14 +4,9 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
+import { TIER_COLORS, normalizePriority } from "@/lib/priority";
 
-const PRIORITY_COLORS: Record<number, string> = {
-  1: "#EF5350",
-  2: "#FFA726",
-  3: "#4FC3F7",
-  4: "#66BB6A",
-  5: "#9E9E9E",
-};
+const PRIORITY_COLORS = TIER_COLORS;
 
 function formatDueDate(dateStr: string): string {
   const date = new Date(dateStr);
@@ -67,7 +62,7 @@ export function KanbanCard({ task }: KanbanCardProps) {
       <div className="flex items-start gap-2" {...attributes} {...listeners}>
         <span
           className="mt-0.5 block h-2 w-2 shrink-0 rounded-full"
-          style={{ backgroundColor: PRIORITY_COLORS[task.priority] || "#9E9E9E" }}
+          style={{ backgroundColor: PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E" }}
         />
         <span className="text-sm text-primary leading-snug">{task.title}</span>
       </div>

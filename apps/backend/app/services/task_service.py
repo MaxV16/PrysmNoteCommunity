@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task, TaskStatus
+from app.utils.priority import normalize_priority
 
 
 def _parse_date(value: str | None) -> date_type | None:
@@ -30,7 +31,7 @@ async def create_task(
     parent_task_id: UUID | None = None,
     description: str | None = None,
     status: str = "backlog",
-    priority: int = 3,
+    priority: int = 2,
     start_date: str | None = None,
     due_date: str | None = None,
     recurrence_rule: str | None = None,
@@ -42,7 +43,7 @@ async def create_task(
         title=title,
         description=description,
         status=_coerce_status(status),
-        priority=priority,
+        priority=normalize_priority(priority),
         start_date=_parse_date(start_date),
         due_date=_parse_date(due_date),
         recurrence_rule=recurrence_rule,
@@ -78,6 +79,8 @@ async def update_task(session: AsyncSession, task_id: UUID, fields: dict) -> Tas
                 value = _parse_date(value)
             if key == "status":
                 value = _coerce_status(value)
+            if key == "priority":
+                value = normalize_priority(value)
             setattr(task, key, value)
     await session.flush()
     return task

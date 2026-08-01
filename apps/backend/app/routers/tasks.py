@@ -11,6 +11,7 @@ from app.models.task import Task, TaskStatus
 from app.models.user import User
 from app.services.embedding_service import generate_and_store_embedding
 from app.services.task_service import create_task, delete_task, get_task, search_tasks, update_task
+from app.services import subtask_service
 
 VALID_STATUSES = {s.value for s in TaskStatus}
 
@@ -341,6 +342,8 @@ async def create_subtask(
     parent = await get_task(session, UUID(task_id))
     if not parent:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent task not found")
+    if str(parent.user_id) != str(user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent task not found")
 
     subtask = Task(
         user_id=user.id,
@@ -348,12 +351,60 @@ async def create_subtask(
         title=request.title,
         description=request.description,
         status=TaskStatus.TODO,
+        sort_order=await subtask_service.next_sort_order(session, UUID(task_id)),
     )
     session.add(subtask)
     await session.flush()
 
     await session.refresh(subtask)
     return {"id": str(subtask.id), "title": subtask.title, "status": subtask.status.value}
+
+
+@router.post("/{task_id}/subtasks/reorder")
+async def reorder_subtasks(
+    task_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    parent = await get_task(session, UUID(task_id))
+    if not parent or str(parent.user_id) != str(user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent task not found")
+    ordered_ids = [str(i) for i in (body.get("ordered_ids") or [])]
+    result = await subtask_service.reorder_subtasks(session, parent, ordered_ids)
+    return {"status": "ok", "subtasks": result}
+
+
+@router.post("/{task_id}/description-to-subtasks")
+async def description_to_subtasks(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    parent = await get_task(session, UUID(task_id))
+    if not parent or str(parent.user_id) != str(user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    created = await subtask_service.convert_description_to_subtasks(session, parent)
+    return {
+        "status": "ok",
+        "description": parent.description,
+        "subtasks": [
+            {"id": str(t.id), "title": t.title, "status": t.status.value} for t in created
+        ],
+    }
+
+
+@router.post("/{task_id}/subtasks-to-description")
+async def subtasks_to_description(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    parent = await get_task(session, UUID(task_id))
+    if not parent or str(parent.user_id) != str(user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    description = await subtask_service.convert_subtasks_to_description(session, parent)
+    return {"status": "ok", "description": description}
 
 
 @router.patch("/{task_id}/subtasks/{subtask_id}")
@@ -512,7 +563,7 @@ async def batch_create_tasks(
             title=t_data.get("title", "Untitled"),
             start_date=t_data.get("start_date"),
             due_date=t_data.get("due_date"),
-            priority=t_data.get("priority", 3),
+            priority=t_data.get("priority", 2),
         )
         created.append({"id": str(task.id), "title": task.title})
 

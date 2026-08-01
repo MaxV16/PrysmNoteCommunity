@@ -6,14 +6,9 @@ import type { Task } from "@/types/task";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { useTasks } from "@/hooks/useTasks";
+import { TIER_COLORS, normalizePriority } from "@/lib/priority";
 
-const PRIORITY_COLORS: Record<number, string> = {
-  1: "#EF5350",
-  2: "#FFA726",
-  3: "#4FC3F7",
-  4: "#66BB6A",
-  5: "#9E9E9E",
-};
+const PRIORITY_COLORS = TIER_COLORS;
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAY_HEADERS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -119,8 +114,8 @@ export function CalendarView() {
                     onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
                     className="truncate text-[10px] rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110"
                     style={{
-                      backgroundColor: (PRIORITY_COLORS[task.priority] || "#9E9E9E") + "22",
-                      borderLeft: `2px solid ${PRIORITY_COLORS[task.priority] || "#9E9E9E"}`,
+                      backgroundColor: (PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E") + "22",
+                      borderLeft: `2px solid ${PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E"}`,
                       color: "var(--text-primary)",
                     }}
                   >

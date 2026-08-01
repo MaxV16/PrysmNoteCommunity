@@ -47,6 +47,13 @@ const TOOL_LABELS: Record<string, string> = {
   get_task_details: "Loading task details",
   link_tasks: "Linking tasks",
   suggest_subtasks: "Suggesting subtasks",
+  get_subtasks: "Reading subtasks",
+  create_subtask: "Adding subtask",
+  update_subtask: "Updating subtask",
+  delete_subtask: "Removing subtask",
+  reorder_subtasks: "Reordering subtasks",
+  convert_description_to_subtasks: "Splitting description into subtasks",
+  convert_subtasks_to_description: "Collapsing subtasks into description",
 };
 
 function prettyToolName(name: string): string {

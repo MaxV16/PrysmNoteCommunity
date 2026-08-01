@@ -3,6 +3,7 @@
 import type { ChatMessage as ChatMessageType } from "@/types/ai";
 import { Avatar } from "@/components/ui/Avatar";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { Markdown } from "./Markdown";
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -41,7 +42,11 @@ export function ChatMessage({ message }: ChatMessageProps) {
           }`}
         >
           {message.content ? (
-            message.content
+            isUser ? (
+              message.content
+            ) : (
+              <Markdown>{message.content}</Markdown>
+            )
           ) : (
             <TypingIndicator />
           )}

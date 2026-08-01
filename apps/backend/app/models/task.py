@@ -32,7 +32,7 @@ class Task(Base):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[TaskStatus] = mapped_column(Enum(TaskStatus, name="task_status", values_callable=lambda x: [e.value for e in x]), default=TaskStatus.BACKLOG, nullable=False)
-    priority: Mapped[int] = mapped_column(SmallInteger, default=3, nullable=False)
+    priority: Mapped[int] = mapped_column(SmallInteger, default=2, nullable=False)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_all_day: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

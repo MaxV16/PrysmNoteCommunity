@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.base import get_provider
+from app.utils.priority import normalize_priority
 
 
 TOOL_DEFINITIONS = [
@@ -132,7 +133,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "detect_conflicts",
-            "description": "Detect scheduling conflicts for a dated task with priority information. Priority 5 (medical/health) always outranks lower-priority tasks. Use this to check whether a task clashes with existing higher-priority or medical tasks before finalizing a schedule and to surface clashes in your reply.",
+            "description": "Detect scheduling conflicts for a dated task with priority information. Priority 1 (high/medical/health) always outranks lower-priority tasks. Lower priority numbers are MORE important (1=high, 2=medium, 3=low). Use this to check whether a task clashes with existing higher-priority tasks before finalizing a schedule and to surface clashes in your reply.",
             "parameters": {
                 "type": "object",
                 "properties": {"task_id": {"type": "string"}},
@@ -229,6 +230,111 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_subtasks",
+            "description": "List the subtasks (child tasks) of a task, with status, priority and order",
+            "parameters": {
+                "type": "object",
+                "properties": {"task_id": {"type": "string"}},
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_subtask",
+            "description": "Create a subtask (child task) under a parent task",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                },
+                "required": ["task_id", "title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_subtask",
+            "description": "Update a subtask's title, status or priority",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "subtask_id": {"type": "string"},
+                    "fields": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "status": {"type": "string", "enum": ["backlog", "todo", "in_progress", "done", "cancelled"]},
+                            "priority": {"type": "integer"},
+                        },
+                    },
+                },
+                "required": ["task_id", "subtask_id", "fields"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_subtask",
+            "description": "Delete a subtask (child task) of a parent task",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "subtask_id": {"type": "string"},
+                },
+                "required": ["task_id", "subtask_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reorder_subtasks",
+            "description": "Reorder a task's subtasks by providing the ordered subtask ids",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "ordered_ids": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["task_id", "ordered_ids"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "convert_description_to_subtasks",
+            "description": "Split a task's description into subtasks (one per bullet/line), clearing the description",
+            "parameters": {
+                "type": "object",
+                "properties": {"task_id": {"type": "string"}},
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "convert_subtasks_to_description",
+            "description": "Collapse a task's subtasks back into a markdown description, deleting the subtasks",
+            "parameters": {
+                "type": "object",
+                "properties": {"task_id": {"type": "string"}},
+                "required": ["task_id"],
+            },
+        },
+    },
 ]
 
 
@@ -243,13 +349,13 @@ You are Prysm AI, a hyper-intelligent task management agent. You are the user's 
 CORE BEHAVIOR: When the user gives you a request, follow this protocol:
 1. PARSE: Extract task title, date/time, priority, recurrence, project, dependencies.
 2. ACT: For scheduling/creation requests, CONFIRM the details (compute exact dates yourself using TODAY'S DATE) then CREATE the task with create_task or batch_create_tasks. DO NOT just describe what you would do — actually do it.
-3. VERIFY CONFLICTS: When a request targets a SPECIFIC DATE (the user names a day — "next Monday", "March 3rd", "tomorrow", "Friday"), call list_tasks_by_date_range for that same day BEFORE creating so you know what is already scheduled. Medical/health tasks (priority 5) always outrank a regular meeting (priority 3): if the new dated task would clash with an existing higher-priority or medical task, DO NOT silently double-book — create it anyway but clearly warn the user in your reply with the exact date and the conflicting task's title/priority, or ask which to keep.
+3. VERIFY CONFLICTS: When a request targets a SPECIFIC DATE (the user names a day — "next Monday", "March 3rd", "tomorrow", "Friday"), call list_tasks_by_date_range for that same day BEFORE creating so you know what is already scheduled. High-priority tasks (priority 1 — use for medical/health anything) always outrank a routine meeting (priority 2): if the new dated task would clash with an existing higher-priority task, DO NOT silently double-book — create it anyway but clearly warn the user in your reply with the exact date and the conflicting task's title/priority, or ask which to keep.
 4. EXPLAIN: Briefly tell the user what you did (1-2 lines max), and if there was a conflict, explicitly call it out.
 
 DECISION RULES:
 - When the user asks to add/schedule/create a task (e.g. "schedule GP appointment next Monday at 12pm", "add a reminder to call mom"), CALL create_task (or batch_create_tasks for several). Only skip creating if you genuinely cannot parse the details — then ask ONE clarifying question.
 - If the user's request includes ANY date/time ("next Monday", "tomorrow", "Friday", "at 12pm", "next week"), you MUST compute the exact YYYY-MM-DD from TODAY'S DATE and pass it as start_date. NEVER create a date-less task when a date was given.
-- Before creating a task on a SPECIFIC date, call list_tasks_by_date_range for that date to check for conflicts. If a conflict exists and the existing task has higher priority (especially priority 5 = medical), mention it and the exact date in your reply.
+- Before creating a task on a SPECIFIC date, call list_tasks_by_date_range for that date to check for conflicts. If a conflict exists and the existing task has higher priority (especially priority 1 = high, which includes medical), mention it and the exact date in your reply.
 - "12pm", "morning", "in the afternoon" have no date field; capture them in description and set estimated_minutes if useful.
 - If the user asks "what's coming up / deadlines", use get_upcoming_deadlines and summarize.
 - If the user asks to find tasks, use search_tasks.
@@ -257,16 +363,19 @@ DECISION RULES:
 - Never end the turn after doing only read-only searches when the user asked you to CREATE something. Finish the job.
 
 NATURAL LANGUAGE UNDERSTANDING:
-- "gp appointment next week monday at 12pm" → next Monday, priority 5 (medical)
-- "call mom every sunday" → recurring task, priority 3
-- "finish the report by Friday" → due_date this Friday, priority from context
-- "maybe learn guitar someday" → backlog status, low priority, no dates
+- "gp appointment next week monday at 12pm" → next Monday, priority 1 (high/medical)
+- "call mom every sunday" → recurring task, priority 2 (medium)
+- "finish the report by Friday" → due_date this Friday, priority from context (default 2)
+- "maybe learn guitar someday" → backlog status, low priority (3), no dates
+- Priority scale is 3 levels: 1=High (red), 2=Medium (blue), 3=Low (green). Lower number = more important. Use 1 for medical/health or anything that must outrank routine meetings; use 2 by default; use 3 for low-priority/ someday items.
 - Relative dates across months: calculate correctly from TODAY'S DATE.
 
 ALWAYS:
 - Use create_task or batch_create_tasks for anything the user wants added.
 - Use reschedule_task when moving tasks, not just update_task.
 - When creating or rescheduling a task onto a specific date, check that date for conflicts (list_tasks_by_date_range) and warn the user if the day is already crowded or a higher-priority/medical task is scheduled.
+- To view a task's subtasks call get_subtasks; to add/update/delete/reorder them use the matching subtask tools. To rewrite a long description into a checklist use convert_description_to_subtasks; to collapse a checklist back into prose use convert_subtasks_to_description.
+- Use get_task_details to inspect any task (with its links, tags and subtasks) before manipulating it.
 - Be concise and decisive."""
 
     if context:
@@ -333,7 +442,7 @@ async def execute_tool_calls(
             return _date.fromisoformat(value)
         except (ValueError, TypeError):
             return None
-    from app.services.task_service import create_task, search_tasks
+    from app.services.task_service import create_task, search_tasks, get_task
 
     results = []
 
@@ -433,7 +542,7 @@ async def execute_tool_calls(
                     project_id=project_id,
                     start_date=args.get("start_date"),
                     due_date=args.get("due_date"),
-                    priority=args.get("priority", 3),
+                    priority=args.get("priority", 2),
                     recurrence_rule=args.get("recurrence_rule"),
                 )
 
@@ -458,27 +567,29 @@ async def execute_tool_calls(
                                 (Task.start_date <= te) & (Task.due_date.is_(None)),
                                 (Task.due_date >= ts) & (Task.start_date.is_(None)),
                             ),
-                        ).order_by(Task.priority.desc(), Task.start_date).limit(10)
+                        ).order_by(Task.priority.asc(), Task.start_date).limit(10)
                     )
                     for ct in conflict_result.scalars().all():
-                        ct_prio = ct.priority or 3
-                        # Match detect_conflicts' priority direction: a higher
-                        # numeric priority (medical/health = 5) is more important
-                        # than a lower one (regular meeting = 3).
+                        ct_prio = normalize_priority(ct.priority)
+                        new_prio = normalize_priority(task.priority or 2)
+                        # Priority tiers: lower number == more important
+                        # (1=high/red incl. medical, 2=medium/blue, 3=low/green).
+                        # A conflict task outranks the new task when its tier number
+                        # is SMALLER (more important).
                         conflicts.append({
                             "id": str(ct.id),
                             "title": ct.title,
                             "priority": ct.priority,
                             "start_date": str(ct.start_date) if ct.start_date else None,
                             "due_date": str(ct.due_date) if ct.due_date else None,
-                            "outranks_new": ct_prio > (task.priority or 3),
+                            "outranks_new": ct_prio < new_prio,
                         })
 
                 created_payload = {"created": True, "task": {"id": str(task.id), "title": task.title}}
                 if conflicts:
                     created_payload["conflict_warning"] = {
                         "conflict_count": len(conflicts),
-                        "message": "This task overlaps existing task(s) on the same day. If a conflicting task has higher priority (especially priority 5 = medical), you MUST warn the user in your reply with the date and conflicting title(s).",
+                        "message": "This task overlaps existing task(s) on the same day. If a conflicting task has HIGHER priority (priority 1 = high, which includes medical/health), you MUST warn the user in your reply with the date and conflicting title(s).",
                         "conflicts": conflicts,
                     }
                 results.append({
@@ -495,6 +606,8 @@ async def execute_tool_calls(
                 if task:
                     for key, value in (fields or {}).items():
                         if key in {"title", "description", "status", "priority", "start_date", "due_date"}:
+                            if key == "priority":
+                                value = normalize_priority(value)
                             setattr(task, key, value)
                     await session.flush()
                     results.append({
@@ -750,21 +863,23 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                                 (Task.due_date >= task.start_date) & (Task.start_date.is_(None)),
                             ),
                         )
-                        .order_by(Task.start_date)
+                        .order_by(Task.priority.asc())
                     )
                     conflicts = overlapping.scalars().all()
 
                     def compute_resolution(new_priority: int, conflict_tasks: list) -> list:
                         resolutions = []
+                        new_tier = normalize_priority(new_priority)
                         for ct in conflict_tasks:
-                            if ct.priority < new_priority:
+                            ct_tier = normalize_priority(ct.priority)
+                            if ct_tier < new_tier:
                                 resolutions.append({
-                                    "action": "suggest_reschedule",
+                                    "action": "suggest_move_new_task",
                                     "task_id": str(ct.id),
                                     "task_title": ct.title,
-                                    "reason": f"Lower priority ({ct.priority}) than new task ({new_priority})",
+                                    "reason": f"Existing task has higher priority ({ct_tier}) than new task ({new_tier})",
                                 })
-                            elif ct.priority == new_priority:
+                            elif ct_tier == new_tier:
                                 resolutions.append({
                                     "action": "conflict_warning",
                                     "task_id": str(ct.id),
@@ -773,10 +888,10 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                                 })
                             else:
                                 resolutions.append({
-                                    "action": "suggest_move_new_task",
+                                    "action": "suggest_reschedule",
                                     "task_id": str(ct.id),
                                     "task_title": ct.title,
-                                    "reason": f"Existing task has higher priority ({ct.priority})",
+                                    "reason": f"Lower priority ({ct_tier}) than new task ({new_tier})",
                                 })
                         return resolutions
 
@@ -901,15 +1016,19 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             elif name == "suggest_best_time":
                 desired_date = _parse_date_arg(args.get("desired_date"))
                 duration_hours = args.get("duration_hours", 1)
-                min_priority = args.get("min_priority_to_consider", 3)
+                min_priority = args.get("min_priority_to_consider", 2)
 
+                # A task counts as a "considered" conflict when its normalized
+                # tier is <= the threshold (lower tier number == more important).
+                # Default threshold 2 => consider high(1) + medium(2).
+                from sqlalchemy import or_
                 result = await session.execute(
                     select(Task).where(
                         Task.user_id == UUID(user_id),
                         Task.start_date == desired_date,
                         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
-                        Task.priority >= min_priority,
-                    ).order_by(Task.priority.desc())
+                        or_(*[Task.priority == t for t in [1, 2, 3] if t <= min_priority]),
+                    ).order_by(Task.priority.asc())
                 )
                 day_tasks = result.scalars().all()
 
@@ -952,7 +1071,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         Task.due_date <= end,
                         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                     )
-                    .order_by(Task.due_date, Task.priority.desc())
+                    .order_by(Task.due_date, Task.priority.asc())
                 )
                 tasks = result.scalars().all()
                 results.append({
@@ -996,7 +1115,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         project_id=project_id,
                         start_date=t_data.get("start_date"),
                         due_date=t_data.get("due_date"),
-                        priority=t_data.get("priority", 3),
+                        priority=t_data.get("priority", 2),
                     )
                     created.append({"id": str(task.id), "title": task.title})
 
@@ -1005,6 +1124,190 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     "role": "tool",
                     "content": json.dumps({"created_count": len(created), "tasks": created}),
                 })
+
+            elif name == "get_subtasks":
+                from app.services import subtask_service
+                task_id = args.get("task_id")
+                parent = await get_task(session, UUID(task_id))
+                if not parent or str(parent.user_id) != str(user_id):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                else:
+                    result = await session.execute(
+                        select(Task).where(Task.parent_task_id == parent.id).order_by(Task.sort_order)
+                    )
+                    subtasks = [
+                        {"id": str(t.id), "title": t.title, "status": t.status.value if t.status else None,
+                         "priority": t.priority, "sort_order": t.sort_order,
+                         "description": t.description}
+                        for t in result.scalars().all()
+                    ]
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"task_id": task_id, "count": len(subtasks), "subtasks": subtasks}),
+                    })
+
+            elif name == "create_subtask":
+                from app.services import subtask_service
+                task_id = args.get("task_id")
+                title = args.get("title")
+                description = args.get("description")
+                parent = await get_task(session, UUID(task_id))
+                if not parent or str(parent.user_id) != str(user_id):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                else:
+                    child = Task(
+                        user_id=parent.user_id,
+                        parent_task_id=parent.id,
+                        title=title,
+                        description=description,
+                        status=TaskStatus.TODO,
+                        priority=parent.priority,
+                        sort_order=await subtask_service.next_sort_order(session, parent.id),
+                    )
+                    session.add(child)
+                    await session.flush()
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({
+                            "created": True,
+                            "subtask": {"id": str(child.id), "title": child.title, "status": child.status.value},
+                        }),
+                    })
+
+            elif name == "update_subtask":
+                task_id = args.get("task_id")
+                subtask_id = args.get("subtask_id")
+                fields = args.get("fields", {}) or {}
+                parent = await get_task(session, UUID(task_id))
+                if not parent or str(parent.user_id) != str(user_id):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                    continue
+                result = await session.execute(select(Task).where(Task.id == UUID(subtask_id)))
+                child = result.scalar_one_or_none()
+                if not child or str(child.parent_task_id) != str(parent.id):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Subtask not found"}),
+                    })
+                else:
+                    for key, value in fields.items():
+                        if key in {"title", "description", "status", "priority"}:
+                            if key == "status":
+                                value = TaskStatus(value)
+                            if key == "priority":
+                                value = normalize_priority(value)
+                            setattr(child, key, value)
+                    await session.flush()
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({
+                            "updated": True,
+                            "subtask": {"id": str(child.id), "title": child.title, "status": child.status.value, "priority": child.priority},
+                        }),
+                    })
+
+            elif name == "delete_subtask":
+                task_id = args.get("task_id")
+                subtask_id = args.get("subtask_id")
+                parent = await get_task(session, UUID(task_id))
+                if not parent or str(parent.user_id) != str(user_id):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                    continue
+                result = await session.execute(select(Task).where(Task.id == UUID(subtask_id)))
+                child = result.scalar_one_or_none()
+                if not child or str(child.parent_task_id) != str(parent.id):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Subtask not found"}),
+                    })
+                else:
+                    await session.delete(child)
+                    await session.flush()
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"deleted": True, "subtask_id": subtask_id}),
+                    })
+
+            elif name == "reorder_subtasks":
+                from app.services import subtask_service
+                task_id = args.get("task_id")
+                ordered_ids = args.get("ordered_ids", [])
+                parent = await get_task(session, UUID(task_id))
+                if not parent or str(parent.user_id) != str(user_id):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                else:
+                    ordered = await subtask_service.reorder_subtasks(session, parent, [str(i) for i in ordered_ids])
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"reordered": True, "subtasks": ordered}),
+                    })
+
+            elif name == "convert_description_to_subtasks":
+                from app.services import subtask_service
+                task_id = args.get("task_id")
+                parent = await get_task(session, UUID(task_id))
+                if not parent or str(parent.user_id) != str(user_id):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                else:
+                    created = await subtask_service.convert_description_to_subtasks(session, parent)
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({
+                            "converted": True,
+                            "subtask_count": len(created),
+                            "subtasks": [{"id": str(t.id), "title": t.title} for t in created],
+                        }),
+                    })
+
+            elif name == "convert_subtasks_to_description":
+                from app.services import subtask_service
+                task_id = args.get("task_id")
+                parent = await get_task(session, UUID(task_id))
+                if not parent or str(parent.user_id) != str(user_id):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                else:
+                    description = await subtask_service.convert_subtasks_to_description(session, parent)
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"converted": True, "description": description}),
+                    })
 
             else:
                 results.append({

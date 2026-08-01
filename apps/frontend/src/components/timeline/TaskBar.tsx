@@ -2,6 +2,8 @@
 
 import { useDraggable } from "@dnd-kit/core";
 import type { Task } from "@/types/task";
+import { TIER_COLORS, TIER_LABELS, normalizePriority, type PriorityTier } from "@/lib/priority";
+import { BAR_HEIGHT } from "./constants";
 
 interface TaskBarProps {
   task: Task;
@@ -9,35 +11,20 @@ interface TaskBarProps {
   onClick?: () => void;
 }
 
-const BAR_COLORS: Record<number, { bg: string; border: string; text: string }> = {
-  1: { bg: "#ef5350", border: "#ef5350", text: "#ffffff" },
-  2: { bg: "#ffa726", border: "#ffa726", text: "#1a1a2e" },
-  3: { bg: "#4fc3f7", border: "#4fc3f7", text: "#1a1a2e" },
-  4: { bg: "#66bb6a", border: "#66bb6a", text: "#1a1a2e" },
-  5: { bg: "#9e9e9e", border: "#9e9e9e", text: "#ffffff" },
-};
-
-const PRIORITY_LABELS: Record<number, string> = {
-  1: "Urgent",
-  2: "High",
-  3: "Medium",
-  4: "Low",
-  5: "None",
-};
-
 export function TaskBar({ task, style, onClick }: TaskBarProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
   });
 
-  const colors = BAR_COLORS[task.priority] || BAR_COLORS[5];
+  const tier: PriorityTier = normalizePriority(task.priority);
+  const colors = { bg: TIER_COLORS[tier], border: TIER_COLORS[tier], text: "#ffffff" };
   const isDone = task.status === "done";
   const isInProgress = task.status === "in_progress";
 
   const barStyle: React.CSSProperties = {
     ...style,
     position: "absolute",
-    height: 38,
+    height: BAR_HEIGHT,
     backgroundColor: colors.bg + "20",
     border: `1px solid ${colors.border}33`,
     borderLeft: `3px solid ${colors.border}`,
@@ -70,9 +57,9 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
       className={isDragging ? "ring-2 ring-white/30 scale-[1.02]" : isInProgress ? "animate-pulse-subtle" : ""}
     >
       <div className="flex items-center gap-1.5 truncate w-full">
-        {task.priority <= 2 && (
+        {tier === 1 && (
           <span className="shrink-0 text-[9px] font-semibold uppercase" style={{ color: colors.text }}>
-            {PRIORITY_LABELS[task.priority]}
+            {TIER_LABELS[tier]}
           </span>
         )}
         <span className="truncate text-sm font-medium" style={{ color: colors.border }}>
