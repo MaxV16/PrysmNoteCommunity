@@ -102,7 +102,7 @@ function lsSet(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
-function stBool(key: string, fallback = false): [boolean, (v: boolean) => void] {
+function useBoolSetting(key: string, fallback = false): [boolean, (v: boolean) => void] {
   const [v, setV] = useState(() => lsGet<boolean>(key, fallback));
   const set = useCallback(
     (nv: boolean) => {
@@ -114,7 +114,7 @@ function stBool(key: string, fallback = false): [boolean, (v: boolean) => void] 
   return [v, set];
 }
 
-function stStr(key: string, fallback = ""): [string, (v: string) => void] {
+function useStringSetting(key: string, fallback = ""): [string, (v: string) => void] {
   const [v, setV] = useState(() => lsGet<string>(key, fallback));
   const set = useCallback(
     (nv: string) => {
@@ -185,39 +185,39 @@ export default function SettingsPage() {
   const [keyTestResults, setKeyTestResults] = useState<Record<string, { valid: boolean; error?: string } | null>>({});
   const [deletingAccount, setDeletingAccount] = useState(false);
 
-  const [calendarOn, setCalendarOn] = stBool("prysm_feature_calendar", true);
-  const [kanbanOn, setKanbanOn] = stBool("prysm_feature_kanban", true);
-  const [habitsOn, setHabitsOn] = stBool("prysm_feature_habits", true);
-  const [voiceOn, setVoiceOn] = stBool("prysm_feature_voice", true);
+  const [calendarOn, setCalendarOn] = useBoolSetting("prysm_feature_calendar", true);
+  const [kanbanOn, setKanbanOn] = useBoolSetting("prysm_feature_kanban", true);
+  const [habitsOn, setHabitsOn] = useBoolSetting("prysm_feature_habits", true);
+  const [voiceOn, setVoiceOn] = useBoolSetting("prysm_feature_voice", true);
 
-  const [showInbox, setShowInbox] = stBool("prysm_smartlist_inbox", true);
-  const [showToday, setShowToday] = stBool("prysm_smartlist_today", true);
-  const [showNext7, setShowNext7] = stBool("prysm_smartlist_next7", true);
-  const [showAll, setShowAll] = stBool("prysm_smartlist_all", true);
-  const [showCompleted, setShowCompleted] = stBool("prysm_smartlist_completed", true);
+  const [showInbox, setShowInbox] = useBoolSetting("prysm_smartlist_inbox", true);
+  const [showToday, setShowToday] = useBoolSetting("prysm_smartlist_today", true);
+  const [showNext7, setShowNext7] = useBoolSetting("prysm_smartlist_next7", true);
+  const [showAll, setShowAll] = useBoolSetting("prysm_smartlist_all", true);
+  const [showCompleted, setShowCompleted] = useBoolSetting("prysm_smartlist_completed", true);
 
-  const [notifPush, setNotifPush] = stBool("prysm_notif_push");
-  const [notifEmail, setNotifEmail] = stBool("prysm_notif_email");
-  const [notifDue, setNotifDue] = stBool("prysm_notif_due", true);
-  const [notifDigest, setNotifDigest] = stBool("prysm_notif_digest");
-  const [notifSound, setNotifSound] = stBool("prysm_notif_sound");
+  const [notifPush, setNotifPush] = useBoolSetting("prysm_notif_push");
+  const [notifEmail, setNotifEmail] = useBoolSetting("prysm_notif_email");
+  const [notifDue, setNotifDue] = useBoolSetting("prysm_notif_due", true);
+  const [notifDigest, setNotifDigest] = useBoolSetting("prysm_notif_digest");
+  const [notifSound, setNotifSound] = useBoolSetting("prysm_notif_sound");
 
-  const [startDay, setStartDay] = stStr("prysm_start_day", "monday");
-  const [timeFormat, setTimeFormat] = stStr("prysm_time_format", "24h");
-  const [dateFormat, setDateFormat] = stStr("prysm_date_format", "dd/mm/yyyy");
-  const [timezone, setTimezone] = stStr("prysm_tz", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const [startDay, setStartDay] = useStringSetting("prysm_start_day", "monday");
+  const [timeFormat, setTimeFormat] = useStringSetting("prysm_time_format", "24h");
+  const [dateFormat, setDateFormat] = useStringSetting("prysm_date_format", "dd/mm/yyyy");
+  const [timezone, setTimezone] = useStringSetting("prysm_tz", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 
-  const [lastExport, setLastExport] = stStr("prysm_last_export");
+  const [lastExport, setLastExport] = useStringSetting("prysm_last_export");
 
   const [notificationStatus, setNotificationStatus] = useState<"idle" | "granted" | "denied">("idle");
 
-  const [stickyColor, setStickyColor] = stStr("prysm_sticky_color", "#FFD700");
-  const [stickyFontSize, setStickyFontSize] = stStr("prysm_sticky_font", "14px");
-  const [stickyAutoShow, setStickyAutoShow] = stBool("prysm_sticky_autoshow", true);
+  const [stickyColor, setStickyColor] = useStringSetting("prysm_sticky_color", "#FFD700");
+  const [stickyFontSize, setStickyFontSize] = useStringSetting("prysm_sticky_font", "14px");
+  const [stickyAutoShow, setStickyAutoShow] = useBoolSetting("prysm_sticky_autoshow", true);
 
-  const [widgetCalendar, setWidgetCalendar] = stBool("prysm_widget_calendar", true);
-  const [widgetTasks, setWidgetTasks] = stBool("prysm_widget_tasks", true);
-  const [widgetHabits, setWidgetHabits] = stBool("prysm_widget_habits", true);
+  const [widgetCalendar, setWidgetCalendar] = useBoolSetting("prysm_widget_calendar", true);
+  const [widgetTasks, setWidgetTasks] = useBoolSetting("prysm_widget_tasks", true);
+  const [widgetHabits, setWidgetHabits] = useBoolSetting("prysm_widget_habits", true);
 
   const [collabTeamName, setCollabTeamName] = useState("");
   const [collabInviteEmail, setCollabInviteEmail] = useState("");
@@ -836,9 +836,10 @@ export default function SettingsPage() {
               <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider">Theme</h3>
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-5 gap-2">
                 {THEME_NAMES.map((name) => {
-                  const isBuiltin = name in THEMES;
-                  const info = isBuiltin ? THEMES[name as keyof typeof THEMES] : { label: "My Custom", colors: customTheme };
-                  const active = name === "custom" ? themeName === "custom" && !!customTheme : themeName === name && (!customTheme || name !== "custom");
+                  const isBuiltin = name !== "custom";
+                  const active = isBuiltin
+                    ? themeName === name
+                    : themeName === "custom" && !!customTheme;
                   return (
                     <button
                       key={name}
@@ -857,10 +858,10 @@ export default function SettingsPage() {
                     >
                       <div
                         className="h-6 w-full rounded-lg mb-1.5 shadow-inner"
-                        style={{ backgroundColor: isBuiltin ? (info as typeof THEMES["dark"]).colors.accent : (info as ThemeColors)?.accent || "#888" }}
+                        style={{ backgroundColor: isBuiltin ? THEMES[name as keyof typeof THEMES].colors.accent : (customTheme?.accent ?? "#888") }}
                       />
                       <span className={`text-[10px] font-semibold ${active ? "text-accent" : "text-secondary"}`}>
-                        {isBuiltin ? (info as typeof THEMES["dark"]).label : "Custom"}
+                        {isBuiltin ? THEMES[name as keyof typeof THEMES].label : "Custom"}
                       </span>
                     </button>
                   );

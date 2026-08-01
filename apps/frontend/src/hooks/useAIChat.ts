@@ -236,7 +236,7 @@ async function executeToolOnBackend(
         if (task) {
           const previous: Record<string, unknown> = {};
           for (const key of Object.keys(fields)) {
-            (previous as Record<string, unknown>)[key] = (task as Record<string, unknown>)[key];
+            (previous as Record<string, unknown>)[key] = (task as unknown as Record<string, unknown>)[key];
           }
           undoStack.push({ type: "update_task", data: { id: args.task_id, previous } });
           if (undoStack.length > 5) undoStack.shift();

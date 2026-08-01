@@ -9,6 +9,12 @@ const FONT_KEY = "prysm-font";
 const BG_KEY = "prysm-bg";
 const BG_IMAGE_KEY = "prysm-bg-image";
 
+type BackgroundState = {
+  type: "none" | "gradient" | "pattern" | "image";
+  value: string;
+  size?: string;
+};
+
 interface ThemeContextValue {
   themeName: ThemeName;
   setThemeName: (name: ThemeName) => void;
@@ -16,7 +22,7 @@ interface ThemeContextValue {
   isDark: boolean;
   fontFamily: string;
   setFontFamily: (name: string) => void;
-  background: { type: "none" | "preset" | "image"; value: string; size?: string };
+  background: BackgroundState;
   setBackgroundPreset: (preset: BackgroundPreset) => void;
   setBackgroundImage: (dataUrl: string) => void;
   clearBackground: () => void;
@@ -116,7 +122,7 @@ const ls = {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [themeName, setThemeNameState] = useState<ThemeName>(DEFAULT_THEME);
   const [fontFamily, setFontFamilyState] = useState(DEFAULT_FONT);
-  const [background, setBackgroundState] = useState<{ type: string; value: string; size?: string }>({
+  const [background, setBackgroundState] = useState<BackgroundState>({
     type: "none",
     value: "",
   });
@@ -134,7 +140,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setFontFamilyState(ls.getStr(FONT_KEY, DEFAULT_FONT));
     setCustomThemeState(ls.get<ThemeColors | null>(CUSTOM_THEME_KEY, null));
     const savedBg = ls.get<{ type: string; value: string; size?: string } | null>(BG_KEY, null);
-    if (savedBg) setBackgroundState(savedBg);
+    if (savedBg && ["none", "gradient", "pattern", "image"].includes(savedBg.type)) {
+      setBackgroundState(savedBg as BackgroundState);
+    }
   }, []);
 
   useEffect(() => {
@@ -172,7 +180,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const toggleTheme = useCallback(() => {
     const themes = Object.keys(THEMES) as ThemeName[];
     const currentThemes = themes.filter((t) => t !== "custom");
-    const idx = currentThemes.indexOf(themeName);
+    const idx = currentThemes.indexOf(themeName as Exclude<ThemeName, "custom">);
     const next = idx >= 0 ? currentThemes[(idx + 1) % currentThemes.length] : currentThemes[0];
     setThemeName(next);
   }, [themeName, setThemeName]);
@@ -195,7 +203,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setBackgroundImage = useCallback((dataUrl: string) => {
-    const s = { type: "image", value: dataUrl };
+    const s: BackgroundState = { type: "image", value: dataUrl };
     setBackgroundState(s);
     ls.set(BG_KEY, s);
     ls.setStr(BG_IMAGE_KEY, dataUrl);
