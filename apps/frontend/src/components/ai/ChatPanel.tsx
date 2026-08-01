@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useAIChat } from "@/hooks/useAIChat";
 import { ChatMessage } from "./ChatMessage";
@@ -9,7 +9,6 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useAppStore } from "@/stores/app-store";
 import { getItem, setItem } from "@/lib/local-storage";
 import { decryptString } from "@/lib/crypto-utils";
-
 
 
 const PROVIDERS = [
@@ -50,7 +49,6 @@ function saveChatHistory(sessions: ChatSession[]) {
 
 export function ChatPanel({ onClose }: ChatPanelProps) {
   const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo } = useAIChat();
-  const voiceInitiatedRef = useRef(false);
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -135,14 +133,6 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     return () => window.removeEventListener("prysm-ai-suggest", handler);
   }, [sendMessage, provider]);
 
-  useEffect(() => {
-    if (!voiceInitiatedRef.current || isLoading) return;
-    const lastMsg = chatMessages[chatMessages.length - 1];
-    if (lastMsg && lastMsg.role === "assistant" && lastMsg.content) {
-      voiceInitiatedRef.current = false;
-    }
-  }, [chatMessages, isLoading]);
-
   const handleNewChat = () => {
     const store = useAppStore.getState();
     if (store.chatMessages.length > 0) {
@@ -176,21 +166,14 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     saveChatHistory(updated);
   };
 
-  const handleSend = useCallback((message: string, voiceInitiated = false) => {
+  const handleSend = useCallback((message: string) => {
     const store = useAppStore.getState();
     const context: Record<string, unknown> = {};
     if (store.navFilter) {
       context.view_filter = store.navFilter;
     }
-    if (voiceInitiated) {
-      voiceInitiatedRef.current = true;
-    }
     sendMessage(message, provider, Object.keys(context).length > 0 ? context : undefined);
   }, [sendMessage, provider]);
-
-  const handleVoiceTranscript = useCallback((text: string) => {
-    handleSend(text, true);
-  }, [handleSend]);
 
   return (
     <div className="flex flex-col overflow-hidden border-l border-border bg-surface">
@@ -327,3 +310,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         <ChatInput
           onSend={(msg) => handleSend(msg)}
           disabled={isLoading}
+      </div>
+    </div>
+  );
+}

@@ -16,7 +16,6 @@ const THEME_NAMES: ThemeName[] = [...(Object.keys(THEMES) as ThemeName[]), "cust
 
 type SettingsTab =
   | "account"
-  | "premium"
   | "features"
   | "smart-list"
   | "notifications"
@@ -41,7 +40,6 @@ const TAB_GROUPS: TabGroup[] = [
     label: "Account",
     tabs: [
       { id: "account", label: "Account", svg: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" },
-      { id: "premium", label: "Premium", svg: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" },
     ],
   },
   {
@@ -615,12 +613,6 @@ export default function SettingsPage() {
                   )}
                 </div>
               </div>
-              <div className="rounded-xl bg-elevated border border-border p-3">
-                <p className="text-xs text-muted">
-                  <strong className="text-secondary">Plan:</strong>{" "}
-                  {lsGet("prysm_premium", false) ? "Premium · €5/month" : "Free"}
-                </p>
-              </div>
 
               <div className="border-t border-border pt-4 space-y-4">
                 <h3 className="text-sm font-semibold text-primary">Security</h3>
@@ -663,7 +655,6 @@ export default function SettingsPage() {
             </section>
           )}
 
-          {/* === PREMIUM === */}
 
           {/* === FEATURES === */}
           {activeTab === "features" && (

@@ -55,10 +55,7 @@ On Docker Desktop for Windows, `process.cwd()` and `__dirname` inside containers
 
 **ALWAYS use the `src/ee/` directory approach for EE file access:**
 - In `docker/frontend.Dockerfile`: `COPY ee/apps/frontend/ee ./src/ee/`
-- In source code: `import from "@/ee/components/..."` (uses the `@/*` → `./src/*` alias)
-- The `next.config.ts` webpack alias `@/ee` falls back to `../../ee/apps/frontend/ee` for local dev
 - A local junction from `apps/frontend/src/ee/` → `../../ee/apps/frontend/ee/` may be needed for local dev
-- Do NOT rely on tsconfig `paths` for `@ee/*` — it breaks in Docker because the path resolves to host absolute paths
 
 ### Docker Compose Dev Mode (Volume Mounts)
 The `docker-compose.yml` mounts `./apps/frontend:/app` in dev mode, OVERRIDING the Dockerfile build output. The container runs `npx next dev`, so changes to source files take effect immediately.
@@ -89,8 +86,6 @@ docker compose restart frontend
 ```
 
 ### Known Docker Build Failures
-1. **Module not found: `@ee/components/*`** — EE files not copied to `src/ee/` in Dockerfile, or volume mount at wrong path in dev mode. Fix: `COPY ee/apps/frontend/ee ./src/ee/` and import as `@/ee/...`
-2. **`@ee` alias resolves to host path** — tsconfig `paths` for `@ee/*` cause this. Fix: use only webpack alias in `next.config.ts`, not tsconfig paths
 3. **Build succeeds locally but fails in Docker** — `process.cwd()`/`__dirname` path resolution difference. Fix: use `fs.existsSync` to probe multiple locations in the webpack alias
 
 ## Quick Start
