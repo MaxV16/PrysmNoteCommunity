@@ -16,6 +16,11 @@ import { Modal } from "@/components/ui/Modal";
 import { useTasks } from "@/hooks/useTasks";
 import { useRouter } from "next/navigation";
 
+// Fixed width, in px, of each day column in the infinite timeline.
+const DAY_WIDTH = 120;
+// How many days to prepend/append per expansion step.
+const EXPAND_STEP = 7;
+
 function isToday(dateStr: string | null): boolean {
   if (!dateStr) return false;
   const d = new Date(dateStr);
@@ -53,9 +58,8 @@ interface TimelineViewProps {
 }
 
 export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false }: TimelineViewProps) {
-  const [isMobile, setIsMobile] = useState(false);
   const { tasks, selectedTaskId, setSelectedTaskId, projects, navFilter, setNavFilter, selectedProjectId, selectedTagId } = useAppStore();
-  const { visibleRange, viewDays, expandBackward, expandForward } = useTimeline(14);
+  const { visibleRange, viewDays, expandBackward, expandForward } = useTimeline(20, 10);
   const { createTask, updateTask } = useTasks();
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
@@ -74,10 +78,6 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
     if (viewDropdownOpen) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [viewDropdownOpen]);
-
-  useEffect(() => {
-    setIsMobile(window.innerWidth < 768);
-  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -127,18 +127,29 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
   useEffect(() => {
     const body = bodyRef.current;
     if (!body || viewMode !== "timeline") return;
+    // Position "today" (column baseLeftOffset) at the left edge, leaving room to
+    // browse backwards before expansion kicks in.
+    body.scrollLeft = 10 * DAY_WIDTH;
+  }, [viewMode]);
+
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || viewMode !== "timeline") return;
     let scrollTimer: ReturnType<typeof setTimeout> | null = null;
     const handleScroll = () => {
       if (scrollTimer) clearTimeout(scrollTimer);
       scrollTimer = setTimeout(() => {
-        const threshold = 120;
+        const threshold = DAY_WIDTH;
         if (body.scrollLeft < threshold) {
-          expandBackward(7);
+          // Prepend days on the left; the viewport must shift right by exactly the
+          // number of added columns to stay visually anchored (no jump).
+          body.scrollLeft += EXPAND_STEP * DAY_WIDTH;
+          expandBackward(EXPAND_STEP);
         }
         if (body.scrollLeft + body.clientWidth > body.scrollWidth - threshold) {
-          expandForward(7);
+          expandForward(EXPAND_STEP);
         }
-      }, 200);
+      }, 150);
     };
     body.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
@@ -152,8 +163,8 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
       const { active, delta } = event;
       if (!active) return;
       const taskId = active.id as string;
-      const body = bodyRef.current;
-      const dayWidth = body ? body.clientWidth / viewDays : 100;
+      // Each day column is a fixed width in the infinite timeline.
+      const dayWidth = DAY_WIDTH;
       const daysShifted = Math.round(delta.x / dayWidth);
       if (daysShifted === 0) return;
       const task = tasks.find((t) => t.id === taskId);
@@ -172,7 +183,7 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
       if (!task.start_date && !task.due_date) return;
       await updateTask(taskId, fields);
     },
-    [tasks, updateTask, viewDays]
+    [tasks, updateTask]
   );
 
   const handleCreateTask = useCallback(
@@ -342,7 +353,7 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
         <div className="flex flex-col" data-timeline-canvas style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
           <TimelineHeader days={days} />
           <div ref={bodyRef} className="flex flex-col" data-timeline-body style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-            <DndContext sensors={!isMobile ? sensors : undefined} onDragEnd={!isMobile ? handleDragEnd : undefined}>
+            <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
               <div className="relative" style={{ minHeight: "100%", minWidth: days.length * 120 }}>
                 <TimelineGrid days={days} />
                 {hasTasks ? (

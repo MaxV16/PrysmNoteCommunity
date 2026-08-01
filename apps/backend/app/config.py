@@ -3,7 +3,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql+asyncpg://prysm:prysm_dev_password@localhost:5432/prysm_note"
+    database_url: str = ""
+    db_password: str = ""
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
