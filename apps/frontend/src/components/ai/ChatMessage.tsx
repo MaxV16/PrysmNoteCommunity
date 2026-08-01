@@ -12,11 +12,19 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function isToolActivity(content: string): boolean {
+  return content.startsWith("⚙ ");
+}
+
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === "user";
 
   if (message.role === "tool") {
     return <ToolCallCard message={message} />;
+  }
+
+  if (!isUser && isToolActivity(message.content || "")) {
+    return <ToolActivity content={(message.content || "").slice(2)} />;
   }
 
   return (
@@ -57,6 +65,22 @@ function ToolCallCard({ message }: { message: ChatMessageType }) {
       <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-elevated/50 px-3 py-2 text-xs text-secondary border-l-2 border-l-accent">
         <span className="text-accent">&#9880;</span>
         <span>{message.content}</span>
+      </div>
+    </div>
+  );
+}
+
+function ToolActivity({ content }: { content: string }) {
+  return (
+    <div className="flex justify-start slide-up">
+      <div className="flex items-center gap-2 rounded-full bg-accent/10 border border-accent/20 px-3 py-1.5 text-xs text-secondary">
+        <span className="flex items-center gap-0.5">
+          <span className="h-1 w-1 rounded-full bg-accent animate-bounce" style={{ animationDelay: "0ms" }} />
+          <span className="h-1 w-1 rounded-full bg-accent animate-bounce" style={{ animationDelay: "150ms" }} />
+          <span className="h-1 w-1 rounded-full bg-accent animate-bounce" style={{ animationDelay: "300ms" }} />
+        </span>
+        <span className="text-accent">&#9880;</span>
+        <span className="font-medium">{content}</span>
       </div>
     </div>
   );

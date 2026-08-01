@@ -10,7 +10,7 @@ from app.llm.base import LLMClient, register_provider
 class DeepSeekClient(LLMClient):
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.base_url = "https://api.deepseek.com/v1"
+        self.base_url = "https://api.deepseek.com"
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=httpx.Timeout(60.0, connect=10.0),

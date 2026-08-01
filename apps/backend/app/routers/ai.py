@@ -133,22 +133,22 @@ async def chat(
     sanitized_history = _sanitize_chat_history(request.chat_history)
     messages = build_messages(sanitized_history, request.message, request.context)
 
-    response = await client.chat(messages, tools=TOOL_DEFINITIONS)
+    MAX_TOOL_ROUNDS = 4
+    content = ""
+    tool_calls = None
+    for _round in range(MAX_TOOL_ROUNDS):
+        response = await client.chat(messages, tools=TOOL_DEFINITIONS)
+        choice = response.get("choices", [{}])[0]
+        assistant_message = choice.get("message", {})
+        content = assistant_message.get("content", "") or ""
+        tool_calls = assistant_message.get("tool_calls")
 
-    choice = response.get("choices", [{}])[0]
-    assistant_message = choice.get("message", {})
-    content = assistant_message.get("content", "") or ""
-    tool_calls = assistant_message.get("tool_calls")
+        if not tool_calls:
+            break
 
-    if tool_calls:
         messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-
         tool_results = await execute_tool_calls(tool_calls, user.id, session, client)
         messages.extend(tool_results)
-
-        follow_up = await client.chat(messages, tools=TOOL_DEFINITIONS)
-        follow_choice = follow_up.get("choices", [{}])[0]
-        content = follow_choice.get("message", {}).get("content", "") or ""
 
     await persist_conversation(session, user.id, session_id, "user", request.message)
     await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
@@ -179,27 +179,41 @@ async def chat_stream(
     async def event_generator():
         import json
 
-        response = await client.chat(messages, tools=TOOL_DEFINITIONS)
-        choice = response.get("choices", [{}])[0]
-        assistant_message = choice.get("message", {})
-        content = assistant_message.get("content", "") or ""
-        tool_calls = assistant_message.get("tool_calls")
+        MAX_TOOL_ROUNDS = 4
+        tool_calls = None
+        content = ""
 
-        if tool_calls:
+        for _round in range(MAX_TOOL_ROUNDS):
+            response = await client.chat(messages, tools=TOOL_DEFINITIONS)
+            choice = response.get("choices", [{}])[0]
+            assistant_message = choice.get("message", {})
+            content = assistant_message.get("content", "") or ""
+            tool_calls = assistant_message.get("tool_calls")
+
+            if not tool_calls:
+                break
+
+            # Run tool calls, feed their outputs back, and continue the loop so a
+            # search → create → conflict-check sequence can complete in one turn.
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-
-            yield {"event": "tool_start", "data": json.dumps([tc.get("function", {}).get("name") for tc in tool_calls])}
-
+            yield {
+                "event": "tool_start",
+                "data": json.dumps([tc.get("function", {}).get("name") for tc in tool_calls]),
+            }
             tool_results = await execute_tool_calls(tool_calls, user.id, session, client)
             messages.extend(tool_results)
-
             yield {"event": "tool_results", "data": json.dumps([r["content"] for r in tool_results])}
 
+            if _round == MAX_TOOL_ROUNDS - 1:
+                fallback = await client.chat(messages, tools=None)
+                content = (fallback.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
+
+        # Stream the final natural-language answer.
+        if content:
             async for chunk in client.stream_chat(messages, tools=TOOL_DEFINITIONS):
                 yield {"event": "token", "data": chunk}
         else:
-            for word in content.split():
-                yield {"event": "token", "data": word + " "}
+            yield {"event": "token", "data": " "}
 
         await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
         await session.commit()

@@ -9,6 +9,9 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useAppStore } from "@/stores/app-store";
 import { getItem, setItem } from "@/lib/local-storage";
 import { decryptString } from "@/lib/crypto-utils";
+import { useUiModule } from "@/lib/ui-module-registry";
+import { useApiKeys } from "@/hooks/useApiKeys";
+import { useLocalBool } from "@/lib/use-local-bool";
 
 
 const PROVIDERS = [
@@ -49,20 +52,33 @@ function saveChatHistory(sessions: ChatSession[]) {
 
 export function ChatPanel({ onClose }: ChatPanelProps) {
   const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo } = useAIChat();
+  const voiceModuleOn = useUiModule("voice");
+  const voiceLocalOn = useLocalBool("prysm_feature_voice", true);
+  const voiceOn = voiceModuleOn && voiceLocalOn;
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const { keys, fetchKeys } = useApiKeys();
 
   const LAST_PROVIDER_KEY = "prysm_last_provider";
+  const configuredProviders = keys.map((k) => k.provider);
 
   const [provider, setProvider] = useState("openai");
 
   useEffect(() => {
     (async () => {
+      try {
+        await fetchKeys();
+      } catch {}
       if (typeof window === "undefined") return;
       const last = localStorage.getItem(LAST_PROVIDER_KEY);
       if (last && PROVIDERS.some((p) => p.value === last)) {
         setProvider(last);
+        return;
+      }
+      const firstConfigured = PROVIDERS.find((p) => configuredProviders.includes(p.value));
+      if (firstConfigured) {
+        setProvider(firstConfigured.value);
         return;
       }
       for (const p of PROVIDERS) {
@@ -77,6 +93,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       }
       setProvider("openai");
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -193,9 +210,14 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
               onChange={(e) => setProvider(e.target.value)}
               className="rounded-full border border-border bg-elevated px-3 py-1.5 text-xs text-primary outline-none appearance-none pr-7 cursor-pointer hover:border-accent/40 transition-colors"
             >
-              {PROVIDERS.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
+              {PROVIDERS.map((p) => {
+                const configured = configuredProviders.includes(p.value);
+                return (
+                  <option key={p.value} value={p.value}>
+                    {p.label}{configured ? " ✓" : ""}
+                  </option>
+                );
+              })}
             </select>
             <svg className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="6 9 12 15 18 9"/>

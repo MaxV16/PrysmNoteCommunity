@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useUiModule } from "@/lib/ui-module-registry";
 
 interface StickyNote {
   id: string;
@@ -60,6 +61,7 @@ export function useStickyBoard(): StickyBoardContextValue {
 export function StickyBoardProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [notes, setNotes] = useState<StickyNote[]>([]);
+  const stickyOn = useUiModule("stickyNotes");
 
   useEffect(() => {
     setNotes(loadNotes());
@@ -73,10 +75,17 @@ export function StickyBoardProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const toggle = useCallback(() => setIsOpen((v) => !v), []);
-  const open = useCallback(() => setIsOpen(true), []);
+  const toggle = useCallback(() => {
+    if (!stickyOn) return;
+    setIsOpen((v) => !v);
+  }, [stickyOn]);
+  const open = useCallback(() => {
+    if (!stickyOn) return;
+    setIsOpen(true);
+  }, [stickyOn]);
   const close = useCallback(() => setIsOpen(false), []);
   const addNoteWithContent = useCallback((title: string, content: string) => {
+    if (!stickyOn) return;
     const cx = typeof window !== "undefined" ? window.innerWidth / 2 - 130 : 300;
     const cy = typeof window !== "undefined" ? window.innerHeight / 2 - 100 : 200;
     const note: StickyNote = {
@@ -94,12 +103,14 @@ export function StickyBoardProvider({ children }: { children: ReactNode }) {
     saveNotes(current);
     setNotes(current);
     setIsOpen(true);
-  }, []);
+  }, [stickyOn]);
+
+  const isActive = stickyOn && isOpen;
 
   return (
-    <StickyBoardContext.Provider value={{ isOpen, toggle, open, close, addNoteWithContent }}>
+    <StickyBoardContext.Provider value={{ isOpen: isActive, toggle, open, close, addNoteWithContent }}>
       {children}
-      <StickyNoteBoard />
+      {stickyOn && <StickyNoteBoard />}
     </StickyBoardContext.Provider>
   );
 }

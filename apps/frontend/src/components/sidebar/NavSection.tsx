@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useAppStore, type NavFilter } from "@/stores/app-store";
+import { useLocalBool } from "@/lib/use-local-bool";
 
 function isToday(dateStr: string | null): boolean {
   if (!dateStr) return false;
@@ -35,6 +36,16 @@ export function NavSection() {
   const tasks = useAppStore((s) => s.tasks);
   const navFilter = useAppStore((s) => s.navFilter);
   const setNavFilter = useAppStore((s) => s.setNavFilter);
+  const showInbox = useLocalBool("prysm_smartlist_inbox", true);
+  const showToday = useLocalBool("prysm_smartlist_today", true);
+  const showNext7 = useLocalBool("prysm_smartlist_next7", true);
+
+  const enabledFilters = new Set<NavFilter>();
+  if (showInbox) enabledFilters.add("inbox");
+  if (showToday) enabledFilters.add("today");
+  if (showNext7) enabledFilters.add("next7");
+
+  const visibleItems = NAV_ITEMS.filter((item) => enabledFilters.has(item.filter));
 
   const counts = useMemo(() => {
     const active = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled" && !t.is_archived);
@@ -47,7 +58,7 @@ export function NavSection() {
 
   return (
     <nav className="flex flex-col gap-1">
-      {NAV_ITEMS.map((item) => {
+      {visibleItems.map((item) => {
         const isActive = navFilter === item.filter;
         const count = counts[item.filter as keyof typeof counts];
         return (

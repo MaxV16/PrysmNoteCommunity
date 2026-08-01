@@ -42,6 +42,7 @@ export function ChatInput({ onSend, disabled, additionalAction }: ChatInputProps
     <form onSubmit={handleSubmit} className="flex flex-col gap-2">
       <div className="relative">
         <textarea
+          id="ai-input"
           ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value.slice(0, MAX_LENGTH))}

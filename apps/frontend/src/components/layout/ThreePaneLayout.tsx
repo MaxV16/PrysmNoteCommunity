@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import { SidebarLeft } from "@/components/sidebar/SidebarLeft";
 import { TimelineView } from "@/components/layout/TimelineView";
 import { ChatPanel } from "@/components/ai/ChatPanel";
@@ -9,6 +10,10 @@ import { useTasks } from "@/hooks/useTasks";
 import { useProjects } from "@/hooks/useProjects";
 import { useTags } from "@/hooks/useTags";
 import { StickyBoardProvider, useStickyBoard } from "@/components/sticky/StickyNoteBoard";
+import { useUiModule } from "@/lib/ui-module-registry";
+import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
+import { useTheme } from "@/lib/theme-context";
+
 
 class ErrorBoundaryInner extends React.Component<
   { children: ReactNode; fallback?: ReactNode },
@@ -48,13 +53,29 @@ function MainLayout() {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
   const { toggle: toggleSticky } = useStickyBoard();
+  const { toggleTheme } = useTheme();
+  const sidebarOn = useUiModule("sidebar");
+  const aiOn = useUiModule("aiPanel");
+
+  useGlobalShortcuts({
+    onToggleSidebar: () => setLeftCollapsed((v) => !v),
+    onToggleAiPanel: () => setRightOpen((v) => !v),
+    onToggleTheme: toggleTheme,
+    onNewTask: () => {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("prysm-new-task"));
+      }
+    },
+  });
 
   return (
     <div className="flex bg-base" style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
-      <SidebarLeft
-        collapsed={leftCollapsed}
-        onToggle={() => setLeftCollapsed(!leftCollapsed)}
-      />
+      {sidebarOn && (
+        <SidebarLeft
+          collapsed={leftCollapsed}
+          onToggle={() => setLeftCollapsed(!leftCollapsed)}
+        />
+      )}
       <div className="flex flex-col" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
         <TimelineView
           onToggleRight={() => setRightOpen(v => !v)}
@@ -62,7 +83,7 @@ function MainLayout() {
           hideProjects={leftCollapsed}
         />
       </div>
-      {rightOpen && (
+      {aiOn && rightOpen && (
         <div className="shrink-0 border-l border-border bg-base" style={{ width: 384 }}>
           <ChatPanel onClose={() => setRightOpen(false)} />
         </div>
@@ -96,9 +117,9 @@ export function ThreePaneLayout() {
           </div>
         </div>
       ) : (
-        <StickyBoardProvider>
-          <MainLayout />
-        </StickyBoardProvider>
+          <StickyBoardProvider>
+            <MainLayout />
+          </StickyBoardProvider>
       )}
     </ErrorBoundaryInner>
   );

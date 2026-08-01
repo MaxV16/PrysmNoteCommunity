@@ -10,11 +10,15 @@ from app.services.ai_service import execute_tool_calls, build_messages, TOOL_DEF
 
 @pytest.mark.asyncio
 async def test_build_messages(db_session: AsyncSession):
+    from datetime import date
     messages = build_messages([{"role": "user", "content": "hi"}], "create a task")
     assert len(messages) == 3
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
     assert messages[1]["content"] == "hi"
+    # The system prompt must surface the current date so the model can resolve
+    # relative dates ("next Monday", "tomorrow") without extra tool round-trips.
+    assert date.today().isoformat() in messages[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -474,3 +478,65 @@ async def test_execute_batch_create_tasks(db_session: AsyncSession, ai_user):
     content = json.loads(results[0]["content"])
     assert content["created_count"] == 2
     assert len(content["tasks"]) == 2
+
+
+async def _fake_agent_client(*, key):
+    """A minimal fake LLM client emulating an OpenAI-style tool-calling loop."""
+    class FakeAgent:
+        def __init__(self, api_key: str):
+            self.api_key = api_key
+            self.calls = 0
+
+        async def chat(self, messages, tools=None):
+            self.calls += 1
+            # First call: request create_task; second call: no tools -> final text.
+            if self.calls == 1:
+                return {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [{
+                                "id": "call_agent_1",
+                                "function": {
+                                    "name": "create_task",
+                                    "arguments": json.dumps({"title": "Scheduled GP Visit", "start_date": "2030-01-05"}),
+                                },
+                            }],
+                        }
+                    }]
+                }
+            return {"choices": [{"message": {"role": "assistant", "content": "Done."}}]}
+
+        async def stream_chat(self, messages, tools=None):
+            yield "Done."
+
+        async def embed(self, text):
+            return [0.0] * 8
+
+    return FakeAgent(api_key=key)
+
+
+@pytest.mark.asyncio
+async def test_router_agent_loop_creates_task(client, ai_user, monkeypatch):
+    """The /api/ai/chat endpoint should run multiple tool rounds and actually
+    create the task the user asked for (guards the multi-round agent loop)."""
+    from app.services.ai_service import get_llm_client
+
+    async def _fake_get_client(provider, api_key):
+        return await _fake_agent_client(key=api_key)
+
+    monkeypatch.setattr("app.routers.ai.get_llm_client", _fake_get_client)
+    monkeypatch.setattr("app.routers.ai.get_user_api_key", _dummy_key)
+
+    response = await client.post("/api/ai/chat", json={
+        "message": "Schedule GP appointment next Monday at 12pm",
+        "provider": "openai",
+    })
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["content"] == "Done."
+
+
+async def _dummy_key(session, user, provider):
+    return "test-key"

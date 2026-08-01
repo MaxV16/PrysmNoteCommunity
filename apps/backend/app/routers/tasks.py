@@ -19,6 +19,21 @@ from app.models.task_tag import TaskTag
 from app.models.tag import Tag
 
 
+def _parse_date_arg(value: str | None) -> date_type | None:
+    """Parse an ISO-format date string into a date object.
+
+    The models' start_date/due_date are `date` columns; passing raw strings to
+    comparisons against them makes asyncpg fail with "operator does not exist:
+    date >= character varying". ALWAYS coerce to a `date` first.
+    """
+    if value is None:
+        return None
+    try:
+        return date_type.fromisoformat(value)
+    except (ValueError, TypeError):
+        return None
+
+
 def _serialize_task(task: Task) -> dict:
     return {
         "id": str(task.id),
@@ -376,9 +391,9 @@ async def search_tasks_route(
     )
 
     if date_from:
-        stmt = stmt.where(Task.start_date >= date_from)
+        stmt = stmt.where(Task.start_date >= _parse_date_arg(date_from))
     if date_to:
-        stmt = stmt.where(Task.start_date <= date_to)
+        stmt = stmt.where(Task.start_date <= _parse_date_arg(date_to))
     if priority_min is not None:
         stmt = stmt.where(Task.priority >= priority_min)
     if priority_max is not None:
@@ -410,15 +425,18 @@ async def list_tasks_by_date_range(
 ):
     from sqlalchemy import or_
 
+    from_date = _parse_date_arg(date_from)
+    to_date = _parse_date_arg(date_to)
+
     result = await session.execute(
         select(Task)
         .where(
             Task.user_id == user.id,
             Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
             or_(
-                (Task.start_date >= date_from) & (Task.start_date <= date_to),
-                (Task.due_date >= date_from) & (Task.due_date <= date_to),
-                (Task.start_date <= date_from) & (Task.due_date >= date_to),
+                (Task.start_date >= from_date) & (Task.start_date <= to_date),
+                (Task.due_date >= from_date) & (Task.due_date <= to_date),
+                (Task.start_date <= from_date) & (Task.due_date >= to_date),
             ),
         )
         .order_by(Task.start_date)

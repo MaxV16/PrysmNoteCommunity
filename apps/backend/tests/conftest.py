@@ -4,9 +4,9 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from app.main import app
 from app.database import get_db
@@ -19,8 +19,35 @@ TEST_DATABASE_URL = os.getenv(
     "sqlite+aiosqlite:///:memory:",
 )
 
-_test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
+# When falling back to an in-memory SQLite database, every connection must share
+# the SAME underlying database, otherwise each new connection gets an empty
+# database and "no such table" errors. NullPool + :memory: creates a fresh empty
+# DB per connection, so use a StaticPool so the table schema created in setup_db
+# is visible to the session/request connections.
+_pool_class = NullPool if "postgres" in TEST_DATABASE_URL else StaticPool
+_engine_kwargs = {}
+if _pool_class is StaticPool:
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+_test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=_pool_class, **_engine_kwargs)
 _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@event.listens_for(_test_engine.sync_engine, "connect")
+def _sqlite_connect_functions(dbapi_conn, record):
+    """SQLite lacks PostgreSQL's gen_random_uuid(); register a compatible one so
+    the SQLite test database can satisfy the models' server_default."""""
+    if _test_engine.dialect.name != "postgresql":
+        try:
+            import sqlite3
+            from uuid import uuid4 as _uuid4
+
+            def _gen_random_uuid():
+                return str(_uuid4())
+
+            dbapi_conn.create_function("gen_random_uuid", 0, _gen_random_uuid)
+        except Exception:
+            pass
 
 
 @pytest_asyncio.fixture(autouse=True)

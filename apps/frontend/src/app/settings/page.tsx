@@ -12,6 +12,7 @@ import type { ThemeName, ThemeColors, BackgroundPreset } from "@/types/theme";
 import { THEMES, FONT_PRESETS, BACKGROUND_PRESETS } from "@/types/theme";
 
 
+
 const THEME_NAMES: ThemeName[] = [...(Object.keys(THEMES) as ThemeName[]), "custom"];
 
 type SettingsTab =
@@ -72,7 +73,7 @@ const ACCENT_COLORS = [
 ];
 
 const SHORTCUTS = [
-  { key: "Ctrl+K", action: "Search / Command palette" },
+  { key: "Ctrl+F", action: "Search tasks" },
   { key: "Ctrl+N", action: "New task" },
   { key: "Ctrl+B", action: "Toggle sidebar" },
   { key: "Ctrl+Shift+J", action: "Toggle AI panel" },
@@ -666,6 +667,7 @@ export default function SettingsPage() {
               )}
             </section>
           )}
+
 
 
           {/* === FEATURES === */}

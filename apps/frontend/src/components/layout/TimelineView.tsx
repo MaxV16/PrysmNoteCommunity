@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useCallback, useState, useEffect, useRef } from "react";
-import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, type DragEndEvent, type DragMoveEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useAppStore, type NavFilter } from "@/stores/app-store";
 import { useTimeline } from "@/hooks/useTimeline";
 import { TimelineHeader } from "@/components/timeline/TimelineHeader";
@@ -14,6 +14,8 @@ import { CalendarView } from "@/components/calendar/CalendarView";
 import { ListView } from "@/components/list/ListView";
 import { Modal } from "@/components/ui/Modal";
 import { useTasks } from "@/hooks/useTasks";
+import { useUiModule } from "@/lib/ui-module-registry";
+import { useLocalBool } from "@/lib/use-local-bool";
 import { useRouter } from "next/navigation";
 
 // Fixed width, in px, of each day column in the infinite timeline.
@@ -58,7 +60,7 @@ interface TimelineViewProps {
 }
 
 export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false }: TimelineViewProps) {
-  const { tasks, selectedTaskId, setSelectedTaskId, projects, navFilter, setNavFilter, selectedProjectId, selectedTagId } = useAppStore();
+  const { tasks, selectedTaskId, setSelectedTaskId, projects, navFilter, setNavFilter, selectedProjectId, selectedTagId, searchQuery, setSearchQuery } = useAppStore();
   const { visibleRange, viewDays, expandBackward, expandForward } = useTimeline(20, 10);
   const { createTask, updateTask } = useTasks();
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -68,6 +70,27 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
   const dropdownRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
   const bodyRef = useRef<HTMLDivElement>(null);
+  const timelineOn = useUiModule("viewTimeline");
+  const kanbanOn = useUiModule("viewKanban") && useLocalBool("prysm_feature_kanban", true);
+  const calendarOn = useUiModule("viewCalendar") && useLocalBool("prysm_feature_calendar", true);
+  const listOn = useUiModule("viewList");
+  const projectRailOn = useUiModule("projectRail");
+  const stickyOn = useUiModule("stickyNotes");
+
+  const viewModules: Record<"timeline" | "kanban" | "calendar" | "list", boolean> = {
+    timeline: timelineOn,
+    kanban: kanbanOn,
+    calendar: calendarOn,
+    list: listOn,
+  };
+  const enabledViews = (Object.keys(viewModules) as ("timeline" | "kanban" | "calendar" | "list")[]).filter((v) => viewModules[v]);
+  const activeViewEnabled = viewModules[viewMode];
+
+  useEffect(() => {
+    if (!activeViewEnabled && enabledViews.length > 0) {
+      setViewMode(enabledViews[0]);
+    }
+  }, [activeViewEnabled, enabledViews.length]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -78,6 +101,15 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
     if (viewDropdownOpen) document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [viewDropdownOpen]);
+
+  useEffect(() => {
+    const onNewTask = () => {
+      setFormDefaultDate(null);
+      setShowTaskForm(true);
+    };
+    window.addEventListener("prysm-new-task", onNewTask);
+    return () => window.removeEventListener("prysm-new-task", onNewTask);
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -104,6 +136,12 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
       tasks.filter((t) => t.status !== "done" && t.status !== "cancelled" && !t.is_archived),
       navFilter
     );
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      activeTasks = activeTasks.filter(
+        (t) => t.title.toLowerCase().includes(q) || (t.description && t.description.toLowerCase().includes(q))
+      );
+    }
     if (selectedProjectId) {
       activeTasks = activeTasks.filter((t) => t.project_id === selectedProjectId);
     }
@@ -116,7 +154,7 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
       map[pid].push(task);
     }
     return map;
-  }, [tasks, navFilter, selectedProjectId, selectedTagId]);
+  }, [tasks, navFilter, selectedProjectId, selectedTagId, searchQuery]);
 
   const monthLabel = useMemo(() => {
     const mid = new Date(visibleRange.start);
@@ -139,7 +177,7 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
     const handleScroll = () => {
       if (scrollTimer) clearTimeout(scrollTimer);
       scrollTimer = setTimeout(() => {
-        const threshold = DAY_WIDTH;
+        const threshold = DAY_WIDTH * 1.5;
         if (body.scrollLeft < threshold) {
           // Prepend days on the left; the viewport must shift right by exactly the
           // number of added columns to stay visually anchored (no jump).
@@ -149,7 +187,7 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
         if (body.scrollLeft + body.clientWidth > body.scrollWidth - threshold) {
           expandForward(EXPAND_STEP);
         }
-      }, 150);
+      }, 60);
     };
     body.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
@@ -184,6 +222,33 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
       await updateTask(taskId, fields);
     },
     [tasks, updateTask]
+  );
+
+  // Expand the timeline forward/backward while dragging a task near the left or
+  // right edge, so the canvas feels infinite. Works alongside dnd-kit autoScroll.
+  const handleDragMove = useCallback(
+    (event: DragMoveEvent) => {
+      const body = bodyRef.current;
+      if (!body) return;
+      const edgeZone = DAY_WIDTH * 1.5;
+      const dragX = body.clientWidth / 2 + event.delta.x;
+
+      // Near the right edge → grow forward and scroll right to reveal the new days.
+      if (dragX > body.clientWidth - edgeZone) {
+        const remaining = body.scrollWidth - (body.scrollLeft + body.clientWidth);
+        if (remaining < edgeZone) {
+          expandForward(EXPAND_STEP);
+          body.scrollLeft += EXPAND_STEP * DAY_WIDTH;
+        }
+      }
+
+      // Near the left edge → grow backward and keep the view anchored.
+      if (dragX < edgeZone && body.scrollLeft <= EXPAND_STEP * DAY_WIDTH) {
+        expandBackward(EXPAND_STEP);
+        body.scrollLeft = Math.max(0, body.scrollLeft + EXPAND_STEP * DAY_WIDTH);
+      }
+    },
+    [expandBackward, expandForward]
   );
 
   const handleCreateTask = useCallback(
@@ -231,6 +296,15 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
           </span>
         )}
 
+        <input
+          id="global-search"
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search tasks…  (⌘/Ctrl+F)"
+          className="input-field text-xs w-48 shrink-0 px-2.5"
+        />
+
         <div className="flex-1" />
 
         {viewMode === "timeline" && (
@@ -246,37 +320,47 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
           </button>
           {viewDropdownOpen && (
             <div className="absolute right-0 top-full mt-1 z-30 rounded-xl border border-border bg-surface shadow-lg py-1 w-36">
+              {timelineOn && (
               <button
                 onClick={() => { setViewMode("timeline"); setViewDropdownOpen(false); }}
                 className={`w-full text-left px-3 py-2 text-xs hover:bg-hover transition-colors ${viewMode === "timeline" ? "text-accent font-semibold" : "text-secondary"}`}
               >
                 Timeline
               </button>
+              )}
+              {kanbanOn && (
               <button
                 onClick={() => { setViewMode("kanban"); setViewDropdownOpen(false); }}
                 className={`w-full text-left px-3 py-2 text-xs hover:bg-hover transition-colors ${viewMode === "kanban" ? "text-accent font-semibold" : "text-secondary"}`}
               >
                 Kanban
               </button>
+              )}
+              {calendarOn && (
               <button
                 onClick={() => { setViewMode("calendar"); setViewDropdownOpen(false); }}
                 className={`w-full text-left px-3 py-2 text-xs hover:bg-hover transition-colors ${viewMode === "calendar" ? "text-accent font-semibold" : "text-secondary"}`}
               >
                 Calendar
               </button>
+              )}
+              {listOn && (
               <button
                 onClick={() => { setViewMode("list"); setViewDropdownOpen(false); }}
                 className={`w-full text-left px-3 py-2 text-xs hover:bg-hover transition-colors ${viewMode === "list" ? "text-accent font-semibold" : "text-secondary"}`}
               >
                 List
               </button>
+              )}
             </div>
           )}
         </div>
 
+        {stickyOn && (
         <button onClick={onOpenSticky} className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary">
           Notes
         </button>
+        )}
 
         <button
           onClick={() => { setFormDefaultDate(null); setShowTaskForm(!showTaskForm); }}
@@ -323,7 +407,7 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
         <ListView />
       ) : (
       <div className="flex" style={{ flex: 1, minHeight: 0 }}>
-        {!hideProjects && (
+        {!hideProjects && projectRailOn && (
         <div className="shrink-0 border-r border-border/40 bg-surface overflow-y-auto" style={{ width: 200 }}>
           <div className="sticky top-0 z-10 h-10 border-b border-border/40 flex items-center px-3 bg-surface">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Projects</span>
@@ -353,7 +437,7 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
         <div className="flex flex-col" data-timeline-canvas style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
           <TimelineHeader days={days} />
           <div ref={bodyRef} className="flex flex-col" data-timeline-body style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-            <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+            <DndContext sensors={sensors} onDragEnd={handleDragEnd} onDragMove={handleDragMove}>
               <div className="relative" style={{ minHeight: "100%", minWidth: days.length * 120 }}>
                 <TimelineGrid days={days} />
                 {hasTasks ? (

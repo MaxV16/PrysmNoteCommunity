@@ -2,141 +2,11 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "@/stores/app-store";
-import { streamChat, chat, hasLocalKey, getLocalApiKey } from "@/lib/llm";
+import { api } from "@/lib/api";
 import type { ChatMessage } from "@/types/ai";
-import type { LLMProvider } from "@/lib/llm";
+import type { Task } from "@/types/task";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
-
-const TOOL_DEFINITIONS = [
-  {
-    type: "function",
-    function: {
-      name: "search_tasks",
-      description: "Search tasks by query string and optional filters",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "search query" },
-          date_from: { type: "string", description: "YYYY-MM-DD optional start date filter" },
-          date_to: { type: "string", description: "YYYY-MM-DD optional end date filter" },
-          priority_min: { type: "integer", description: "minimum priority filter (1-5)" },
-          priority_max: { type: "integer", description: "maximum priority filter (1-5)" },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "create_task",
-      description: "Create a new task",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          project: { type: "string", description: "project name" },
-          start_date: { type: "string", description: "YYYY-MM-DD" },
-          due_date: { type: "string", description: "YYYY-MM-DD" },
-          priority: { type: "integer", minimum: 1, maximum: 5 },
-          recurrence_rule: { type: "string", description: "RRULE string" },
-          description: { type: "string" },
-          estimated_minutes: { type: "integer", description: "estimated time in minutes" },
-        },
-        required: ["title"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "update_task",
-      description: "Update task fields",
-      parameters: {
-        type: "object",
-        properties: {
-          task_id: { type: "string" },
-          fields: { type: "object", description: "fields to update" },
-        },
-        required: ["task_id", "fields"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "reschedule_task",
-      description: "Reschedule a task to a new date/time with conflict checking",
-      parameters: {
-        type: "object",
-        properties: {
-          task_id: { type: "string" },
-          new_start_date: { type: "string", description: "YYYY-MM-DD" },
-          new_due_date: { type: "string", description: "YYYY-MM-DD" },
-          reason: { type: "string", description: "reason for rescheduling" },
-        },
-        required: ["task_id"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_tasks_by_date_range",
-      description: "List all tasks in a date range with their priorities",
-      parameters: {
-        type: "object",
-        properties: {
-          date_from: { type: "string", description: "YYYY-MM-DD" },
-          date_to: { type: "string", description: "YYYY-MM-DD" },
-        },
-        required: ["date_from", "date_to"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_upcoming_deadlines",
-      description: "Get tasks approaching their due dates, sorted by urgency",
-      parameters: {
-        type: "object",
-        properties: {
-          days_ahead: { type: "integer", description: "number of days to look ahead (default: 7)" },
-        },
-        required: [],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "batch_create_tasks",
-      description: "Create multiple tasks at once",
-      parameters: {
-        type: "object",
-        properties: {
-          tasks: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                title: { type: "string" },
-                project: { type: "string" },
-                start_date: { type: "string" },
-                due_date: { type: "string" },
-                priority: { type: "integer" },
-              },
-              required: ["title"],
-            },
-          },
-        },
-        required: ["tasks"],
-      },
-    },
-  },
-];
 
 function getStoredSessionId(): string {
   if (typeof window === "undefined") return "";
@@ -151,6 +21,36 @@ function getToken(): string | null {
   if (typeof document === "undefined") return null;
   const match = document.cookie.match(/(?:^|;\s*)access_token=([^;]*)/);
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+async function refreshTasksFromServer() {
+  try {
+    const data = await api.get<Task[]>("/tasks/");
+    useAppStore.getState().setTasks(data);
+  } catch {
+    // Non-fatal: fall back to local tasks.
+  }
+}
+
+const TOOL_LABELS: Record<string, string> = {
+  create_task: "Creating task",
+  batch_create_tasks: "Creating tasks",
+  update_task: "Updating task",
+  reschedule_task: "Rescheduling task",
+  delete_task: "Removing task",
+  search_tasks: "Searching tasks",
+  list_tasks_by_date_range: "Checking calendar",
+  check_calendar: "Checking calendar",
+  suggest_best_time: "Finding a free slot",
+  detect_conflicts: "Checking for conflicts",
+  get_upcoming_deadlines: "Checking upcoming deadlines",
+  get_task_details: "Loading task details",
+  link_tasks: "Linking tasks",
+  suggest_subtasks: "Suggesting subtasks",
+};
+
+function prettyToolName(name: string): string {
+  return TOOL_LABELS[name] || `Calling ${name}`;
 }
 
 function buildFullContext(): string {
@@ -345,6 +245,10 @@ export function useAIChat() {
     })();
   }, [historyLoaded, setChatMessages]);
 
+  const sendViaBackendRef = useRef<
+    (content: string, provider: string, sessionId: string, assistantId: string, context?: Record<string, unknown>, signal?: AbortSignal) => Promise<void>
+  >(async () => {});
+
   const sendMessage = useCallback(
     async (content: string, provider = "openai", context?: Record<string, unknown>) => {
       setIsLoading(true);
@@ -370,266 +274,138 @@ export function useAIChat() {
         created_at: new Date().toISOString(),
       });
 
-      const providerKey = provider as "openai" | "gemini" | "deepseek";
-      const useDirectLLM = await hasLocalKey(providerKey);
-
-      if (useDirectLLM) {
-        abortRef.current = new AbortController();
-        await sendViaDirectLLM(content, providerKey, sessionId, assistantId, context);
-      } else {
-        abortRef.current = new AbortController();
-        await sendViaBackend(content, provider, sessionId, assistantId, context);
-      }
+      abortRef.current = new AbortController();
+      await sendViaBackendRef.current(content, provider, sessionId, assistantId, context, abortRef.current?.signal);
 
       setIsLoading(false);
       abortRef.current = null;
     },
-    [addChatMessage, tasks, projects, tags]
+    [addChatMessage]
   );
-  const updateAssistant = (assistantId: string, text: string) => {
-    const store = useAppStore.getState();
-    store.setChatMessages(
-      store.chatMessages.map((m) =>
-        m.id === assistantId ? { ...m, content: text } : m
-      )
-    );
-  };
+  const sendViaBackend = useCallback(
+    async (
+      content: string,
+      provider: string,
+      sessionId: string,
+      assistantId: string,
+      context?: Record<string, unknown>,
+      signal?: AbortSignal
+    ) => {
+      const setAssistant = (text: string) => {
+        const store = useAppStore.getState();
+        store.setChatMessages(
+          store.chatMessages.map((m) =>
+            m.id === assistantId ? { ...m, content: text } : m
+          )
+        );
+      };
 
-  const sendViaDirectLLM = async (
-    content: string,
-    provider: "openai" | "gemini" | "deepseek",
-    _sessionId: string,
-    assistantId: string,
-    _context?: Record<string, unknown>
-  ) => {
-    try {
-      const systemPrompt = `You are Prysm AI, a hyper-intelligent task management agent. You think like an expert productivity coach + personal assistant + schedule optimizer combined.
-
-CORE BEHAVIOR: When the user gives you a request, follow this protocol:
-1. PARSE: Extract task title, date/time, priority, recurrence, project, dependencies
-2. SEARCH: Always search for similar tasks and schedule conflicts before creating
-3. ANALYZE: Check calendar density for the target date range
-4. CREATE/SUGGEST: Create the task, or if conflicts exist, suggest resolution
-5. EXPLAIN: Briefly explain your decisions (1-2 lines max)
-
-NATURAL LANGUAGE UNDERSTANDING:
-- "gp appointment next week monday at 12" → parse to next Monday, 12:00, priority assessment
-- "call mom every sunday" → recurring task, no end date
-- "finish the report by Friday" → due_date this Friday, priority inferred from deadline proximity
-- "maybe learn guitar someday" → backlog/someday status, low priority
-
-PRIORITY-BASED CONFLICT RESOLUTION:
-- When a new task conflicts with existing tasks on the same day, compare priorities
-- If new task has higher priority, suggest rescheduling lower-priority conflicts
-- If same priority, suggest time slots or adjacent days
-- A day with 5+ tasks triggers an automatic overload warning
-- Medical/health appointments default to priority 5 (highest)
-
-EDGE CASES & IRREGULAR SCENARIOS:
-- "I need this done yesterday" → set to today with highest priority, warn about being overdue
-- "Whenever you get a chance" → inbox/backlog, priority 1
-- "ASAP but before my holiday starts on the 20th" → due_date = 19th, high priority
-- "Same time as my standup" → search for daily standup task, extract its time
-- Multi-task creation: "I need: buy groceries, pick up dry cleaning, call dentist" → create 3 tasks
-- Vague deadlines: "around next week" → suggest Wednesday of next week, ask confirmation
-- Double-booked but both urgent → flag both, ask user to choose
-- Task with no clear action: "think about career change" → create as low-priority backlog with note
-- Time-of-day specificity: "tomorrow morning" → start 9am, "tomorrow evening" → start 6pm
-- Relative dates across months: "end of next month" → calculate correctly
-- Overlapping multi-day tasks: detect and warn
-
-${buildFullContext()}`;
-
-      const messages: Array<{ role: string; content: string }> = [
-        { role: "system", content: systemPrompt },
-        ...chatMessages.slice(-10).map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content })),
-        { role: "user", content },
-      ];
-
-      const response = await chat(provider, messages as Array<{ role: string; content: string }>, TOOL_DEFINITIONS, abortRef.current?.signal);
-
-      if (response.tool_calls && response.tool_calls.length > 0) {
-        const toolNames = response.tool_calls.map((tc: { function: { name: string } }) => tc.function.name).join(", ");
-        updateAssistant(assistantId, `[Running: ${toolNames}]`);
-
-        const toolResults: Array<{ role: string; content: string }> = [];
-        for (const tc of response.tool_calls) {
-          const result = await executeToolOnBackend(tc, undoStackRef.current);
-          toolResults.push({ role: "tool", content: result });
-        }
-        setHasUndo(undoStackRef.current.length > 0);
-
-        messages.push({ role: "assistant", content: response.content || "" });
-        messages.push(...toolResults);
-
-        const body = new ReadableStream({
-          async start(controller) {
-            try {
-              const stream = await streamChat(provider, messages, TOOL_DEFINITIONS, abortRef.current?.signal);
-              const reader = stream.getReader();
-              const decoder = new TextDecoder();
-              let streamBuf = "";
-              let fullContent = "";
-
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                streamBuf += decoder.decode(value, { stream: true });
-
-                const lines = streamBuf.split("\n");
-                streamBuf = lines.pop() || "";
-
-                for (const line of lines) {
-                  if (line.startsWith("data: ") && line !== "data: [DONE]") {
-                    try {
-                      const chunk = JSON.parse(line.slice(6));
-                      const delta = chunk.choices?.[0]?.delta?.content || "";
-                      if (delta) {
-                        fullContent += delta;
-                        updateAssistant(assistantId, `[Running: ${toolNames}]\n\n${fullContent}`);
-                      }
-                    } catch {
-                      continue;
-                    }
-                  }
-                }
-              }
-
-              if (!fullContent) {
-                const store = useAppStore.getState();
-                store.setChatMessages(
-                  store.chatMessages.map((m) =>
-                    m.id === assistantId ? { ...m, content: response.content || "" } : m
-                  )
-                );
-              }
-
-              controller.close();
-            } catch {
-              controller.close();
-            }
-          },
+      let res: Response;
+      try {
+        res = await fetch(`${API_URL}/ai/chat/stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          signal,
+          body: JSON.stringify({
+            message: content,
+            chat_history: chatMessages.slice(-10),
+            session_id: sessionId,
+            provider,
+            ...(context ? { context } : {}),
+          }),
         });
-
-        await body.getReader().read();
-      } else {
-        const body = new ReadableStream({
-          async start(controller) {
-            try {
-              const stream = await streamChat(provider, messages, TOOL_DEFINITIONS, abortRef.current?.signal);
-              const reader = stream.getReader();
-              const decoder = new TextDecoder();
-              let streamBuf = "";
-              let fullContent = "";
-
-              while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                streamBuf += decoder.decode(value, { stream: true });
-
-                const lines = streamBuf.split("\n");
-                streamBuf = lines.pop() || "";
-
-                for (const line of lines) {
-                  if (line.startsWith("data: ") && line !== "data: [DONE]") {
-                    try {
-                      const chunk = JSON.parse(line.slice(6));
-                      const delta = chunk.choices?.[0]?.delta?.content || "";
-                      if (delta) {
-                        fullContent += delta;
-                        updateAssistant(assistantId, fullContent);
-                      }
-                    } catch {
-                      continue;
-                    }
-                  }
-                }
-              }
-
-              if (!fullContent) {
-                updateAssistant(assistantId, response.content || "");
-              }
-
-              controller.close();
-            } catch {
-              controller.close();
-            }
-          },
-        });
-
-        await body.getReader().read();
+      } catch (err: unknown) {
+        const msg = err instanceof Error && err.name !== "AbortError" ? err.message : "Failed to fetch";
+        setAssistant(`Error: ${msg}. Please check your API key in Settings.`);
+        return;
       }
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : "An error occurred";
-      updateAssistant(assistantId, `Error: ${errorMsg}. Please check your API key in Settings.`);
-    }
-  };
 
-  const sendViaBackend = async (
-    content: string,
-    provider: string,
-    sessionId: string,
-    assistantId: string,
-    context?: Record<string, unknown>
-  ) => {
-    try {
-      const res = await fetch(`${API_URL}/ai/chat/stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          message: content,
-          chat_history: chatMessages.slice(-10),
-          session_id: sessionId,
-          provider,
-          ...(context ? { context } : {}),
-        }),
-      });
+      if (!res.ok) {
+        let message = `Server error ${res.status}`;
+        try {
+          const body = await res.json();
+          if (typeof body?.detail === "string") message = body.detail;
+          else if (Array.isArray(body?.detail) && body.detail[0]?.msg) message = body.detail[0].msg;
+        } catch {
+          message = res.statusText || message;
+        }
+        setAssistant(`Error: ${message}`);
+        return;
+      }
 
       const reader = res.body?.getReader();
-      if (!reader) throw new Error("No reader");
+      if (!reader) {
+        setAssistant("Error: No response stream.");
+        return;
+      }
 
       const decoder = new TextDecoder();
       let buf = "";
       let currentEvent = "";
+      let receivedToken = false;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() || "";
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() || "";
 
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && currentEvent === "token") {
-            const store = useAppStore.getState();
-            const existing = store.chatMessages.find((m) => m.id === assistantId);
-            const newContent = (existing?.content || "") + line.slice(6);
-            updateAssistant(assistantId, newContent);
-          } else if (line.startsWith("data: ") && currentEvent === "tool_start") {
-            updateAssistant(assistantId, "[Tool calls: " + line.slice(6) + "]");
-          } else if (line === "") {
-            currentEvent = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              const data = line.slice(6);
+              if (currentEvent === "token") {
+                receivedToken = true;
+                const store = useAppStore.getState();
+                const existing = store.chatMessages.find((m) => m.id === assistantId);
+                setAssistant((existing?.content || "") + data);
+              } else if (currentEvent === "tool_start") {
+                const names = (() => {
+                  try {
+                    const raw = JSON.parse(data);
+                    if (Array.isArray(raw)) return raw;
+                  } catch {}
+                  return [];
+                })();
+                const label = names.length
+                  ? names.map(prettyToolName).join(" · ")
+                  : "using tools…";
+                setAssistant(`⚙ ${label}`);
+              }
+            } else if (line === "") {
+              currentEvent = "";
+            }
           }
         }
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name !== "AbortError") {
+          setAssistant("Sorry, I encountered an error while reading the response. Please try again.");
+        }
+        return;
       }
-    } catch {
-      const store = useAppStore.getState();
-      const existing = store.chatMessages.find((m) => m.id === assistantId);
-      if (existing && !existing.content) {
-        store.setChatMessages(
-          store.chatMessages.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: "Sorry, I encountered an error. Please check your API key." }
-              : m
-          )
-        );
+
+      // The backend may have created, updated, or deleted tasks via tool calls
+      // (e.g. create_task, reschedule_task, batch_create_tasks). Refresh the
+      // task store so the timeline/kanban/calendar/list reflect the changes
+      // immediately instead of only after a full page reload.
+      await refreshTasksFromServer();
+
+      if (!receivedToken) {
+        const store = useAppStore.getState();
+        const existing = store.chatMessages.find((m) => m.id === assistantId);
+        if (existing && !existing.content) {
+          setAssistant("Sorry, I encountered an error. Please check your API key in Settings.");
+        }
       }
-    }
-  };
+    },
+    [chatMessages]
+  );
+  sendViaBackendRef.current = sendViaBackend;
 
   return { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo };
 }

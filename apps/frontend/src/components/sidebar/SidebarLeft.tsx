@@ -11,6 +11,7 @@ import { NavSection } from "@/components/sidebar/NavSection";
 import { ProjectList } from "@/components/sidebar/ProjectList";
 import { TagList } from "@/components/sidebar/TagList";
 import { FilterBar } from "@/components/sidebar/FilterBar";
+import { useUiModule } from "@/lib/ui-module-registry";
 
 interface SidebarLeftProps {
   collapsed: boolean;
@@ -29,6 +30,12 @@ const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
 export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
   const { user, logout } = useAuth();
   const { themeName, setThemeName, toggleTheme } = useTheme();
+  const navOn = useUiModule("navSection");
+  const filterOn = useUiModule("filterBar");
+  const projectsOn = useUiModule("projectList");
+  const teamOn = useUiModule("teamSection");
+  const tagsOn = useUiModule("tagList");
+  const themeOn = useUiModule("themeSelector");
   const selectedTagId = useAppStore((s) => s.selectedTagId);
   const setSelectedTagId = useAppStore((s) => s.setSelectedTagId);
   const [teamExpanded, setTeamExpanded] = useState(false);
@@ -57,6 +64,8 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
           ▶
         </button>
         <div className="w-8 h-px bg-border my-1" />
+        {themeOn && (
+        <>
         {THEME_NAMES.map((name) => (
           <button
             key={name}
@@ -68,6 +77,8 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
             title={THEMES[name].label}
           />
         ))}
+        </>
+        )}
         <div className="flex-1" />
         <button
           onClick={handleLogout}
@@ -108,13 +119,13 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
 
       {/* Navigation & Content */}
       <div className="flex-1 overflow-auto px-3 py-3 space-y-6 scroll-smooth">
-        <NavSection />
-        <div className="divider-gradient" />
-        <FilterBar />
-        <div className="divider-gradient" />
-        <ProjectList />
-        <div className="divider-gradient" />
-        {teamMembers.length > 0 && (
+        {navOn && <NavSection />}
+        {navOn && <div className="divider-gradient" />}
+        {filterOn && <FilterBar />}
+        {filterOn && <div className="divider-gradient" />}
+        {projectsOn && <ProjectList />}
+        {projectsOn && <div className="divider-gradient" />}
+        {teamOn && teamMembers.length > 0 && (
           <>
             <div>
               <button
@@ -151,7 +162,7 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
             <div className="divider-gradient" />
           </>
         )}
-        <TagList />
+        {tagsOn && <TagList />}
       </div>
 
       {/* Footer: user + theme */}
@@ -182,6 +193,7 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
         )}
 
         {/* Theme selector */}
+        {themeOn && (
         <div className="px-3 py-2">
           <div className="flex items-center justify-between">
             <button
@@ -206,6 +218,7 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
