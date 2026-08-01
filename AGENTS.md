@@ -8,28 +8,82 @@ brew install gh
 gh auth login
 ```
 
+## Web Search (Always On)
+
+Use the built-in `websearch` / `webfetch` tools (no API key needed) whenever you need
+current, up-to-date, or external web information (latest docs, releases, bug reports,
+package versions, conventions, Stack Overflow, Autonoma usage, etc.) instead of guessing.
+
+- **Trigger it automatically**: prefer `websearch` before answering anything that is stale
+  or uncertain, or where accuracy matters. Do not wait to be asked.
+- **Part of the Autonoma loop too**: when debugging an Autonoma failure, look up relevant
+  docs/schemas with `websearch` and apply the findings alongside the code fix.
+- **Search then use**: pass the returned snippets/titles/URLs as source material in your
+  answer, phrased as search findings rather than personal knowledge.
+
+### Web Search Privacy & Secret-Handling (REQUIRED)
+
+Never leak secrets, credentials, or sensitive values into a web search. Treat every DuckDuckGo query as if it
+will be sent publicly to a third-party service. Enforce these rules on **every** search query:
+
+- **NEVER include in any query:**
+  - API keys, tokens, secrets, passwords, or credentials (e.g. `OPENAI_API_KEY`, `JWT_SECRET_KEY`,
+    `ENCRYPTION_KEY`, `sk-or-v1-...`, Bearer tokens).
+  - Connection strings (e.g. `DATABASE_URL`) — especially with embedded usernames/passwords.
+  - Internal hostnames, IPs, ports, or private project/file paths.
+  - Customer/PII data or anything confidential.
+- **Sanitize the query**: replace secrets/internal values with generic descriptions before searching.
+  - Bad: `ddg_web_search "how to fix {MY_DASHBOARD_URL} + sk-or-v1-572a..."`
+  - Good: `ddg_web_search "how to fix a 401 auth error on a Next.js app"`.
+- If a search genuinely needs the context around a secret, paraphrase it in neutral terms so the value itself
+  never leaves the machine.
+- **Verify the query text** before sending: if a pasted command, snippet, or log line would expose a secret,
+  redact it first, then search.
+- When pasting docs, code, or error output into the conversation or search, check for embedded secrets and
+  scrub them first.
+
+This applies both to web search and to anything shared externally (commits, PRs, issues, Docker, logs).
+
 ## Git Workflow
 
 After every meaningful set of file changes, you MUST:
-1. Stage all changed files: `git add <files>`
-2. Create a commit with a conventional commit message: `git commit -m "type(scope): description"`
-3. Push immediately: `git push`
-4. **Wait for CI and sync workflows to complete, then check for failures:**
+1. Run normal build + tests, then the **Autonoma full app check** (`npm run test:e2e:full`)
+   and fix any **confirmed** failures it reports (see "AI-Driven E2E Testing (Autonoma Loop)"
+   below).
+2. Stage all changed files: `git add <files>`
+3. Create a commit with a conventional commit message: `git commit -m "type(scope): description"`
+4. Push immediately: `git push`
+5. **Wait for CI and sync workflows to complete, then check for failures:**
    ```bash
    gh run list --workflow=CI --limit 1 --json conclusion,databaseId,displayTitle,url
    gh run list --workflow="Sync to Community Edition" --limit 1 --json conclusion,databaseId,displayTitle,url
    ```
-5. If any workflow failed, inspect the error with `gh run view <databaseId> --log | grep -E "Error|error|FAILED|exit code"` and fix the root cause, then commit and push the fix.
-6. Repeat steps 4-5 until both workflows pass.
+6. If any workflow failed, inspect the error with `gh run view <databaseId> --log | grep -E "Error|error|FAILED|exit code"` and fix the root cause, then commit and push the fix.
+7. Repeat steps 5-6 until both workflows pass.
 
 Batch related changes into a single commit. Do not create one commit per file or per micro-edit.
 
-**CRITICAL: Do NOT start, run, or restart any Docker containers, dev servers, databases, or localhost processes.** The user runs the app exclusively via their own start.bat script.
+**CRITICAL: After every meaningful change, rebuild/recompile and update Docker so changes appear on `localhost`.** The recommended workflow is:
 
-Allowed build-only commands that self-terminate:
-- `npm run build` (frontend) — verify compilation, then stop
-- `npm run test` (frontend) — run tests, then stop  
-- `pytest` (backend) — run tests, then stop
+```bash
+# 1) Verify the build compiles and run the test suites (all self-terminating):
+npm run build                              # compile the frontend
+npm run test                               # run frontend tests
+cd apps/backend && pytest -v && cd ../..   # run backend tests
+
+# 2) Rebuild changed Docker images (SAFE: never uses -v, never touches volumes):
+docker compose up -d --build frontend backend
+
+# 3) Restart so volume-mounted source is picked up / available immediately:
+docker compose restart frontend backend
+```
+
+- Plain source-file edits under `apps/frontend`/`apps/backend` are hot-reloaded via volume mounts
+  (`npx next dev` and `uvicorn --reload`), so `docker compose restart frontend backend` is usually
+  enough to see changes. A full `docker compose up -d --build frontend backend` is only required
+  when the Dockerfile, `package.json`, `next.config.ts`, or other build inputs change.
+- Do not leave long-running processes hanging after your work: run the build/tests, update Docker,
+  then stop. Never use `npm run dev`, `uvicorn`, or `next dev` directly — let Docker run them.
 
 **BANNED — DESTRUCTIVE / DATA-LOSS: NEVER RUN THESE.** They permanently delete the database and all user data:
 - `docker compose down -v` / `--volumes`
@@ -46,10 +100,10 @@ docker compose stop          # or: docker compose down  (no -v!)
 docker compose up -d
 ```
 - Never add `-v` (volumes) to any down/stop/rm command.
-- Do not interrupt containers preemptively. Only stop them if the user explicitly asks.
+- Do not interrupt containers preemptively. Only stop them if necessary to pick up changes or the user explicitly asks.
 - If a container MUST be removed (e.g. to rebuild), it is still safe to run `docker compose down` (stops and removes containers/networks) — the named `*_postgres_data` volume is persisted unless `-v` is used.
 
-Never leave processes running after your work is done, and never use `docker compose up`, `npm run dev`, `uvicorn`, `next dev`, or any other long-running command.
+Never leave a long-running foreground process hanging after your work is done (run `docker compose up` and other long-running commands only in the detached/update forms described above, and stop containers gracefully when finished).
 
 ## Project Overview
 
@@ -170,6 +224,99 @@ pytest -v            # 80+ tests: auth, tasks, projects, tags, search, AI servic
 
 ## API Keys (Encryption)
 User-provided LLM API keys (OpenAI, Gemini, DeepSeek) are encrypted at rest using Fernet (symmetric encryption from the `cryptography` library) before being stored in the `encrypted_key` BYTEA column of `api_keys` table. The `ENCRYPTION_KEY` in `.env` must be a 44-character base64-encoded Fernet key. Decryption happens in-memory only when the key is needed for an API call. See `app/utils/encryption.py`.
+
+## AI-Driven E2E Testing (Autonoma Loop)
+
+Autonoma (cloned at `~/Downloads/autonoma`) is an AI agent that drives a real
+headless browser against the running app, screenshots/videos every step, and
+reports what failed — screenshot + video + a written reason. **The intended loop:
+after ANY change to Prysm Note UI/backend, run Autonoma, read its failure report,
+and fix confirmed failures — then re-run until clean.**
+
+### Run it (from repo root)
+```bash
+npm run test:e2e           # quick core check (5 checks)
+npm run test:e2e:full      # FULL app check (10 checks) — before settling on a change
+npm run test:e2e:rebuild   # rebuild Prysm Note Docker first, then core check
+```
+Entry point: `autonoma/run-tests.sh` (handles PRYSM Note up, Autonoma infra up,
+fresh session-cookie auth, OpenRouter-driven agent, artifact saving).
+
+### Test cases
+- `autonoma-tests/prysmnote-core.tc.md` — core: workspace, new task on timeline,
+  Ctrl+F search, settings toggles, AI chat.
+- `autonoma-tests/prysmnote-full.tc.md` — full: adds view modes, task edit,
+  project rail + tags, theme, sticky notes.
+
+### After a run
+- Full logs: `autonoma-artifacts/<run>/run.log`
+- Screenshots + video: `~/Downloads/autonoma/apps/engine-web/artifacts/<latest>`
+- The agent prints a per-check PASS/FAIL list. Read the FAIL reasons, verify each
+  against the real app (direct Playwright or the API — see below), fix confirmed
+  bugs in Prysm Note, then re-run.
+
+### Mandatory rule: verify before fixing — multi-channel, never single-source
+
+Autonoma uses screenshot-coordinate clicking and an LLM-driven browser, so it
+sometimes reports false positives (it clicks the wrong `+ New`, clicks near a
+button, misread a view/tab, or blames a real bug for its own navigation loop).
+Treat **any single Autonoma report as a hypothesis, not a fact.** Never change
+code based on Autonoma alone.
+
+Before editing Prysm Note for a reported failure, confirm the real behavior
+through **at least two independent, reproducible channels**, and record the
+evidence in the commit/PR:
+
+1. **API  — deterministic truth.** Hit the real endpoints (`/api/...`) directly
+   (curl or a script) and assert on the actual response body/status. E.g. create
+   a task and verify it 200s and returns the task; GET it back.
+2. **Headless DOM assertions — deterministic UI truth.** Drive a real headless
+   browser (Playwright) with explicit, coordinate-free assertions (`getByRole`,
+   `getByText`, `expect(...).toBeVisible()`), not screenshot clicking. If the
+   agent could not find something, assert it from the DOM directly.
+3. **Code inspection — root-cause truth.** Read the component/handler that is
+   claimed broken and confirm the code path actually produces the reported
+   symptom (or cannot).
+
+A confirmed bug = the symptom reproduces through **≥2 of the 3 channels above**
+(e.g., the API returns the wrong thing AND a headless `toBeVisible` assertion
+fails for a concrete reason). If a channel contradicts the report (e.g., the API
+returns the task but the agent says it "disappeared"), the report is a false
+positive — do not fix.
+
+When you fix a confirmed bug, add or update an automated regression test that
+fails without the fix and passes with it, so the loop does not re-report the
+same false positive.
+
+### Using the smoke tests instead of (or before) Autonoma
+Run the deterministic smoke checks before deciding anything needs a full Autonoma
+pass:
+
+```bash
+npm run smoke:api        # direct API assertions (signup/login → task CRUD → round-trip)
+npm run smoke:ui         # headless Playwright DOM assertions (login → new task → visible on today)
+EXECUTABLE_PATH=... npm run smoke:ui   # point at a specific local Chromium if needed
+# smoke:ui reuses the Chromium already cached on this machine (shared with
+# Autonoma); set EXECUTABLE_PATH to a Playwright-managed browser to use it.
+```
+
+`npm run smoke:ui` uses coordinate-free selectors, so it is the primary source of
+truth for "did the task appear". Prefer a green `smoke:api` + `smoke:ui` over a
+fast re-run of Autonoma when you are verifying UI/task-creation behavior.
+
+### Web search
+Use `websearch` freely to look up Autonoma usage, API details, or anything
+unclear, then apply the findings.
+
+### Model/config notes
+- Autonoma uses the user's OpenRouter key (`.env` → `OPENROUTER_API_KEY`),
+  cheapest models: `google/gemini-3-flash-preview` (vision, forced tool calling)
+  + `openai/gpt-oss-120b` (text) + `mistralai/ministral-8b-2512` (fast). No
+  Gemini/Groq keys needed.
+- Requires Node >= 24 + pnpm 11 (installed keg-only via `node@24`) and Autonoma
+  infra (postgres :5433, redis :6380, temporal :7233) via
+  `docker compose -f ~/Downloads/autonoma/docker-compose.coexist.yaml up -d` —
+  all isolated from Prysm Note's own containers/data.
 
 ## Tech Stack Summary
 

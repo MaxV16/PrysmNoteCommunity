@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/stores/app-store";
 import type { Task, TaskStatus } from "@/types/task";
+import { toLocalDateString } from "@/lib/utils";
 
 interface TaskFormProps {
   onSubmit: (data: {
@@ -186,11 +187,17 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    // Ensure undated tasks land on the user's local date so they appear on the
+    // timeline. Using the local date (not UTC) keeps the day aligned across
+    // timezones.
+    const today = toLocalDateString();
+    const start = startDate || (isEdit ? "" : today);
+    const due = dueDate || (isEdit ? "" : today);
     onSubmit({
       title: title.trim(),
       description: description.trim() || undefined,
-      start_date: startDate || undefined,
-      due_date: dueDate || undefined,
+      start_date: start || undefined,
+      due_date: due || undefined,
       status: isEdit ? status : undefined,
       priority: isEdit ? priority : undefined,
       project_id: projectId || null,

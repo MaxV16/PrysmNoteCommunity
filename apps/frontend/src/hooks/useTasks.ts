@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { api } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
 import type { Task } from "@/types/task";
-import { getLocalTasks, createLocalTask, updateLocalTask, deleteLocalTask, setLocalTasks } from "@/lib/local-storage";
+import { getLocalTasks, updateLocalTask, deleteLocalTask } from "@/lib/local-storage";
 
 export function useTasks() {
   const { tasks, setTasks } = useAppStore();
@@ -21,15 +21,9 @@ export function useTasks() {
 
   const createTask = useCallback(
     async (task: Record<string, unknown>) => {
-      try {
-        const data = await api.post<Task>("/tasks/", task);
-        await fetchTasks();
-        return data;
-      } catch {
-        const local = createLocalTask(task as any);
-        await fetchTasks();
-        return local;
-      }
+      const data = await api.post<Task>("/tasks/", task);
+      await fetchTasks();
+      return data;
     },
     [fetchTasks]
   );

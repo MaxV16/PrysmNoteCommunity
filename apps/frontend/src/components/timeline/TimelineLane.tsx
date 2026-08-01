@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { Task } from "@/types/task";
 import { TaskBar } from "./TaskBar";
+import { parseLocalDate } from "@/lib/utils";
 
 interface TimelineLaneProps {
   tasks: Task[];
@@ -12,8 +13,8 @@ interface TimelineLaneProps {
 }
 
 function getTaskPosition(task: Task, days: Date[]) {
-  const taskStart = task.start_date ? new Date(task.start_date) : null;
-  const taskEnd = task.due_date ? new Date(task.due_date) : null;
+  const taskStart = task.start_date ? parseLocalDate(task.start_date) : null;
+  const taskEnd = task.due_date ? parseLocalDate(task.due_date) : null;
   if (!taskStart && !taskEnd) return null;
 
   const startOfFirstDay = new Date(days[0]);

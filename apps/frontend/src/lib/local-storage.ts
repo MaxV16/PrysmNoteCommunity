@@ -17,6 +17,8 @@ export function setItem<T>(key: string, value: T): void {
   } catch {}
 }
 
+import { toLocalDateString } from "@/lib/utils";
+
 const TASKS_KEY = "prysm_tasks";
 
 function generateId(): string {
@@ -33,7 +35,7 @@ export function setLocalTasks<T>(tasks: T) {
 
 export function createLocalTask(data: { title: string; description?: string; start_date?: string; due_date?: string; status?: string; priority?: number; project_id?: string | null }) {
   const tasks = getLocalTasks<any[]>();
-  const today = new Date().toISOString().split("T")[0];
+  const today = toLocalDateString();
   const task = {
     id: generateId(),
     user_id: "local",

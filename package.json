@@ -8,13 +8,19 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "lint": "turbo run lint"
+    "lint": "turbo run lint",
+    "smoke:api": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/api-smoke.mjs",
+    "smoke:ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke.mjs",
+    "test:e2e": "bash autonoma/run-tests.sh core",
+    "test:e2e:full": "bash autonoma/run-tests.sh full",
+    "test:e2e:rebuild": "bash autonoma/run-tests.sh new"
   },
   "overrides": {
     "postcss": "^8.5.23"
   },
   "packageManager": "npm@11.16.0",
   "devDependencies": {
+    "@playwright/test": "^1.53.0",
     "concurrently": "^10.0.4",
     "electron": "^42.3.3",
     "electron-builder": "^26.15.3",

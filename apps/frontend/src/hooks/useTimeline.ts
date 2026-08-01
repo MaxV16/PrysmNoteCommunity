@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
+import { parseLocalDate } from "@/lib/utils";
 
 /**
  * Infinite horizontal timeline state.
@@ -45,7 +46,8 @@ export function useTimeline(initialDays = 20, baseLeftOffset = 10) {
     () =>
       tasks.filter((t) => {
         if (!t.start_date && !t.due_date) return false;
-        const taskDate = new Date(t.start_date || t.due_date || "");
+        const taskDate = parseLocalDate(t.start_date || t.due_date || "");
+        if (Number.isNaN(taskDate.getTime())) return false;
         return taskDate >= visibleRange.start && taskDate <= visibleRange.end;
       }),
     [tasks, visibleRange]
