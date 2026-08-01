@@ -42,7 +42,7 @@ export default function TosPage() {
 
         <section className="space-y-4 text-sm text-secondary leading-relaxed">
           <h2 className="text-lg font-semibold text-primary">5. Intellectual Property</h2>
-          <p>The Community Edition of Prysm Note is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). The Enterprise Edition and associated proprietary features are licensed separately under a commercial license. You retain ownership of your task data and content.</p>
+          <p>The Community Edition of Prysm Note is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0) You retain ownership of your task data and content.</p>
         </section>
 
         <section className="space-y-4 text-sm text-secondary leading-relaxed">
