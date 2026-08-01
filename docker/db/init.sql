@@ -142,6 +142,15 @@ CREATE TABLE IF NOT EXISTS ai_conversations (
   tool_calls JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- AI session summaries (rolling agent memory per chat session)
+CREATE TABLE IF NOT EXISTS ai_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL,
+  summary TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 -- Calendar events (Google Calendar sync map)
 CREATE TABLE IF NOT EXISTS calendar_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -210,6 +219,7 @@ CREATE INDEX IF NOT EXISTS idx_task_links_target ON task_links(target_task_id);
 CREATE INDEX IF NOT EXISTS idx_task_embeddings_ann ON task_embeddings
   USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX IF NOT EXISTS idx_ai_conversations_session ON ai_conversations(session_id);
+CREATE INDEX IF NOT EXISTS idx_ai_sessions_user_session ON ai_sessions(user_id, session_id);
 CREATE INDEX IF NOT EXISTS idx_calendar_events_google ON calendar_events(google_event_id);
 CREATE INDEX IF NOT EXISTS idx_user_tokens_provider ON user_tokens(user_id, provider);
 
@@ -223,6 +233,7 @@ ALTER TABLE tags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_tags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_embeddings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE calendar_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE habits ENABLE ROW LEVEL SECURITY;
@@ -259,6 +270,9 @@ CREATE POLICY user_isolation ON task_embeddings
   USING (task_id IN (SELECT id FROM tasks WHERE user_id = rls_user_id()));
 
 CREATE POLICY user_isolation ON ai_conversations
+  USING (user_id = rls_user_id());
+
+CREATE POLICY user_isolation ON ai_sessions
   USING (user_id = rls_user_id());
 
 CREATE POLICY user_isolation ON calendar_events

@@ -77,6 +77,19 @@ describe("parseLocalDate", () => {
     expect(parsed.getDate()).toBe(1);
   });
 
+  it("shifting a local date and serializing back keeps the exact day (drag fix)", () => {
+    // Mirrors handleDragEnd: parse local → setDate(+daysShifted) → toLocalDateString.
+    // If serialization used UTC (toISOString) this would be off by one in -UTC zones.
+    const daysShifted = 2;
+    const d = parseLocalDate("2026-08-01");
+    d.setDate(d.getDate() + daysShifted);
+    expect(toLocalDateString(d)).toBe("2026-08-03");
+
+    const back = parseLocalDate("2026-08-01");
+    back.setDate(back.getDate() - 2);
+    expect(toLocalDateString(back)).toBe("2026-07-30");
+  });
+
   it("returns an invalid date for garbage input", () => {
     expect(Number.isNaN(parseLocalDate("nonsense").getTime())).toBe(true);
   });

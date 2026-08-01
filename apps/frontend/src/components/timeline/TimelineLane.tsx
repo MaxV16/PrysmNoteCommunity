@@ -61,26 +61,28 @@ export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick }: Tim
 
   return (
     <div className="relative border-b border-border/30 hover:bg-hover/10 transition-colors" style={{ minHeight: 48 }}>
-      {positionedTasks.map(({ task, pos }) => (
-        <TaskBar
-          key={task.id}
-          task={task}
-          style={{ left: pos.left, width: pos.width, top: 5 }}
-          onClick={() => onTaskClick?.(task.id)}
-        />
-      ))}
       {onDayDoubleClick && (
-        <div className="absolute inset-0 flex pointer-events-none z-10">
+        <div className="absolute inset-0 flex pointer-events-none z-0">
           {days.map((day) => (
             <div
               key={day.toISOString()}
               className="pointer-events-auto cursor-pointer"
-              style={{ minWidth: 120, flex: 1 }}
+              style={{ width: 120, minWidth: 120, flex: "0 0 120px" }}
               onDoubleClick={() => onDayDoubleClick(day)}
             />
           ))}
         </div>
       )}
+      <div className="absolute inset-0 z-20 pointer-events-none">
+        {positionedTasks.map(({ task, pos }) => (
+          <TaskBar
+            key={task.id}
+            task={task}
+            style={{ left: pos.left, width: pos.width, top: 5 }}
+            onClick={() => onTaskClick?.(task.id)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

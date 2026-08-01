@@ -17,6 +17,7 @@ import { useTasks } from "@/hooks/useTasks";
 import { useUiModule } from "@/lib/ui-module-registry";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { useRouter } from "next/navigation";
+import { parseLocalDate, toLocalDateString } from "@/lib/utils";
 
 // Fixed width, in px, of each day column in the infinite timeline.
 const DAY_WIDTH = 120;
@@ -209,14 +210,14 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
       if (!task) return;
       const fields: Record<string, string> = {};
       if (task.start_date) {
-        const d = new Date(task.start_date);
+        const d = parseLocalDate(task.start_date);
         d.setDate(d.getDate() + daysShifted);
-        fields.start_date = d.toISOString().split("T")[0];
+        fields.start_date = toLocalDateString(d);
       }
       if (task.due_date) {
-        const d = new Date(task.due_date);
+        const d = parseLocalDate(task.due_date);
         d.setDate(d.getDate() + daysShifted);
-        fields.due_date = d.toISOString().split("T")[0];
+        fields.due_date = toLocalDateString(d);
       }
       if (!task.start_date && !task.due_date) return;
       await updateTask(taskId, fields);
@@ -435,10 +436,10 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
 
         {/* Right timeline canvas */}
         <div className="flex flex-col" data-timeline-canvas style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-          <TimelineHeader days={days} />
           <div ref={bodyRef} className="flex flex-col" data-timeline-body style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
             <DndContext sensors={sensors} onDragEnd={handleDragEnd} onDragMove={handleDragMove}>
-              <div className="relative" style={{ minHeight: "100%", minWidth: days.length * 120 }}>
+              <div className="relative" style={{ minHeight: "100%", width: days.length * DAY_WIDTH }}>
+                <TimelineHeader days={days} />
                 <TimelineGrid days={days} />
                 {hasTasks ? (
                   Object.entries(tasksByProject).map(([projectId, projectTasks]) => (

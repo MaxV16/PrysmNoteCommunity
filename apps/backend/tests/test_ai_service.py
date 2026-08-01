@@ -580,3 +580,139 @@ async def test_execute_search_accepts_uuid_object_user_id(db_session: AsyncSessi
     results = await execute_tool_calls(tool_calls, user_id, db_session)
     content = json.loads(results[0]["content"])
     assert "found" in content, f"search_tasks failed with UUID user_id: {results}"
+
+
+@pytest.mark.asyncio
+async def test_execute_create_task_conflict_enrichment(db_session: AsyncSession, ai_user):
+    """Creating a dated task that overlaps an existing higher-priority (medical,
+    priority 5) task must surface a conflict_warning with outranks_new, so the
+    model warns instead of silently double-booking."""
+    from app.models.task import Task
+    user_id = ai_user
+    existing = Task(
+        user_id=user_id, title="GP Appointment",
+        start_date=date(2026, 8, 3), due_date=date(2026, 8, 3), priority=5,
+    )
+    db_session.add(existing)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_conflict_create",
+        "function": {
+            "name": "create_task",
+            "arguments": json.dumps({"title": "Team Meeting", "start_date": "2026-08-03", "priority": 3}),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert content["created"] is True
+    assert content["task"]["title"] == "Team Meeting"
+    assert "conflict_warning" in content, f"expected conflict_warning in tool result: {content}"
+    warn = content["conflict_warning"]
+    assert warn["conflict_count"] >= 1
+    assert any(c["title"] == "GP Appointment" and c["outranks_new"] for c in warn["conflicts"])
+
+
+@pytest.mark.asyncio
+async def test_execute_create_task_no_conflict_on_distinct_day(db_session: AsyncSession, ai_user):
+    from app.models.task import Task
+    user_id = ai_user
+    existing = Task(
+        user_id=user_id, title="GP Appointment",
+        start_date=date(2026, 8, 3), due_date=date(2026, 8, 3), priority=5,
+    )
+    db_session.add(existing)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_distinct",
+        "function": {
+            "name": "create_task",
+            "arguments": json.dumps({"title": "Other Day", "start_date": "2026-08-10", "priority": 3}),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert content["created"] is True
+    assert "conflict_warning" not in content
+
+
+@pytest.mark.asyncio
+async def test_build_messages_injects_summary(db_session: AsyncSession):
+    messages = build_messages([], "follow up on the task", None, "Created task X on 2026-08-03, priority 5.")
+    system = messages[0]["content"]
+    assert "CONTEXT SUMMARY" in system
+    assert "Created task X on 2026-08-03" in system
+
+
+@pytest.mark.asyncio
+async def test_build_messages_skips_empty_summary(db_session: AsyncSession):
+    messages = build_messages([], "hello")
+    assert "CONTEXT SUMMARY" not in messages[0]["content"]
+    messages2 = build_messages([], "hello", None, "   ")
+    assert "CONTEXT SUMMARY" not in messages2[0]["content"]
+
+
+class _FakeSummaryClient:
+    def __init__(self):
+        self.summary = "User asked me to create a task titled 'Quarterly Report Reply' due 2031-01-15 priority 2."
+
+    async def chat(self, messages, tools=None, **kwargs):
+        return {"choices": [{"message": {"role": "assistant", "content": self.summary}}]}
+
+
+@pytest.mark.asyncio
+async def test_session_summary_persists(db_session: AsyncSession, ai_user):
+    """_maybe_update_summary should persist a rolling summary to ai_sessions and
+    keep it across calls (agent memory), guarded by a length threshold."""
+    from app.models.ai_session import AiSession
+    from app.routers.ai import _maybe_update_summary, load_session_summary
+
+    user_id = str(ai_user)
+    session_id = str(uuid4())
+    client = _FakeSummaryClient()
+
+    # Below threshold → no row.
+    await _maybe_update_summary(
+        db_session, user_id, session_id, client,
+        [{"role": "user", "content": "hi"}], "world", "hello", None,
+    )
+    row = await load_session_summary(db_session, user_id, session_id)
+    assert row is None
+
+    # Enough history → summary persisted.
+    long_history = [{"role": "user", "content": f"msg {i}"} for i in range(10)]
+    await _maybe_update_summary(
+        db_session, user_id, session_id, client,
+        long_history, "create Quarterly Report Reply for Jan 15", "done", None,
+    )
+    await db_session.commit()
+    row = await load_session_summary(db_session, user_id, session_id)
+    assert row is not None
+    assert row.summary is not None
+    assert "Quarterly Report Reply" in row.summary
+
+
+@pytest.mark.asyncio
+async def test_session_summary_survives_summarizer_failure(db_session: AsyncSession, ai_user):
+    """If summarization fails (bad key/network), the existing truncation behavior
+    is preserved and the stored summary is not lost nor does it raise."""
+    from app.routers.ai import _maybe_update_summary, load_session_summary, summarize_conversation
+
+    class _FailingClient:
+        async def chat(self, messages, tools=None, **kwargs):
+            raise RuntimeError("boom")
+
+    user_id = str(ai_user)
+    session_id = str(uuid4())
+    long_history = [{"role": "user", "content": f"msg {i}"} for i in range(10)]
+
+    # Nothing stored yet, summarizer fails → no crash, no summary.
+    summary = await summarize_conversation(_FailingClient(), long_history, None)
+    assert summary == ""
+
+    # With an existing summary, a failure keeps the old summary.
+    kept = await summarize_conversation(_FailingClient(), long_history, "keep me")
+    assert kept == "keep me"

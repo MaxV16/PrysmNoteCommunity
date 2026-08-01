@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { api } from "@/lib/api";
-import type { ChatMessage } from "@/types/ai";
+import type { ChatMessage, AiSessionListItem } from "@/types/ai";
 import type { Task } from "@/types/task";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
@@ -245,6 +245,48 @@ export function useAIChat() {
     })();
   }, [historyLoaded, setChatMessages]);
 
+  const loadSession = useCallback(
+    async (sid: string) => {
+      sessionIdRef.current = sid;
+      setStoredSessionId(sid);
+      setHistoryLoaded(true);
+      try {
+        const res = await fetch(`${API_URL}/ai/conversations/${sid}`, { credentials: "include" });
+        if (res.ok) {
+          const history = await res.json();
+          const msgs: ChatMessage[] = history.map((h: { role: string; content: string; created_at: string }) => ({
+            id: crypto.randomUUID(),
+            role: h.role,
+            content: h.content,
+            created_at: h.created_at,
+          }));
+          setChatMessages(msgs);
+        } else {
+          setChatMessages([]);
+        }
+      } catch {
+        setChatMessages([]);
+      }
+    },
+    [setChatMessages]
+  );
+
+  const newChat = useCallback(() => {
+    sessionIdRef.current = crypto.randomUUID();
+    setStoredSessionId(sessionIdRef.current);
+    setHistoryLoaded(true);
+    setChatMessages([]);
+  }, [setChatMessages]);
+
+  const fetchSessions = useCallback(async () => {
+    try {
+      const data = await api.get<AiSessionListItem[]>("/ai/sessions");
+      return data;
+    } catch {
+      return [];
+    }
+  }, []);
+
   const sendViaBackendRef = useRef<
     (content: string, provider: string, sessionId: string, assistantId: string, context?: Record<string, unknown>, signal?: AbortSignal) => Promise<void>
   >(async () => {});
@@ -409,5 +451,15 @@ export function useAIChat() {
   );
   sendViaBackendRef.current = sendViaBackend;
 
-  return { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo };
+  return {
+    chatMessages,
+    sendMessage,
+    isLoading,
+    abort,
+    undoLastAction,
+    hasUndo,
+    loadSession,
+    newChat,
+    fetchSessions,
+  };
 }

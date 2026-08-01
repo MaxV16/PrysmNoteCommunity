@@ -29,7 +29,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_task",
-            "description": "Create a new task. IMPORTANT: if the user mentions a date/time or relative day (tomorrow, next Monday, Friday, etc.), resolve it to an exact ISO date using TODAY'S DATE and ALWAYS pass it in start_date (and due_date if relevant). Do not create date-less tasks when the user gave a date.",
+            "description": "Create a new task. IMPORTANT: if the user mentions a date/time or relative day (tomorrow, next Monday, Friday, etc.), resolve it to an exact ISO date using TODAY'S DATE and ALWAYS pass it in start_date (and due_date if relevant). Do not create date-less tasks when the user gave a date. When a specific date is used, first call list_tasks_by_date_range for that date to flag conflicts in your reply (medical/priority-5 tasks outrank regular meetings).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -132,7 +132,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "detect_conflicts",
-            "description": "Detect scheduling conflicts for a task with priority information",
+            "description": "Detect scheduling conflicts for a dated task with priority information. Priority 5 (medical/health) always outranks lower-priority tasks. Use this to check whether a task clashes with existing higher-priority or medical tasks before finalizing a schedule and to surface clashes in your reply.",
             "parameters": {
                 "type": "object",
                 "properties": {"task_id": {"type": "string"}},
@@ -232,7 +232,7 @@ TOOL_DEFINITIONS = [
 ]
 
 
-def build_messages(chat_history: list[dict], user_message: str, context: dict | None = None) -> list[dict]:
+def build_messages(chat_history: list[dict], user_message: str, context: dict | None = None, summary: str | None = None) -> list[dict]:
     from datetime import date
     today = date.today().isoformat()
 
@@ -243,12 +243,13 @@ You are Prysm AI, a hyper-intelligent task management agent. You are the user's 
 CORE BEHAVIOR: When the user gives you a request, follow this protocol:
 1. PARSE: Extract task title, date/time, priority, recurrence, project, dependencies.
 2. ACT: For scheduling/creation requests, CONFIRM the details (compute exact dates yourself using TODAY'S DATE) then CREATE the task with create_task or batch_create_tasks. DO NOT just describe what you would do — actually do it.
-3. VERIFY: Only use search_tasks / list_tasks_by_date_range / check_calendar for genuine conflict-checking when it matters (e.g. "is my Tuesday free?"). You already know the date math; do not browse the calendar for a simple "create X on Y" request.
-4. EXPLAIN: Briefly tell the user what you did (1-2 lines max).
+3. VERIFY CONFLICTS: When a request targets a SPECIFIC DATE (the user names a day — "next Monday", "March 3rd", "tomorrow", "Friday"), call list_tasks_by_date_range for that same day BEFORE creating so you know what is already scheduled. Medical/health tasks (priority 5) always outrank a regular meeting (priority 3): if the new dated task would clash with an existing higher-priority or medical task, DO NOT silently double-book — create it anyway but clearly warn the user in your reply with the exact date and the conflicting task's title/priority, or ask which to keep.
+4. EXPLAIN: Briefly tell the user what you did (1-2 lines max), and if there was a conflict, explicitly call it out.
 
 DECISION RULES:
 - When the user asks to add/schedule/create a task (e.g. "schedule GP appointment next Monday at 12pm", "add a reminder to call mom"), CALL create_task (or batch_create_tasks for several). Only skip creating if you genuinely cannot parse the details — then ask ONE clarifying question.
 - If the user's request includes ANY date/time ("next Monday", "tomorrow", "Friday", "at 12pm", "next week"), you MUST compute the exact YYYY-MM-DD from TODAY'S DATE and pass it as start_date. NEVER create a date-less task when a date was given.
+- Before creating a task on a SPECIFIC date, call list_tasks_by_date_range for that date to check for conflicts. If a conflict exists and the existing task has higher priority (especially priority 5 = medical), mention it and the exact date in your reply.
 - "12pm", "morning", "in the afternoon" have no date field; capture them in description and set estimated_minutes if useful.
 - If the user asks "what's coming up / deadlines", use get_upcoming_deadlines and summarize.
 - If the user asks to find tasks, use search_tasks.
@@ -265,7 +266,7 @@ NATURAL LANGUAGE UNDERSTANDING:
 ALWAYS:
 - Use create_task or batch_create_tasks for anything the user wants added.
 - Use reschedule_task when moving tasks, not just update_task.
-- Only check calendar/conflicts when the user explicitly asks about scheduling conflicts or free time.
+- When creating or rescheduling a task onto a specific date, check that date for conflicts (list_tasks_by_date_range) and warn the user if the day is already crowded or a higher-priority/medical task is scheduled.
 - Be concise and decisive."""
 
     if context:
@@ -289,6 +290,15 @@ ALWAYS:
                 if busy_days:
                     days_str = ", ".join(d["date"] for d in busy_days[:5])
                     system_content += f"\n\nSCHEDULE ALERT: The following days have 5+ tasks (overcrowded): {days_str}. Be cautious when scheduling on these dates."
+
+    if summary and summary.strip():
+        system_content += (
+            "\n\nCONTEXT SUMMARY — IMPORTANT LONG-TERM MEMORY:\n"
+            "The following is a rolling summary of earlier parts of this conversation that may no longer be "
+            "in the raw history. Treat it as ground truth for facts you established earlier "
+            "(tasks created, their titles/dates/priorities, decisions, user preferences).\n\n"
+            f"{summary.strip()}"
+        )
 
     messages = [{"role": "system", "content": system_content}]
     messages.extend(chat_history[-20:])
@@ -426,10 +436,56 @@ async def execute_tool_calls(
                     priority=args.get("priority", 3),
                     recurrence_rule=args.get("recurrence_rule"),
                 )
+
+                # Conflict enrichment: after creating a dated task, surface any
+                # overlapping tasks on the same day so the model can warn the user
+                # even if it forgot to call list_tasks_by_date_range. Medical/health
+                # (priority 5) tasks outrank regular meetings (priority 3).
+                conflicts = []
+                if task.start_date or task.due_date:
+                    from sqlalchemy import or_
+                    ts = task.start_date
+                    te = task.due_date or task.start_date
+                    conflict_result = await session.execute(
+                        select(Task).where(
+                            Task.user_id == UUID(user_id),
+                            Task.id != task.id,
+                            Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+                            Task.start_date.isnot(None),
+                            or_(
+                                Task.start_date == ts,
+                                Task.due_date == te,
+                                (Task.start_date <= te) & (Task.due_date >= ts),
+                                (Task.start_date <= te) & (Task.due_date.is_(None)),
+                                (Task.due_date >= ts) & (Task.start_date.is_(None)),
+                            ),
+                        ).order_by(Task.priority.desc(), Task.start_date).limit(10)
+                    )
+                    for ct in conflict_result.scalars().all():
+                        ct_prio = ct.priority or 3
+                        # Match detect_conflicts' priority direction: a higher
+                        # numeric priority (medical/health = 5) is more important
+                        # than a lower one (regular meeting = 3).
+                        conflicts.append({
+                            "id": str(ct.id),
+                            "title": ct.title,
+                            "priority": ct.priority,
+                            "start_date": str(ct.start_date) if ct.start_date else None,
+                            "due_date": str(ct.due_date) if ct.due_date else None,
+                            "outranks_new": ct_prio > (task.priority or 3),
+                        })
+
+                created_payload = {"created": True, "task": {"id": str(task.id), "title": task.title}}
+                if conflicts:
+                    created_payload["conflict_warning"] = {
+                        "conflict_count": len(conflicts),
+                        "message": "This task overlaps existing task(s) on the same day. If a conflicting task has higher priority (especially priority 5 = medical), you MUST warn the user in your reply with the date and conflicting title(s).",
+                        "conflicts": conflicts,
+                    }
                 results.append({
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
-                    "content": json.dumps({"created": True, "task": {"id": str(task.id), "title": task.title}}),
+                    "content": json.dumps(created_payload),
                 })
 
             elif name == "update_task":

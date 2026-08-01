@@ -13,3 +13,11 @@ export interface AiSuggestion {
   description: string;
   task_id?: string;
 }
+
+export interface AiSessionListItem {
+  session_id: string;
+  title: string;
+  message_count: number;
+  last_message_at: string;
+  summary?: string | null;
+}

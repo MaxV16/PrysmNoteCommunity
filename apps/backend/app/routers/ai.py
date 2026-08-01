@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.ai_conversation import AiConversation
+from app.models.ai_session import AiSession
 from app.models.api_key import ApiKey
 from app.models.user import User
 from app.services.ai_service import (
@@ -116,6 +117,94 @@ async def persist_conversation(
     session.add(conv)
 
 
+async def load_session_summary(session: AsyncSession, user_id: str, session_id: str) -> AiSession | None:
+    result = await session.execute(
+        select(AiSession).where(
+            AiSession.user_id == user_id,
+            AiSession.session_id == session_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_session_summary(session: AsyncSession, user_id: str, session_id: str) -> None:
+    session.add(AiSession(user_id=user_id, session_id=session_id))
+
+
+async def summarize_conversation(
+    client,
+    history: list[dict],
+    existing_summary: str | None,
+) -> str:
+    prior = f"\nExisting summary:\n{existing_summary}" if existing_summary else ""
+    transcript = "\n".join(
+        f"{m.get('role')}: {str(m.get('content', ''))[:800]}"
+        for m in history[-20:]
+        if m.get("role") in ("user", "assistant", "tool")
+    )
+    prompt = (
+        "You maintain a compact rolling summary of a task-management chat. "
+        "Distill the ABSOLUTE essentials only: tasks discussed or created (title, date, priority), "
+        "scheduling decisions, conflicts, dates resolved, and user preferences. "
+        "Keep it to one concise paragraph (under ~120 words). "
+        "Do NOT invent facts not in the conversation. Drop trivia.\n\n"
+        f"{prior.strip()}\n\nLatest messages:\n{transcript.strip()}\n\n"
+        "Updated one-paragraph summary:"
+    )
+    try:
+        resp = await client.chat(
+            [{"role": "user", "content": prompt}],
+            tools=None,
+            temperature=0.2,
+            max_tokens=300,
+        )
+        content = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+        if not content or len(content) < 20:
+            return existing_summary or ""
+        # Collapse the "Updated ..." wrapper if the model echoed it.
+        return content
+    except Exception:
+        return existing_summary or ""
+
+
+SUMMARIZE_MIN_HISTORY = 8
+
+
+async def _maybe_update_summary(
+    session: AsyncSession,
+    user_id: str,
+    session_id: str,
+    client,
+    sanitized_history: list[dict],
+    user_message: str,
+    assistant_content: str,
+    current_summary: str | None,
+) -> None:
+    """Fold the latest turns into a rolling summary.
+
+    Only runs once there's enough history for a summary to be useful, or when a
+    summary already exists (so it keeps evolving). Failures fall back silently to
+    the existing truncation behavior — never breaks the user request.
+    """
+    total_turns = len(sanitized_history) + 2  # + this user + assistant message
+    if total_turns < SUMMARIZE_MIN_HISTORY and not current_summary:
+        return
+
+    combined_history = sanitized_history + [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": assistant_content},
+    ]
+    new_summary = await summarize_conversation(client, combined_history, current_summary)
+
+    ai_session = await load_session_summary(session, user_id, session_id)
+    if ai_session is None:
+        await create_session_summary(session, user_id, session_id)
+        ai_session = await load_session_summary(session, user_id, session_id)
+    if ai_session is not None:
+        ai_session.summary = new_summary
+    await session.flush()
+
+
 @router.post("/chat")
 async def chat(
     request: ChatRequest,
@@ -131,7 +220,9 @@ async def chat(
     session_id = request.session_id or str(uuid4())
     client = await get_llm_client(request.provider, api_key)
     sanitized_history = _sanitize_chat_history(request.chat_history)
-    messages = build_messages(sanitized_history, request.message, request.context)
+    ai_session = await load_session_summary(session, user.id, session_id)
+    current_summary = ai_session.summary if ai_session else None
+    messages = build_messages(sanitized_history, request.message, request.context, current_summary)
 
     MAX_TOOL_ROUNDS = 4
     content = ""
@@ -157,9 +248,10 @@ async def chat(
 
     await persist_conversation(session, user.id, session_id, "user", request.message)
     await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
+    await _maybe_update_summary(session, user.id, session_id, client, sanitized_history, request.message, content, current_summary)
     await session.commit()
 
-    return {"content": content, "tool_calls": tool_calls}
+    return {"content": content, "tool_calls": tool_calls, "session_id": session_id}
 
 
 @router.post("/chat/stream")
@@ -177,7 +269,9 @@ async def chat_stream(
     session_id = request.session_id or str(uuid4())
     client = await get_llm_client(request.provider, api_key)
     sanitized_history = _sanitize_chat_history(request.chat_history)
-    messages = build_messages(sanitized_history, request.message, request.context)
+    ai_session = await load_session_summary(session, user.id, session_id)
+    current_summary = ai_session.summary if ai_session else None
+    messages = build_messages(sanitized_history, request.message, request.context, current_summary)
 
     await persist_conversation(session, user.id, session_id, "user", request.message)
 
@@ -221,6 +315,9 @@ async def chat_stream(
             yield {"event": "token", "data": " "}
 
         await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
+        await _maybe_update_summary(
+            session, user.id, session_id, client, sanitized_history, request.message, content, current_summary
+        )
         await session.commit()
         yield {"event": "done", "data": ""}
 
@@ -240,14 +337,45 @@ async def list_sessions(
         .order_by(sa_func.max(AiConversation.created_at).desc())
         .limit(50)
     )
-    return [
-        {
-            "session_id": str(row[0]),
-            "message_count": row[1],
-            "last_message_at": row[2].isoformat(),
-        }
-        for row in result
-    ]
+    rows = result.all()
+
+    titles: dict[str, str] = {}
+    summ: dict[str, str | None] = {}
+    if rows:
+        ids = [str(r[0]) for r in rows]
+        first_msgs = await session.execute(
+            select(AiConversation)
+            .where(
+                AiConversation.user_id == user.id,
+                AiConversation.session_id.in_(ids),
+                AiConversation.role == "user",
+            )
+            .order_by(AiConversation.created_at)
+        )
+        seen: set[str] = set()
+        for c in first_msgs.scalars().all():
+            sid = str(c.session_id)
+            if sid in seen:
+                continue
+            seen.add(sid)
+            titles[sid] = (c.content or "").strip()[:60] or "New Chat"
+
+        summaries = await session.execute(
+            select(AiSession).where(AiSession.user_id == user.id, AiSession.session_id.in_(ids))
+        )
+        summ = {str(s.session_id): s.summary for s in summaries.scalars().all()}
+
+    out = []
+    for (sid, count, last_at) in rows:
+        sid = str(sid)
+        out.append({
+            "session_id": sid,
+            "title": titles.get(sid) or "New Chat",
+            "message_count": count,
+            "last_message_at": last_at.isoformat(),
+            "summary": summ.get(sid),
+        })
+    return out
 
 
 @router.get("/conversations/{session_id}")
@@ -273,3 +401,26 @@ async def get_conversation_history(
         }
         for c in result.scalars().all()
     ]
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import delete
+    await session.execute(
+        delete(AiSession).where(
+            AiSession.user_id == user.id,
+            AiSession.session_id == session_id,
+        )
+    )
+    await session.execute(
+        delete(AiConversation).where(
+            AiConversation.user_id == user.id,
+            AiConversation.session_id == session_id,
+        )
+    )
+    await session.commit()
+    return {"deleted": True, "session_id": session_id}

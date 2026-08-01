@@ -49,10 +49,11 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
     alignItems: "center",
     cursor: "grab",
     transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
-    zIndex: isDragging ? 100 : undefined,
+    zIndex: isDragging ? 100 : 20,
     opacity: isDone ? 0.5 : 1,
     boxShadow: isDragging ? "0 4px 12px rgba(0,0,0,0.3)" : undefined,
     overflow: "hidden",
+    pointerEvents: "auto",
   };
 
   return (

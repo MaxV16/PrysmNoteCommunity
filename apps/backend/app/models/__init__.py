@@ -12,6 +12,7 @@ from app.models.task_link import TaskLink, TaskLinkType
 from app.models.api_key import ApiKey
 from app.models.embedding import TaskEmbedding
 from app.models.ai_conversation import AiConversation
+from app.models.ai_session import AiSession
 from app.models.calendar_event import CalendarEvent
 from app.models.user_token import UserToken
 
@@ -30,6 +31,7 @@ __all__ = [
     "ApiKey",
     "TaskEmbedding",
     "AiConversation",
+    "AiSession",
     "CalendarEvent",
     "UserToken",
 ]

@@ -21,25 +21,23 @@ export function TimelineHeader({ days }: TimelineHeaderProps) {
   }, [days]);
 
   return (
-    <div className="flex border-b border-border bg-surface sticky top-0 z-20 shrink-0">
-      <div className="flex" style={{ width: "100%", minWidth: 0 }}>
-        {dayRows.map(({ dayName, dayNum, isToday, key }) => (
-          <div
-            key={key}
-            className="flex flex-col items-center justify-center py-3"
-            style={{ minWidth: 120, flex: 1 }}
+    <div className="flex border-b border-border bg-surface sticky top-0 z-20 shrink-0" style={{ width: "100%", minWidth: "max-content", height: 56 }}>
+      {dayRows.map(({ dayName, dayNum, isToday, key }) => (
+        <div
+          key={key}
+          className="flex flex-col items-center justify-center py-3"
+          style={{ width: 120, minWidth: 120, flex: "0 0 120px" }}
+        >
+          <span className={`text-xs font-medium ${isToday ? "text-accent" : "text-secondary"}`}>
+            {dayName}
+          </span>
+          <span
+            className={`mt-1 text-2xl font-semibold tabular-nums leading-none ${isToday ? "text-accent" : "text-primary"}`}
           >
-            <span className={`text-xs font-medium ${isToday ? "text-accent" : "text-secondary"}`}>
-              {dayName}
-            </span>
-            <span
-              className={`mt-1 text-2xl font-semibold tabular-nums leading-none ${isToday ? "text-accent" : "text-primary"}`}
-            >
-              {dayNum}
-            </span>
-          </div>
-        ))}
-      </div>
+            {dayNum}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

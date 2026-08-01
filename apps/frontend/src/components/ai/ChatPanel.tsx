@@ -12,6 +12,7 @@ import { decryptString } from "@/lib/crypto-utils";
 import { useUiModule } from "@/lib/ui-module-registry";
 import { useApiKeys } from "@/hooks/useApiKeys";
 import { useLocalBool } from "@/lib/use-local-bool";
+import { api } from "@/lib/api";
 
 
 const PROVIDERS = [
@@ -51,11 +52,14 @@ function saveChatHistory(sessions: ChatSession[]) {
 }
 
 export function ChatPanel({ onClose }: ChatPanelProps) {
-  const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo } = useAIChat();
+  const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo, loadSession, newChat, fetchSessions } = useAIChat();
   const voiceModuleOn = useUiModule("voice");
   const voiceLocalOn = useLocalBool("prysm_feature_voice", true);
   const voiceOn = voiceModuleOn && voiceLocalOn;
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
+  const [serverSessions, setServerSessions] = useState<
+    { session_id: string; title: string; message_count: number; last_message_at: string; summary?: string | null }[]
+  >([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const { keys, fetchKeys } = useApiKeys();
@@ -67,16 +71,16 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
 
   useEffect(() => {
     (async () => {
-      try {
-        await fetchKeys();
-      } catch {}
       if (typeof window === "undefined") return;
+      // Persisted last-provider always wins, so a manual selection is preserved.
       const last = localStorage.getItem(LAST_PROVIDER_KEY);
       if (last && PROVIDERS.some((p) => p.value === last)) {
         setProvider(last);
         return;
       }
-      const firstConfigured = PROVIDERS.find((p) => configuredProviders.includes(p.value));
+      const currentKeys = await fetchKeys();
+      const configured = currentKeys.map((k) => k.provider);
+      const firstConfigured = PROVIDERS.find((p) => configured.includes(p.value));
       if (firstConfigured) {
         setProvider(firstConfigured.value);
         return;
@@ -164,10 +168,12 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       setChatHistory(updated);
       saveChatHistory(updated);
     }
-    store.setChatMessages([]);
-    saveMessages([]);
-    const newId = crypto.randomUUID();
-    localStorage.setItem("ai_session_id", newId);
+    newChat();
+  };
+
+  const handleLoadServerSession = async (sessionId: string) => {
+    await loadSession(sessionId);
+    setHistoryOpen(false);
   };
 
   const handleLoadSession = (session: ChatSession) => {
@@ -182,6 +188,31 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     setChatHistory(updated);
     saveChatHistory(updated);
   };
+
+  const handleDeleteServerSession = async (sessionId: string) => {
+    try {
+      await api.delete(`/ai/sessions/${sessionId}`);
+      setServerSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
+    } catch {
+      // Non-fatal: leave the item in place.
+    }
+  };
+
+  useEffect(() => {
+    if (historyOpen) {
+      fetchSessions().then((sessions) =>
+        setServerSessions(
+          sessions.map((s) => ({
+            session_id: s.session_id,
+            title: s.title,
+            message_count: s.message_count,
+            last_message_at: s.last_message_at,
+            summary: s.summary,
+          }))
+        )
+      );
+    }
+  }, [historyOpen, fetchSessions]);
 
   const handleSend = useCallback((message: string) => {
     const store = useAppStore.getState();
@@ -232,15 +263,51 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
               📋
             </button>
             {historyOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 w-64 max-h-80 overflow-auto rounded-xl border border-border bg-surface p-2 shadow-lg">
-                <p className="text-[10px] uppercase tracking-wider text-muted px-2 py-1">Chat History</p>
-                {chatHistory.length === 0 && <p className="text-xs text-muted px-2 py-3 text-center">No saved chats</p>}
-                {chatHistory.map((s) => (
-                  <div key={s.id} className="flex items-center gap-1 rounded-lg px-2 py-1.5 hover:bg-hover transition-colors group">
-                    <button onClick={() => handleLoadSession(s)} className="flex-1 text-left text-xs text-secondary truncate">{s.title}</button>
-                    <button onClick={() => handleDeleteSession(s.id)} className="text-[10px] text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
-                  </div>
-                ))}
+              <div className="absolute right-0 top-full mt-1 z-50 w-80 max-h-[70vh] overflow-hidden rounded-xl border border-border bg-surface shadow-lg flex flex-col">
+                <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-muted">Chat History</p>
+                  <button
+                    onClick={handleNewChat}
+                    className="rounded-full px-2 py-0.5 text-[10px] text-accent hover:bg-hover transition-colors font-medium"
+                    title="Start a new chat"
+                  >
+                    + New Chat
+                  </button>
+                </div>
+                <div className="overflow-auto p-2 space-y-1">
+                  {serverSessions.length === 0 && chatHistory.length === 0 && (
+                    <p className="text-xs text-muted px-2 py-3 text-center">No saved chats yet</p>
+                  )}
+                  {serverSessions.map((s) => (
+                    <div key={s.session_id} className="flex items-center gap-1 rounded-lg px-2 py-1.5 hover:bg-hover transition-colors group">
+                      <button
+                        onClick={() => handleLoadServerSession(s.session_id)}
+                        className="flex-1 text-left min-w-0"
+                        title={s.summary || s.title}
+                      >
+                        <span className="block truncate text-xs text-secondary">{s.title}</span>
+                        <span className="block text-[9px] text-muted">
+                          {s.message_count} messages · {new Date(s.last_message_at).toLocaleDateString()}
+                        </span>
+                      </button>
+                      <button onClick={() => handleDeleteServerSession(s.session_id)} className="text-[10px] text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                    </div>
+                  ))}
+                  {chatHistory.map((s) => (
+                    <div key={s.id} className="flex items-center gap-1 rounded-lg px-2 py-1.5 hover:bg-hover transition-colors group">
+                      <button onClick={() => handleLoadSession(s)} className="flex-1 text-left text-xs text-secondary truncate">{s.title}</button>
+                      <button onClick={() => handleDeleteSession(s.id)} className="text-[10px] text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity">✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="border-t border-border/60 px-3 py-1.5">
+                  <button
+                    onClick={handleNewChat}
+                    className="w-full text-left text-[10px] text-danger/80 hover:text-danger transition-colors"
+                  >
+                    Clear current chat
+                  </button>
+                </div>
               </div>
             )}
           </div>

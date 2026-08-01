@@ -14,7 +14,7 @@ export function TimelineGrid({ days }: TimelineGridProps) {
   }, []);
 
   return (
-    <div className="absolute inset-0 pointer-events-none" style={{ minHeight: "100%" }}>
+    <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{ top: 56, minHeight: "calc(100% - 56px)" }}>
       {/* Vertical day columns */}
       <div className="flex" style={{ minHeight: "100%" }}>
         {days.map((day) => {
@@ -28,8 +28,9 @@ export function TimelineGrid({ days }: TimelineGridProps) {
               data-is-today={isToday ? "true" : "false"}
               className="relative"
               style={{
+                width: 120,
                 minWidth: 120,
-                flex: 1,
+                flex: "0 0 120px",
                 backgroundColor: isToday ? "color-mix(in srgb, var(--accent) 10%, transparent)" : undefined,
               }}
             >

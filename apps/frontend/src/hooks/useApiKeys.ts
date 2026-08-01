@@ -35,13 +35,15 @@ export function useApiKeys() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchKeys = useCallback(async () => {
+  const fetchKeys = useCallback(async (): Promise<ApiKey[]> => {
     setLoading(true);
     try {
       const data = await api.get<ApiKey[]>("/keys/");
       setKeys(data);
+      return data;
     } catch {
       setKeys([]);
+      return [];
     } finally {
       setLoading(false);
     }
