@@ -194,18 +194,6 @@ async def list_tasks(
     return [_serialize_task(t) for t in result.scalars().all()]
 
 
-@router.get("/{task_id}")
-async def get_task_route(
-    task_id: str,
-    user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db),
-):
-    task = await get_task(session, UUID(task_id))
-    if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return _serialize_task(task)
-
-
 @router.post("/")
 async def create_task_route(
     request: CreateTaskRequest,
@@ -521,3 +509,17 @@ async def expand_recurring(
     from app.services.recurring_task_service import expand_recurring_tasks
     created = await expand_recurring_tasks(session, user.id)
     return {"expanded": created}
+
+
+# Dynamic task routes are declared last so literal static paths like
+# /search, /date-range and /upcoming-deadlines match first.
+@router.get("/{task_id}")
+async def get_task_route(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    task = await get_task(session, UUID(task_id))
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    return _serialize_task(task)

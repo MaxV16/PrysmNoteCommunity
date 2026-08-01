@@ -1,7 +1,7 @@
 import enum
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Integer, SmallInteger, String, Text, ForeignKey, Enum, func, Uuid
+from sqlalchemy import Boolean, Date, DateTime, Integer, SmallInteger, String, Text, ForeignKey, Enum, func, Uuid, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -17,6 +17,13 @@ class TaskStatus(str, enum.Enum):
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        Index("idx_tasks_user_start_date", "user_id", "start_date"),
+        Index("idx_tasks_user_due_date", "user_id", "due_date"),
+        Index("idx_tasks_user_status", "user_id", "status"),
+        Index("idx_tasks_user_archived", "user_id", "is_archived"),
+        Index("idx_tasks_parent", "parent_task_id"),
+    )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     user_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
