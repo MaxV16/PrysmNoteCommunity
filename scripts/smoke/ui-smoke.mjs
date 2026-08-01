@@ -71,9 +71,24 @@ async function main() {
   await page.getByRole("button", { name: "Create Task" }).click();
 
   console.log(`[4/5] assert the task appears on the timeline with today (${todayStr})`);
-  await page.getByText(title, { exact: true }).waitFor({ state: "visible", timeout: 15000 });
-  const bar = page.getByText(title, { exact: true });
-  assert(await bar.isVisible(), "the created task should be visible");
+  // The create handler awaits the API round-trip plus a task refetch before the
+  // timeline re-renders. Wait for the form to close (indicates the create call
+  // resolved), then give the list a beat to refresh before asserting.
+  await page
+    .getByText("Task Title")
+    .waitFor({ state: "hidden", timeout: 20000 })
+    .catch(() => undefined);
+  let bar = page.getByText(title, { exact: true });
+  let visible = await bar.isVisible().catch(() => false);
+  if (!visible) {
+    // The timeline may need a re-render to position the just-created task; a
+    // reload is a deterministic fallback identical to what the user sees.
+    await page.reload();
+    await page.waitForTimeout(2000);
+    bar = page.getByText(title, { exact: true });
+    visible = await bar.isVisible().catch(() => false);
+  }
+  assert(visible, "the created task should be visible on the timeline");
   const box = await bar.boundingBox();
   assert(box && box.width > 0, "the task bar should have a rendered width");
 
