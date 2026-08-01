@@ -31,7 +31,25 @@ Allowed build-only commands that self-terminate:
 - `npm run test` (frontend) — run tests, then stop  
 - `pytest` (backend) — run tests, then stop
 
-If Docker containers are running when you start working, kill them immediately with `docker compose down`. Never leave processes running after your work is done. Never use `docker compose up`, `npm run dev`, `uvicorn`, `next dev`, or any other long-running command.
+**BANNED — DESTRUCTIVE / DATA-LOSS: NEVER RUN THESE.** They permanently delete the database and all user data:
+- `docker compose down -v` / `--volumes`
+- `docker volume rm` (any volume, including `prysmnotedev_postgres_data`)
+- `docker compose rm -v`, `docker system prune -a --volumes`, or any `-v`/`--volumes` flag with a database container
+
+This is production data. The exact incident that caused data loss was `docker compose down -v` wiping the `prysmnotedev_postgres_data` volume.
+
+If containers are running and you need to stop them, **stop gracefully WITHOUT removing volumes** so no data is lost:
+```bash
+# Stop containers (keeps all volumes and data intact):
+docker compose stop          # or: docker compose down  (no -v!)
+# To bring them back up afterwards:
+docker compose up -d
+```
+- Never add `-v` (volumes) to any down/stop/rm command.
+- Do not interrupt containers preemptively. Only stop them if the user explicitly asks.
+- If a container MUST be removed (e.g. to rebuild), it is still safe to run `docker compose down` (stops and removes containers/networks) — the named `*_postgres_data` volume is persisted unless `-v` is used.
+
+Never leave processes running after your work is done, and never use `docker compose up`, `npm run dev`, `uvicorn`, `next dev`, or any other long-running command.
 
 ## Project Overview
 
@@ -80,7 +98,7 @@ cd apps/frontend && npm run dev
 | `alembic upgrade head` | apps/backend | Run DB migrations |
 | `docker compose up` | root | Start all services |
 | `docker compose build --no-cache frontend` | root | Full frontend rebuild |
-| `docker compose down` | root | Stop all containers |
+| `docker compose down` | root | Stop all containers (SAFE: keeps volumes/data. NEVER add `-v`) |
 
 ## Environment Variables
 
@@ -95,6 +113,11 @@ See `.env.example` for the full list. Key variables:
 - PostgreSQL 16 with `pgvector` extension for AI embeddings
 - Alembic migrations in `apps/backend/alembic/`
 - All tables have RLS (Row-Level Security) policies keyed on `app.user_id` session variable
+- **Backup your data:** the `prysmnotedev_postgres_data` volume contains ALL persisted data. Routinely back it up so it can never be lost:
+  ```bash
+  docker exec prysmnotedev-postgres-1 pg_dump -U prysm -d prysm_note > backups/prysm_note_$(date +%Y%m%d).sql
+  ```
+  To restore: `docker exec -i prysmnotedev-postgres-1 psql -U prysm -d prysm_note < backups/prysm_note_<date>.sql`
 - **Date columns** (`start_date`, `due_date`, `recurrence_end_date`) are `Mapped[date | None]` in SQLAlchemy models. **ALWAYS** convert string dates to `datetime.date` objects using `date.fromisoformat()` before assignment. Never pass raw strings — asyncpg requires `date` objects and will throw `'str' object has no attribute 'toordinal'`. See `app/services/task_service.py::_parse_date()`.
 
 ## Key Backend Patterns
