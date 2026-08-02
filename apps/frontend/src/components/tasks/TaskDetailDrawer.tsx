@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import {
   TIER_COLORS,
   TIER_LABELS,
+  TIER_VALUES,
   normalizePriority,
   type PriorityTier,
 } from "@/lib/priority";
@@ -68,6 +69,9 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [draftTitle, setDraftTitle] = useState(task.title);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [priorityOpen, setPriorityOpen] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descDraft, setDescDraft] = useState(task.description || "");
   const [busy, setBusy] = useState(false);
   const [subtasks, setSubtasks] = useState<Task[]>(task.subtasks || []);
   const [loadedSubtasks, setLoadedSubtasks] = useState(false);
@@ -147,6 +151,26 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     const newStatus = task.status === "done" ? "todo" : "done";
     await updateTask(task.id, { status: newStatus });
   };
+
+  const handlePriorityChange = async (value: PriorityTier) => {
+    setPriorityOpen(false);
+    if (value !== tier) {
+      await updateTask(task.id, { priority: value });
+    }
+  };
+
+  const handleDescriptionSave = async () => {
+    setEditingDescription(false);
+    await updateTask(task.id, { description: descDraft || null });
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const handleConvertToSubtasks = async () => {
     setBusy(true);
@@ -250,11 +274,28 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {isNote && <span className="badge bg-elevated text-muted">Note</span>}
-          <span
-            className="h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: TIER_COLORS[tier] }}
-            title={`${TIER_LABELS[tier]} priority`}
-          />
+          <div className="relative">
+            <button
+              onClick={() => setPriorityOpen((v) => !v)}
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-border/40 p-1 transition-transform hover:scale-110"
+              title={`Priority: ${TIER_LABELS[tier]} (click to change)`}
+              aria-label="Change priority"
+            >
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TIER_COLORS[tier] }} />
+            </button>
+            {priorityOpen && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-32 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-lg">
+                {TIER_VALUES.map((p) => (
+                  <MenuItem key={p} onClick={() => handlePriorityChange(p)}>
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: TIER_COLORS[p] }} />
+                      {TIER_LABELS[p]}
+                    </span>
+                  </MenuItem>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
@@ -366,10 +407,42 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         {mode === "description" ? (
           <div>
             <Label>Description</Label>
-            {task.description ? (
-              <Markdown>{task.description}</Markdown>
+            {editingDescription ? (
+              <textarea
+                autoFocus
+                value={descDraft}
+                onChange={(e) => setDescDraft(e.target.value)}
+                onBlur={handleDescriptionSave}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleDescriptionSave();
+                  if (e.key === "Escape") {
+                    setEditingDescription(false);
+                  }
+                }}
+                placeholder="Write a description (markdown supported)…"
+                rows={6}
+                className="input-field w-full bg-transparent text-sm"
+              />
+            ) : task.description ? (
+              <div
+                onDoubleClick={() => {
+                  setDescDraft(task.description || "");
+                  setEditingDescription(true);
+                }}
+                title="Double-click to edit"
+              >
+                <Markdown>{task.description}</Markdown>
+              </div>
             ) : (
-              <p className="text-sm text-muted">No description</p>
+              <button
+                onClick={() => {
+                  setDescDraft(task.description || "");
+                  setEditingDescription(true);
+                }}
+                className="w-full rounded-lg border border-dashed border-border/60 px-3 py-4 text-left text-sm text-muted transition-colors hover:border-accent/40 hover:text-secondary"
+              >
+                No description — click to add one
+              </button>
             )}
           </div>
         ) : (
@@ -485,19 +558,26 @@ interface DrawerShellProps {
 
 function DrawerShell({ onClose, title, children }: DrawerShellProps) {
   return (
-    <div className="fixed inset-y-0 right-0 z-40 flex w-[400px] max-w-[92vw] flex-col border-l border-border bg-[#14141c] shadow-2xl">
-      {title ? (
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h3 className="text-sm font-semibold text-primary">{title}</h3>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-secondary hover:bg-hover hover:text-primary">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-      ) : null}
-      <div className="flex flex-1 flex-col overflow-y-auto px-4 py-3">{children}</div>
+    <div className="fixed inset-0 z-40 flex justify-end">
+      <div
+        className="h-full flex-1 bg-black/40 backdrop-blur-[2px]"
+        aria-hidden
+        onClick={onClose}
+      />
+      <div className="slide-in-right flex h-full w-[400px] max-w-[92vw] flex-col border-l border-border bg-[#14141c] shadow-2xl">
+        {title ? (
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <h3 className="text-sm font-semibold text-primary">{title}</h3>
+            <button onClick={onClose} className="rounded-lg p-1.5 text-secondary hover:bg-hover hover:text-primary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        ) : null}
+        <div className="flex flex-1 flex-col overflow-y-auto px-4 py-3">{children}</div>
+      </div>
     </div>
   );
 }
