@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { Task } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
 import { useAppStore } from "@/stores/app-store";
@@ -75,6 +76,11 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [busy, setBusy] = useState(false);
   const [subtasks, setSubtasks] = useState<Task[]>(task.subtasks || []);
   const [loadedSubtasks, setLoadedSubtasks] = useState(false);
+  const titleOptionsRef = useRef<HTMLButtonElement | null>(null);
+  const footerMoreRef = useRef<HTMLButtonElement | null>(null);
+  const priorityRef = useRef<HTMLButtonElement | null>(null);
+  const statusRef = useRef<HTMLButtonElement | null>(null);
+  const [optionsTrigger, setOptionsTrigger] = useState<HTMLButtonElement | null>(null);
   const { updateTask, deleteTask, fetchTasks } = useTasks();
   const { addNoteWithContent } = useStickyBoard();
 
@@ -276,25 +282,33 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
           {isNote && <span className="badge bg-elevated text-muted">Note</span>}
           <div className="relative">
             <button
-              onClick={() => setPriorityOpen((v) => !v)}
+              ref={priorityRef}
+              onClick={() => {
+                setOptionsOpen(false);
+                setPriorityOpen((v) => !v);
+              }}
               className="flex h-5 w-5 items-center justify-center rounded-full border border-border/40 p-1 transition-transform hover:scale-110"
               title={`Priority: ${TIER_LABELS[tier]} (click to change)`}
               aria-label="Change priority"
             >
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TIER_COLORS[tier] }} />
             </button>
-            {priorityOpen && (
-              <div className="absolute right-0 top-full z-30 mt-1 w-32 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-lg">
-                {TIER_VALUES.map((p) => (
-                  <MenuItem key={p} onClick={() => handlePriorityChange(p)}>
-                    <span className="inline-flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: TIER_COLORS[p] }} />
-                      {TIER_LABELS[p]}
-                    </span>
-                  </MenuItem>
-                ))}
-              </div>
-            )}
+            <Popover
+              open={priorityOpen}
+              triggerRef={priorityRef}
+              align="right"
+              onClose={() => setPriorityOpen(false)}
+              className="w-40"
+            >
+              {TIER_VALUES.map((p) => (
+                <MenuItem key={p} onClick={() => handlePriorityChange(p)}>
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: TIER_COLORS[p] }} />
+                    {TIER_LABELS[p]}
+                  </span>
+                </MenuItem>
+              ))}
+            </Popover>
           </div>
           <button
             onClick={onClose}
@@ -352,7 +366,11 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         )}
         <div className="relative shrink-0">
           <button
-            onClick={() => setOptionsOpen((v) => !v)}
+            ref={titleOptionsRef}
+            onClick={() => {
+              setOptionsTrigger(titleOptionsRef.current);
+              setOptionsOpen((v) => !v);
+            }}
             className="rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
             aria-label="Options"
           >
@@ -362,43 +380,27 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               <circle cx="19" cy="12" r="1" />
             </svg>
           </button>
-          {optionsOpen && (
-            <div className="absolute right-0 top-full z-30 mt-1 w-60 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-lg">
-              <MenuItem
-                onClick={() => {
-                  setOptionsOpen(false);
-                  handleConvertToSubtasks();
-                }}
-                disabled={busy}
-              >
-                Convert description to subtasks
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  setOptionsOpen(false);
-                  handleConvertToDescription();
-                }}
-                disabled={busy || !hasSubtasks}
-              >
-                Convert subtasks to text
-              </MenuItem>
-              <MenuItem onClick={handleBreakDown}>Break down into subtasks (AI)</MenuItem>
-              <MenuItem onClick={() => addNoteWithContent(task.title, task.description || "")}>
-                Add as sticky note
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  setOptionsOpen(false);
-                  setEditing(true);
-                }}
-              >
-                Edit task
-              </MenuItem>
-              <MenuItem onClick={handleDelete} danger>
-                Delete task
-              </MenuItem>
-            </div>
-          )}
+          <Popover
+            open={optionsOpen && optionsTrigger === titleOptionsRef.current}
+            triggerRef={titleOptionsRef}
+            align="right"
+            onClose={() => setOptionsOpen(false)}
+            className="w-64"
+          >
+            <OptionsMenuContent
+              busy={busy}
+              hasSubtasks={hasSubtasks}
+              onConvertToSubtasks={handleConvertToSubtasks}
+              onConvertToDescription={handleConvertToDescription}
+              onBreakDown={handleBreakDown}
+              onSticky={() => addNoteWithContent(task.title, task.description || "")}
+              onEdit={() => {
+                setOptionsOpen(false);
+                setEditing(true);
+              }}
+              onDelete={handleDelete}
+            />
+          </Popover>
         </div>
       </div>
 
@@ -490,8 +492,9 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       {/* Footer */}
       <div className="mt-4 border-t border-border/60 pt-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="relative">
+          <div>
             <button
+              ref={statusRef}
               onClick={() => setStatusOpen((v) => !v)}
               className="badge"
               style={{
@@ -502,15 +505,20 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               {task.status.replace("_", " ")}
               <svg className="ml-1" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
             </button>
-            {statusOpen && (
-              <div className="absolute bottom-full left-0 z-30 mb-1 w-36 overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-lg">
-                {STATUS_OPTIONS.map((opt) => (
-                  <MenuItem key={opt.value} onClick={() => handleStatusChange(opt.value)}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
-              </div>
-            )}
+            <Popover
+              open={statusOpen}
+              triggerRef={statusRef}
+              align="left"
+              preferred="above"
+              onClose={() => setStatusOpen(false)}
+              className="w-40"
+            >
+              {STATUS_OPTIONS.map((opt) => (
+                <MenuItem key={opt.value} onClick={() => handleStatusChange(opt.value)}>
+                  {opt.label}
+                </MenuItem>
+              ))}
+            </Popover>
           </div>
           <div className="flex items-center gap-1">
             <span
@@ -533,7 +541,11 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               </svg>
             </button>
             <button
-              onClick={() => setOptionsOpen((v) => !v)}
+              ref={footerMoreRef}
+              onClick={() => {
+                setOptionsTrigger(footerMoreRef.current);
+                setOptionsOpen((v) => !v);
+              }}
               className="rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
               aria-label="More options"
             >
@@ -543,6 +555,28 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 <circle cx="19" cy="12" r="1" />
               </svg>
             </button>
+            <Popover
+              open={optionsOpen && optionsTrigger === footerMoreRef.current}
+              triggerRef={footerMoreRef}
+              align="right"
+              preferred="above"
+              onClose={() => setOptionsOpen(false)}
+              className="w-64"
+            >
+              <OptionsMenuContent
+                busy={busy}
+                hasSubtasks={hasSubtasks}
+                onConvertToSubtasks={handleConvertToSubtasks}
+                onConvertToDescription={handleConvertToDescription}
+                onBreakDown={handleBreakDown}
+                onSticky={() => addNoteWithContent(task.title, task.description || "")}
+                onEdit={() => {
+                  setOptionsOpen(false);
+                  setEditing(true);
+                }}
+                onDelete={handleDelete}
+              />
+            </Popover>
           </div>
         </div>
       </div>
@@ -590,6 +624,138 @@ function Label({ children }: { children: React.ReactNode }) {
   );
 }
 
+interface PopoverProps {
+  open: boolean;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  align?: "left" | "right";
+  preferred?: "below" | "above";
+  onClose: () => void;
+  children: ReactNode;
+  className?: string;
+}
+
+// Portal-based menu so popover content is never clipped by the drawer's
+// overflow container and always renders on the top-most layer (z-50).
+function Popover({
+  open,
+  triggerRef,
+  align = "left",
+  preferred = "below",
+  onClose,
+  children,
+  className = "",
+}: PopoverProps) {
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Recompute position whenever the menu opens or its content size changes.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const compute = () => {
+      const menu = menuRef.current;
+      const menuW = menu ? menu.getBoundingClientRect().width : 240;
+      const menuH = menu ? menu.getBoundingClientRect().height : 200;
+      let left = align === "right" ? rect.right - menuW : Math.min(rect.left, window.innerWidth - menuW - 8);
+      left = Math.max(8, left);
+      let top = preferred === "below" ? rect.bottom + 4 : rect.top - menuH - 4;
+      // Keep menu within the viewport vertically.
+      if (preferred === "below" && top + menuH > window.innerHeight - 8) {
+        top = rect.top - menuH - 4;
+      } else if (top < 8) {
+        top = 8;
+      }
+      return { top, left, width: menuW };
+    };
+    setPos(compute());
+    // Recompute after children render to get accurate dimensions.
+    const raf = requestAnimationFrame(() => setPos(compute()));
+    return () => cancelAnimationFrame(raf);
+  }, [open, align, preferred, triggerRef]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const onDown = (e: MouseEvent) => {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(e.target as Node) &&
+        triggerRef.current &&
+        !triggerRef.current.contains(e.target as Node)
+      ) {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onDown);
+    };
+  }, [open, onClose, triggerRef]);
+
+  if (!open || !pos) return null;
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      role="menu"
+      className={`fixed z-[70] overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-2xl ${className}`}
+      style={{ top: pos.top, left: pos.left, minWidth: pos.width }}
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
+
+interface OptionsMenuContentProps {
+  busy: boolean;
+  hasSubtasks: boolean;
+  onConvertToSubtasks: () => void;
+  onConvertToDescription: () => void;
+  onBreakDown: () => void;
+  onSticky: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}
+
+function OptionsMenuContent({
+  busy,
+  hasSubtasks,
+  onConvertToSubtasks,
+  onConvertToDescription,
+  onBreakDown,
+  onSticky,
+  onEdit,
+  onDelete,
+}: OptionsMenuContentProps) {
+  return (
+    <>
+      <MenuItem onClick={onConvertToSubtasks} disabled={busy}>
+        Convert description to subtasks
+      </MenuItem>
+      <MenuItem onClick={onConvertToDescription} disabled={busy || !hasSubtasks}>
+        Convert subtasks to text
+      </MenuItem>
+      <MenuItem onClick={onBreakDown}>Break down into subtasks (AI)</MenuItem>
+      <MenuItem onClick={onSticky}>Add as sticky note</MenuItem>
+      <div className="my-1 h-px bg-border/60" />
+      <MenuItem onClick={onEdit}>Edit task</MenuItem>
+      <MenuItem onClick={onDelete} danger>
+        Delete task
+      </MenuItem>
+    </>
+  );
+}
+
 function MenuItem({
   children,
   onClick,
@@ -605,11 +771,11 @@ function MenuItem({
     <button
       onClick={() => !disabled && onClick()}
       disabled={disabled}
-      className={`block w-full px-3 py-2 text-left text-xs transition-colors ${
+      className={`block w-full px-4 py-2 text-left text-xs transition-colors ${
         danger ? "text-danger hover:bg-hover" : "text-secondary hover:bg-hover hover:text-primary"
       } ${disabled ? "cursor-not-allowed opacity-40" : ""}`}
     >
-      {children}
+      <span className="block min-w-0 truncate whitespace-nowrap">{children}</span>
     </button>
   );
 }
