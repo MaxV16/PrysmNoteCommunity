@@ -72,19 +72,23 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
   useEffect(() => {
     (async () => {
       if (typeof window === "undefined") return;
-      // Persisted last-provider always wins, so a manual selection is preserved.
+      // Fetch the user's configured keys; the persisted last-provider only wins
+      // when that provider actually still has a key configured.
+      const currentKeys = await fetchKeys();
+      const configured = new Set(currentKeys.map((k) => k.provider));
       const last = localStorage.getItem(LAST_PROVIDER_KEY);
-      if (last && PROVIDERS.some((p) => p.value === last)) {
+      if (last && configured.has(last)) {
         setProvider(last);
         return;
       }
-      const currentKeys = await fetchKeys();
-      const configured = currentKeys.map((k) => k.provider);
-      const firstConfigured = PROVIDERS.find((p) => configured.includes(p.value));
+      // Otherwise default visibly to the first configured provider, so the
+      // dropdown matches the API key the user actually set.
+      const firstConfigured = PROVIDERS.find((p) => configured.has(p.value));
       if (firstConfigured) {
         setProvider(firstConfigured.value);
         return;
       }
+      // Fall back to a cached key stored in localStorage.
       for (const p of PROVIDERS) {
         const encrypted = localStorage.getItem(`prysm_key_${p.value}`);
         if (encrypted) {
