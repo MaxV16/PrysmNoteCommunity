@@ -314,9 +314,12 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setViewDropdownOpen(v => !v)}
-            className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary"
+            className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary inline-flex items-center gap-1.5"
+            aria-haspopup="menu"
+            aria-expanded={viewDropdownOpen}
           >
             {viewModeLabel}
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
           </button>
           {viewDropdownOpen && (
             <div className="absolute right-0 top-full mt-1 z-30 rounded-xl border border-border bg-surface shadow-lg py-1 w-36">

@@ -36,8 +36,9 @@ export function ProjectList() {
         <button
           onClick={() => setIsAdding(!isAdding)}
           className="text-xs text-accent hover:text-accent-hover font-medium"
+          title="Create a new list/project"
         >
-          + New
+          + New List
         </button>
       </div>
       {isAdding && (
