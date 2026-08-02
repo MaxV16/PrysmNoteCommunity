@@ -250,19 +250,24 @@ async def test_recurring_weekday_expands_full_week(client: AsyncClient):
     })
     assert created.status_code == 200
 
-    children = await client.get("/api/tasks/")
-    assert children.status_code == 200
-    weekday_tasks = [
-        t for t in children.json()
-        if t.get("title") == "Weekday Job" and t.get("parent_task_id") is not None
-    ]
+    tasks = (await client.get("/api/tasks/")).json()
+    weekday_tasks = [t for t in tasks if t.get("title") == "Weekday Job"]
+    templates = [t for t in weekday_tasks if t.get("parent_task_id") is None]
+    children = [t for t in weekday_tasks if t.get("parent_task_id") is not None]
+    child_dates = {t["start_date"] for t in children}
 
-    dates = {t["start_date"] for t in weekday_tasks}
-    # The first week (Mon 3rd - Fri 7th Aug 2026) should all be present.
-    for expected in ["2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07"]:
-        assert expected in dates, f"missing weekday occurrence {expected}"
+    # Exactly one template exists, living on its own start date.
+    assert len(templates) == 1
+    assert templates[0]["start_date"] == "2026-08-03"
+
+    # Children cover Tue-Fri of the first week (the template already represents Mon),
+    # plus the same weekdays in subsequent weeks.
+    for expected in ["2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07"]:
+        assert expected in child_dates, f"missing child occurrence {expected}"
+    # No duplicate child is ever created on the template's own date.
+    assert "2026-08-03" not in child_dates
     # And it must not have created a whole-year flood.
-    assert len(dates) <= 60
+    assert len(child_dates) <= 60
 
 
 @pytest.mark.asyncio
@@ -275,13 +280,17 @@ async def test_recurring_weekend_expands_sat_and_sun(client: AsyncClient):
     })
     assert created.status_code == 200
 
-    children = await client.get("/api/tasks/")
-    assert children.status_code == 200
-    weekend_tasks = [
-        t for t in children.json()
-        if t.get("title") == "Weekend Shift" and t.get("parent_task_id") is not None
-    ]
-    dates = {t["start_date"] for t in weekend_tasks}
+    tasks = (await client.get("/api/tasks/")).json()
+    weekend_tasks = [t for t in tasks if t.get("title") == "Weekend Shift"]
+    templates = [t for t in weekend_tasks if t.get("parent_task_id") is None]
+    children = [t for t in weekend_tasks if t.get("parent_task_id") is not None]
+    child_dates = {t["start_date"] for t in children}
 
-    assert "2026-08-08" in dates
-    assert "2026-08-09" in dates
+    # Sat 8th is the template itself; Sunday 9th is a child occurrence.
+    assert len(templates) == 1
+    assert templates[0]["start_date"] == "2026-08-08"
+    assert "2026-08-08" not in child_dates
+    # The following weekend Saturday (15th) is a child, proving Sat+Sun both materialize.
+    assert "2026-08-09" in child_dates
+    assert "2026-08-15" in child_dates
+    assert "2026-08-16" in child_dates

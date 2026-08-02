@@ -75,6 +75,10 @@ async def expand_task_occurrences(session: AsyncSession, task: Task) -> int:
     if not candidate_dates:
         return 0
 
+    # The template row itself is the occurrence for its start_date (it already
+    # exists on that calendar day), so never spawn a duplicate child for it.
+    candidate_dates.discard(task.start_date)
+
     existing_child = await session.execute(
         select(Task.start_date).where(Task.parent_task_id == task.id)
     )
