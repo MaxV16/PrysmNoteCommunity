@@ -8,6 +8,10 @@ import type { Task } from "@/types/task";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
+// Upper bound on raw chat history sent to the backend for context. Durable
+// memory (server-side) carries older context, so we keep this small.
+const CONTEXT_MAX_MESSAGES = 12;
+
 function getStoredSessionId(): string {
   if (typeof window === "undefined") return "";
   return localStorage.getItem("ai_session_id") || "";
@@ -278,7 +282,30 @@ export function useAIChat() {
     [setChatMessages]
   );
 
-  const newChat = useCallback(() => {
+  const newChat = useCallback(
+    async () => {
+      // Start a brand-new session. Prior server sessions (and their history)
+      // are left intact so they stay listed in the history panel.
+      sessionIdRef.current = crypto.randomUUID();
+      setStoredSessionId(sessionIdRef.current);
+      setHistoryLoaded(true);
+      setChatMessages([]);
+    },
+    [setChatMessages]
+  );
+
+  const clearActiveSession = useCallback(async () => {
+    // Hard-delete the active server session (and, server-side, any durable
+    // memory facts extracted from it), then start fresh — mirrors the X on a
+    // history row. No orphan rows or dangling "life" facts are left behind.
+    const prevSid = sessionIdRef.current;
+    if (prevSid) {
+      try {
+        await api.delete(`/ai/sessions/${prevSid}`);
+      } catch {
+        // Non-fatal: if the session wasn't persisted, start fresh anyway.
+      }
+    }
     sessionIdRef.current = crypto.randomUUID();
     setStoredSessionId(sessionIdRef.current);
     setHistoryLoaded(true);
@@ -351,6 +378,39 @@ export function useAIChat() {
         );
       };
 
+      // Track a transient "tool activity" bubble (role: "tool") shown while the
+      // backend is executing tools. Once the first token arrives we drop it so
+      // the final answer renders as its own clean markdown message — never
+      // prefixed with "⚙" (which used to hijack ChatMessage into a pill).
+      let toolBubbleId: string | null = null;
+      const addToolBubble = (label: string) => {
+        const store = useAppStore.getState();
+        if (toolBubbleId) {
+          store.setChatMessages(
+            store.chatMessages.map((m) =>
+              m.id === toolBubbleId ? { ...m, content: label } : m
+            )
+          );
+          return;
+        }
+        toolBubbleId = crypto.randomUUID();
+        store.setChatMessages([
+          ...store.chatMessages,
+          {
+            id: toolBubbleId,
+            role: "tool",
+            content: label,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      };
+      const removeToolBubble = () => {
+        if (!toolBubbleId) return;
+        const store = useAppStore.getState();
+        store.setChatMessages(store.chatMessages.filter((m) => m.id !== toolBubbleId));
+        toolBubbleId = null;
+      };
+
       let res: Response;
       try {
         res = await fetch(`${API_URL}/ai/chat/stream`, {
@@ -360,7 +420,7 @@ export function useAIChat() {
           signal,
           body: JSON.stringify({
             message: content,
-            chat_history: chatMessages.slice(-10),
+            chat_history: chatMessages.slice(-CONTEXT_MAX_MESSAGES),
             session_id: sessionId,
             provider,
             ...(context ? { context } : {}),
@@ -395,6 +455,7 @@ export function useAIChat() {
       let buf = "";
       let currentEvent = "";
       let receivedToken = false;
+      let receivedTool = false;
 
       try {
         while (true) {
@@ -412,10 +473,12 @@ export function useAIChat() {
               const data = line.slice(6);
               if (currentEvent === "token") {
                 receivedToken = true;
+                removeToolBubble();
                 const store = useAppStore.getState();
                 const existing = store.chatMessages.find((m) => m.id === assistantId);
                 setAssistant((existing?.content || "") + data);
               } else if (currentEvent === "tool_start") {
+                receivedTool = true;
                 const names = (() => {
                   try {
                     const raw = JSON.parse(data);
@@ -426,7 +489,7 @@ export function useAIChat() {
                 const label = names.length
                   ? names.map(prettyToolName).join(" · ")
                   : "using tools…";
-                setAssistant(`⚙ ${label}`);
+                addToolBubble(label);
               }
             } else if (line === "") {
               currentEvent = "";
@@ -446,7 +509,7 @@ export function useAIChat() {
       // immediately instead of only after a full page reload.
       await refreshTasksFromServer();
 
-      if (!receivedToken) {
+      if (!receivedToken && !receivedTool) {
         const store = useAppStore.getState();
         const existing = store.chatMessages.find((m) => m.id === assistantId);
         if (existing && !existing.content) {
@@ -467,6 +530,7 @@ export function useAIChat() {
     hasUndo,
     loadSession,
     newChat,
+    clearActiveSession,
     fetchSessions,
   };
 }

@@ -52,7 +52,7 @@ function saveChatHistory(sessions: ChatSession[]) {
 }
 
 export function ChatPanel({ onClose }: ChatPanelProps) {
-  const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo, loadSession, newChat, fetchSessions } = useAIChat();
+  const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo, loadSession, newChat, clearActiveSession, fetchSessions } = useAIChat();
   const voiceModuleOn = useUiModule("voice");
   const voiceLocalOn = useLocalBool("prysm_feature_voice", true);
   const voiceOn = voiceModuleOn && voiceLocalOn;
@@ -158,23 +158,18 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     return () => window.removeEventListener("prysm-ai-suggest", handler);
   }, [sendMessage, provider]);
 
-  const handleNewChat = () => {
-    const store = useAppStore.getState();
-    if (store.chatMessages.length > 0) {
-      const firstMsg = store.chatMessages.find((m) => m.role === "user");
-      const session: ChatSession = {
-        id: crypto.randomUUID(),
-        title: firstMsg ? firstMsg.content.slice(0, 60) : "New Chat",
-        messages: store.chatMessages,
-        timestamp: new Date().toISOString(),
-      };
-      const updated = [session, ...chatHistory].slice(0, 50);
-      setChatHistory(updated);
-      saveChatHistory(updated);
-    }
-    newChat();
+  const handleNewChat = async () => {
+    // Start a new session, leaving prior server sessions in history.
+    await newChat();
     // Persist the cleared state so a refresh does not resurrect the previous
     // chat under a brand-new session id.
+    saveMessages([]);
+  };
+
+  const handleClearCurrent = async () => {
+    // Delete the active server session (purging its durable memory), then start
+    // fresh — same net effect as hitting X on the session, all server-backed.
+    await clearActiveSession();
     saveMessages([]);
   };
 
@@ -309,7 +304,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
                 </div>
                 <div className="border-t border-border/60 px-3 py-1.5">
                   <button
-                    onClick={handleNewChat}
+                    onClick={handleClearCurrent}
                     className="w-full text-left text-[10px] text-danger/80 hover:text-danger transition-colors"
                   >
                     Clear current chat

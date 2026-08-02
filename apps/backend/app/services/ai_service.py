@@ -7,6 +7,19 @@ from app.llm.base import get_provider
 from app.utils.priority import normalize_priority
 
 
+# Max number of raw past turns injected into the LLM prompt. Durable memory
+# (Workstream 6) lets us keep this small so token usage stays bounded.
+CONTEXT_MAX_MESSAGES = 12
+
+# Cap on how many search-result tasks we hand the model in one tool result.
+TOOL_SEARCH_MAX = 12
+# Cap on the serialized length of a single tool result fed back to the model.
+TOOL_RESULT_MAX_CHARS = 3000
+# Per-memory character cap when injecting the RECALLED MEMORY block, keeping it
+# to a bounded token budget (~MEMORY_TOP_K * MEMORY_CAP chars worst case).
+MEMORY_CAP = 400
+
+
 TOOL_DEFINITIONS = [
     {
         "type": "function",
@@ -30,7 +43,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_task",
-            "description": "Create a new task. IMPORTANT: if the user mentions a date/time or relative day (tomorrow, next Monday, Friday, etc.), resolve it to an exact ISO date using TODAY'S DATE and ALWAYS pass it in start_date (and due_date if relevant). Do not create date-less tasks when the user gave a date. When a specific date is used, first call list_tasks_by_date_range for that date to flag conflicts in your reply (medical/priority-5 tasks outrank regular meetings).",
+            "description": "Create a new task. IMPORTANT: if the user mentions a date/time or relative day (tomorrow, next Monday, Friday, etc.), resolve it to an exact ISO date using TODAY'S DATE and ALWAYS pass it in start_date (and due_date if relevant). Do not create date-less tasks when the user gave a date. When a specific date is used, first call list_tasks_by_date_range for that date to flag conflicts in your reply (medical/priority-5 tasks outrank regular meetings). TITLE vs DESCRIPTION: keep title SHORT and actionable (a concise noun-phrase, ~6 words max, e.g. \"Buy supplies\"). Put ALL supporting detail, item/vendor specifics, context and times (\"12pm\", \"morning\") into description. NEVER silently drop user detail.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -207,7 +220,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "batch_create_tasks",
-            "description": "Create multiple tasks at once (for compound commands)",
+            "description": "Create multiple tasks at once (for compound commands). Keep each title short and actionable (~6 words); put supporting detail and times into that task's description.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -221,6 +234,7 @@ TOOL_DEFINITIONS = [
                                 "start_date": {"type": "string"},
                                 "due_date": {"type": "string"},
                                 "priority": {"type": "integer"},
+                                "description": {"type": "string", "description": "full detail/context/notes for the task"},
                             },
                             "required": ["title"],
                         },
@@ -338,7 +352,7 @@ TOOL_DEFINITIONS = [
 ]
 
 
-def build_messages(chat_history: list[dict], user_message: str, context: dict | None = None, summary: str | None = None) -> list[dict]:
+def build_messages(chat_history: list[dict], user_message: str, context: dict | None = None, summary: str | None = None, memories: list[str] | None = None) -> list[dict]:
     from datetime import date
     today = date.today().isoformat()
 
@@ -357,6 +371,7 @@ DECISION RULES:
 - If the user's request includes ANY date/time ("next Monday", "tomorrow", "Friday", "at 12pm", "next week"), you MUST compute the exact YYYY-MM-DD from TODAY'S DATE and pass it as start_date. NEVER create a date-less task when a date was given.
 - Before creating a task on a SPECIFIC date, call list_tasks_by_date_range for that date to check for conflicts. If a conflict exists and the existing task has higher priority (especially priority 1 = high, which includes medical), mention it and the exact date in your reply.
 - "12pm", "morning", "in the afternoon" have no date field; capture them in description and set estimated_minutes if useful.
+- TITLE vs DESCRIPTION: keep `title` SHORT and actionable — a concise noun-phrase of about 6 words or fewer (e.g. "Buy supplies"). Put ALL supporting detail — vendor/item specifics, context, the "why", and any times like "12pm"/"morning" — into `description`. NEVER drop user detail: if the user gives specifics, they go in `description`, never silently discarded. Example: "Buy engine oil & supplies for mechanic" → title="Buy supplies", description="For mechanic (engine oil and related supplies)".
 - If the user asks "what's coming up / deadlines", use get_upcoming_deadlines and summarize.
 - If the user asks to find tasks, use search_tasks.
 - If the user asks to move a task, use reschedule_task. If they ask to edit fields, use update_task.
@@ -409,8 +424,20 @@ ALWAYS:
             f"{summary.strip()}"
         )
 
+    if memories:
+        # Durable cross-session memories surfaced for THIS message. Hard token cap
+        # (first N chars) so memory never expands the window unboundedly.
+        block = "\n\n".join(m[:MEMORY_CAP] for m in memories)
+        if block:
+            system_content += (
+                "\n\nRECALLED MEMORY — facts the user established in PREVIOUS chats "
+                "(durable, cross-session). Weave them into your answer naturally when "
+                "they are relevant; do not restate them as a list to the user.\n\n"
+                f"{block}"
+            )
+
     messages = [{"role": "system", "content": system_content}]
-    messages.extend(chat_history[-20:])
+    messages.extend(chat_history[-CONTEXT_MAX_MESSAGES:])
     messages.append({"role": "user", "content": user_message})
     return messages
 
@@ -479,7 +506,7 @@ async def execute_tool_calls(
                     stmt = stmt.where(Task.priority >= priority_min)
                 if priority_max is not None:
                     stmt = stmt.where(Task.priority <= priority_max)
-                stmt = stmt.limit(20)
+                stmt = stmt.limit(TOOL_SEARCH_MAX)
 
                 task_list = await session.execute(stmt)
                 tasks = task_list.scalars().all()
@@ -540,6 +567,7 @@ async def execute_tool_calls(
                     user_id=UUID(user_id),
                     title=title,
                     project_id=project_id,
+                    description=args.get("description"),
                     start_date=args.get("start_date"),
                     due_date=args.get("due_date"),
                     priority=args.get("priority", 2),
@@ -1113,6 +1141,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         user_id=UUID(user_id),
                         title=title,
                         project_id=project_id,
+                        description=t_data.get("description"),
                         start_date=t_data.get("start_date"),
                         due_date=t_data.get("due_date"),
                         priority=t_data.get("priority", 2),
@@ -1322,6 +1351,13 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 "role": "tool",
                 "content": json.dumps({"error": str(e)}),
             })
+
+    # Bound token usage: don't feed huge serialized tool outputs back to the
+    # model. Truncate centrally so every branch is covered.
+    for r in results:
+        content = r.get("content", "")
+        if isinstance(content, str) and len(content) > TOOL_RESULT_MAX_CHARS:
+            r["content"] = content[:TOOL_RESULT_MAX_CHARS] + "\n...(truncated)"
 
     return results
 

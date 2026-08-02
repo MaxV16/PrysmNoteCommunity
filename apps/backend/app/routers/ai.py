@@ -20,6 +20,13 @@ from app.services.ai_service import (
     execute_tool_calls,
     get_llm_client,
 )
+from app.services.memory_service import (
+    extract_memories,
+    list_active_memories,
+    purge_memories_for_session,
+    retrieve_relevant_memories,
+    store_memories,
+)
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -61,6 +68,26 @@ def _check_ai_rate_limit(user_id: str) -> None:
 
 MAX_CHAT_HISTORY = 20
 MAX_MESSAGE_LENGTH = 4000
+
+
+def _chunk_text(text: str, size: int = 400) -> list[str]:
+    """Split already-computed final answer text into token-like chunks so the
+    frontend can render it incrementally without a second model call."""
+    text = text or ""
+    if len(text) <= size:
+        return [text]
+    words = text.split(" ")
+    chunks: list[str] = []
+    cur = ""
+    for w in words:
+        if cur and len(cur) + len(w) + 1 > size:
+            chunks.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip() if cur else w
+    if cur:
+        chunks.append(cur)
+    return chunks
 
 
 def _sanitize_chat_history(chat_history: list[dict]) -> list[dict]:
@@ -205,6 +232,38 @@ async def _maybe_update_summary(
     await session.flush()
 
 
+# Run memory extraction only when the turn plausibly produced something durable
+# (a real assistant reply, or it replaced placeholder content when tools ran).
+MEMORY_EXTRACT_MIN_CONTENT = 20
+
+
+async def _maybe_extract_memories(
+    session: AsyncSession,
+    user_id: str,
+    session_id: str,
+    client,
+    sanitized_history: list[dict],
+    user_message: str,
+    assistant_content: str,
+) -> list[dict]:
+    """After a turn, distill any durable cross-session facts into AiMemory rows.
+
+    Fail-open and bounded (mirrors _maybe_update_summary): never raises into the
+    turn, caps storage, dedupes. Only runs when there's a substantive reply and
+    either meaningful history or the user actually wrote something new.
+    """
+    if not assistant_content or len(assistant_content) < MEMORY_EXTRACT_MIN_CONTENT:
+        return []
+    if not (user_message.strip() or sanitized_history):
+        return []
+
+    facts = await extract_memories(client, sanitized_history, user_message, assistant_content)
+    if not facts:
+        return facts
+    await store_memories(session, user_id, session_id, facts)
+    return facts
+
+
 @router.post("/chat")
 async def chat(
     request: ChatRequest,
@@ -222,7 +281,8 @@ async def chat(
     sanitized_history = _sanitize_chat_history(request.chat_history)
     ai_session = await load_session_summary(session, user.id, session_id)
     current_summary = ai_session.summary if ai_session else None
-    messages = build_messages(sanitized_history, request.message, request.context, current_summary)
+    memories = await retrieve_relevant_memories(session, str(user.id), request.message)
+    messages = build_messages(sanitized_history, request.message, request.context, current_summary, memories)
 
     MAX_TOOL_ROUNDS = 4
     content = ""
@@ -249,6 +309,7 @@ async def chat(
     await persist_conversation(session, user.id, session_id, "user", request.message)
     await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
     await _maybe_update_summary(session, user.id, session_id, client, sanitized_history, request.message, content, current_summary)
+    await _maybe_extract_memories(session, user.id, session_id, client, sanitized_history, request.message, content)
     await session.commit()
 
     return {"content": content, "tool_calls": tool_calls, "session_id": session_id}
@@ -271,7 +332,8 @@ async def chat_stream(
     sanitized_history = _sanitize_chat_history(request.chat_history)
     ai_session = await load_session_summary(session, user.id, session_id)
     current_summary = ai_session.summary if ai_session else None
-    messages = build_messages(sanitized_history, request.message, request.context, current_summary)
+    memories = await retrieve_relevant_memories(session, str(user.id), request.message)
+    messages = build_messages(sanitized_history, request.message, request.context, current_summary, memories)
 
     await persist_conversation(session, user.id, session_id, "user", request.message)
 
@@ -307,9 +369,12 @@ async def chat_stream(
                 fallback = await client.chat(messages, tools=None)
                 content = (fallback.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
 
-        # Stream the final natural-language answer.
+        # Stream the final natural-language answer. `content` was already
+        # produced by the tool loop (either a normal non-tool round or the
+        # forced fallback at MAX_TOOL_ROUNDS-1), so we emit it directly rather
+        # than re-invoking the model — that was a wasteful second full call.
         if content:
-            async for chunk in client.stream_chat(messages, tools=TOOL_DEFINITIONS):
+            for chunk in _chunk_text(content):
                 yield {"event": "token", "data": chunk}
         else:
             yield {"event": "token", "data": " "}
@@ -318,6 +383,7 @@ async def chat_stream(
         await _maybe_update_summary(
             session, user.id, session_id, client, sanitized_history, request.message, content, current_summary
         )
+        await _maybe_extract_memories(session, user.id, session_id, client, sanitized_history, request.message, content)
         await session.commit()
         yield {"event": "done", "data": ""}
 
@@ -422,5 +488,35 @@ async def delete_session(
             AiConversation.session_id == session_id,
         )
     )
+    # Purge any durable memory facts extracted from this session so deleting a
+    # chat also drops the "life" facts it produced.
+    await purge_memories_for_session(session, str(user.id), session_id)
     await session.commit()
     return {"deleted": True, "session_id": session_id}
+
+
+@router.get("/memories")
+async def get_memories(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    memories = await list_active_memories(session, str(user.id))
+    return memories
+
+
+@router.delete("/memories/{memory_id}")
+async def delete_memory(
+    memory_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import delete
+    from app.models.ai_memory import AiMemory
+    result = await session.execute(
+        delete(AiMemory).where(
+            AiMemory.user_id == user.id,
+            AiMemory.id == memory_id,
+        )
+    )
+    await session.commit()
+    return {"deleted": bool(result.rowcount), "memory_id": memory_id}

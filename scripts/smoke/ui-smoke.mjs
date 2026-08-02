@@ -98,8 +98,25 @@ async function main() {
 
   console.log("[5/5] task visible + today column exists (no screenshot clicking)");
 
+  console.log("[6] layout: open AI panel and assert timeline stays visible left of it");
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.locator('button[title="AI"]').waitFor({ state: "visible" });
+  await page.locator('button[title="AI"]').click();
+  await page.getByText("AI Command Center").waitFor({ state: "visible", timeout: 10000 });
+  // The panel docks to the right ("lg:static"), so the timeline body must remain
+  // visible and positioned entirely to the left of the panel (no overlap/hide).
+  const timelineBox = await page.locator("[data-timeline-body]").boundingBox();
+  const panelBox = await page
+    .locator("div", { hasText: "AI Command Center" })
+    .last()
+    .boundingBox();
+  assert(!!timelineBox && timelineBox.width > 0, "timeline body should remain visible with the AI panel open");
+  assert(!!panelBox && panelBox.width > 0, "AI panel should be rendered");
+  assert(timelineBox.x + timelineBox.width <= panelBox.x + 1, "timeline should sit left of (not under) the AI panel");
+  console.log("      timeline stays visible left of docked AI panel");
+
   await browser.close();
-  console.log("\nSMOKE UI PASS: register → +New → create → task visible on today");
+  console.log("\nSMOKE UI PASS: register → +New → create → task visible on today → AI panel docks right");
 }
 
 main().catch((err) => {

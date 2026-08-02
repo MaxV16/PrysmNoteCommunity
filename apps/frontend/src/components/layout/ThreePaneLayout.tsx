@@ -92,15 +92,16 @@ function MainLayout() {
           onToggle={() => setSidebarCollapsed(!isSidebarCollapsed)}
         />
       )}
-      <div className="relative flex flex-col" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+      <div className="relative flex min-w-0" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
         <TimelineView
           onToggleRight={() => setRightOpen(v => !v)}
           onOpenSticky={toggleSticky}
         />
         {aiOn && rightOpen && (
           // On small screens the AI panel overlays the timeline instead of
-          // squeezing it out of the viewport.
-          <div className="absolute inset-y-0 right-0 z-20 w-[min(22.5rem,88vw)] border-l border-border bg-base lg:static lg:z-auto lg:h-full lg:min-h-0 lg:w-[22.5rem]">
+          // squeezing it out of the viewport. On lg+ it docks as a fixed-width
+          // right column, keeping the timeline always visible to its left.
+          <div className="absolute inset-y-0 right-0 z-20 w-[min(22.5rem,88vw)] border-l border-border bg-base lg:static lg:h-full lg:min-h-0 lg:shrink-0 lg:w-[22.5rem]">
             <ChatPanel onClose={() => setRightOpen(false)} />
           </div>
         )}

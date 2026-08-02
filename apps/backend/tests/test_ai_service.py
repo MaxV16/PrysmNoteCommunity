@@ -56,8 +56,8 @@ async def test_build_messages_with_context(db_session: AsyncSession):
 async def test_build_messages_limits_chat_history(db_session: AsyncSession):
     long_history = [{"role": "user", "content": f"msg {i}"} for i in range(50)]
     messages = build_messages(long_history, "final")
-    # MAX_CHAT_HISTORY is 20, plus system + new user = 22
-    assert len(messages) == 22
+    # History is capped to CONTEXT_MAX_MESSAGES (12), plus system + new user = 14
+    assert len(messages) == 14
 
 
 @pytest.mark.asyncio
@@ -681,6 +681,70 @@ async def test_build_messages_injects_summary(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_build_messages_has_title_description_rule(db_session: AsyncSession):
+    """WS3: the system prompt must instruct the model to keep titles short and put
+    supporting detail (times, vendor, context) into description."""
+    from app.services.ai_service import build_messages as _build
+    messages = _build([], "Buy engine oil for the mechanic on Tuesday", None, None)
+    system = messages[0]["content"]
+    assert "TITLE vs DESCRIPTION" in system
+    assert "description" in system
+    assert "Buy supplies" in system  # the worked example
+
+
+@pytest.mark.asyncio
+async def test_execute_create_task_round_trips_description(db_session: AsyncSession, ai_user):
+    """WS3: create_task must pass the description through to the Task model (it
+    previously dropped it), so a verbose title+description both persist."""
+    from uuid import UUID
+    from app.models.task import Task
+    from sqlalchemy import select
+    user_id = str(ai_user)
+    tool_calls = [{
+        "id": "call_desc",
+        "function": {
+            "name": "create_task",
+            "arguments": json.dumps({
+                "title": "Buy supplies",
+                "description": "For mechanic (engine oil and related supplies)",
+                "start_date": "2026-08-04",
+            }),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, user_id, db_session)
+    content = json.loads(results[0]["content"])
+    assert content["created"] is True
+
+    rows = (await db_session.execute(select(Task).where(Task.user_id == UUID(user_id)))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].title == "Buy supplies"
+    assert rows[0].description == "For mechanic (engine oil and related supplies)"
+
+
+@pytest.mark.asyncio
+async def test_execute_batch_create_tasks_round_trips_description(db_session: AsyncSession, ai_user):
+    from uuid import UUID
+    from app.models.task import Task
+    from sqlalchemy import select
+    user_id = str(ai_user)
+    tool_calls = [{
+        "id": "call_batch_desc",
+        "function": {
+            "name": "batch_create_tasks",
+            "arguments": json.dumps({
+                "tasks": [
+                    {"title": "Buy supplies", "description": "Engine oil for the mechanic"},
+                ],
+            }),
+        },
+    }]
+    await execute_tool_calls(tool_calls, user_id, db_session)
+    rows = (await db_session.execute(select(Task).where(Task.user_id == UUID(user_id)))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].description == "Engine oil for the mechanic"
+
+
+@pytest.mark.asyncio
 async def test_build_messages_skips_empty_summary(db_session: AsyncSession):
     messages = build_messages([], "hello")
     assert "CONTEXT SUMMARY" not in messages[0]["content"]
@@ -749,3 +813,114 @@ async def test_session_summary_survives_summarizer_failure(db_session: AsyncSess
     # With an existing summary, a failure keeps the old summary.
     kept = await summarize_conversation(_FailingClient(), long_history, "keep me")
     assert kept == "keep me"
+
+
+def test_chunk_text_splits_long_final_answer():
+    """WS4: _chunk_text turns an already-computed final answer into a few
+    token-like chunks so we can stream it once (no second model call)."""
+    from app.routers.ai import _chunk_text
+    short = "Done."
+    assert _chunk_text(short) == ["Done."]
+    text = " ".join(["word"] * 1000)
+    chunks = _chunk_text(text, size=400)
+    assert len(chunks) > 1
+    assert " ".join(chunks).strip() == text.strip()
+    assert all(len(c) <= 400 for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_build_messages_injects_recalled_memory(db_session: AsyncSession):
+    """WS6: a matching memory must be injected as a RECALLED MEMORY block."""
+    messages = build_messages([], "remind me about the mechanic appointment", None, None, [
+        "User has an ITV/mechanic appointment Tue 2026-08-04 at 16:00.",
+    ])
+    system = messages[0]["content"]
+    assert "RECALLED MEMORY" in system
+    assert "mechanic appointment" in system
+
+
+@pytest.mark.asyncio
+async def test_build_messages_no_memory_no_block(db_session: AsyncSession):
+    messages = build_messages([], "hello", None, None, [])
+    assert "RECALLED MEMORY" not in messages[0]["content"]
+    messages2 = build_messages([], "hello")
+    assert "RECALLED MEMORY" not in messages2[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_store_and_retrieve_memories(db_session: AsyncSession, ai_user):
+    """WS6: stored memories are retrieved by keyword relevance; near-duplicate
+    content is skipped by dedupe."""
+    from app.services.memory_service import store_memories, retrieve_relevant_memories, purge_memories_for_session
+    from sqlalchemy import select
+    from uuid import UUID as _UUID
+    from app.models.ai_memory import AiMemory
+
+    user_id = str(ai_user)
+    session_id = str(uuid4())
+    user_uuid = _UUID(user_id)
+
+    stored = await store_memories(db_session, user_id, session_id, [
+        {"content": "User has a mechanic/ITV appointment on Tuesday 2026-08-04 at 16:00.", "category": "schedule"},
+        {"content": "User prefers morning meetings.", "category": "preference"},
+    ])
+    assert stored == 2
+
+    # An exact duplicate is skipped by dedupe.
+    stored2 = await store_memories(db_session, user_id, str(uuid4()), [
+        {"content": "User prefers morning meetings.", "category": "preference"},
+    ])
+    assert stored2 == 0
+
+    relevant = await retrieve_relevant_memories(db_session, user_id, "mechanic appointment")
+    assert any("mechanic" in m for m in relevant)
+
+    # Rows exist in the DB.
+    rows = (await db_session.execute(select(AiMemory).where(AiMemory.user_id == user_uuid))).scalars().all()
+    assert len(rows) == 2
+
+    # Purging the source session removes exactly those rows.
+    purged = await purge_memories_for_session(db_session, user_id, session_id)
+    assert purged == 2
+    rows = (await db_session.execute(select(AiMemory).where(AiMemory.user_id == user_uuid))).scalars().all()
+    assert len(rows) == 0
+
+
+@pytest.mark.asyncio
+async def test_memory_extraction_fail_open(db_session: AsyncSession, ai_user):
+    """WS6: extraction failures must not raise or block anything."""
+    from app.routers.ai import _maybe_extract_memories
+
+    class _AlwaysFail:
+        async def chat(self, messages, tools=None, **kwargs):
+            raise RuntimeError("boom")
+
+    facts = await _maybe_extract_memories(
+        db_session, str(ai_user), str(uuid4()), _AlwaysFail(),
+        [{"role": "user", "content": "hi"}], "hello", "A sufficiently long assistant reply string here.",
+    )
+    assert facts == []
+
+
+@pytest.mark.asyncio
+async def test_execute_search_tasks_capped(db_session: AsyncSession, ai_user):
+    """WS4: search_tasks must be capped (TOOL_SEARCH_MAX), so huge result sets
+    don't blow the context window."""
+    from app.services.ai_service import TOOL_SEARCH_MAX
+    from app.models.task import Task
+    user_id = ai_user
+    for i in range(30):
+        db_session.add(Task(user_id=user_id, title=f"Searchable {i}"))
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_cap",
+        "function": {
+            "name": "search_tasks",
+            "arguments": json.dumps({"query": "Searchable"}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert len(content["tasks"]) <= TOOL_SEARCH_MAX
+

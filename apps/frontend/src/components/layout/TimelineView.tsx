@@ -340,7 +340,7 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
   const viewModeLabel = viewMode === "timeline" ? "Timeline" : viewMode === "kanban" ? "Kanban" : viewMode === "calendar" ? "Calendar" : "List";
 
   return (
-    <div className="flex flex-col bg-base" style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+    <div className="flex flex-col bg-base" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-1.5 shrink-0 overflow-x-auto">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
