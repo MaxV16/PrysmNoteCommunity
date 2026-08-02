@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MonthCalendar } from "./MonthCalendar";
 import {
   describeRule,
+  recurrencePresetLabel,
   toRRule,
   type RecurrenceFrequency,
 } from "@/lib/recurrence";
@@ -27,28 +28,23 @@ function addDays(iso: string, days: number): string {
   return d.toISOString().split("T")[0];
 }
 
-function isWeekend(iso: string): boolean {
-  const d = new Date(iso);
-  const day = d.getDay();
-  return day === 0 || day === 6;
-}
-
 function weekdayFromIso(iso: string): string {
   const codes = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
   return codes[(new Date(iso).getDay() + 6) % 7];
 }
 
-const RECURRENCE_PRESETS = [
-  { labelKey: "daily", label: "Daily", build: (d: string) => "FREQ=DAILY" },
-  { labelKey: "weekly", label: (d: string) => "", build: (d: string) => `FREQ=WEEKLY;BYDAY=${weekdayFromIso(d)}` },
-  { labelKey: "monthly", label: (d: string) => "", build: (d: string) => `FREQ=MONTHLY;BYMONTHDAY=${new Date(d).getDate()}` },
-  { labelKey: "yearly", label: (d: string) => "", build: (d: string) => `FREQ=YEARLY;BYMONTHDAY=${new Date(d).getDate()}` },
-  { labelKey: "weekday", label: "Every Weekday (Mon–Fri)", build: () => "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" },
-];
-
-function presetLabel(p: { labelKey: string; label: string | ((d: string) => string) }, d: string): string {
-  return typeof p.label === "function" ? p.label(d) : p.label;
+interface RecurrencePreset {
+  labelKey: "daily" | "weekly" | "monthly" | "yearly" | "weekday";
+  build: (d: string) => string;
 }
+
+const RECURRENCE_PRESETS: RecurrencePreset[] = [
+  { labelKey: "daily", build: () => "FREQ=DAILY" },
+  { labelKey: "weekly", build: (d: string) => `FREQ=WEEKLY;BYDAY=${weekdayFromIso(d)}` },
+  { labelKey: "monthly", build: (d: string) => `FREQ=MONTHLY;BYMONTHDAY=${new Date(d).getDate()}` },
+  { labelKey: "yearly", build: (d: string) => `FREQ=YEARLY;BYMONTHDAY=${new Date(d).getDate()}` },
+  { labelKey: "weekday", build: () => "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" },
+];
 
 export function DateRecurrencePopover({
   open,
@@ -129,7 +125,6 @@ export function DateRecurrencePopover({
   }, [open, onClose, triggerRef, view]);
 
   const dateStr = date || new Date().toISOString().split("T")[0];
-  const recurrenceSummary = describeRule(open ? (view === "recurrence" || view === "custom" ? rule : recurrenceRule) : recurrenceRule);
 
   // Custom recurrence draft state.
   const [custom, setCustom] = useState<{
@@ -154,7 +149,15 @@ export function DateRecurrencePopover({
     { label: "Today", build: () => new Date().toISOString().split("T")[0] },
     { label: "Tomorrow", build: () => addDays(new Date().toISOString().split("T")[0], 1) },
     { label: "+7 Days", build: () => addDays(new Date().toISOString().split("T")[0], 7) },
-    { label: "Next Week", build: () => addDays(new Date().toISOString().split("T")[0], 7) },
+    {
+      label: "Next Week",
+      build: () => {
+        const today = new Date();
+        const day = today.getDay(); // 0=Sun..6=Sat
+        const daysUntilNextMon = day === 0 ? 1 : 8 - day;
+        return addDays(today.toISOString().split("T")[0], daysUntilNextMon);
+      },
+    },
   ];
 
   return createPortal(
@@ -252,16 +255,12 @@ function MainView({
   onOpenRecurrence: () => void;
   quickActions: { label: string; build: () => string }[];
 }) {
-  const [seg, setSeg] = useState("Date");
   const dateStr = date || new Date().toISOString().split("T")[0];
   const summary = describeRule(rule);
 
   return (
     <div className="flex flex-col overflow-y-auto">
       <Header title="Set reminder" />
-      <div className="px-3 pt-2">
-        <Segmented options={["Date", "Duration"]} value={seg} onChange={setSeg} />
-      </div>
       <div className="px-3 pt-2">
         <div className="flex flex-wrap gap-1.5">
           {quickActions.map((a) => (
@@ -279,10 +278,7 @@ function MainView({
         <MonthCalendar value={dateStr} onChange={setDate} />
       </div>
       <div className="mx-3 border-t border-border/60 py-1">
-        <Row icon="🕒" label="Time" onClick={() => {}} />
-        <Row icon="🔔" label="Reminder" onClick={() => {}} />
         <Row icon="🔄" label={summary ? `Every ${summary.toLowerCase()}` : "Repeat"} onClick={onOpenRecurrence} arrow />
-        <Row icon="♾️" label="Endlessly" onClick={() => {}} />
       </div>
     </div>
   );
@@ -341,7 +337,7 @@ function RecurrenceView({
               onClick={() => setRule(p.build(date))}
               className={`flex items-center justify-between rounded-md px-3 py-2 text-left text-xs transition-colors ${active ? "bg-accent/15 text-accent" : "text-secondary hover:bg-hover hover:text-primary"}`}
             >
-              <span>{presetLabel(p, date)}</span>
+              <span>{recurrencePresetLabel(p.labelKey, date)}</span>
               {active && <span className="text-accent">✓</span>}
             </button>
           );

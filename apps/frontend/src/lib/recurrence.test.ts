@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toRRule, describeRule, weekdayCode, dailyWeeklyMonthlyYearly } from "./recurrence";
+import { toRRule, describeRule, weekdayCode, dailyWeeklyMonthlyYearly, recurrencePresetLabel, ordinal } from "./recurrence";
 
 describe("recurrence helpers", () => {
   it("toRRule: daily / none", () => {
@@ -36,5 +36,26 @@ describe("recurrence helpers", () => {
   it("dailyWeeklyMonthlyYearly: monthly uses the day of the month", () => {
     expect(dailyWeeklyMonthlyYearly(new Date(2026, 7, 20), "monthly")).toBe("FREQ=MONTHLY;BYMONTHDAY=20");
     expect(dailyWeeklyMonthlyYearly(new Date(2026, 7, 20), "weekly")).toBe("FREQ=WEEKLY;BYDAY=TH");
+  });
+});
+
+describe("recurrence preset labels", () => {
+  // 2026-08-20 is a Thursday.
+  it("renders descriptive labels from the selected date (not blank)", () => {
+    const iso = "2026-08-20";
+    expect(recurrencePresetLabel("daily", iso)).toBe("Daily");
+    expect(recurrencePresetLabel("weekly", iso)).toBe("Weekly (Thu)");
+    expect(recurrencePresetLabel("monthly", iso)).toBe("Monthly (20th)");
+    expect(recurrencePresetLabel("yearly", iso)).toBe("Yearly (20 Aug)");
+    expect(recurrencePresetLabel("weekday", iso)).toBe("Every Weekday (Mon–Fri)");
+  });
+
+  it("applies correct ordinal suffixes", () => {
+    expect(ordinal(1)).toBe("1st");
+    expect(ordinal(2)).toBe("2nd");
+    expect(ordinal(3)).toBe("3rd");
+    expect(ordinal(11)).toBe("11th");
+    expect(ordinal(20)).toBe("20th");
+    expect(ordinal(21)).toBe("21st");
   });
 });

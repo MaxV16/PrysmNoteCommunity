@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_HEADERS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
@@ -22,6 +22,15 @@ export function MonthCalendar({ value, onChange, accent = "var(--accent)" }: Mon
   const parsed = useMemo(() => (value ? new Date(value) : null), [value]);
   const [viewYear, setViewYear] = useState(() => parsed?.getFullYear() ?? new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState(() => (parsed ? parsed.getMonth() : new Date().getMonth()));
+
+  // Keep the visible month aligned with the selected date (e.g. after a quick
+  // action changes the date, or when the popover is opened for an old task).
+  useEffect(() => {
+    if (parsed && !isNaN(parsed.getTime())) {
+      setViewYear(parsed.getFullYear());
+      setViewMonth(parsed.getMonth());
+    }
+  }, [parsed]);
 
   const year = viewYear;
   const month = viewMonth;

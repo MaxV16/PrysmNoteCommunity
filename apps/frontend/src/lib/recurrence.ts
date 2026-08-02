@@ -58,6 +58,40 @@ export function toRRule(input: { type: string; freq?: RecurrenceFrequency; inter
 
 export const WEEKDAY_CODES = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
 
+export function ordinal(n: number): string {
+  const s = n % 10, h = n % 100;
+  if (s === 1 && h !== 11) return `${n}st`;
+  if (s === 2 && h !== 12) return `${n}nd`;
+  if (s === 3 && h !== 13) return `${n}rd`;
+  return `${n}th`;
+}
+
+const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/**
+ * Descriptive labels for native recurrence presets derived from a selected date,
+ * e.g. "Weekly (Thu)", "Monthly (20th)", "Yearly (20 Aug)".
+ */
+export function recurrencePresetLabel(key: "daily" | "weekly" | "monthly" | "yearly" | "weekday", iso: string): string {
+  const day = new Date(iso);
+  switch (key) {
+    case "daily":
+      return "Daily";
+    case "weekday":
+      return "Every Weekday (Mon–Fri)";
+    case "weekly": {
+      const dow = WEEKDAY_NAMES[(day.getDay() + 6) % 7];
+      return `Weekly (${dow})`;
+    }
+    case "monthly":
+      return `Monthly (${ordinal(day.getDate())})`;
+    case "yearly": {
+      const month = day.toLocaleDateString("en-US", { month: "short" });
+      return `Yearly (${day.getDate()} ${month})`;
+    }
+  }
+}
+
 /** Weekday code (MO..SU) for a JS Date. */
 export function weekdayCode(d: Date): string {
   return WEEKDAY_CODES[(d.getDay() + 6) % 7];
