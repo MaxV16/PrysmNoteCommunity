@@ -10,12 +10,18 @@ class OpenAIClient(LLMClient):
     def __init__(self, api_key: str):
         self.client = AsyncOpenAI(api_key=api_key)
 
-    async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
-        kwargs = dict(model="gpt-4o", messages=messages)
+    async def chat(self, messages: list[dict], tools: list[dict] | None = None, **overrides) -> dict:
+        body = dict(model="gpt-4o", messages=messages)
         if tools:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
-        response = await self.client.chat.completions.create(**kwargs)
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+        temperature = overrides.get("temperature")
+        if temperature is not None:
+            body["temperature"] = temperature
+        max_tokens = overrides.get("max_tokens")
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
+        response = await self.client.chat.completions.create(**body)
         return response.model_dump()
 
     async def stream_chat(self, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[str]:

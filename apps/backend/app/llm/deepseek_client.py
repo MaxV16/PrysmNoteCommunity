@@ -16,10 +16,16 @@ class DeepSeekClient(LLMClient):
             timeout=httpx.Timeout(60.0, connect=10.0),
         )
 
-    async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+    async def chat(self, messages: list[dict], tools: list[dict] | None = None, **overrides) -> dict:
         body = dict(model="deepseek-chat", messages=messages)
         if tools:
             body["tools"] = tools
+        temperature = overrides.get("temperature")
+        if temperature is not None:
+            body["temperature"] = temperature
+        max_tokens = overrides.get("max_tokens")
+        if max_tokens is not None:
+            body["max_tokens"] = max_tokens
         response = await self.client.post(
             "/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}"},

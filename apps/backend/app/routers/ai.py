@@ -90,6 +90,30 @@ def _chunk_text(text: str, size: int = 400) -> list[str]:
     return chunks
 
 
+# Rough heuristic: ~4 chars per token, close enough for cost-usage visibility.
+_CHARS_PER_TOKEN = 4
+
+
+def _estimate_tokens(prompt_messages: list[dict], completion: str | None = None) -> int:
+    """Estimate total tokens for a prompt + (optional) completion, so the user
+    can see how expensive a turn was. Not a precise tokenizer — for visibility."""
+    chars = 0
+    for m in prompt_messages or []:
+        content = m.get("content")
+        if isinstance(content, str):
+            chars += len(content)
+        tool_calls = m.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tc in tool_calls:
+                fn = (tc.get("function") or {}).get("name", "")
+                args = (tc.get("function") or {}).get("arguments", "")
+                chars += len(fn) + len(str(args))
+    prompt_tokens = max(1, chars // _CHARS_PER_TOKEN)
+    if completion:
+        prompt_tokens += max(0, len(completion) // _CHARS_PER_TOKEN)
+    return prompt_tokens
+
+
 def _sanitize_chat_history(chat_history: list[dict]) -> list[dict]:
     sanitized_history = []
     for msg in chat_history[-MAX_CHAT_HISTORY:]:
@@ -312,7 +336,12 @@ async def chat(
     await _maybe_extract_memories(session, user.id, session_id, client, sanitized_history, request.message, content)
     await session.commit()
 
-    return {"content": content, "tool_calls": tool_calls, "session_id": session_id}
+    return {
+        "content": content,
+        "tool_calls": tool_calls,
+        "session_id": session_id,
+        "estimated_tokens": _estimate_tokens(messages, content),
+    }
 
 
 @router.post("/chat/stream")
@@ -378,6 +407,9 @@ async def chat_stream(
                 yield {"event": "token", "data": chunk}
         else:
             yield {"event": "token", "data": " "}
+
+        estimated_tokens = _estimate_tokens(messages, content)
+        yield {"event": "usage", "data": json.dumps({"estimated_tokens": estimated_tokens})}
 
         await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
         await _maybe_update_summary(

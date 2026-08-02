@@ -4,7 +4,7 @@ from typing import AsyncIterator
 
 class LLMClient(ABC):
     @abstractmethod
-    async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+    async def chat(self, messages: list[dict], tools: list[dict] | None = None, **kwargs) -> dict:
         pass
 
     @abstractmethod

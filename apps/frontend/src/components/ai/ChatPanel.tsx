@@ -52,7 +52,7 @@ function saveChatHistory(sessions: ChatSession[]) {
 }
 
 export function ChatPanel({ onClose }: ChatPanelProps) {
-  const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo, loadSession, newChat, clearActiveSession, fetchSessions } = useAIChat();
+  const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo, loadSession, newChat, clearActiveSession, fetchSessions, usageTokens } = useAIChat();
   const voiceModuleOn = useUiModule("voice");
   const voiceLocalOn = useLocalBool("prysm_feature_voice", true);
   const voiceOn = voiceModuleOn && voiceLocalOn;
@@ -370,6 +370,13 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         {chatMessages.map((msg) => (
           <ChatMessage key={msg.id} message={msg} />
         ))}
+        {usageTokens != null && !isLoading && (
+          <div className="flex justify-end px-2">
+            <span className="text-[9px] text-muted" title="Estimated prompt + completion tokens for this turn">
+              ~{usageTokens.toLocaleString()} tokens used
+            </span>
+          </div>
+        )}
         {isLoading && (
           <div className="flex justify-center py-3">
             <Spinner />

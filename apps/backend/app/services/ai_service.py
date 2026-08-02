@@ -598,6 +598,11 @@ async def execute_tool_calls(
                         ).order_by(Task.priority.asc(), Task.start_date).limit(10)
                     )
                     for ct in conflict_result.scalars().all():
+                        # The DB-level `Task.id != task.id` exclusion is unreliable
+                        # across dialects (SQLite UUID binding), so also drop the
+                        # just-created task here to avoid a spurious "self conflict".
+                        if str(ct.id) == str(task.id):
+                            continue
                         ct_prio = normalize_priority(ct.priority)
                         new_prio = normalize_priority(task.priority or 2)
                         # Priority tiers: lower number == more important

@@ -815,6 +815,84 @@ async def test_session_summary_survives_summarizer_failure(db_session: AsyncSess
     assert kept == "keep me"
 
 
+@pytest.mark.asyncio
+async def test_chat_stream_emits_single_answer_and_usage(client, ai_user, monkeypatch):
+    """WS4 + usage: /api/ai/chat/stream must stream the tool loop's final
+    content ONCE (no second model call) and emit an SSE `usage` event so the
+    frontend can show token usage."""
+    from app.services.ai_service import get_llm_client
+
+    class _StreamAgent:
+        attempts = 0
+
+        async def chat(self, messages, tools=None):
+            type(self).attempts += 1
+            if type(self).attempts == 1:
+                return {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "tool_calls": [{
+                                "id": "call_s_1",
+                                "function": {"name": "create_task", "arguments": json.dumps({"title": "Streamed Task"})},
+                            }],
+                        }
+                    }]
+                }
+            return {"choices": [{"message": {"role": "assistant", "content": "Done."}}]}
+
+        async def stream_chat(self, messages, tools=None):
+            yield "SHOULD NOT BE CALLED (double model call)"
+
+        async def embed(self, text):
+            return [0.0] * 8
+
+    agent = _StreamAgent()
+
+    async def _fake_get_client(provider, api_key):
+        return agent
+
+    monkeypatch.setattr("app.routers.ai.get_llm_client", _fake_get_client)
+    monkeypatch.setattr("app.routers.ai.get_user_api_key", _dummy_key)
+
+    response = await client.post("/api/ai/chat/stream", json={
+        "message": "schedule a task",
+        "provider": "openai",
+    })
+    assert response.status_code == 200, response.text
+
+    events = []
+    for line in response.text.splitlines():
+        if line.startswith("event: "):
+            events.append(line[len("event: "):].strip())
+
+    assert "tool_start" in events
+    assert "usage" in events, f"missing usage event: {events}"
+    # The fake stream_chat would emit 'SHOULD NOT BE CALLED'; if the double call
+    # is gone, the token events must come from _chunk_text("Done.").
+    assert "SHOULD NOT BE CALLED" not in response.text
+    # Single final answer: exactly one occurrence of 'Done.' (not doubled).
+    assert response.text.count("Done.") == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_chat_accepts_temperature_max_tokens_kwargs():
+    """Regression: summary/memory/subtask calls pass temperature & max_tokens to
+    client.chat(). Provider clients must accept those kwargs instead of raising
+    TypeError (which silently disabled summaries + memory extraction)."""
+    import inspect
+    from app.llm.openai_client import OpenAIClient
+    from app.llm.deepseek_client import DeepSeekClient
+    from app.llm.gemini_client import GeminiClient
+
+    for cls in (OpenAIClient, DeepSeekClient, GeminiClient):
+        params = inspect.signature(cls.chat).parameters
+        # Summary/memory/subtask flows call chat(..., temperature=..., max_tokens=...),
+        # so each provider must accept **kwargs (VAR_KEYWORD).
+        assert any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()), cls.__name__
+
+
 def test_chunk_text_splits_long_final_answer():
     """WS4: _chunk_text turns an already-computed final answer into a few
     token-like chunks so we can stream it once (no second model call)."""
@@ -845,6 +923,27 @@ async def test_build_messages_no_memory_no_block(db_session: AsyncSession):
     assert "RECALLED MEMORY" not in messages[0]["content"]
     messages2 = build_messages([], "hello")
     assert "RECALLED MEMORY" not in messages2[0]["content"]
+
+
+def test_estimate_tokens_counts_prompt_and_completion():
+    """Token-usage visibility: _estimate_tokens returns a positive, roughly
+    proportional figure derived from prompt + completion text."""
+    from app.routers.ai import _estimate_tokens
+    short = _estimate_tokens([{"role": "user", "content": "hi"}], "ok")
+    assert short > 0
+    long_prompt = _estimate_tokens([{"role": "user", "content": "x" * 2000}], "reply")
+    big = _estimate_tokens(
+        [{"role": "user", "content": "x" * 2000}],
+        "y" * 1000,
+    )
+    # Bigger prompt => bigger estimate; adding a long completion increases it.
+    assert big > long_prompt
+    # A tool call in the message chain is counted too.
+    with_tool = _estimate_tokens(
+        [{"role": "assistant", "tool_calls": [{"function": {"name": "create_task", "arguments": "{}"}}]}],
+        "",
+    )
+    assert with_tool > 0
 
 
 @pytest.mark.asyncio
@@ -900,6 +999,26 @@ async def test_memory_extraction_fail_open(db_session: AsyncSession, ai_user):
         [{"role": "user", "content": "hi"}], "hello", "A sufficiently long assistant reply string here.",
     )
     assert facts == []
+
+
+@pytest.mark.asyncio
+async def test_execute_create_task_no_conflict_self_match(db_session: AsyncSession, ai_user):
+    """Creating a lone dated task must NOT be flagged as its own conflict. The
+    DB-level `id != task.id` exclusion is unreliable across dialects, so the
+    just-created task must be dropped explicitly (regression for spurious
+    'this task conflicts with itself' warnings)."""
+    user_id = str(ai_user)
+    tool_calls = [{
+        "id": "call_selfmatch",
+        "function": {
+            "name": "create_task",
+            "arguments": json.dumps({"title": "Only Task On Day", "start_date": "2026-08-10"}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, user_id, db_session)
+    content = json.loads(results[0]["content"])
+    assert content["created"] is True
+    assert "conflict_warning" not in content, f"lone task must not self-conflict: {content}"
 
 
 @pytest.mark.asyncio

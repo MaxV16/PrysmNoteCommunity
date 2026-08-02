@@ -37,12 +37,18 @@ class GeminiClient(LLMClient):
             ]))
         return converted or None
 
-    async def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+    async def chat(self, messages: list[dict], tools: list[dict] | None = None, **overrides) -> dict:
         contents = self._convert_messages(messages)
         config_kwargs = {}
         gemini_tools = self._convert_tools(tools)
         if gemini_tools:
             config_kwargs["tools"] = gemini_tools
+        temperature = overrides.get("temperature")
+        if temperature is not None:
+            config_kwargs["temperature"] = temperature
+        max_tokens = overrides.get("max_tokens")
+        if max_tokens is not None:
+            config_kwargs["max_output_tokens"] = max_tokens
         response = await self.client.models.generate_content(
             model="gemini-2.0-flash",
             contents=contents,

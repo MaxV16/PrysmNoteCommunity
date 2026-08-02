@@ -198,6 +198,7 @@ export function useAIChat() {
   const abortRef = useRef<AbortController | null>(null);
   const undoStackRef = useRef<Array<{ type: string; data: unknown }>>([]);
   const [hasUndo, setHasUndo] = useState(false);
+  const [usageTokens, setUsageTokens] = useState<number | null>(null);
 
   const abort = useCallback(() => {
     abortRef.current?.abort();
@@ -328,6 +329,7 @@ export function useAIChat() {
   const sendMessage = useCallback(
     async (content: string, provider = "openai", context?: Record<string, unknown>) => {
       setIsLoading(true);
+      setUsageTokens(null);
       if (!sessionIdRef.current) {
         sessionIdRef.current = crypto.randomUUID();
         setStoredSessionId(sessionIdRef.current);
@@ -490,6 +492,15 @@ export function useAIChat() {
                   ? names.map(prettyToolName).join(" · ")
                   : "using tools…";
                 addToolBubble(label);
+              } else if (currentEvent === "usage") {
+                try {
+                  const u = JSON.parse(data);
+                  if (typeof u?.estimated_tokens === "number") {
+                    setUsageTokens(u.estimated_tokens);
+                  }
+                } catch {
+                  // Non-fatal: usage is informational only.
+                }
               }
             } else if (line === "") {
               currentEvent = "";
@@ -532,5 +543,6 @@ export function useAIChat() {
     newChat,
     clearActiveSession,
     fetchSessions,
+    usageTokens,
   };
 }
