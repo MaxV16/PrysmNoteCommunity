@@ -35,6 +35,8 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
 const RECURRENCE_PRESETS: { label: string; value: string; rrule?: string }[] = [
   { label: "None", value: "none" },
   { label: "Daily", value: "daily", rrule: "FREQ=DAILY" },
+  { label: "Every weekday", value: "weekdays", rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" },
+  { label: "Every weekend", value: "weekends", rrule: "FREQ=WEEKLY;BYDAY=SA,SU" },
   { label: "Weekly", value: "weekly", rrule: "FREQ=WEEKLY" },
   { label: "Biweekly", value: "biweekly", rrule: "FREQ=WEEKLY;INTERVAL=2" },
   { label: "Monthly", value: "monthly", rrule: "FREQ=MONTHLY" },

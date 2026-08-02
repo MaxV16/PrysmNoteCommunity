@@ -601,6 +601,7 @@ async def batch_create_tasks(
             start_date=t_data.get("start_date"),
             due_date=t_data.get("due_date"),
             priority=t_data.get("priority", 2),
+            recurrence_rule=t_data.get("recurrence_rule"),
         )
         created.append({"id": str(task.id), "title": task.title})
 

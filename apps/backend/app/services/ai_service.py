@@ -235,6 +235,7 @@ TOOL_DEFINITIONS = [
                                 "due_date": {"type": "string"},
                                 "priority": {"type": "integer"},
                                 "description": {"type": "string", "description": "full detail/context/notes for the task"},
+                                "recurrence_rule": {"type": "string", "description": "RRULE string for recurring tasks, e.g. FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR. Occurrences are expanded automatically."},
                             },
                             "required": ["title"],
                         },
@@ -380,6 +381,10 @@ DECISION RULES:
 NATURAL LANGUAGE UNDERSTANDING:
 - "gp appointment next week monday at 12pm" → next Monday, priority 1 (high/medical)
 - "call mom every sunday" → recurring task, priority 2 (medium)
+- Recurrence across MULTIPLE days of the week: set recurrence_rule with proper BYDAY. Examples:
+  - "Mon–Fri 9–5 job every week" → recurrence_rule="FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" (start_date = next Monday). Do NOT create 5 separate tasks — create ONE recurring template; occurrences expand automatically.
+  - "weekend shift every Sat+Sun" → recurrence_rule="FREQ=WEEKLY;BYDAY=SA,SU".
+  - "rotating weekend shifts 8–4 / 4–12 / 12–8 (3-week cycle)" → a single RRULE cannot change start/times by week, so do NOT try to fake it with one recurring task. Instead use batch_create_tasks to create the concrete shifts (e.g. "Weekend shift 8–4", "Weekend shift 4–12", "Weekend shift 12–8") with their exact start_date/due_date for the weeks you can compute (approximately the next 8 weeks), then briefly tell the user the rotation will need to be extended later.
 - "finish the report by Friday" → due_date this Friday, priority from context (default 2)
 - "maybe learn guitar someday" → backlog status, low priority (3), no dates
 - Priority scale is 3 levels: 1=High (red), 2=Medium (blue), 3=Low (green). Lower number = more important. Use 1 for medical/health or anything that must outrank routine meetings; use 2 by default; use 3 for low-priority/ someday items.
@@ -1150,6 +1155,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         start_date=t_data.get("start_date"),
                         due_date=t_data.get("due_date"),
                         priority=t_data.get("priority", 2),
+                        recurrence_rule=t_data.get("recurrence_rule"),
                     )
                     created.append({"id": str(task.id), "title": task.title})
 

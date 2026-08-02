@@ -238,3 +238,50 @@ async def test_expand_recurring(client: AsyncClient):
     # Should have expanded at least one future instance
     data = response.json()
     assert data["expanded"] >= 0  # May be 0 if no future instances this year
+
+
+@pytest.mark.asyncio
+async def test_recurring_weekday_expands_full_week(client: AsyncClient):
+    """Creating a Mon-Fri recurring template must materialize all 5 weekdays immediately."""
+    created = await client.post("/api/tasks/", json={
+        "title": "Weekday Job",
+        "start_date": "2026-08-03",  # a Monday
+        "recurrence_rule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+    })
+    assert created.status_code == 200
+
+    children = await client.get("/api/tasks/")
+    assert children.status_code == 200
+    weekday_tasks = [
+        t for t in children.json()
+        if t.get("title") == "Weekday Job" and t.get("parent_task_id") is not None
+    ]
+
+    dates = {t["start_date"] for t in weekday_tasks}
+    # The first week (Mon 3rd - Fri 7th Aug 2026) should all be present.
+    for expected in ["2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07"]:
+        assert expected in dates, f"missing weekday occurrence {expected}"
+    # And it must not have created a whole-year flood.
+    assert len(dates) <= 60
+
+
+@pytest.mark.asyncio
+async def test_recurring_weekend_expands_sat_and_sun(client: AsyncClient):
+    """A Sat+Sun recurring template must materialize both weekend days in one call."""
+    created = await client.post("/api/tasks/", json={
+        "title": "Weekend Shift",
+        "start_date": "2026-08-08",  # a Saturday
+        "recurrence_rule": "FREQ=WEEKLY;BYDAY=SA,SU",
+    })
+    assert created.status_code == 200
+
+    children = await client.get("/api/tasks/")
+    assert children.status_code == 200
+    weekend_tasks = [
+        t for t in children.json()
+        if t.get("title") == "Weekend Shift" and t.get("parent_task_id") is not None
+    ]
+    dates = {t["start_date"] for t in weekend_tasks}
+
+    assert "2026-08-08" in dates
+    assert "2026-08-09" in dates

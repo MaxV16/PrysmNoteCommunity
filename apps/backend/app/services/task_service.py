@@ -50,6 +50,13 @@ async def create_task(
     )
     session.add(task)
     await session.flush()
+
+    # Materialize upcoming occurrences up front so recurring templates (e.g.
+    # "Mon-Fri", rotating weekend shifts) show their full week/cycle immediately.
+    if recurrence_rule and parent_task_id is None:
+        from app.services.recurring_task_service import expand_task_occurrences
+        await expand_task_occurrences(session, task)
+
     return task
 
 
