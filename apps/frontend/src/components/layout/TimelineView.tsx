@@ -13,6 +13,7 @@ import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { ListView } from "@/components/list/ListView";
 import { Modal } from "@/components/ui/Modal";
+import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { useTasks } from "@/hooks/useTasks";
 import { useUiModule } from "@/lib/ui-module-registry";
 import { useLocalBool } from "@/lib/use-local-bool";
@@ -67,7 +68,7 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
   const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
   const [viewMode, setViewMode] = useState<"timeline" | "kanban" | "calendar" | "list">("timeline");
   const [viewDropdownOpen, setViewDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const viewButtonRef = useRef<HTMLButtonElement | null>(null);
   const router = useRouter();
   const bodyRef = useRef<HTMLDivElement>(null);
   const timelineOn = useUiModule("viewTimeline");
@@ -91,16 +92,6 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
       setViewMode(enabledViews[0]);
     }
   }, [activeViewEnabled, enabledViews.length]);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setViewDropdownOpen(false);
-      }
-    }
-    if (viewDropdownOpen) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [viewDropdownOpen]);
 
   useEffect(() => {
     const onNewTask = () => {
@@ -311,52 +302,58 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
           <span className="hidden lg:inline-flex text-xs font-medium text-muted bg-elevated px-3 py-1.5 rounded-full shrink-0">{monthLabel}</span>
         )}
 
-        <div className="relative" ref={dropdownRef}>
+        <div className="shrink-0">
           <button
+            ref={viewButtonRef}
             onClick={() => setViewDropdownOpen(v => !v)}
             className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary inline-flex items-center gap-1.5"
             aria-haspopup="menu"
             aria-expanded={viewDropdownOpen}
+            data-testid="view-mode-toggle"
           >
             {viewModeLabel}
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
           </button>
-          {viewDropdownOpen && (
-            <div className="absolute right-0 top-full mt-1 z-30 rounded-xl border border-border bg-surface shadow-lg py-1 w-36">
-              {timelineOn && (
+          <PopoverMenu
+            open={viewDropdownOpen}
+            triggerRef={viewButtonRef}
+            align="right"
+            onClose={() => setViewDropdownOpen(false)}
+            className="w-40"
+          >
+            {timelineOn && (
               <button
                 onClick={() => { setViewMode("timeline"); setViewDropdownOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-xs hover:bg-hover transition-colors ${viewMode === "timeline" ? "text-accent font-semibold" : "text-secondary"}`}
+                className={`block w-full px-4 py-2 text-left text-xs transition-colors hover:bg-hover ${viewMode === "timeline" ? "text-accent font-semibold" : "text-secondary"}`}
               >
                 Timeline
               </button>
-              )}
-              {kanbanOn && (
+            )}
+            {kanbanOn && (
               <button
                 onClick={() => { setViewMode("kanban"); setViewDropdownOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-xs hover:bg-hover transition-colors ${viewMode === "kanban" ? "text-accent font-semibold" : "text-secondary"}`}
+                className={`block w-full px-4 py-2 text-left text-xs transition-colors hover:bg-hover ${viewMode === "kanban" ? "text-accent font-semibold" : "text-secondary"}`}
               >
                 Kanban
               </button>
-              )}
-              {calendarOn && (
+            )}
+            {calendarOn && (
               <button
                 onClick={() => { setViewMode("calendar"); setViewDropdownOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-xs hover:bg-hover transition-colors ${viewMode === "calendar" ? "text-accent font-semibold" : "text-secondary"}`}
+                className={`block w-full px-4 py-2 text-left text-xs transition-colors hover:bg-hover ${viewMode === "calendar" ? "text-accent font-semibold" : "text-secondary"}`}
               >
                 Calendar
               </button>
-              )}
-              {listOn && (
+            )}
+            {listOn && (
               <button
                 onClick={() => { setViewMode("list"); setViewDropdownOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-xs hover:bg-hover transition-colors ${viewMode === "list" ? "text-accent font-semibold" : "text-secondary"}`}
+                className={`block w-full px-4 py-2 text-left text-xs transition-colors hover:bg-hover ${viewMode === "list" ? "text-accent font-semibold" : "text-secondary"}`}
               >
                 List
               </button>
-              )}
-            </div>
-          )}
+            )}
+          </PopoverMenu>
         </div>
 
         {stickyOn && (

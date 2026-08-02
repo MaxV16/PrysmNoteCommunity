@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import type { Task } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
 import { useAppStore } from "@/stores/app-store";
@@ -293,7 +293,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             >
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TIER_COLORS[tier] }} />
             </button>
-            <Popover
+            <PopoverMenu
               open={priorityOpen}
               triggerRef={priorityRef}
               align="right"
@@ -308,7 +308,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   </span>
                 </MenuItem>
               ))}
-            </Popover>
+            </PopoverMenu>
           </div>
           <button
             onClick={onClose}
@@ -380,7 +380,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               <circle cx="19" cy="12" r="1" />
             </svg>
           </button>
-          <Popover
+          <PopoverMenu
             open={optionsOpen && optionsTrigger === titleOptionsRef.current}
             triggerRef={titleOptionsRef}
             align="right"
@@ -400,7 +400,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               }}
               onDelete={handleDelete}
             />
-          </Popover>
+          </PopoverMenu>
         </div>
       </div>
 
@@ -505,7 +505,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               {task.status.replace("_", " ")}
               <svg className="ml-1" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
             </button>
-            <Popover
+            <PopoverMenu
               open={statusOpen}
               triggerRef={statusRef}
               align="left"
@@ -518,7 +518,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                   {opt.label}
                 </MenuItem>
               ))}
-            </Popover>
+            </PopoverMenu>
           </div>
           <div className="flex items-center gap-1">
             <span
@@ -555,7 +555,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 <circle cx="19" cy="12" r="1" />
               </svg>
             </button>
-            <Popover
+            <PopoverMenu
               open={optionsOpen && optionsTrigger === footerMoreRef.current}
               triggerRef={footerMoreRef}
               align="right"
@@ -576,7 +576,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 }}
                 onDelete={handleDelete}
               />
-            </Popover>
+            </PopoverMenu>
           </div>
         </div>
       </div>
@@ -621,98 +621,6 @@ function Label({ children }: { children: React.ReactNode }) {
     <h4 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">
       {children}
     </h4>
-  );
-}
-
-interface PopoverProps {
-  open: boolean;
-  triggerRef: React.RefObject<HTMLButtonElement | null>;
-  align?: "left" | "right";
-  preferred?: "below" | "above";
-  onClose: () => void;
-  children: ReactNode;
-  className?: string;
-}
-
-// Portal-based menu so popover content is never clipped by the drawer's
-// overflow container and always renders on the top-most layer (z-50).
-function Popover({
-  open,
-  triggerRef,
-  align = "left",
-  preferred = "below",
-  onClose,
-  children,
-  className = "",
-}: PopoverProps) {
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // Recompute position whenever the menu opens or its content size changes.
-  useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const compute = () => {
-      const menu = menuRef.current;
-      const menuW = menu ? menu.getBoundingClientRect().width : 240;
-      const menuH = menu ? menu.getBoundingClientRect().height : 200;
-      let left = align === "right" ? rect.right - menuW : Math.min(rect.left, window.innerWidth - menuW - 8);
-      left = Math.max(8, left);
-      let top = preferred === "below" ? rect.bottom + 4 : rect.top - menuH - 4;
-      // Keep menu within the viewport vertically.
-      if (preferred === "below" && top + menuH > window.innerHeight - 8) {
-        top = rect.top - menuH - 4;
-      } else if (top < 8) {
-        top = 8;
-      }
-      return { top, left, width: menuW };
-    };
-    setPos(compute());
-    // Recompute after children render to get accurate dimensions.
-    const raf = requestAnimationFrame(() => setPos(compute()));
-    return () => cancelAnimationFrame(raf);
-  }, [open, align, preferred, triggerRef]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    const onDown = (e: MouseEvent) => {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(e.target as Node) &&
-        triggerRef.current &&
-        !triggerRef.current.contains(e.target as Node)
-      ) {
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onDown);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onDown);
-    };
-  }, [open, onClose, triggerRef]);
-
-  if (!open || !pos) return null;
-
-  return createPortal(
-    <div
-      ref={menuRef}
-      role="menu"
-      className={`fixed z-[70] overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-2xl ${className}`}
-      style={{ top: pos.top, left: pos.left, minWidth: pos.width }}
-    >
-      {children}
-    </div>,
-    document.body
   );
 }
 

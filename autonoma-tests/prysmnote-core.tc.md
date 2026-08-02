@@ -6,50 +6,61 @@ You are testing "Prysm Note" (an AI task manager, three-pane UI: sidebar,
 timeline, AI chat). You are already signed in as "Autonoma Tester". Work through
 the checks IN ORDER. You must stay signed in the whole time — do NOT log out.
 
+HARD RULE — DO NOT NAVIGATE AWAY: The app is ALREADY loaded at
+http://localhost:3000. Never navigate to any other URL (no vercel.app, no other
+host). If you are ever not on http://localhost:3000, navigate back there before
+continuing. The session cookies only work on localhost:3000.
+
 CRITICAL TARGETING RULES (follow every time you click or type):
 - For TYPING, click one of the actual inner text boxes, not an outer container or
-  an icon. Prefer an element whose placeholder is given below. Do not click the
-  placeholder label itself.
-- Click buttons by their exact visible text.
+  an icon. Prefer an element whose placeholder is given below.
+- Click buttons by their exact visible text or label. Do not click icons beside a
+  button unless a check says to.
 
-CHECK 1. VERIFY WORKSPACE: A sidebar should be on the left, a timeline in the
-center (with dated columns like "22" "23" "24"), and "Autonoma Tester" at the
-bottom-left. If any of those are missing, stop and report FAILURE.
+MAIN TOOLBAR LAYOUT (left to right): a calendar icon, the view name, a search box
+(placeholder "Search… (⌘F)"), a month label pill, a view-mode pill showing the
+current view with a small chevron, a "Notes" pill, a solid purple "+ New" task
+button, a "⚙" Settings icon, and a round "⚡" AI button.
+
+CHECK 1. VERIFY WORKSPACE: A sidebar should be on the left, a dated timeline in
+the center (with dated columns), and "Autonoma Tester" at the bottom-left. If any
+are missing, stop and report FAILURE. PASS/FAIL.
 
 CHECK 2. CREATE A TASK AND SEE IT ON THE TIMELINE:
-There are TWO "+ New" buttons. One is under "LISTS" in the left sidebar (that one
-makes a LIST — do NOT click it). The other is in the MAIN toolbar, to the right of
-the words "Timeline" and "Notes" (that one makes a TASK). Click the MAIN "+ New"
-button (the one near "Notes").
-A task form opens. In it, click the text box whose placeholder text is exactly
-"What needs to be done?" and type: Autonoma task 123
-(Do not put text in the smaller "Add details..." box.)
-Now click the button whose visible text is "Create Task" (a solid purple button).
-Afterwards the task form should close. Assert that the timeline now shows a bar
-labeled "Autonoma task 123" and that the text "Autonoma task 123" is visible
-somewhere on screen. If the form is still open OR the text is not visible
-anywhere, that is a FAILURE.
+The MAIN "+ New" is the solid purple task button in the top toolbar, LEFT of the
+"⚙" Settings icon. There is ALSO a text-only "+ New List" under "LISTS" in the
+left sidebar — do NOT click that one.
+Click the MAIN purple "+ New". A form appears. In the text box whose placeholder
+is exactly "What needs to be done?" type:
+Autonoma task 123
+(Do not type into the separate "Add details..." box.) Click the "Create Task"
+button (solid purple). The form should close. Confirm the text "Autonoma task
+123" is visible somewhere on the timeline/workspace. If it is not, FAIL.
+PASS/FAIL.
 
 CHECK 3. SEARCH WITH Control+F:
-Press Control+F. A search text box with placeholder starting "Search tasks" should
-appear/focus in the toolbar. Click it and type: Autonoma task 123
-The list should now be filtered so only that task matches. If pressing Control+F
-does nothing or typing into it has no filtering effect, that is a FAILURE.
+Press Control+F (or Cmd+F). The search box in the toolbar (placeholder
+"Search… (⌘F)") should focus. Type: Autonoma task 123
+Confirm the task list filters down to that task. Then clear the search box.
+PASS/FAIL.
 
 CHECK 4. SETTINGS TOGGLE ACTUALLY HIDES UI:
-Click the gear button (⚙) in the sidebar to open Settings. Find a tab labeled
-"UI Modules" or "Features". Turn OFF exactly one toggle such as "Sidebar" or
-"Timeline view" (click the toggle button next to it). Go back to the main
-workspace. Confirm that element is now hidden. Then reopen Settings and turn it
-back ON, and confirm it is visible again. If toggling produced no visible change,
-that is a FAILURE.
+Click the "⚙" Settings icon in the top toolbar. A Settings page opens with a left
+nav. Click the "Features" tab. Find the row labeled "Calendar View" and click its
+toggle switch to turn it OFF. Go back to the main workspace. Open the view-mode
+pill (top toolbar) and confirm the "Calendar" option is now GONE from the menu.
+Then reopen Settings → "Features", turn "Calendar View" back ON, return, and
+confirm "Calendar" is present in the view-menu again. If toggling produced no
+change, FAIL. PASS/FAIL.
 
 CHECK 5. AI CHAT REPLIES:
-Open the AI chat panel (the button on the far right, near ⚡). Read the provider
-shown in the dropdown. In the chat text area (placeholder starts "What would you
-like me to do?"), type: Reply with just the word OK
+Click the round "⚡" AI button on the far right of the top toolbar. The AI Command
+Center panel opens on the right. In the chat text area (placeholder starts "What
+would you like me to do?"), type:
+Reply with just the word OK
 Press Enter to send. A reply should appear that is NOT an error. If the reply is
 an error such as "failed to fetch" or "check your API key", that is a FAILURE.
+PASS/FAIL.
 
 Report each check as PASS/FAIL with a one-line reason, and to finish, list every
 FAILURE explicitly.
