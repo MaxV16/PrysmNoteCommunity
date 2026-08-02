@@ -48,7 +48,3 @@ electron/out/
 # Turborepo artifacts
 .turbo/
 apps/frontend/.turbo/
-
-# Autonoma E2E loop (local test harness — not part of the product)
-autonoma/
-autonoma-artifacts/

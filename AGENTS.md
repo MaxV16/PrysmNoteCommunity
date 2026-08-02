@@ -12,12 +12,10 @@ gh auth login
 
 Use the built-in `websearch` / `webfetch` tools (no API key needed) whenever you need
 current, up-to-date, or external web information (latest docs, releases, bug reports,
-package versions, conventions, Stack Overflow, Autonoma usage, etc.) instead of guessing.
+package versions, conventions, Stack Overflow, etc.) instead of guessing.
 
 - **Trigger it automatically**: prefer `websearch` before answering anything that is stale
   or uncertain, or where accuracy matters. Do not wait to be asked.
-- **Part of the Autonoma loop too**: when debugging an Autonoma failure, look up relevant
-  docs/schemas with `websearch` and apply the findings alongside the code fix.
 - **Search then use**: pass the returned snippets/titles/URLs as source material in your
   answer, phrased as search findings rather than personal knowledge.
 
@@ -47,9 +45,8 @@ This applies both to web search and to anything shared externally (commits, PRs,
 ## Git Workflow
 
 After every meaningful set of file changes, you MUST:
-1. Run normal build + tests, then the **Autonoma full app check** (`npm run test:e2e:full`)
-   and fix any **confirmed** failures it reports (see "AI-Driven E2E Testing (Autonoma Loop)"
-   below).
+1. Run normal build + tests, plus the deterministic smoke checks (`npm run smoke:api`,
+   `npm run smoke:ui`), and fix any confirmed failures reported by those channels.
 2. Stage all changed files: `git add <files>`
 3. Create a commit with a conventional commit message: `git commit -m "type(scope): description"`
 4. Push immediately: `git push`
@@ -225,55 +222,36 @@ pytest -v            # 80+ tests: auth, tasks, projects, tags, search, AI servic
 ## API Keys (Encryption)
 User-provided LLM API keys (OpenAI, Gemini, DeepSeek) are encrypted at rest using Fernet (symmetric encryption from the `cryptography` library) before being stored in the `encrypted_key` BYTEA column of `api_keys` table. The `ENCRYPTION_KEY` in `.env` must be a 44-character base64-encoded Fernet key. Decryption happens in-memory only when the key is needed for an API call. See `app/utils/encryption.py`.
 
-## AI-Driven E2E Testing (Autonoma Loop)
+## Deterministic Smoke Checks & Testing
 
-Autonoma (cloned at `~/Downloads/autonoma`) is an AI agent that drives a real
-headless browser against the running app, screenshots/videos every step, and
-reports what failed — screenshot + video + a written reason. **The intended loop:
-after ANY change to Prysm Note UI/backend, run Autonoma, read its failure report,
-and fix confirmed failures — then re-run until clean.**
+Run the deterministic smoke checks to verify UI/task-creation behavior before
+deciding anything needs a deeper pass:
 
-### Run it (from repo root)
 ```bash
-npm run test:e2e           # quick core check (5 checks)
-npm run test:e2e:full      # FULL app check (10 checks) — before settling on a change
-npm run test:e2e:rebuild   # rebuild Prysm Note Docker first, then core check
+npm run smoke:api        # direct API assertions (signup/login → task CRUD → round-trip)
+npm run smoke:ui         # headless Playwright DOM assertions (login → new task → visible on today)
+EXECUTABLE_PATH=... npm run smoke:ui   # point at a specific local Chromium if needed
+# smoke:ui reuses the Chromium already cached on this machine; set EXECUTABLE_PATH
+# to a Playwright-managed browser to use it.
 ```
-Entry point: `autonoma/run-tests.sh` (handles PRYSM Note up, Autonoma infra up,
-fresh session-cookie auth, OpenRouter-driven agent, artifact saving).
 
-### Test cases
-- `autonoma-tests/prysmnote-core.tc.md` — core: workspace, new task on timeline,
-  Ctrl+F search, settings toggles, AI chat.
-- `autonoma-tests/prysmnote-full.tc.md` — full: adds view modes, task edit,
-  project rail + tags, theme, sticky notes.
-
-### After a run
-- Full logs: `autonoma-artifacts/<run>/run.log`
-- Screenshots + video: `~/Downloads/autonoma/apps/engine-web/artifacts/<latest>`
-- The agent prints a per-check PASS/FAIL list. Read the FAIL reasons, verify each
-  against the real app (direct Playwright or the API — see below), fix confirmed
-  bugs in Prysm Note, then re-run.
+`npm run smoke:ui` uses coordinate-free selectors (`getByRole` / `getByText` /
+`toBeVisible`), so it is the primary source of truth for "did the task appear".
 
 ### Mandatory rule: verify before fixing — multi-channel, never single-source
 
-Autonoma uses screenshot-coordinate clicking and an LLM-driven browser, so it
-sometimes reports false positives (it clicks the wrong `+ New`, clicks near a
-button, misread a view/tab, or blames a real bug for its own navigation loop).
-Treat **any single Autonoma report as a hypothesis, not a fact.** Never change
-code based on Autonoma alone.
+Treat **any single automated report as a hypothesis, not a fact.** Never change
+code based on a flaky or single-source report alone (screenshot-coordinate
+clicking, a flaky browser step, etc.). Before editing Prysm Note for a reported
+failure, confirm the real behavior through **at least two independent,
+reproducible channels**, and record the evidence in the commit/PR:
 
-Before editing Prysm Note for a reported failure, confirm the real behavior
-through **at least two independent, reproducible channels**, and record the
-evidence in the commit/PR:
-
-1. **API  — deterministic truth.** Hit the real endpoints (`/api/...`) directly
+1. **API — deterministic truth.** Hit the real endpoints (`/api/...`) directly
    (curl or a script) and assert on the actual response body/status. E.g. create
    a task and verify it 200s and returns the task; GET it back.
 2. **Headless DOM assertions — deterministic UI truth.** Drive a real headless
    browser (Playwright) with explicit, coordinate-free assertions (`getByRole`,
-   `getByText`, `expect(...).toBeVisible()`), not screenshot clicking. If the
-   agent could not find something, assert it from the DOM directly.
+   `getByText`, `expect(...).toBeVisible()`), not screenshot clicking.
 3. **Code inspection — root-cause truth.** Read the component/handler that is
    claimed broken and confirm the code path actually produces the reported
    symptom (or cannot).
@@ -281,42 +259,11 @@ evidence in the commit/PR:
 A confirmed bug = the symptom reproduces through **≥2 of the 3 channels above**
 (e.g., the API returns the wrong thing AND a headless `toBeVisible` assertion
 fails for a concrete reason). If a channel contradicts the report (e.g., the API
-returns the task but the agent says it "disappeared"), the report is a false
+returns the task but the report says it "disappeared"), the report is a false
 positive — do not fix.
 
 When you fix a confirmed bug, add or update an automated regression test that
-fails without the fix and passes with it, so the loop does not re-report the
-same false positive.
-
-### Using the smoke tests instead of (or before) Autonoma
-Run the deterministic smoke checks before deciding anything needs a full Autonoma
-pass:
-
-```bash
-npm run smoke:api        # direct API assertions (signup/login → task CRUD → round-trip)
-npm run smoke:ui         # headless Playwright DOM assertions (login → new task → visible on today)
-EXECUTABLE_PATH=... npm run smoke:ui   # point at a specific local Chromium if needed
-# smoke:ui reuses the Chromium already cached on this machine (shared with
-# Autonoma); set EXECUTABLE_PATH to a Playwright-managed browser to use it.
-```
-
-`npm run smoke:ui` uses coordinate-free selectors, so it is the primary source of
-truth for "did the task appear". Prefer a green `smoke:api` + `smoke:ui` over a
-fast re-run of Autonoma when you are verifying UI/task-creation behavior.
-
-### Web search
-Use `websearch` freely to look up Autonoma usage, API details, or anything
-unclear, then apply the findings.
-
-### Model/config notes
-- Autonoma uses the user's OpenRouter key (`.env` → `OPENROUTER_API_KEY`),
-  cheapest models: `google/gemini-3-flash-preview` (vision, forced tool calling)
-  + `openai/gpt-oss-120b` (text) + `mistralai/ministral-8b-2512` (fast). No
-  Gemini/Groq keys needed.
-- Requires Node >= 24 + pnpm 11 (installed keg-only via `node@24`) and Autonoma
-  infra (postgres :5433, redis :6380, temporal :7233) via
-  `docker compose -f ~/Downloads/autonoma/docker-compose.coexist.yaml up -d` —
-  all isolated from Prysm Note's own containers/data.
+fails without the fix and passes with it.
 
 ## Tech Stack Summary
 

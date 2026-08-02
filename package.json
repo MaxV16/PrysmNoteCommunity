@@ -10,10 +10,7 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "smoke:api": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/api-smoke.mjs",
-    "smoke:ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke.mjs",
-    "test:e2e": "bash autonoma/run-tests.sh core",
-    "test:e2e:full": "bash autonoma/run-tests.sh full",
-    "test:e2e:rebuild": "bash autonoma/run-tests.sh new"
+    "smoke:ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke.mjs"
   },
   "overrides": {
     "postcss": "^8.5.23"

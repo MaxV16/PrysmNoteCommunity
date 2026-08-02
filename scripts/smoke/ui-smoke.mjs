@@ -19,8 +19,8 @@ import { chromium } from "@playwright/test";
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
 
-// Reuse the Chromium already cached on this machine (shared with Autonoma) so
-// `npm run smoke:ui` works without downloading a Playwright-matching browser.
+// Reuse the Chromium already cached on this machine so `npm run smoke:ui`
+// works without downloading a Playwright-matching browser.
 // Set EXECUTABLE_PATH to a specific binary to override, or leave empty to let
 // Playwright resolve its own browser.
 const EXECUTABLE_PATH =
