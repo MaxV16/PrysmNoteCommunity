@@ -92,7 +92,7 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
   }
 
   return (
-    <div className="flex flex-col border-r border-border bg-surface overflow-hidden">
+    <div className="flex flex-col border-r border-border bg-surface overflow-hidden w-52 shrink-0 lg:w-56 xl:w-60">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
         <div className="flex items-center gap-2">

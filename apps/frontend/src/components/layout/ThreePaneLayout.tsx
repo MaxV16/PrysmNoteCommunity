@@ -13,6 +13,7 @@ import { StickyBoardProvider, useStickyBoard } from "@/components/sticky/StickyN
 import { useUiModule } from "@/lib/ui-module-registry";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useTheme } from "@/lib/theme-context";
+import { useMediaQuery } from "@/lib/use-media-query";
 
 
 class ErrorBoundaryInner extends React.Component<
@@ -56,9 +57,15 @@ function MainLayout() {
   const { toggleTheme } = useTheme();
   const sidebarOn = useUiModule("sidebar");
   const aiOn = useUiModule("aiPanel");
+  // Below md: auto-collapse the wide sidebar so the center pane keeps room.
+  const smallScreen = useMediaQuery("(max-width: 767px)");
+  const isSidebarCollapsed = smallScreen ? true : leftCollapsed;
+  const setSidebarCollapsed = (v: boolean) => {
+    if (!smallScreen) setLeftCollapsed(v);
+  };
 
   useGlobalShortcuts({
-    onToggleSidebar: () => setLeftCollapsed((v) => !v),
+    onToggleSidebar: () => setSidebarCollapsed(!isSidebarCollapsed),
     onToggleAiPanel: () => setRightOpen((v) => !v),
     onToggleTheme: toggleTheme,
     onNewTask: () => {
@@ -69,25 +76,30 @@ function MainLayout() {
   });
 
   return (
-    <div className="flex bg-base" style={{ width: "100vw", height: "100vh", overflow: "hidden" }}>
+    <div
+      className="flex bg-base"
+      style={{ width: "100vw", height: "100vh", overflow: "hidden" }}
+    >
       {sidebarOn && (
         <SidebarLeft
-          collapsed={leftCollapsed}
-          onToggle={() => setLeftCollapsed(!leftCollapsed)}
+          collapsed={isSidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!isSidebarCollapsed)}
         />
       )}
-      <div className="flex flex-col" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+      <div className="relative flex flex-col" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
         <TimelineView
           onToggleRight={() => setRightOpen(v => !v)}
           onOpenSticky={toggleSticky}
-          hideProjects={leftCollapsed}
+          hideProjects={isSidebarCollapsed}
         />
+        {aiOn && rightOpen && (
+          // On small screens the AI panel overlays the timeline instead of
+          // squeezing it out of the viewport.
+          <div className="absolute inset-y-0 right-0 z-20 w-[min(22.5rem,88vw)] border-l border-border bg-base lg:static lg:z-auto lg:w-[22.5rem]">
+            <ChatPanel onClose={() => setRightOpen(false)} />
+          </div>
+        )}
       </div>
-      {aiOn && rightOpen && (
-        <div className="shrink-0 border-l border-border bg-base" style={{ width: 384 }}>
-          <ChatPanel onClose={() => setRightOpen(false)} />
-        </div>
-      )}
     </div>
   );
 }

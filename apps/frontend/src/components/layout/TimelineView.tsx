@@ -280,17 +280,17 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
   return (
     <div className="flex flex-col bg-base" style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
       {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-1.5 shrink-0">
+      <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-1.5 shrink-0 overflow-x-auto">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
           <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
           <line x1="16" y1="2" x2="16" y2="6"/>
           <line x1="8" y1="2" x2="8" y2="6"/>
           <line x1="3" y1="10" x2="21" y2="10"/>
         </svg>
-        <span className="text-lg font-bold text-primary mr-2 hidden sm:block">{viewModeLabel}</span>
+        <span className="text-lg font-bold text-primary mr-2 hidden md:block">{viewModeLabel}</span>
 
         {filterBadge && (
-          <span className="inline-flex items-center gap-1 bg-accent/15 text-accent text-[10px] px-2 py-0.5 rounded">
+          <span className="inline-flex items-center gap-1 bg-accent/15 text-accent text-[10px] px-2 py-0.5 rounded shrink-0">
             {filterBadge}
             <button onClick={() => setNavFilter(null)} className="hover:text-primary">✕</button>
           </span>
@@ -301,14 +301,14 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search tasks…  (⌘/Ctrl+F)"
-          className="input-field text-xs w-48 shrink-0 px-2.5"
+          placeholder="Search… (⌘F)"
+          className="input-field text-xs w-32 sm:w-40 lg:w-48 px-2.5 shrink min-w-0"
         />
 
         <div className="flex-1" />
 
         {viewMode === "timeline" && (
-          <span className="text-xs font-medium text-muted bg-elevated px-3 py-1.5 rounded-full">{monthLabel}</span>
+          <span className="hidden lg:inline-flex text-xs font-medium text-muted bg-elevated px-3 py-1.5 rounded-full shrink-0">{monthLabel}</span>
         )}
 
         <div className="relative" ref={dropdownRef}>
@@ -408,7 +408,7 @@ export function TimelineView({ onToggleRight, onOpenSticky, hideProjects = false
       ) : (
       <div className="flex" style={{ flex: 1, minHeight: 0 }}>
         {!hideProjects && projectRailOn && (
-        <div className="shrink-0 border-r border-border/40 bg-surface overflow-y-auto" style={{ width: 200 }}>
+        <div className="hidden lg:block shrink-0 border-r border-border/40 bg-surface overflow-y-auto" style={{ width: 200 }}>
           <div className="sticky top-0 z-10 h-10 border-b border-border/40 flex items-center px-3 bg-surface">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Projects</span>
           </div>
