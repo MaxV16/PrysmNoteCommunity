@@ -91,7 +91,6 @@ async def expand_task_occurrences(session: AsyncSession, task: Task) -> int:
     for instance_date in to_create:
         new_task = Task(
             user_id=task.user_id,
-            project_id=task.project_id,
             title=task.title,
             description=task.description,
             status=TaskStatus.TODO,

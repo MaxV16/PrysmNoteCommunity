@@ -136,13 +136,9 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         if (detail.taskId) {
           const task = store.tasks.find(t => t.id === detail.taskId);
           if (task) {
-            const project = task.project_id
-              ? store.projects.find(p => p.id === task.project_id)
-              : null;
             context.focused_task = {
               title: task.title,
               description: task.description,
-              project_name: project?.name,
             };
           }
         }

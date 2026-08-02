@@ -15,7 +15,6 @@ import { ListView } from "@/components/list/ListView";
 import { Modal } from "@/components/ui/Modal";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { useTasks } from "@/hooks/useTasks";
-import { useProjects } from "@/hooks/useProjects";
 import { useUiModule } from "@/lib/ui-module-registry";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { useRouter } from "next/navigation";
@@ -61,14 +60,11 @@ interface TimelineViewProps {
 }
 
 export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps) {
-  const { tasks, selectedTaskId, setSelectedTaskId, projects, navFilter, setNavFilter, selectedProjectId, selectedTagId, searchQuery, setSearchQuery } = useAppStore();
+  const { tasks, selectedTaskId, setSelectedTaskId, navFilter, setNavFilter, selectedTagId, searchQuery, setSearchQuery } = useAppStore();
   const { visibleRange, viewDays, expandBackward, expandForward } = useTimeline(20, 10);
   const { createTask, updateTask } = useTasks();
-  const { createProject, renameProject } = useProjects();
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
-  const [renamingRowId, setRenamingRowId] = useState<string | null>(null);
-  const [rowDraft, setRowDraft] = useState("");
   const [viewMode, setViewMode] = useState<"timeline" | "kanban" | "calendar" | "list">("timeline");
   const [viewDropdownOpen, setViewDropdownOpen] = useState(false);
   const viewButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -129,8 +125,7 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
     [tasks, selectedTaskId]
   );
 
-  const tasksByProject = useMemo(() => {
-    const map: Record<string, typeof tasks> = {};
+  const visibleTasks = useMemo(() => {
     let activeTasks = applyNavFilter(
       tasks.filter((t) => t.status !== "done" && t.status !== "cancelled" && !t.is_archived),
       navFilter
@@ -141,19 +136,11 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
         (t) => t.title.toLowerCase().includes(q) || (t.description && t.description.toLowerCase().includes(q))
       );
     }
-    if (selectedProjectId) {
-      activeTasks = activeTasks.filter((t) => t.project_id === selectedProjectId);
-    }
     if (selectedTagId) {
       activeTasks = activeTasks.filter((t) => t.tags?.some((tag) => tag.id === selectedTagId));
     }
-    for (const task of activeTasks) {
-      const pid = task.project_id || "__none__";
-      if (!map[pid]) map[pid] = [];
-      map[pid].push(task);
-    }
-    return map;
-  }, [tasks, navFilter, selectedProjectId, selectedTagId, searchQuery]);
+    return activeTasks;
+  }, [tasks, navFilter, selectedTagId, searchQuery]);
 
   const monthLabel = useMemo(() => {
     const mid = new Date(visibleRange.start);
@@ -272,7 +259,7 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
   const handleCreateTask = useCallback(
     async (data: {
       title: string; description?: string; start_date?: string; due_date?: string;
-      project_id?: string | null; status?: string; priority?: number;
+      status?: string; priority?: number;
       tag_ids?: string[]; recurrence_rule?: string; estimated_minutes?: number;
     }) => {
       await createTask(data);
@@ -291,51 +278,11 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
     ? navFilter === "inbox" ? "Inbox" : navFilter === "today" ? "Today" : "Next 7 Days"
     : null;
 
-  const hasTasks = Object.keys(tasksByProject).length > 0;
+  const hasTasks = visibleTasks.length > 0;
 
-  // Ordered, user-numbered timeline rows backed by the Project entity. Project
-  // grouping for rendering is intentional: each project == one horizontal row.
-  const visibleRows = useMemo(
-    () =>
-      projects
-        .filter((p) => !p.is_archived)
-        .slice()
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.created_at.localeCompare(b.created_at)),
-    [projects]
-  );
-
-  // Uniform lane height so gutter labels and day lanes stay vertically aligned.
-  const rowTaskCounts = visibleRows.map((p) => (tasksByProject[p.id]?.length || 0));
-  const maxRowTasks = Math.max(1, ...rowTaskCounts);
-  const rowHeight = TOP_PADDING * 2 + maxRowTasks * (BAR_HEIGHT + BAR_GAP) - BAR_GAP;
-
-  // Rows to render: the numbered project rows, then an implicit "No project" row.
-  const unassignedTasks = tasksByProject["__none__"] || [];
-
-  const handleAddRow = async () => {
-    const created = await createProject({ name: `Row ${visibleRows.length + 1}` });
-    setRenamingRowId(created.id);
-    setRowDraft(created.name);
-  };
-
-  const handleRenameRowCommit = async () => {
-    if (renamingRowId) {
-      const name = rowDraft.trim() || `Row`;
-      await renameProject(renamingRowId, name);
-    }
-    setRenamingRowId(null);
-    setRowDraft("");
-  };
-
-  const handleRenameRowKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      (e.target as HTMLInputElement).blur();
-      handleRenameRowCommit();
-    } else if (e.key === "Escape") {
-      setRenamingRowId(null);
-      setRowDraft("");
-    }
-  };
+  // Timeline is a single lane: all visible tasks stack vertically in one row.
+  const rowTaskCount = visibleTasks.length;
+  const laneHeight = TOP_PADDING * 2 + Math.max(1, rowTaskCount) * (BAR_HEIGHT + BAR_GAP) - BAR_GAP;
 
   const viewModeLabel = viewMode === "timeline" ? "Timeline" : viewMode === "kanban" ? "Kanban" : viewMode === "calendar" ? "Calendar" : "List";
 
@@ -478,97 +425,22 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
         <ListView />
       ) : (
       <div className="flex" style={{ flex: 1, minHeight: 0 }}>
-        {/* Row gutter: numbered + nameable rows, fixed to the left */}
-        <div
-          className="shrink-0 flex flex-col border-r border-border/40 bg-surface overflow-hidden"
-          style={{ width: 168 }}
-        >
-          <div className="flex items-center justify-between border-b border-border/40 px-3 shrink-0" style={{ height: 56 }}>
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Rows</span>
-            <button
-              onClick={handleAddRow}
-              className="flex h-5 w-5 items-center justify-center rounded-md border border-border/60 text-secondary hover:text-primary hover:border-accent/50 transition-colors"
-              title="Add a new timeline row"
-            >
-              +
-            </button>
-          </div>
-          <div className="flex flex-col overflow-y-auto">
-            {visibleRows.map((row, idx) => {
-              const isRenaming = renamingRowId === row.id;
-              const count = tasksByProject[row.id]?.length || 0;
-              return (
-                <div
-                  key={row.id}
-                  className="flex items-start gap-2 px-3 py-2 border-b border-border/30 shrink-0"
-                  style={{ height: rowHeight }}
-                >
-                  <span className="mt-0.5 shrink-0 text-[10px] font-semibold text-muted w-4">{idx + 1}</span>
-                  {isRenaming ? (
-                    <input
-                      autoFocus
-                      value={rowDraft}
-                      onChange={(e) => setRowDraft(e.target.value)}
-                      onBlur={handleRenameRowCommit}
-                      onKeyDown={handleRenameRowKey}
-                      className="input-field bg-transparent text-xs text-primary w-full"
-                    />
-                  ) : (
-                    <button
-                      onDoubleClick={() => {
-                        setRenamingRowId(row.id);
-                        setRowDraft(row.name);
-                      }}
-                      title="Double-click to rename"
-                      className="flex-1 min-w-0 text-left text-xs font-medium text-secondary truncate hover:text-primary"
-                    >
-                      {row.name}
-                    </button>
-                  )}
-                  <span className="mt-0.5 shrink-0 text-[10px] text-muted">{count}</span>
-                </div>
-              );
-            })}
-            {unassignedTasks.length > 0 && (
-              <div
-                className="flex items-center gap-2 px-3 py-2 border-b border-border/30 bg-base/40 shrink-0"
-                style={{ height: rowHeight }}
-              >
-                <span className="mt-0.5 shrink-0 text-[10px] font-semibold text-muted w-4">•</span>
-                <span className="flex-1 min-w-0 text-xs font-medium text-muted truncate">No project</span>
-                <span className="mt-0.5 shrink-0 text-[10px] text-muted">{unassignedTasks.length}</span>
-              </div>
-            )}
-            {visibleRows.length === 0 && !hasTasks && (
-              <div className="px-3 py-6 text-xs text-muted">
-                No rows yet — use <span className="text-accent">+</span> to add one.
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right timeline canvas */}
+        {/* Single timeline canvas: all tasks render in one lane */}
         <div className="flex flex-col" data-timeline-canvas style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
           <div ref={bodyRef} className="flex flex-col" data-timeline-body style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
             <DndContext sensors={sensors} onDragEnd={handleDragEnd} onDragMove={handleDragMove}>
               <div className="relative" style={{ minHeight: "100%", width: days.length * DAY_WIDTH }}>
                 <TimelineHeader days={days} />
                 <TimelineGrid days={days} />
-                {visibleRows.map((row) => (
+                {!hasTasks ? (
+                  <div className="px-4 py-6 text-xs text-muted">
+                    No tasks to show.
+                  </div>
+                ) : (
                   <TimelineLane
-                    key={row.id}
-                    tasks={tasksByProject[row.id] || []}
+                    tasks={visibleTasks}
                     days={days}
-                    rowHeight={rowHeight}
-                    onTaskClick={(id) => setSelectedTaskId(id)}
-                    onDayDoubleClick={handleDayDoubleClick}
-                  />
-                ))}
-                {(unassignedTasks.length > 0 || visibleRows.length === 0) && (
-                  <TimelineLane
-                    tasks={unassignedTasks}
-                    days={days}
-                    rowHeight={rowHeight}
+                    rowHeight={laneHeight}
                     onTaskClick={(id) => setSelectedTaskId(id)}
                     onDayDoubleClick={handleDayDoubleClick}
                   />

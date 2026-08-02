@@ -13,11 +13,10 @@ const PRIORITY_COLORS: Record<number, string> = TIER_COLORS;
 export function ListView() {
   const tasks = useAppStore((s) => s.tasks);
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
-  const projects = useAppStore((s) => s.projects);
   const searchQuery = useAppStore((s) => s.searchQuery);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
   const { updateTask, createTask } = useTasks();
-  const [sortBy, setSortBy] = useState<"date" | "priority" | "project">("date");
+  const [sortBy, setSortBy] = useState<"date" | "priority">("date");
   const [showTaskForm, setShowTaskForm] = useState(false);
 
   const visibleTasks = useMemo(() => {
@@ -32,16 +31,6 @@ export function ListView() {
       case "priority":
         filtered.sort((a, b) => a.priority - b.priority);
         break;
-      case "project": {
-        const projectIndex: Record<string, number> = {};
-        projects.forEach((p, i) => { projectIndex[p.id] = i; });
-        filtered.sort((a, b) => {
-          const ai = projectIndex[a.project_id || ""] ?? 999;
-          const bi = projectIndex[b.project_id || ""] ?? 999;
-          return ai - bi;
-        });
-        break;
-      }
       case "date":
       default:
         filtered.sort((a, b) => {
@@ -55,7 +44,7 @@ export function ListView() {
         break;
     }
     return filtered;
-  }, [tasks, searchQuery, sortBy, projects]);
+  }, [tasks, searchQuery, sortBy]);
 
   const handleCreateTask = async (data: Record<string, unknown>) => {
     await createTask(data);
@@ -95,7 +84,6 @@ export function ListView() {
         >
           <option value="date">By Date</option>
           <option value="priority">By Priority</option>
-          <option value="project">By Project</option>
         </select>
         <button
           onClick={() => setShowTaskForm(true)}
@@ -111,7 +99,6 @@ export function ListView() {
         ) : (
           <div className="divide-y divide-border/30">
             {visibleTasks.map((task) => {
-              const project = task.project_id ? projects.find((p) => p.id === task.project_id) : null;
               const isDone = task.status === "done";
               return (
                 <div
@@ -139,11 +126,10 @@ export function ListView() {
                     <span className={`text-sm truncate block ${isDone ? "line-through text-muted" : "text-primary"}`}>
                       {task.title}
                     </span>
-                    {(task.due_date || task.start_date || project) && (
+                    {(task.due_date || task.start_date) && (
                       <span className="text-[10px] text-muted mt-0.5 block">
                         {task.start_date && `From ${new Date(task.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} `}
                         {task.due_date && `${task.start_date ? "→ " : ""}Due ${new Date(task.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
-                        {project && ` · ${project.name}`}
                       </span>
                     )}
                   </div>

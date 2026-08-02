@@ -6,6 +6,9 @@ import type { ReactNode } from "react";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+const { clearUserData } = vi.hoisted(() => ({ clearUserData: vi.fn() }));
+vi.mock("@/lib/clear-user-data", () => ({ clearUserData }));
+
 function wrapper({ children }: { children: ReactNode }) {
   return <AuthProvider>{children}</AuthProvider>;
 }
@@ -78,6 +81,7 @@ describe("useAuth", () => {
     });
 
     expect(result.current.user).toEqual({ id: "2", email: "a@b.com" });
+    expect(clearUserData).toHaveBeenCalled();
   });
 
   it("login throws on failure", async () => {
@@ -115,6 +119,7 @@ describe("useAuth", () => {
     });
 
     expect(result.current.user).toEqual({ id: "2", email: "new@b.com", display_name: "New" });
+    expect(clearUserData).toHaveBeenCalled();
   });
 
   it("logout clears user", async () => {
@@ -131,6 +136,7 @@ describe("useAuth", () => {
     });
 
     expect(result.current.user).toBeNull();
+    expect(clearUserData).toHaveBeenCalled();
   });
 
   it("refreshSession returns true on success", async () => {

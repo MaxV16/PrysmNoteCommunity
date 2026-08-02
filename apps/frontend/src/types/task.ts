@@ -16,7 +16,6 @@ export interface TaskLink {
 export interface Task {
   id: string;
   user_id: string;
-  project_id: string | null;
   parent_task_id: string | null;
   title: string;
   description: string | null;

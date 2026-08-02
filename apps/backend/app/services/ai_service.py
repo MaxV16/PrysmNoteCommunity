@@ -48,7 +48,6 @@ TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "title": {"type": "string"},
-                    "project": {"type": "string", "description": "project name"},
                     "start_date": {"type": "string", "description": "YYYY-MM-DD. REQUIRED whenever the user mentions a date/time."},
                     "due_date": {"type": "string", "description": "YYYY-MM-DD"},
                     "priority": {"type": "integer", "minimum": 1, "maximum": 5},
@@ -230,7 +229,6 @@ TOOL_DEFINITIONS = [
                             "type": "object",
                             "properties": {
                                 "title": {"type": "string"},
-                                "project": {"type": "string"},
                                 "start_date": {"type": "string"},
                                 "due_date": {"type": "string"},
                                 "priority": {"type": "integer"},
@@ -362,7 +360,7 @@ def build_messages(chat_history: list[dict], user_message: str, context: dict | 
 You are Prysm AI, a hyper-intelligent task management agent. You are the user's personal productivity assistant and schedule optimizer.
 
 CORE BEHAVIOR: When the user gives you a request, follow this protocol:
-1. PARSE: Extract task title, date/time, priority, recurrence, project, dependencies.
+1. PARSE: Extract task title, date/time, priority, recurrence, dependencies.
 2. ACT: For scheduling/creation requests, CONFIRM the details (compute exact dates yourself using TODAY'S DATE) then CREATE the task with create_task or batch_create_tasks. DO NOT just describe what you would do — actually do it.
 3. VERIFY CONFLICTS: When a request targets a SPECIFIC DATE (the user names a day — "next Monday", "March 3rd", "tomorrow", "Friday"), call list_tasks_by_date_range for that same day BEFORE creating so you know what is already scheduled. High-priority tasks (priority 1 — use for medical/health anything) always outrank a routine meeting (priority 2): if the new dated task would clash with an existing higher-priority task, DO NOT silently double-book — create it anyway but clearly warn the user in your reply with the exact date and the conflicting task's title/priority, or ask which to keep.
 4. EXPLAIN: Briefly tell the user what you did (1-2 lines max), and if there was a conflict, explicitly call it out.
@@ -377,6 +375,8 @@ DECISION RULES:
 - If the user asks to find tasks, use search_tasks.
 - If the user asks to move a task, use reschedule_task. If they ask to edit fields, use update_task.
 - Never end the turn after doing only read-only searches when the user asked you to CREATE something. Finish the job.
+
+DON'T FABRICATE SUCCESS: When the user asked you to CREATE or SCHEDULE a task (or several), never claim "Done!" / "I've created it" / "scheduled!" in your final reply unless your tool call actually returned `"created": true` (or `"created_count": N` for batch). If you did not make a successful create call, you have NOT created anything — do NOT affirm a schedule that doesn't exist. Instead, end the turn asking the ONE clarifying question you need (date, title, or priority) so you can then actually create it. A confirmation of a non-created schedule is a bug.
 
 NATURAL LANGUAGE UNDERSTANDING:
 - "gp appointment next week monday at 12pm" → next Monday, priority 1 (high/medical)
@@ -404,8 +404,6 @@ ALWAYS:
             system_content += f'\n\nCURRENT FOCUS: The user is viewing task "{task.get("title", "")}"'
             if task.get("description"):
                 system_content += f" (description: {task['description'][:200]})"
-            if task.get("project_name"):
-                system_content += f' in project "{task["project_name"]}"'
             system_content += ". You can help with this specific task."
 
         if context.get("view_filter"):
@@ -460,7 +458,6 @@ async def execute_tool_calls(
     import json
     from datetime import date as _date
     from app.models.task import Task, TaskStatus
-    from app.models.project import Project
 
     # Normalize user_id to a string. The router passes user.id, which SQLAlchemy
     # hands over as a uuid.UUID object; wrapping UUID(uuid.UUID) in the tool
@@ -496,25 +493,48 @@ async def execute_tool_calls(
                 priority_max = args.get("priority_max")
 
                 from sqlalchemy import or_
-                stmt = select(Task).where(
-                    Task.user_id == UUID(user_id),
-                    or_(
-                        Task.title.ilike(func.concat('%', query, '%')),
-                        Task.description.ilike(func.concat('%', query, '%')),
-                    ),
-                )
-                if date_from:
-                    stmt = stmt.where(Task.start_date >= _parse_date_arg(date_from))
-                if date_to:
-                    stmt = stmt.where(Task.start_date <= _parse_date_arg(date_to))
-                if priority_min is not None:
-                    stmt = stmt.where(Task.priority >= priority_min)
-                if priority_max is not None:
-                    stmt = stmt.where(Task.priority <= priority_max)
-                stmt = stmt.limit(TOOL_SEARCH_MAX)
-
-                task_list = await session.execute(stmt)
-                tasks = task_list.scalars().all()
+                q_lower = (query or "").lower().strip()
+                rank_expr = func.greatest(
+                    func.similarity(func.lower(Task.title), q_lower),
+                    func.similarity(func.lower(func.coalesce(Task.description, "")), q_lower),
+                ).label("rank")
+                try:
+                    stmt = select(Task, rank_expr).where(
+                        Task.user_id == UUID(user_id),
+                        or_(
+                            func.lower(Task.title) % q_lower,
+                            func.lower(func.coalesce(Task.description, "")) % q_lower,
+                        ),
+                    )
+                    if date_from:
+                        stmt = stmt.where(Task.start_date >= _parse_date_arg(date_from))
+                    if date_to:
+                        stmt = stmt.where(Task.start_date <= _parse_date_arg(date_to))
+                    if priority_min is not None:
+                        stmt = stmt.where(Task.priority >= priority_min)
+                    if priority_max is not None:
+                        stmt = stmt.where(Task.priority <= priority_max)
+                    stmt = stmt.order_by(rank_expr.desc()).limit(TOOL_SEARCH_MAX)
+                    task_rank_rows = (await session.execute(stmt)).all()
+                    tasks = [t for t, _r in task_rank_rows]
+                except Exception:
+                    stmt = select(Task).where(
+                        Task.user_id == UUID(user_id),
+                        or_(
+                            Task.title.ilike(func.concat('%', query, '%')),
+                            Task.description.ilike(func.concat('%', query, '%')),
+                        ),
+                    )
+                    if date_from:
+                        stmt = stmt.where(Task.start_date >= _parse_date_arg(date_from))
+                    if date_to:
+                        stmt = stmt.where(Task.start_date <= _parse_date_arg(date_to))
+                    if priority_min is not None:
+                        stmt = stmt.where(Task.priority >= priority_min)
+                    if priority_max is not None:
+                        stmt = stmt.where(Task.priority <= priority_max)
+                    stmt = stmt.limit(TOOL_SEARCH_MAX)
+                    tasks = (await session.execute(stmt)).scalars().all()
                 found = [{"id": str(t.id), "title": t.title, "status": t.status.value if t.status else None,
                           "priority": t.priority, "start_date": str(t.start_date) if t.start_date else None,
                           "due_date": str(t.due_date) if t.due_date else None} for t in tasks]
@@ -526,8 +546,6 @@ async def execute_tool_calls(
 
             elif name == "create_task":
                 title = args.get("title", "Untitled")
-                project_name = args.get("project")
-                project_id = None
 
                 # Deduplication: check for similar existing tasks
                 from sqlalchemy import or_
@@ -554,24 +572,10 @@ async def execute_tool_calls(
                     })
                     # Still create the task - the LLM can decide based on the warning
 
-                if project_name:
-                    proj_result = await session.execute(
-                        select(Project).where(Project.user_id == UUID(user_id), Project.name == project_name)
-                    )
-                    proj = proj_result.scalar_one_or_none()
-                    if proj:
-                        project_id = proj.id
-                    else:
-                        proj = Project(user_id=UUID(user_id), name=project_name)
-                        session.add(proj)
-                        await session.flush()
-                        project_id = proj.id
-
                 task = await create_task(
                     session,
                     user_id=UUID(user_id),
                     title=title,
-                    project_id=project_id,
                     description=args.get("description"),
                     start_date=args.get("start_date"),
                     due_date=args.get("due_date"),
@@ -639,7 +643,9 @@ async def execute_tool_calls(
             elif name == "update_task":
                 task_id = args.get("task_id")
                 fields = args.get("fields", {})
-                result = await session.execute(select(Task).where(Task.id == UUID(task_id)))
+                result = await session.execute(
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                )
                 task = result.scalar_one_or_none()
                 if task:
                     for key, value in (fields or {}).items():
@@ -662,7 +668,9 @@ async def execute_tool_calls(
 
             elif name == "delete_task":
                 task_id = args.get("task_id")
-                result = await session.execute(select(Task).where(Task.id == UUID(task_id)))
+                result = await session.execute(
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                )
                 task = result.scalar_one_or_none()
                 if task:
                     await session.delete(task)
@@ -681,7 +689,9 @@ async def execute_tool_calls(
 
             elif name == "get_task_details":
                 task_id = args.get("task_id")
-                result = await session.execute(select(Task).where(Task.id == UUID(task_id)))
+                result = await session.execute(
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                )
                 task = result.scalar_one_or_none()
                 if task:
                     from app.models.task_tag import TaskTag
@@ -715,7 +725,6 @@ async def execute_tool_calls(
                             "priority": task.priority,
                             "start_date": str(task.start_date) if task.start_date else None,
                             "due_date": str(task.due_date) if task.due_date else None,
-                            "project_id": str(task.project_id) if task.project_id else None,
                             "tags": tags,
                             "links": links,
                             "subtasks": subtasks,
@@ -733,8 +742,12 @@ async def execute_tool_calls(
                 source_id = args.get("source_id")
                 target_id = args.get("target_id")
                 link_type = args.get("link_type", "related")
-                source = await session.execute(select(Task).where(Task.id == UUID(source_id)))
-                target = await session.execute(select(Task).where(Task.id == UUID(target_id)))
+                source = await session.execute(
+                    select(Task).where(Task.id == UUID(source_id), Task.user_id == UUID(user_id))
+                )
+                target = await session.execute(
+                    select(Task).where(Task.id == UUID(target_id), Task.user_id == UUID(user_id))
+                )
                 if not source.scalar_one_or_none() or not target.scalar_one_or_none():
                     results.append({
                         "tool_call_id": tc.get("id"),
@@ -789,7 +802,9 @@ async def execute_tool_calls(
 
             elif name == "suggest_subtasks":
                 task_id = args.get("task_id")
-                task_result = await session.execute(select(Task).where(Task.id == UUID(task_id)))
+                task_result = await session.execute(
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                )
                 task = task_result.scalar_one_or_none()
                 if not task:
                     results.append({
@@ -878,7 +893,9 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
 
             elif name == "detect_conflicts":
                 task_id = args.get("task_id")
-                task_result = await session.execute(select(Task).where(Task.id == UUID(task_id)))
+                task_result = await session.execute(
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                )
                 task = task_result.scalar_one_or_none()
                 if not task or not task.start_date or not task.due_date:
                     results.append({
@@ -965,7 +982,9 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 new_due = args.get("new_due_date")
                 reason = args.get("reason", "")
 
-                result = await session.execute(select(Task).where(Task.id == UUID(task_id)))
+                result = await session.execute(
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                )
                 task = result.scalar_one_or_none()
                 if not task:
                     results.append({
@@ -1131,26 +1150,11 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 created = []
                 for t_data in batch:
                     title = t_data.get("title", "Untitled")
-                    project_name = t_data.get("project")
-                    project_id = None
-                    if project_name:
-                        proj_result = await session.execute(
-                            select(Project).where(Project.user_id == UUID(user_id), Project.name == project_name)
-                        )
-                        proj = proj_result.scalar_one_or_none()
-                        if proj:
-                            project_id = proj.id
-                        else:
-                            proj = Project(user_id=UUID(user_id), name=project_name)
-                            session.add(proj)
-                            await session.flush()
-                            project_id = proj.id
 
                     task = await create_task(
                         session,
                         user_id=UUID(user_id),
                         title=title,
-                        project_id=project_id,
                         description=t_data.get("description"),
                         start_date=t_data.get("start_date"),
                         due_date=t_data.get("due_date"),
@@ -1168,7 +1172,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             elif name == "get_subtasks":
                 from app.services import subtask_service
                 task_id = args.get("task_id")
-                parent = await get_task(session, UUID(task_id))
+                parent = await get_task(session, UUID(task_id), UUID(user_id))
                 if not parent or str(parent.user_id) != str(user_id):
                     results.append({
                         "tool_call_id": tc.get("id"),
@@ -1196,7 +1200,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 task_id = args.get("task_id")
                 title = args.get("title")
                 description = args.get("description")
-                parent = await get_task(session, UUID(task_id))
+                parent = await get_task(session, UUID(task_id), UUID(user_id))
                 if not parent or str(parent.user_id) != str(user_id):
                     results.append({
                         "tool_call_id": tc.get("id"),
@@ -1228,7 +1232,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 task_id = args.get("task_id")
                 subtask_id = args.get("subtask_id")
                 fields = args.get("fields", {}) or {}
-                parent = await get_task(session, UUID(task_id))
+                parent = await get_task(session, UUID(task_id), UUID(user_id))
                 if not parent or str(parent.user_id) != str(user_id):
                     results.append({
                         "tool_call_id": tc.get("id"),
@@ -1265,7 +1269,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             elif name == "delete_subtask":
                 task_id = args.get("task_id")
                 subtask_id = args.get("subtask_id")
-                parent = await get_task(session, UUID(task_id))
+                parent = await get_task(session, UUID(task_id), UUID(user_id))
                 if not parent or str(parent.user_id) != str(user_id):
                     results.append({
                         "tool_call_id": tc.get("id"),
@@ -1294,7 +1298,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 from app.services import subtask_service
                 task_id = args.get("task_id")
                 ordered_ids = args.get("ordered_ids", [])
-                parent = await get_task(session, UUID(task_id))
+                parent = await get_task(session, UUID(task_id), UUID(user_id))
                 if not parent or str(parent.user_id) != str(user_id):
                     results.append({
                         "tool_call_id": tc.get("id"),
@@ -1312,7 +1316,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             elif name == "convert_description_to_subtasks":
                 from app.services import subtask_service
                 task_id = args.get("task_id")
-                parent = await get_task(session, UUID(task_id))
+                parent = await get_task(session, UUID(task_id), UUID(user_id))
                 if not parent or str(parent.user_id) != str(user_id):
                     results.append({
                         "tool_call_id": tc.get("id"),
@@ -1334,7 +1338,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             elif name == "convert_subtasks_to_description":
                 from app.services import subtask_service
                 task_id = args.get("task_id")
-                parent = await get_task(session, UUID(task_id))
+                parent = await get_task(session, UUID(task_id), UUID(user_id))
                 if not parent or str(parent.user_id) != str(user_id):
                     results.append({
                         "tool_call_id": tc.get("id"),

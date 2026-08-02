@@ -32,7 +32,7 @@ async function refreshTasksFromServer() {
     const data = await api.get<Task[]>("/tasks/");
     useAppStore.getState().setTasks(data);
   } catch {
-    // Non-fatal: fall back to local tasks.
+    // Non-fatal: the next fetch/refresh will retry the server.
   }
 }
 
@@ -67,13 +67,11 @@ function prettyToolName(name: string): string {
 function buildFullContext(): string {
   const store = useAppStore.getState();
   const tasks = store.tasks.filter((t) => !t.is_archived);
-  const projects = store.projects;
   const tags = store.tags;
 
   let ctx = "CURRENT DATABASE STATE:\n\n";
 
   ctx += `Total tasks: ${tasks.length}\n`;
-  ctx += `Projects: ${projects.map((p) => p.name).join(", ") || "none"}\n`;
   ctx += `Tags: ${tags.map((t) => t.name).join(", ") || "none"}\n\n`;
 
   ctx += "TASKS:\n";
@@ -81,10 +79,6 @@ function buildFullContext(): string {
     ctx += `- [${t.status}] ${t.title} (priority: ${t.priority})`;
     if (t.start_date) ctx += ` | starts: ${t.start_date}`;
     if (t.due_date) ctx += ` | due: ${t.due_date}`;
-    if (t.project_id) {
-      const proj = projects.find((p) => p.id === t.project_id);
-      if (proj) ctx += ` | project: ${proj.name}`;
-    }
     ctx += "\n";
   }
 
@@ -115,7 +109,6 @@ async function executeToolOnBackend(
     }
     case "create_task": {
       const body: Record<string, unknown> = { title: args.title };
-      if (args.project) body.project_name = args.project;
       if (args.start_date) body.start_date = args.start_date;
       if (args.due_date) body.due_date = args.due_date;
       if (args.priority) body.priority = args.priority;
@@ -192,7 +185,7 @@ async function executeToolOnBackend(
 
 export function useAIChat() {
   const [isLoading, setIsLoading] = useState(false);
-  const { chatMessages, addChatMessage, setChatMessages, tasks, projects, tags } = useAppStore();
+  const { chatMessages, addChatMessage, setChatMessages } = useAppStore();
   const sessionIdRef = useRef<string>(getStoredSessionId());
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -330,6 +323,14 @@ export function useAIChat() {
     async (content: string, provider = "openai", context?: Record<string, unknown>) => {
       setIsLoading(true);
       setUsageTokens(null);
+      // Account change guard: on login/register/logout clearUserData() wipes the
+      // stored ai_session_id. If our ref still holds a session but storage no
+      // longer does, a different account took over — start a fresh chat session
+      // so we never resume a previous account's conversation.
+      const storedNow = getStoredSessionId();
+      if (sessionIdRef.current && storedNow !== sessionIdRef.current) {
+        sessionIdRef.current = "";
+      }
       if (!sessionIdRef.current) {
         sessionIdRef.current = crypto.randomUUID();
         setStoredSessionId(sessionIdRef.current);
@@ -459,6 +460,7 @@ export function useAIChat() {
       let receivedToken = false;
       let receivedTool = false;
 
+      let streamOk = true;
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -508,17 +510,21 @@ export function useAIChat() {
           }
         }
       } catch (err: unknown) {
+        streamOk = false;
         if (err instanceof Error && err.name !== "AbortError") {
           setAssistant("Sorry, I encountered an error while reading the response. Please try again.");
         }
-        return;
+      } finally {
+        // The backend may have created, updated, or deleted tasks via tool calls
+        // (create_task, reschedule_task, batch_create_tasks). Refresh the task
+        // store so the timeline/kanban/calendar/list reflect the changes — even
+        // when the stream is aborted/errors mid-answer. With the backend's
+        // commit-before-answer fix, tool-created tasks are durable even if the
+        // remaining tokens never arrive, so the timeline must still be refreshed.
+        await refreshTasksFromServer();
       }
 
-      // The backend may have created, updated, or deleted tasks via tool calls
-      // (e.g. create_task, reschedule_task, batch_create_tasks). Refresh the
-      // task store so the timeline/kanban/calendar/list reflect the changes
-      // immediately instead of only after a full page reload.
-      await refreshTasksFromServer();
+      if (!streamOk) return;
 
       if (!receivedToken && !receivedTool) {
         const store = useAppStore.getState();

@@ -5,7 +5,6 @@ register_sqlite_compilers()
 from app.models.base import Base
 from app.models.user import User
 from app.models.task import Task, TaskStatus
-from app.models.project import Project
 from app.models.tag import Tag
 from app.models.task_tag import TaskTag
 from app.models.task_link import TaskLink, TaskLinkType
@@ -24,7 +23,6 @@ __all__ = [
     "User",
     "Task",
     "TaskStatus",
-    "Project",
     "Tag",
     "TaskTag",
     "TaskLink",

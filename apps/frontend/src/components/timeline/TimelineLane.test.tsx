@@ -8,7 +8,6 @@ function makeTask(partial: Partial<Task>): Task {
   return {
     id: partial.id || crypto.randomUUID(),
     user_id: "u1",
-    project_id: null,
     parent_task_id: null,
     title: partial.title || "Task",
     description: null,

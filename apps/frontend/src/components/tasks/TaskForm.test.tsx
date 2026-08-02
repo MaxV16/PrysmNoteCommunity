@@ -5,7 +5,6 @@ import { TaskForm } from "./TaskForm";
 // Mock app-store
 vi.mock("@/stores/app-store", () => ({
   useAppStore: () => ({
-    projects: [],
     tags: [],
   }),
 }));
@@ -36,8 +35,8 @@ describe("TaskForm", () => {
   it("recurrence presets dropdown includes all options", () => {
     render(<TaskForm {...defaultProps} />);
     const selects = screen.getAllByRole("combobox");
-    // The 4th select is the recurrence one (after status, priority, project)
-    const recurrenceSelect = selects[3];
+    // The 3rd select is the recurrence one (after status, priority)
+    const recurrenceSelect = selects[2];
     expect(recurrenceSelect).toBeInTheDocument();
     const options = Array.from(recurrenceSelect.querySelectorAll("option"));
     const labels = options.map((o) => o.textContent);

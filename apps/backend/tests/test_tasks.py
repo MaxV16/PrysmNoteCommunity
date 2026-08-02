@@ -1,5 +1,29 @@
 import pytest
 from httpx import AsyncClient
+from uuid import uuid4
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.task import Task
+
+
+@pytest.mark.asyncio
+async def test_task_routes_reject_other_users_task(client: AsyncClient, db_session: AsyncSession):
+    """C4: get/update/delete on a task owned by another user must return 404
+    (ownership isolation), not mutate or leak the task."""
+    other_user_id = uuid4()
+    from app.models.user import User
+    db_session.add(User(id=other_user_id, email=f"{other_user_id}@other.test", password_hash="x", display_name="Other"))
+    other_task = Task(user_id=other_user_id, title="Other's secret task")
+    db_session.add(other_task)
+    await db_session.commit()
+
+    tid = str(other_task.id)
+    assert (await client.get(f"/api/tasks/{tid}")).status_code == 404
+    assert (await client.patch(f"/api/tasks/{tid}", json={"title": "hacked"})).status_code == 404
+    assert (await client.delete(f"/api/tasks/{tid}")).status_code == 404
+
+    # The other user's task is untouched.
+    fetched = await db_session.get(Task, other_task.id)
+    assert fetched.title == "Other's secret task"
 
 
 @pytest.mark.asyncio
@@ -41,19 +65,6 @@ async def test_create_task_invalid_priority(client: AsyncClient):
 async def test_create_task_invalid_status(client: AsyncClient):
     response = await client.post("/api/tasks/", json={"title": "Test", "status": "invalid_status"})
     assert response.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_create_task_with_project(client: AsyncClient):
-    proj = await client.post("/api/projects/", json={"name": "Work"})
-    project_id = proj.json()["id"]
-
-    response = await client.post("/api/tasks/", json={
-        "title": "Work Task",
-        "project_id": project_id,
-        "priority": 5,
-    })
-    assert response.status_code == 200
 
 
 @pytest.mark.asyncio

@@ -68,11 +68,14 @@ async def store_embedding(session: AsyncSession, task_id: UUID, embedding: list[
     return emb
 
 
-async def search_similar(session: AsyncSession, embedding: list[float], limit: int = 10):
+async def search_similar(
+    session: AsyncSession, embedding: list[float], user_id: UUID, limit: int = 10
+):
     from sqlalchemy import text
     stmt = (
         select(TaskEmbedding, TaskEmbedding.embedding.cosine_distance(embedding).label("distance"))
         .join(Task, TaskEmbedding.task_id == Task.id)
+        .where(Task.user_id == user_id)
         .order_by(text("distance"))
         .limit(limit)
     )

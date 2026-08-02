@@ -40,7 +40,7 @@ async def test_tool_definitions_have_all_tools():
 @pytest.mark.asyncio
 async def test_build_messages_with_context(db_session: AsyncSession):
     context = {
-        "focused_task": {"title": "Fix bug", "description": "Critical bug in login", "project_name": "Dev"},
+        "focused_task": {"title": "Fix bug", "description": "Critical bug in login"},
         "view_filter": "today",
         "calendar_density": [{"date": "2025-01-15", "count": 6}],
     }
@@ -76,29 +76,6 @@ async def test_execute_create_task(db_session: AsyncSession, ai_user):
     content = json.loads(results[0]["content"])
     assert content["created"] is True
     assert content["task"]["title"] == "AI Created Task"
-
-
-@pytest.mark.asyncio
-async def test_execute_create_task_in_project(db_session: AsyncSession, ai_user):
-    from app.models.project import Project
-    from uuid import UUID
-    user_id = ai_user
-    project = Project(user_id=user_id, name="AI Project")
-    db_session.add(project)
-    await db_session.flush()
-
-    tool_calls = [{
-        "id": "call_proj",
-        "function": {
-            "name": "create_task",
-            "arguments": json.dumps({"title": "Project Task", "project": "AI Project"}),
-        },
-    }]
-
-    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
-    assert len(results) == 1
-    content = json.loads(results[0]["content"])
-    assert content["created"] is True
 
 
 @pytest.mark.asyncio
@@ -209,6 +186,32 @@ async def test_execute_get_task_details(db_session: AsyncSession, ai_user):
     results = await execute_tool_calls(tool_calls, str(user_id), db_session)
     content = json.loads(results[0]["content"])
     assert content["title"] == "Details Please"
+
+
+@pytest.mark.asyncio
+async def test_execute_get_task_details_owns_only_own_task(db_session: AsyncSession, ai_user):
+    """C4: get_task_details (and the other by-ID tools) must not return another
+    user's task — the lookup is user-scoped and replies 'Task not found'."""
+    from app.models.task import Task
+    from app.models.user import User
+    from uuid import uuid4
+    other_owner = uuid4()
+    db_session.add(User(id=other_owner, email=f"{other_owner}@other.test", password_hash="x", display_name="Other"))
+    other_task = Task(user_id=other_owner, title="Someone else's secret")
+    db_session.add(other_task)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_details_own",
+        "function": {
+            "name": "get_task_details",
+            "arguments": json.dumps({"task_id": str(other_task.id)}),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(ai_user), db_session)
+    content = json.loads(results[0]["content"])
+    assert "error" in content, f"cross-user get_task_details must 404-equivalent: {content}"
 
 
 @pytest.mark.asyncio

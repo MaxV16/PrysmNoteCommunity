@@ -7,11 +7,6 @@ describe("app-store", () => {
     expect(tasks).toEqual([]);
   });
 
-  it("starts with empty projects", () => {
-    const { projects } = useAppStore.getState();
-    expect(projects).toEqual([]);
-  });
-
   it("starts with empty chat messages", () => {
     const { chatMessages } = useAppStore.getState();
     expect(chatMessages).toEqual([]);
@@ -20,7 +15,6 @@ describe("app-store", () => {
   it("starts with no selection", () => {
     const state = useAppStore.getState();
     expect(state.selectedTaskId).toBeNull();
-    expect(state.selectedProjectId).toBeNull();
     expect(state.searchQuery).toBe("");
     expect(state.navFilter).toBeNull();
   });
@@ -31,13 +25,6 @@ describe("app-store", () => {
     expect(useAppStore.getState().tasks).toEqual(tasks);
     // Reset
     useAppStore.getState().setTasks([]);
-  });
-
-  it("setProjects updates projects", () => {
-    const projects = [{ id: "1", name: "Work" }] as any;
-    useAppStore.getState().setProjects(projects);
-    expect(useAppStore.getState().projects).toEqual(projects);
-    useAppStore.getState().setProjects([]);
   });
 
   it("setTags updates tags", () => {
@@ -61,18 +48,6 @@ describe("app-store", () => {
     expect(useAppStore.getState().tags).toEqual([]);
   });
 
-  it("removeProject removes a project by id", () => {
-    useAppStore.getState().setProjects([{ id: "p1", name: "Work" } as any]);
-    useAppStore.getState().removeProject("p1");
-    expect(useAppStore.getState().projects).toEqual([]);
-  });
-
-  it("removeProject does nothing for non-existent id", () => {
-    useAppStore.getState().setProjects([{ id: "p1", name: "Work" } as any]);
-    useAppStore.getState().removeProject("nonexistent");
-    expect(useAppStore.getState().projects).toHaveLength(1);
-  });
-
   it("addChatMessage appends to chat", () => {
     const msg = { role: "user", content: "hello" } as any;
     useAppStore.getState().addChatMessage(msg);
@@ -94,12 +69,6 @@ describe("app-store", () => {
     useAppStore.getState().setSelectedTaskId(null);
   });
 
-  it("setSelectedProjectId updates selection", () => {
-    useAppStore.getState().setSelectedProjectId("proj-1");
-    expect(useAppStore.getState().selectedProjectId).toBe("proj-1");
-    useAppStore.getState().setSelectedProjectId(null);
-  });
-
   it("setSearchQuery updates query", () => {
     useAppStore.getState().setSearchQuery("groceries");
     expect(useAppStore.getState().searchQuery).toBe("groceries");
@@ -110,5 +79,28 @@ describe("app-store", () => {
     useAppStore.getState().setNavFilter("today");
     expect(useAppStore.getState().navFilter).toBe("today");
     useAppStore.getState().setNavFilter(null);
+  });
+
+  it("reset restores every field to its initial value", () => {
+    useAppStore.getState().setTasks([{ id: "1", title: "T", status: "todo" } as any]);
+    useAppStore.getState().setTags([{ id: "1", name: "urgent", color: null }]);
+    useAppStore.getState().setChatMessages([{ role: "user", content: "hi" } as any]);
+    useAppStore.getState().setChatSessions([{ id: "s1", title: "Chat", messages: [], timestamp: "" }]);
+    useAppStore.getState().setSelectedTaskId("task-1");
+    useAppStore.getState().setSelectedTagId("tag-1");
+    useAppStore.getState().setSearchQuery("groceries");
+    useAppStore.getState().setNavFilter("today");
+
+    useAppStore.getState().reset();
+
+    const state = useAppStore.getState();
+    expect(state.tasks).toEqual([]);
+    expect(state.tags).toEqual([]);
+    expect(state.chatMessages).toEqual([]);
+    expect(state.chatSessions).toEqual([]);
+    expect(state.selectedTaskId).toBeNull();
+    expect(state.selectedTagId).toBeNull();
+    expect(state.searchQuery).toBe("");
+    expect(state.navFilter).toBeNull();
   });
 });

@@ -222,6 +222,12 @@ async def delete_account(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
+    # Delete orphaned blacklist rows for this user before the cascade removes the
+    # user, so no dangling token_blacklist references remain.
+    from sqlalchemy import delete as sa_delete
+    await session.execute(
+        sa_delete(TokenBlacklist).where(TokenBlacklist.user_id == user.id)
+    )
     await session.delete(user)
     await session.flush()
     response.delete_cookie("access_token", path="/")

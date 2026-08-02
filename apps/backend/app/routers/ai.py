@@ -330,6 +330,10 @@ async def chat(
             content = (fallback.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
             tool_calls = None
 
+    # Durable tool side-effects before answering: commit any created/scheduled
+    # tasks so a disconnect after the response can't roll them back.
+    await session.commit()
+
     await persist_conversation(session, user.id, session_id, "user", request.message)
     await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
     await _maybe_update_summary(session, user.id, session_id, client, sanitized_history, request.message, content, current_summary)
@@ -397,6 +401,14 @@ async def chat_stream(
             if _round == MAX_TOOL_ROUNDS - 1:
                 fallback = await client.chat(messages, tools=None)
                 content = (fallback.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
+
+        # Commit tool side-effects BEFORE streaming the final answer. Tool-created
+        # tasks are flushed in execute_tool_calls but not committed; if the client
+        # aborts/cancels the SSE stream mid-answer the generator is torn down and a
+        # later commit would never run — rolling back the tasks while the user already
+        # read "Done!". Committing here makes the created/scheduled tasks durable even
+        # if the answer stream (and the conversation persistence below) is interrupted.
+        await session.commit()
 
         # Stream the final natural-language answer. `content` was already
         # produced by the tool loop (either a normal non-tool round or the

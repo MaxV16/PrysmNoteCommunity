@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import type { User } from "@/types/user";
+import { clearUserData } from "@/lib/clear-user-data";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -49,6 +50,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(err.detail || "Login failed");
     }
     const data = await res.json();
+    // Account change: drop any lingering state/localStorage from a previous
+    // account so the new login starts completely clean.
+    clearUserData();
     setUser(data as User);
   }, []);
 
@@ -65,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(err.detail || "Registration failed");
       }
       const data = await res.json();
+      clearUserData();
       setUser(data as User);
     },
     []
@@ -72,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await fetch(`${API_URL}/auth/logout`, { method: "POST", credentials: "include" }).catch(() => {});
+    clearUserData();
     setUser(null);
   }, []);
 

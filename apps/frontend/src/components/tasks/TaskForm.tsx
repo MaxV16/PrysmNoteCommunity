@@ -14,7 +14,6 @@ interface TaskFormProps {
     due_date?: string;
     status?: string;
     priority?: number;
-    project_id?: string | null;
     tag_ids?: string[];
     recurrence_rule?: string;
     estimated_minutes?: number;
@@ -154,14 +153,13 @@ function CalendarPicker({ value, onChange, placeholder }: { value: string; onCha
 }
 
 export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormProps) {
-  const { projects, tags } = useAppStore();
+  const { tags } = useAppStore();
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || "");
   const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || "");
   const [status, setStatus] = useState<TaskStatus>(initial?.status || "todo");
   const [priority, setPriority] = useState<PriorityTier>(initial?.priority ? normalizePriority(initial.priority) : 2);
-  const [projectId, setProjectId] = useState(initial?.project_id || "");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     initial?.estimated_minutes?.toString() || (initial ? "" : "30")
@@ -203,7 +201,6 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
       due_date: due || undefined,
       status: isEdit ? status : undefined,
       priority: isEdit ? priority : undefined,
-      project_id: projectId || null,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
       recurrence_rule: recurrenceRule || undefined,
       estimated_minutes: estimatedMinutes ? Number(estimatedMinutes) : undefined,
@@ -268,19 +265,6 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
             ))}
           </select>
         </div>
-      </div>
-      <div>
-        <label className="text-xs font-medium text-secondary mb-1.5 block">Project</label>
-        <select
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          className="input-field text-xs h-10"
-        >
-          <option value="">No Project</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
       </div>
       <div className="flex gap-2">
         <div className="flex-1">

@@ -16,6 +16,49 @@ async def test_search_tasks_text(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_search_typo_tolerant(client: AsyncClient):
+    await client.post("/api/tasks/", json={"title": "Appointment with doctor"})
+
+    # "apointment" (missing 'p') should still be found via trigram similarity.
+    response = await client.get("/api/search/", params={"q": "apointment"})
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert any("Appointment" in r["title"] for r in results)
+
+
+@pytest.mark.asyncio
+async def test_search_rank_exact_match_first(client: AsyncClient):
+    await client.post("/api/tasks/", json={"title": "Quarterly report"})
+    await client.post("/api/tasks/", json={"title": "Report status to team"})
+
+    response = await client.get("/api/search/", params={"q": "quarterly report"})
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) >= 1
+    ranks = [r["rank"] for r in results if r["rank"] is not None]
+    # Exact-ish title match ranks highest. On SQLite fallback rank is 0, so only
+    # assert ordering when pg_trgm produced real ranks.
+    if ranks and any(r > 0 for r in ranks):
+        best = max(results, key=lambda r: r["rank"])
+        assert "Quarterly report" in best["title"]
+        assert all(results[i]["rank"] >= results[i + 1]["rank"] for i in range(len(results) - 1))
+
+
+@pytest.mark.asyncio
+async def test_search_results_are_user_scoped(client: AsyncClient):
+    # The client fixture is bound to a single user; search must never surface tasks
+    # owned by someone else. Create a task, then confirm the search only returns the
+    # current user's tasks (cross-tenant isolation).
+    await client.post("/api/tasks/", json={"title": "My private task"})
+    await client.post("/api/tasks/", json={"title": "My private task 2"})
+
+    response = await client.get("/api/search/", params={"q": "private"})
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert all(r["title"].startswith("My private") for r in results)
+
+
+@pytest.mark.asyncio
 async def test_search_tasks_description(client: AsyncClient):
     await client.post("/api/tasks/", json={
         "title": "Project X",

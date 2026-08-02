@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import type { Task, TaskTag } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
-import { useAppStore } from "@/stores/app-store";
 import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { TaskForm } from "./TaskForm";
 import { TaskChecklist } from "./TaskChecklist";
@@ -89,10 +88,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const { updateTask, deleteTask, fetchTasks } = useTasks();
   const { addNoteWithContent } = useStickyBoard();
 
-  const projects = useAppStore.getState().projects;
-  const project = task.project_id
-    ? projects.find((p) => p.id === task.project_id) || null
-    : null;
   const isNote = !task.start_date && !task.due_date;
   const tier: PriorityTier = normalizePriority(task.priority);
   const dateRange = formatDateRange(task);
@@ -252,7 +247,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     due_date?: string;
     status?: string;
     priority?: number;
-    project_id?: string | null;
   }) => {
     const fields: Record<string, unknown> = {};
     if (data.title !== task.title) fields.title = data.title;
@@ -262,7 +256,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       fields.priority = data.priority;
     if (data.start_date !== (task.start_date || "")) fields.start_date = data.start_date;
     if (data.due_date !== (task.due_date || "")) fields.due_date = data.due_date;
-    if (data.project_id !== (task.project_id || "")) fields.project_id = data.project_id;
     if (Object.keys(fields).length > 0) {
       await updateTask(task.id, fields);
     }
@@ -299,25 +292,11 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
   return (
     <DrawerShell onClose={onClose}>
-      {/* Header: project icon + date range pill, priority flag */}
+      {/* Header: type label + date range pill, priority flag */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-xs text-secondary">
-          <span
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded"
-            style={{ backgroundColor: (project?.color || "#555") + "33" }}
-          >
-            {project ? (
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <line x1="9" y1="3" x2="9" y2="21" />
-                <line x1="15" y1="3" x2="15" y2="21" />
-              </svg>
-            ) : (
-              <span className="text-muted">📥</span>
-            )}
-          </span>
           <span className="truncate font-medium text-secondary">
-            {isNote ? "Note" : (project?.name || "No Project")}
+            {isNote ? "Note" : "Task"}
           </span>
           <button
             ref={datePillRef}

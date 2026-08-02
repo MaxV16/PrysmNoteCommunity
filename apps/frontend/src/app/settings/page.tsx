@@ -169,7 +169,7 @@ export default function SettingsPage() {
     useTheme();
   const router = useRouter();
   const { keys, fetchKeys, saveKey, deleteKey, getLocalKey: getApiLocalKey } = useApiKeys();
-  const { tasks, projects } = useAppStore();
+  const { tasks } = useAppStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("account");
   const [displayName, setDisplayName] = useState(user?.display_name || "");
@@ -369,7 +369,7 @@ export default function SettingsPage() {
   };
 
   const handleExport = () => {
-    const data = { tasks, projects, exportedAt: new Date().toISOString() };
+    const data = { tasks, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -391,14 +391,13 @@ export default function SettingsPage() {
       try {
         const text = await file.text();
         const data = JSON.parse(text);
-        if (!data.tasks || !data.projects) {
+        if (!data.tasks) {
           alert("Invalid backup file format.");
           return;
         }
-        if (!window.confirm(`Import ${data.tasks.length} tasks and ${data.projects.length} projects? This will overwrite current data.`)) return;
+        if (!window.confirm(`Import ${data.tasks.length} tasks? This will overwrite current data.`)) return;
         const store = useAppStore.getState();
         store.setTasks(data.tasks);
-        store.setProjects(data.projects);
         alert("Import complete! Reloading...");
         window.location.reload();
       } catch {
@@ -515,11 +514,6 @@ export default function SettingsPage() {
   const doneCount = tasks.filter((t) => t.status === "done").length;
   const activeCount = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled").length;
   const completionRate = activeCount + doneCount > 0 ? Math.round((doneCount / (activeCount + doneCount)) * 100) : 0;
-  const projectStats = projects.map((p) => ({
-    name: p.name,
-    count: tasks.filter((t) => t.project_id === p.id).length,
-    color: p.color || "var(--text-muted)",
-  })).filter((s) => s.count > 0);
   const now = new Date();
   const weekStart = new Date(now);
   weekStart.setDate(now.getDate() - now.getDay());
@@ -1112,7 +1106,7 @@ export default function SettingsPage() {
               <div className="border-t border-border pt-5 space-y-3">
                 <h3 className="text-sm font-semibold text-primary">Data Import/Export</h3>
                 <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
-                  <div><p className="text-sm text-secondary">Export All Data</p><p className="text-xs text-muted">{lastExport ? `Last export: ${lastExport}` : "Download tasks, projects as JSON"}</p></div>
+                  <div><p className="text-sm text-secondary">Export All Data</p><p className="text-xs text-muted">{lastExport ? `Last export: ${lastExport}` : "Download tasks as JSON"}</p></div>
                   <button onClick={handleExport} className="btn bg-accent text-white px-4 py-1.5 text-xs rounded-xl">Export</button>
                 </div>
                 <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">

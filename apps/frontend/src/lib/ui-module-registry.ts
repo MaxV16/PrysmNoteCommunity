@@ -8,8 +8,6 @@ export const MODULE_IDS = [
   "stickyNotes",
   "navSection",
   "filterBar",
-  "projectList",
-  "projectRail",
   "tagList",
   "teamSection",
   "themeSelector",

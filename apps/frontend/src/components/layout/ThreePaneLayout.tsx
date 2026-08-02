@@ -7,7 +7,6 @@ import { TimelineView } from "@/components/layout/TimelineView";
 import { ChatPanel } from "@/components/ai/ChatPanel";
 import { Spinner } from "@/components/ui/Spinner";
 import { useTasks } from "@/hooks/useTasks";
-import { useProjects } from "@/hooks/useProjects";
 import { useTags } from "@/hooks/useTags";
 import { StickyBoardProvider, useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { useUiModule } from "@/lib/ui-module-registry";
@@ -113,17 +112,15 @@ function MainLayout() {
 export function ThreePaneLayout() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const { fetchTasks } = useTasks();
-  const { fetchProjects } = useProjects();
   const { fetchTags } = useTags();
 
   useEffect(() => {
     (async () => {
       try { await fetchTasks(); } catch {}
-      try { await fetchProjects(); } catch {}
       try { await fetchTags(); } catch {}
       setDataLoaded(true);
     })();
-  }, [fetchTasks, fetchProjects, fetchTags]);
+  }, [fetchTasks, fetchTags]);
 
   return (
     <ErrorBoundaryInner>

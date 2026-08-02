@@ -6,6 +6,7 @@
 
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Task status enum
 DO $$ BEGIN
@@ -60,25 +61,10 @@ CREATE TABLE IF NOT EXISTS user_tokens (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Projects table (lists/categories)
-CREATE TABLE IF NOT EXISTS projects (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  parent_id UUID REFERENCES projects(id) ON DELETE SET NULL,
-  name VARCHAR(255) NOT NULL,
-  color VARCHAR(7),
-  icon VARCHAR(50),
-  sort_order INT NOT NULL DEFAULT 0,
-  is_archived BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 -- Tasks table
 CREATE TABLE IF NOT EXISTS tasks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
   parent_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
   title VARCHAR(500) NOT NULL,
   description TEXT,
@@ -214,6 +200,8 @@ CREATE INDEX IF NOT EXISTS idx_habit_logs_habit_date ON habit_logs(habit_id, com
 CREATE INDEX IF NOT EXISTS idx_tasks_user_start_date ON tasks(user_id, start_date);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_due_date ON tasks(user_id, due_date);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status);
+CREATE INDEX IF NOT EXISTS ix_tasks_trgm ON tasks
+  USING gin (lower(title || ' ' || COALESCE(description, '')) gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_task_links_source ON task_links(source_task_id);
 CREATE INDEX IF NOT EXISTS idx_task_links_target ON task_links(target_task_id);
 CREATE INDEX IF NOT EXISTS idx_task_embeddings_ann ON task_embeddings
@@ -226,7 +214,6 @@ CREATE INDEX IF NOT EXISTS idx_user_tokens_provider ON user_tokens(user_id, prov
 -- RLS policies
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
-ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE task_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tags ENABLE ROW LEVEL SECURITY;
@@ -249,9 +236,6 @@ CREATE POLICY user_isolation ON users
   USING (id = rls_user_id());
 
 CREATE POLICY user_isolation ON api_keys
-  USING (user_id = rls_user_id());
-
-CREATE POLICY user_isolation ON projects
   USING (user_id = rls_user_id());
 
 CREATE POLICY user_isolation ON tasks

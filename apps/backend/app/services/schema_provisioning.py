@@ -17,4 +17,9 @@ async def ensure_schema(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_tasks_trgm ON tasks USING gin "
+            "(lower(title || ' ' || COALESCE(description, '')) gin_trgm_ops)"
+        ))
         await conn.run_sync(lambda sync_conn: app.models.Base.metadata.create_all(sync_conn))

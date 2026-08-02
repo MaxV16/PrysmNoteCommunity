@@ -41,10 +41,6 @@ export function KanbanCard({ task }: KanbanCardProps) {
   });
 
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
-  const projects = useAppStore((s) => s.projects);
-  const project = task.project_id
-    ? projects.find((p) => p.id === task.project_id)
-    : null;
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -71,15 +67,6 @@ export function KanbanCard({ task }: KanbanCardProps) {
         {task.due_date && (
           <span className="text-muted">
             {formatDueDate(task.due_date)}
-          </span>
-        )}
-        {project && (
-          <span className="flex items-center gap-1 text-secondary">
-            <span
-              className="block h-1.5 w-1.5 rounded-full"
-              style={{ backgroundColor: project.color || "#888" }}
-            />
-            {project.name}
           </span>
         )}
       </div>

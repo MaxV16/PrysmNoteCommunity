@@ -26,7 +26,7 @@ async def search(
             query_embedding = await client.embed(q)
         except Exception:
             return {"mode": "semantic", "error": "Embedding generation failed", "results": []}
-        similar = await search_similar(session, query_embedding, limit=10)
+        similar = await search_similar(session, query_embedding, user.id, limit=10)
         return {
             "mode": "semantic",
             "results": [
@@ -42,7 +42,7 @@ async def search(
             ],
         }
 
-    tasks = await search_tasks(session, user.id, q)
+    results = await search_tasks(session, user.id, q)
     return {
         "mode": "text",
         "results": [
@@ -52,7 +52,8 @@ async def search(
                 "status": t.status.value if t.status else None,
                 "start_date": str(t.start_date) if t.start_date else None,
                 "due_date": str(t.due_date) if t.due_date else None,
+                "rank": round(rank, 3),
             }
-            for t in tasks
+            for t, rank in results
         ],
     }

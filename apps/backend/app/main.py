@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import async_session_factory
 from app.models.token_blacklist import TokenBlacklist
 from app.models.user_token import UserToken
-from app.routers import auth, tasks, projects, tags, search, ai, keys, calendar, task_links, habits
+from app.routers import auth, tasks, tags, search, ai, keys, calendar, task_links, habits
 from app.routers.ai import start_rate_limit_pruner
 from app.services.calendar_service import pull_and_import_events
 from app.services.recurring_task_service import recurring_task_background_loop
@@ -132,7 +132,6 @@ app.add_middleware(CSPSecurityMiddleware)
 
 app.include_router(auth.router)
 app.include_router(tasks.router)
-app.include_router(projects.router)
 app.include_router(tags.router)
 app.include_router(search.router)
 app.include_router(ai.router)

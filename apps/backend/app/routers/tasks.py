@@ -39,7 +39,6 @@ def _serialize_task(task: Task) -> dict:
     return {
         "id": str(task.id),
         "user_id": str(task.user_id),
-        "project_id": str(task.project_id) if task.project_id else None,
         "parent_task_id": str(task.parent_task_id) if task.parent_task_id else None,
         "title": task.title,
         "description": task.description,
@@ -64,8 +63,6 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 class CreateTaskRequest(BaseModel):
     title: str
-    project_id: str | None = None
-    project_name: str | None = None
     parent_task_id: str | None = None
     description: str | None = None
     status: str = "backlog"
@@ -129,7 +126,6 @@ class UpdateTaskRequest(BaseModel):
     recurrence_rule: str | None = None
     recurrence_end_date: str | None = None
     sort_order: int | None = None
-    project_id: str | None = None
     parent_task_id: str | None = None
     is_archived: bool | None = None
     tag_ids: list[str] | None = None
@@ -203,7 +199,8 @@ async def list_tasks(
     session: AsyncSession = Depends(get_db),
 ):
     if query:
-        return await search_tasks(session, user.id, query)
+        results = await search_tasks(session, user.id, query)
+        return [_serialize_task(t) for t, _rank in results]
     result = await session.execute(
         select(Task).where(Task.user_id == user.id).order_by(Task.created_at.desc()).offset(offset).limit(limit)
     )
@@ -216,29 +213,10 @@ async def create_task_route(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    project_id = None
-
-    if request.project_name:
-        from app.models.project import Project
-        proj_result = await session.execute(
-            select(Project).where(Project.user_id == user.id, Project.name == request.project_name)
-        )
-        proj = proj_result.scalar_one_or_none()
-        if proj:
-            project_id = proj.id
-        else:
-            proj = Project(user_id=user.id, name=request.project_name)
-            session.add(proj)
-            await session.flush()
-            project_id = proj.id
-    elif request.project_id:
-        project_id = UUID(request.project_id)
-
     task = await create_task(
         session,
         user_id=user.id,
         title=request.title,
-        project_id=project_id,
         parent_task_id=UUID(request.parent_task_id) if request.parent_task_id else None,
         description=request.description,
         status=request.status,
@@ -278,7 +256,7 @@ async def update_task_route(
     session: AsyncSession = Depends(get_db),
 ):
     fields = request.to_fields_dict()
-    task = await update_task(session, UUID(task_id), fields)
+    task = await update_task(session, UUID(task_id), fields, user.id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
@@ -308,7 +286,7 @@ async def delete_task_route(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    deleted = await delete_task(session, UUID(task_id))
+    deleted = await delete_task(session, UUID(task_id), user.id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return {"status": "deleted"}
@@ -320,7 +298,7 @@ async def list_subtasks(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    task = await get_task(session, UUID(task_id))
+    task = await get_task(session, UUID(task_id), user.id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     result = await session.execute(
@@ -339,7 +317,7 @@ async def create_subtask(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    parent = await get_task(session, UUID(task_id))
+    parent = await get_task(session, UUID(task_id), user.id)
     if not parent:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent task not found")
     if str(parent.user_id) != str(user.id):
@@ -367,7 +345,7 @@ async def reorder_subtasks(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    parent = await get_task(session, UUID(task_id))
+    parent = await get_task(session, UUID(task_id), user.id)
     if not parent or str(parent.user_id) != str(user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent task not found")
     ordered_ids = [str(i) for i in (body.get("ordered_ids") or [])]
@@ -381,7 +359,7 @@ async def description_to_subtasks(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    parent = await get_task(session, UUID(task_id))
+    parent = await get_task(session, UUID(task_id), user.id)
     if not parent or str(parent.user_id) != str(user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     created = await subtask_service.convert_description_to_subtasks(session, parent)
@@ -400,7 +378,7 @@ async def subtasks_to_description(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    parent = await get_task(session, UUID(task_id))
+    parent = await get_task(session, UUID(task_id), user.id)
     if not parent or str(parent.user_id) != str(user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     description = await subtask_service.convert_subtasks_to_description(session, parent)
@@ -418,7 +396,7 @@ async def breakdown_task(
     Uses the LLM when a key is configured; otherwise falls back to splitting
     the description bullets or a generic breakdown so the action always works.
     """
-    parent = await get_task(session, UUID(task_id))
+    parent = await get_task(session, UUID(task_id), user.id)
     if not parent or str(parent.user_id) != str(user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
@@ -452,10 +430,10 @@ async def update_subtask(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    subtask = await get_task(session, UUID(subtask_id))
+    subtask = await get_task(session, UUID(subtask_id), user.id)
     if not subtask or str(subtask.parent_task_id) != task_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subtask not found")
-    updated = await update_task(session, UUID(subtask_id), request.to_fields_dict())
+    updated = await update_task(session, UUID(subtask_id), request.to_fields_dict(), user.id)
     return {"id": str(updated.id), "title": updated.title, "status": updated.status.value}
 @router.get("/search")
 async def search_tasks_route(
@@ -468,13 +446,19 @@ async def search_tasks_route(
     session: AsyncSession = Depends(get_db),
 ):
     from app.models.task import Task
-    from sqlalchemy import or_
+    from sqlalchemy import or_, func
 
-    stmt = select(Task).where(
+    q_lower = q.lower().strip()
+    rank_expr = func.greatest(
+        func.similarity(func.lower(Task.title), q_lower),
+        func.similarity(func.lower(func.coalesce(Task.description, "")), q_lower),
+    ).label("rank")
+
+    stmt = select(Task, rank_expr).where(
         Task.user_id == user.id,
         or_(
-            Task.title.ilike(f"%{q}%"),
-            Task.description.ilike(f"%{q}%"),
+            func.lower(Task.title) % q_lower,
+            func.lower(func.coalesce(Task.description, "")) % q_lower,
         ),
     )
 
@@ -487,9 +471,9 @@ async def search_tasks_route(
     if priority_max is not None:
         stmt = stmt.where(Task.priority <= priority_max)
 
-    stmt = stmt.limit(20)
+    stmt = stmt.order_by(rank_expr.desc()).limit(20)
     result = await session.execute(stmt)
-    tasks = result.scalars().all()
+    tasks = result.all()
 
     return [
         {
@@ -499,8 +483,9 @@ async def search_tasks_route(
             "priority": t.priority,
             "start_date": str(t.start_date) if t.start_date else None,
             "due_date": str(t.due_date) if t.due_date else None,
+            "rank": round(rank, 3),
         }
-        for t in tasks
+        for t, rank in tasks
     ]
 
 
@@ -539,7 +524,6 @@ async def list_tasks_by_date_range(
             "priority": t.priority,
             "start_date": str(t.start_date) if t.start_date else None,
             "due_date": str(t.due_date) if t.due_date else None,
-            "project_id": str(t.project_id) if t.project_id else None,
         }
         for t in tasks
     ]
@@ -626,7 +610,7 @@ async def get_task_route(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    task = await get_task(session, UUID(task_id))
+    task = await get_task(session, UUID(task_id), user.id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return _serialize_task(task)
