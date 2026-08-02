@@ -187,6 +187,44 @@ async def test_subtask_bad_parent(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_breakdown_creates_subtasks(client: AsyncClient):
+    """Breakdown must create child tasks even without a configured AI key."""
+    created = await client.post("/api/tasks/", json={
+        "title": "Plan launch",
+        "description": "- Research market\n- Define goals\n- Build roadmap",
+    })
+    parent_id = created.json()["id"]
+
+    response = await client.post(f"/api/tasks/{parent_id}/breakdown", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    subtasks = body["subtasks"]
+    assert len(subtasks) >= 3
+    titles = [s["title"] for s in subtasks]
+    assert "Research market" in titles
+    assert "Define goals" in titles
+
+    # They are persisted as real children of the parent.
+    subs = await client.get(f"/api/tasks/{parent_id}/subtasks")
+    assert len(subs.json()) == len(subtasks)
+
+
+@pytest.mark.asyncio
+async def test_breakdown_generic_fallback(client: AsyncClient):
+    """A parent with no description still gets a deterministic breakdown."""
+    created = await client.post("/api/tasks/", json={"title": "Build a product"})
+    parent_id = created.json()["id"]
+
+    response = await client.post(f"/api/tasks/{parent_id}/breakdown", json={})
+    assert response.status_code == 200
+    subtasks = response.json()["subtasks"]
+    assert len(subtasks) >= 1
+    assert all(s["title"] for s in subtasks)
+
+
+
+@pytest.mark.asyncio
 async def test_expand_recurring(client: AsyncClient):
     created = await client.post("/api/tasks/", json={
         "title": "Recurring Task",

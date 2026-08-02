@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -107,3 +108,85 @@ async def next_sort_order(session: AsyncSession, parent_id: UUID) -> int:
         )
     )
     return int(result.scalar_one()) + 1
+
+
+_GENERIC_BREAKDOWN = [
+    "Define scope and requirements",
+    "Plan the steps and timeline",
+    "Execute the core work",
+    "Review and test the result",
+    "Finalize and deliver",
+]
+
+
+async def create_subtask_titles(
+    session: AsyncSession,
+    parent: Task,
+    titles: list[str],
+) -> list[Task]:
+    """Persist the given subtask titles under a parent task, in order."""
+    created: list[Task] = []
+    for title in titles:
+        cleaned = (title or "").strip()
+        if not cleaned:
+            continue
+        child = Task(
+            user_id=parent.user_id,
+            parent_task_id=parent.id,
+            title=cleaned[:500],
+            status=TaskStatus.TODO,
+            priority=parent.priority,
+            sort_order=await next_sort_order(session, parent.id),
+        )
+        session.add(child)
+        created.append(child)
+    await session.flush()
+    return created
+
+
+async def ai_breakdown_titles(
+    session: AsyncSession,
+    parent: Task,
+    client=None,
+) -> list[str]:
+    """Ask the LLM (if available) for breakdown subtask titles.
+
+    Falls back to splitting the description bullets, then to a generic list.
+    Never raises and always returns a non-empty list so the UI action always works.
+    """
+    titles: list[str] = []
+    if client is not None:
+        try:
+            prompt = (
+                "You are a task breakdown expert. Given the task, respond with EXACTLY a "
+                "JSON array of 4-6 concrete, actionable subtask titles to complete it. "
+                "Return nothing but the JSON array, e.g. "
+                '["Research and define scope", "Create a plan", "Execute", "Review"].\n\n'
+                f"Task title: {parent.title}\n"
+                f"Task description: {parent.description or 'None'}"
+            )
+            response = await client.chat(
+                [{"role": "user", "content": prompt}],
+                tools=None,
+                temperature=0.7,
+                max_tokens=500,
+            )
+            content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+            parsed = json.loads(content)
+            if isinstance(parsed, list):
+                titles = [str(t) for t in parsed if str(t).strip()]
+            if not titles:
+                for line in content.splitlines():
+                    line = (line or "").strip().lstrip("-").strip().strip("\"'")
+                    if line and len(line) > 3:
+                        titles.append(line)
+        except Exception:
+            titles = []
+
+    if not titles:
+        titles = _split_bullets(parent.description or "")
+
+    if not titles:
+        titles = list(_GENERIC_BREAKDOWN)
+
+    return titles[:6]

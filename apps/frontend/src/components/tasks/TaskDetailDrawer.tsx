@@ -2,13 +2,15 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
-import type { Task } from "@/types/task";
+import type { Task, TaskTag } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
 import { useAppStore } from "@/stores/app-store";
 import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { TaskForm } from "./TaskForm";
 import { TaskChecklist } from "./TaskChecklist";
 import { TaskLinks } from "./TaskLinks";
+import { TaskTagsEditor } from "./TaskTagsEditor";
+import { DateRecurrencePopover } from "./DateRecurrencePopover";
 import { Markdown } from "@/components/ai/Markdown";
 import { api } from "@/lib/api";
 import {
@@ -76,6 +78,9 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [busy, setBusy] = useState(false);
   const [subtasks, setSubtasks] = useState<Task[]>(task.subtasks || []);
   const [loadedSubtasks, setLoadedSubtasks] = useState(false);
+  const [tags, setTags] = useState<TaskTag[]>(task.tags || []);
+  const [dateOpen, setDateOpen] = useState(false);
+  const datePillRef = useRef<HTMLButtonElement | null>(null);
   const titleOptionsRef = useRef<HTMLButtonElement | null>(null);
   const footerMoreRef = useRef<HTMLButtonElement | null>(null);
   const priorityRef = useRef<HTMLButtonElement | null>(null);
@@ -214,6 +219,32 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     window.dispatchEvent(event);
   };
 
+  const handleBreakDownNow = async () => {
+    setBusy(true);
+    setOptionsOpen(false);
+    try {
+      // Create the subtasks deterministically via the backend breakdown endpoint
+      // regardless of whether an AI key is configured.
+      await api.post(`/tasks/${task.id}/breakdown`, {});
+      await fetchTasks();
+      const data = await api.get<Task[]>(`/tasks/${task.id}/subtasks`);
+      setSubtasks(data);
+      setLoadedSubtasks(true);
+      setMode("subtasks");
+      // Auto-open the AI panel for follow-up guidance.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("prysm-open-ai"));
+        window.dispatchEvent(
+          new CustomEvent("prysm-ai-suggest", {
+            detail: { taskId: task.id, title: task.title },
+          })
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleUpdate = async (data: {
     title: string;
     description?: string;
@@ -236,6 +267,22 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       await updateTask(task.id, fields);
     }
     setEditing(false);
+  };
+
+  const handleDateChange = async (newDate: string | null, newRule: string | null) => {
+    setDateOpen(false);
+    const fields: Record<string, unknown> = {};
+    if (newDate) {
+      // Keep start/due aligned to the chosen date unless the task already had a
+      // start/due range (then preserve the existing start).
+      fields.due_date = newDate;
+      if (!task.start_date) fields.start_date = newDate;
+    } else {
+      fields.due_date = null;
+      fields.start_date = task.start_date;
+    }
+    fields.recurrence_rule = newRule;
+    await updateTask(task.id, fields);
   };
 
   if (editing) {
@@ -272,11 +319,23 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
           <span className="truncate font-medium text-secondary">
             {isNote ? "Note" : (project?.name || "No Project")}
           </span>
-          {dateRange && (
-            <span className="shrink-0 rounded-full bg-elevated px-2 py-0.5 text-[10px] text-muted">
-              {dateRange}
-            </span>
-          )}
+          <button
+            ref={datePillRef}
+            onClick={() => setDateOpen((v) => !v)}
+            className="shrink-0 rounded-full bg-elevated px-2 py-0.5 text-[10px] text-muted hover:bg-hover hover:text-primary transition-colors"
+            title="Set date & recurrence"
+          >
+            {dateRange ? `📅 ${dateRange}` : "📅 No date"}
+            {task.recurrence_rule ? " 🔄" : ""}
+          </button>
+          <DateRecurrencePopover
+            open={dateOpen}
+            triggerRef={datePillRef}
+            onClose={() => setDateOpen(false)}
+            value={task.due_date || task.start_date || null}
+            recurrenceRule={task.recurrence_rule}
+            onChange={handleDateChange}
+          />
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {isNote && <span className="badge bg-elevated text-muted">Note</span>}
@@ -456,22 +515,10 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       </div>
 
       {/* Meta: tags, links, break-down */}
-      {task.tags && task.tags.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-1.5">
-          {task.tags.map((tag) => (
-            <span
-              key={tag.id}
-              className="badge"
-              style={{
-                backgroundColor: (tag.color || "#333") + "30",
-                color: tag.color || "var(--text-secondary)",
-              }}
-            >
-              {tag.name}
-            </span>
-          ))}
-        </div>
-      )}
+      <div className="mt-4">
+        <Label>Tags</Label>
+        <TaskTagsEditor taskId={task.id} tags={tags} onChange={setTags} />
+      </div>
 
       {(task.links?.length ?? 0) > 0 && (
         <div className="mt-4 border-t border-border pt-3">
@@ -481,11 +528,12 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
       {isBroadTask(task.title) && (
         <button
-          onClick={handleBreakDown}
-          className="btn mt-4 w-full gap-2 border border-accent/20 bg-accent/10 px-3 py-2 text-xs text-accent transition-all hover:border-accent/40 hover:bg-accent/20"
+          onClick={handleBreakDownNow}
+          disabled={busy}
+          className="btn mt-4 w-full gap-2 border border-accent/20 bg-accent/10 px-3 py-2 text-xs text-accent transition-all hover:border-accent/40 hover:bg-accent/20 disabled:opacity-50"
         >
           <span>🧠</span>
-          <span>Break this down into subtasks</span>
+          <span>{busy ? "Breaking down…" : "Break this down into subtasks"}</span>
         </button>
       )}
 

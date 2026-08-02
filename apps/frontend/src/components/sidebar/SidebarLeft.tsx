@@ -8,7 +8,6 @@ import { useAppStore } from "@/stores/app-store";
 import type { ThemeName } from "@/types/theme";
 import { THEMES } from "@/types/theme";
 import { NavSection } from "@/components/sidebar/NavSection";
-import { ProjectList } from "@/components/sidebar/ProjectList";
 import { TagList } from "@/components/sidebar/TagList";
 import { FilterBar } from "@/components/sidebar/FilterBar";
 import { useUiModule } from "@/lib/ui-module-registry";
@@ -32,7 +31,6 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
   const { themeName, setThemeName, toggleTheme } = useTheme();
   const navOn = useUiModule("navSection");
   const filterOn = useUiModule("filterBar");
-  const projectsOn = useUiModule("projectList");
   const teamOn = useUiModule("teamSection");
   const tagsOn = useUiModule("tagList");
   const themeOn = useUiModule("themeSelector");
@@ -123,8 +121,6 @@ export function SidebarLeft({ collapsed, onToggle }: SidebarLeftProps) {
         {navOn && <div className="divider-gradient" />}
         {filterOn && <FilterBar />}
         {filterOn && <div className="divider-gradient" />}
-        {projectsOn && <ProjectList />}
-        {projectsOn && <div className="divider-gradient" />}
         {teamOn && teamMembers.length > 0 && (
           <>
             <div>

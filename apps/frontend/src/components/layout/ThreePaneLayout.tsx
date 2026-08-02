@@ -64,16 +64,22 @@ function MainLayout() {
     if (!smallScreen) setLeftCollapsed(v);
   };
 
-  useGlobalShortcuts({
-    onToggleSidebar: () => setSidebarCollapsed(!isSidebarCollapsed),
-    onToggleAiPanel: () => setRightOpen((v) => !v),
-    onToggleTheme: toggleTheme,
-    onNewTask: () => {
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("prysm-new-task"));
-      }
-    },
-  });
+    useGlobalShortcuts({
+      onToggleSidebar: () => setSidebarCollapsed(!isSidebarCollapsed),
+      onToggleAiPanel: () => setRightOpen((v) => !v),
+      onToggleTheme: toggleTheme,
+      onNewTask: () => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("prysm-new-task"));
+        }
+      },
+    });
+
+    useEffect(() => {
+      const onOpenAi = () => setRightOpen(true);
+      window.addEventListener("prysm-open-ai", onOpenAi);
+      return () => window.removeEventListener("prysm-open-ai", onOpenAi);
+    }, []);
 
   return (
     <div
@@ -90,7 +96,6 @@ function MainLayout() {
         <TimelineView
           onToggleRight={() => setRightOpen(v => !v)}
           onOpenSticky={toggleSticky}
-          hideProjects={isSidebarCollapsed}
         />
         {aiOn && rightOpen && (
           // On small screens the AI panel overlays the timeline instead of

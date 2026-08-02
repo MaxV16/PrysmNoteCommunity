@@ -407,6 +407,43 @@ async def subtasks_to_description(
     return {"status": "ok", "description": description}
 
 
+@router.post("/{task_id}/breakdown")
+async def breakdown_task(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """Break a task down into subtasks and CREATE the child tasks.
+
+    Uses the LLM when a key is configured; otherwise falls back to splitting
+    the description bullets or a generic breakdown so the action always works.
+    """
+    parent = await get_task(session, UUID(task_id))
+    if not parent or str(parent.user_id) != str(user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    client = None
+    try:
+        from app.routers.ai import get_user_api_key
+        from app.services.ai_service import get_llm_client
+        for provider in ("openai", "gemini", "deepseek"):
+            api_key = await get_user_api_key(session, user, provider)
+            if api_key:
+                client = await get_llm_client(provider, api_key)
+                break
+    except Exception:
+        client = None
+
+    titles = await subtask_service.ai_breakdown_titles(session, parent, client)
+    created = await subtask_service.create_subtask_titles(session, parent, titles)
+    return {
+        "status": "ok",
+        "subtasks": [
+            {"id": str(t.id), "title": t.title, "status": t.status.value} for t in created
+        ],
+    }
+
+
 @router.patch("/{task_id}/subtasks/{subtask_id}")
 async def update_subtask(
     task_id: str,

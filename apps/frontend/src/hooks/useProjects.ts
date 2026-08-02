@@ -34,5 +34,14 @@ export function useProjects() {
     []
   );
 
-  return { projects, fetchProjects, createProject, deleteProject };
+  const renameProject = useCallback(
+    async (id: string, name: string) => {
+      const data = await api.patch<Project>(`/projects/${id}`, { name });
+      await fetchProjects();
+      return data;
+    },
+    [fetchProjects]
+  );
+
+  return { projects, fetchProjects, createProject, deleteProject, renameProject };
 }

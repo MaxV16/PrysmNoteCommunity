@@ -11,6 +11,8 @@ interface TimelineLaneProps {
   days: Date[];
   onTaskClick?: (id: string) => void;
   onDayDoubleClick?: (day: Date) => void;
+  rowLabel?: React.ReactNode;
+  rowHeight?: number;
 }
 
 interface PositionedTask {
@@ -54,7 +56,7 @@ function getTaskDayInfo(task: Task, days: Date[]): { index: number; endIndex: nu
   return { index: dayIndex, endIndex };
 }
 
-export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick }: TimelineLaneProps) {
+export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, rowHeight }: TimelineLaneProps) {
   const { positioned, maxStack } = useMemo(() => {
     // Determine day column spans for each task.
     const candidates: { task: Task; info: { index: number; endIndex: number } }[] = [];
@@ -98,7 +100,8 @@ export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick }: Tim
     return { positioned, maxStack: totalRows };
   }, [tasks, days]);
 
-  const laneHeight = TOP_PADDING * 2 + Math.max(1, maxStack) * (BAR_HEIGHT + BAR_GAP) - BAR_GAP;
+  const computedHeight = TOP_PADDING * 2 + Math.max(1, maxStack) * (BAR_HEIGHT + BAR_GAP) - BAR_GAP;
+  const laneHeight = rowHeight ?? computedHeight;
 
   return (
     <div
