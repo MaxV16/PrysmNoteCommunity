@@ -57,6 +57,12 @@ _background_tasks: list[asyncio.Task] = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Guarantee the database schema (extensions + baseline tables) exists and is
+    # up to date before accepting traffic. Idempotent; never drops data.
+    from app.services.schema_provisioning import ensure_schema
+    from app.database import engine as _app_engine
+    await ensure_schema(_app_engine)
+
     # Start background tasks
     task = asyncio.create_task(recurring_task_background_loop(async_session_factory))
     _background_tasks.append(task)
