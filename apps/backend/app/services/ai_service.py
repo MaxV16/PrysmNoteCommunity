@@ -1240,7 +1240,9 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         "content": json.dumps({"error": "Task not found"}),
                     })
                     continue
-                result = await session.execute(select(Task).where(Task.id == UUID(subtask_id)))
+                result = await session.execute(
+                    select(Task).where(Task.id == UUID(subtask_id), Task.user_id == UUID(user_id))
+                )
                 child = result.scalar_one_or_none()
                 if not child or str(child.parent_task_id) != str(parent.id):
                     results.append({
@@ -1277,7 +1279,9 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         "content": json.dumps({"error": "Task not found"}),
                     })
                     continue
-                result = await session.execute(select(Task).where(Task.id == UUID(subtask_id)))
+                result = await session.execute(
+                    select(Task).where(Task.id == UUID(subtask_id), Task.user_id == UUID(user_id))
+                )
                 child = result.scalar_one_or_none()
                 if not child or str(child.parent_task_id) != str(parent.id):
                     results.append({

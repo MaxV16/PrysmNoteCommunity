@@ -215,6 +215,46 @@ async def test_execute_get_task_details_owns_only_own_task(db_session: AsyncSess
 
 
 @pytest.mark.asyncio
+async def test_execute_update_subtask_rejects_other_users_child(db_session: AsyncSession, ai_user):
+    """C4 defense-in-depth: update_subtask/delete_subtask must not mutate a child
+    task owned by another user, even if the caller has their own parent task."""
+    from app.models.task import Task
+    from app.models.user import User
+    from uuid import uuid4
+
+    me = ai_user
+    another = uuid4()
+    db_session.add(User(id=another, email=f"{another}@other.test", password_hash="x", display_name="Other"))
+
+    my_parent = Task(user_id=me, title="My parent")
+    their_parent = Task(user_id=another, title="Their task")
+    their_child = Task(user_id=another, parent_task_id=their_parent.id, title="Their child")
+    db_session.add_all([my_parent, their_parent, their_child])
+    await db_session.flush()
+
+    # Attacker (me) has a parent task, but targets a child belonging to someone else.
+    tool_calls = [{
+        "id": "call_xuser_sub",
+        "function": {
+            "name": "update_subtask",
+            "arguments": json.dumps({
+                "task_id": str(my_parent.id),
+                "subtask_id": str(their_child.id),
+                "fields": {"title": "hacked"},
+            }),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(me), db_session)
+    content = json.loads(results[0]["content"])
+    assert "error" in content, f"cross-user update_subtask must fail: {content}"
+
+    # The other user's child is untouched.
+    fresh = await db_session.get(Task, their_child.id)
+    assert fresh.title == "Their child"
+
+
+@pytest.mark.asyncio
 async def test_execute_link_tasks(db_session: AsyncSession, ai_user):
     from app.models.task import Task
     user_id = ai_user
