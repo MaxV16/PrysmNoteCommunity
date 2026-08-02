@@ -227,8 +227,8 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
   }, [sendMessage, provider]);
 
   return (
-    <div className="flex flex-col overflow-hidden border-l border-border bg-surface">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3 bg-surface/80 backdrop-blur-md">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden border-l border-border bg-surface">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3 bg-surface/80 backdrop-blur-md">
         <div className="flex items-center gap-2.5">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent/10">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -378,7 +378,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         )}
       </div>
 
-      <div className="border-t border-border px-4 py-3 space-y-2">
+      <div className="shrink-0 border-t border-border px-4 py-3 space-y-2">
         <div className="flex gap-2">
           {isLoading && (
             <button

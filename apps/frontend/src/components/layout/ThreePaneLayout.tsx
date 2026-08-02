@@ -100,7 +100,7 @@ function MainLayout() {
         {aiOn && rightOpen && (
           // On small screens the AI panel overlays the timeline instead of
           // squeezing it out of the viewport.
-          <div className="absolute inset-y-0 right-0 z-20 w-[min(22.5rem,88vw)] border-l border-border bg-base lg:static lg:z-auto lg:w-[22.5rem]">
+          <div className="absolute inset-y-0 right-0 z-20 w-[min(22.5rem,88vw)] border-l border-border bg-base lg:static lg:z-auto lg:h-full lg:min-h-0 lg:w-[22.5rem]">
             <ChatPanel onClose={() => setRightOpen(false)} />
           </div>
         )}
