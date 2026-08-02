@@ -75,8 +75,12 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
   const router = useRouter();
   const bodyRef = useRef<HTMLDivElement>(null);
   const timelineOn = useUiModule("viewTimeline");
-  const kanbanOn = useUiModule("viewKanban") && useLocalBool("prysm_feature_kanban", true);
-  const calendarOn = useUiModule("viewCalendar") && useLocalBool("prysm_feature_calendar", true);
+  const kanbanModuleOn = useUiModule("viewKanban");
+  const calendarModuleOn = useUiModule("viewCalendar");
+  const kanbanLocalOn = useLocalBool("prysm_feature_kanban", true);
+  const calendarLocalOn = useLocalBool("prysm_feature_calendar", true);
+  const kanbanOn = kanbanModuleOn && kanbanLocalOn;
+  const calendarOn = calendarModuleOn && calendarLocalOn;
   const listOn = useUiModule("viewList");
   const stickyOn = useUiModule("stickyNotes");
 
@@ -93,7 +97,9 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
     if (!activeViewEnabled && enabledViews.length > 0) {
       setViewMode(enabledViews[0]);
     }
-  }, [activeViewEnabled, enabledViews.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- enabledViews is a
+    // fresh filtered array each render; only the current mode/reset matter.
+  }, [activeViewEnabled, enabledViews]);
 
   useEffect(() => {
     const onNewTask = () => {

@@ -21,6 +21,7 @@ export function Avatar({ name, src, size = "md", className = "" }: AvatarProps) 
 
   if (src) {
     return (
+      // eslint-disable-next-line @next/next/no-img-element -- user-supplied remote avatar; opting out of next/image
       <img
         src={src}
         alt={name || "Avatar"}
