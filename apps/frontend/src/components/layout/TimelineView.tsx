@@ -70,6 +70,9 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
   const viewButtonRef = useRef<HTMLButtonElement | null>(null);
   const router = useRouter();
   const bodyRef = useRef<HTMLDivElement>(null);
+  const [panActive, setPanActive] = useState(false);
+  const panStartRef = useRef<{ x: number; scrollLeft: number } | null>(null);
+  const panCursorRef = useRef<"grab" | "grabbing">("grab");
   const timelineOn = useUiModule("viewTimeline");
   const kanbanModuleOn = useUiModule("viewKanban");
   const calendarModuleOn = useUiModule("viewCalendar");
@@ -206,12 +209,15 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
       const { active, delta } = event;
       if (!active) return;
       const taskId = active.id as string;
-      // Each day column is a fixed width in the infinite timeline.
+      // Each day column is a fixed width in the infinite timeline. A tiny drag
+      // still counts as at least one day so it never feels like a dead snap-back.
       const dayWidth = DAY_WIDTH;
-      const daysShifted = Math.round(delta.x / dayWidth);
+      const whole = Math.round(delta.x / dayWidth);
+      const daysShifted = delta.x === 0 ? 0 : (whole === 0 ? Math.sign(delta.x) : whole);
       if (daysShifted === 0) return;
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
+
       const fields: Record<string, string> = {};
       if (task.start_date) {
         const d = parseLocalDate(task.start_date);
@@ -223,7 +229,21 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
         d.setDate(d.getDate() + daysShifted);
         fields.due_date = toLocalDateString(d);
       }
-      if (!task.start_date && !task.due_date) return;
+      // A partially/completely undated task dropped onto the timeline: assign it
+      // the date of the day it landed on (drags start from the "today" column).
+      if (!task.start_date && !task.due_date) {
+        const t = new Date();
+        t.setDate(t.getDate() + daysShifted);
+        fields.start_date = toLocalDateString(t);
+        fields.due_date = toLocalDateString(t);
+      }
+      // Optimistically update the store so the bar visibly snaps to its new day
+      // immediately (no waiting on the server round-trip), keeping the UI in sync
+      // with the drag even if the refetch is slow.
+      const store = useAppStore.getState();
+      store.setTasks(
+        store.tasks.map((t) => (t.id === taskId ? { ...t, ...fields } : t))
+      );
       await updateTask(taskId, fields);
     },
     [tasks, updateTask]
@@ -255,6 +275,43 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
     },
     [expandBackward, expandForward]
   );
+
+  // Drag-to-pan the timeline: grabbing empty space and dragging scrolls the
+  // canvas horizontally (like a map). Only starts when the pointer goes down on
+  // empty space, never on a task bar (which starts a task drag) or on the grid's
+  // interactive day cells (which handle double-click-to-add).
+  const onTimelinePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      const body = bodyRef.current;
+      if (!body || e.button !== 0) return;
+      const target = e.target as HTMLElement;
+      // Never pan from an interactive element (task bars, buttons, inputs).
+      if (target.closest("[data-task-bar], button, input, select, textarea, a, [data-day-column]")) {
+        return;
+      }
+      panStartRef.current = { x: e.clientX, scrollLeft: body.scrollLeft };
+      panCursorRef.current = "grabbing";
+      setPanActive(true);
+    },
+    []
+  );
+
+  const onTimelinePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const body = bodyRef.current;
+      const start = panStartRef.current;
+      if (!body || !start) return;
+      const dx = e.clientX - start.x;
+      body.scrollLeft = start.scrollLeft - dx;
+    },
+    []
+  );
+
+  const onTimelinePointerUp = useCallback(() => {
+    panStartRef.current = null;
+    panCursorRef.current = "grab";
+    setPanActive(false);
+  }, []);
 
   const handleCreateTask = useCallback(
     async (data: {
@@ -427,7 +484,22 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
       <div className="flex" style={{ flex: 1, minHeight: 0 }}>
         {/* Single timeline canvas: all tasks render in one lane */}
         <div className="flex flex-col" data-timeline-canvas style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-          <div ref={bodyRef} className="flex flex-col" data-timeline-body style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
+          <div
+            ref={bodyRef}
+            className="flex flex-col"
+            data-timeline-body
+            style={{
+              flex: 1,
+              overflow: "auto",
+              minHeight: 0,
+              cursor: panActive ? "grabbing" : "grab",
+              userSelect: panActive ? "none" : undefined,
+            }}
+            onPointerDown={onTimelinePointerDown}
+            onPointerMove={onTimelinePointerMove}
+            onPointerUp={onTimelinePointerUp}
+            onPointerLeave={onTimelinePointerUp}
+          >
             <DndContext sensors={sensors} onDragEnd={handleDragEnd} onDragMove={handleDragMove}>
               <div className="relative" style={{ minHeight: "100%", width: days.length * DAY_WIDTH }}>
                 <TimelineHeader days={days} />

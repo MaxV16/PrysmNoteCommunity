@@ -16,16 +16,36 @@
  */
 
 import { chromium } from "@playwright/test";
+import fs from "fs";
+import os from "os";
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
 
 // Reuse the Chromium already cached on this machine so `npm run smoke:ui`
 // works without downloading a Playwright-matching browser.
-// Set EXECUTABLE_PATH to a specific binary to override, or leave empty to let
-// Playwright resolve its own browser.
-const EXECUTABLE_PATH =
-  process.env.EXECUTABLE_PATH ||
-  "/Users/maksimismaccing/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell";
+// Set EXECUTABLE_PATH to a specific binary to override. When unset, we scan the
+// Playwright browser cache for any chromium_headless_shell/chromium build so the
+// path stays valid even when the browser version changes.
+function resolveExecutable() {
+  if (process.env.EXECUTABLE_PATH) return process.env.EXECUTABLE_PATH;
+  const cacheRoot =
+    process.env.PLAYWRIGHT_BROWSERS_PATH || `${os.homedir()}/Library/Caches/ms-playwright`;
+  try {
+    for (const dir of fs.readdirSync(cacheRoot)) {
+      // Prefer a headless shell, else a full chromium build.
+      if (dir.startsWith("chromium_headless_shell-") || dir.startsWith("chromium-")) {
+        for (const candidate of ["chrome-mac/headless_shell", "chrome-mac/Chromium"]) {
+          const p = `${cacheRoot}/${dir}/${candidate}`;
+          if (fs.existsSync(p)) return p;
+        }
+      }
+    }
+  } catch {
+    // Fall through to Playwright's own resolution if the cache isn't present.
+  }
+  return "";
+}
+const EXECUTABLE_PATH = resolveExecutable();
 
 function localDateString() {
   const d = new Date();

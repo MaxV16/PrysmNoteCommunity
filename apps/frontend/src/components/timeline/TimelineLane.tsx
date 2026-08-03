@@ -56,13 +56,42 @@ function getTaskDayInfo(task: Task, days: Date[]): { index: number; endIndex: nu
   return { index: dayIndex, endIndex };
 }
 
+// Today's index within the rendered day range, or -1 if today isn't visible.
+function todayIndex(days: Date[]): number {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  for (let i = 0; i < days.length; i++) {
+    const d = days[i];
+    if (
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate()
+    ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, rowHeight }: TimelineLaneProps) {
   const { positioned, maxStack } = useMemo(() => {
+    // Day column index for "today", used to place undated (inbox) tasks so they
+    // are visible and draggable on the timeline. Falls back to the middle day if
+    // today isn't in range.
+    const todayIdx = todayIndex(days);
+    const undatedIdx = todayIdx >= 0 ? todayIdx : Math.floor(days.length / 2);
+
     // Determine day column spans for each task.
     const candidates: { task: Task; info: { index: number; endIndex: number } }[] = [];
     for (const task of tasks) {
       const info = getTaskDayInfo(task, days);
-      if (info) candidates.push({ task, info });
+      if (info) {
+        candidates.push({ task, info });
+      } else if (!task.start_date && !task.due_date) {
+        // Undated task: pin to today's column so it can be grabbed and dragged
+        // onto a date.
+        candidates.push({ task, info: { index: undatedIdx, endIndex: undatedIdx } });
+      }
     }
 
     // Assign a vertical stack row per task. A task may reuse a row across the

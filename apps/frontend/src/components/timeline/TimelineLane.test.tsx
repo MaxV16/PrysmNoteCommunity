@@ -53,9 +53,9 @@ function renderLane(tasks: Task[], start = "2026-08-03"): RenderLane {
       <TimelineLane tasks={tasks} days={days} />
     </DndContext>
   );
-  const baseElements = Array.from(
-    container.querySelectorAll('[class*="cursor-grab"]')
-  ).map((el) => el.parentElement!).filter(Boolean);
+  // Task bars carry a `data-task-bar` attribute (our stable hook) and are
+  // positioned via inline style.top; use them for assertions.
+  const baseElements = Array.from(container.querySelectorAll('[data-task-bar]'));
   return { container, baseElements };
 }
 
@@ -88,11 +88,23 @@ describe("TimelineLane stacking", () => {
     expect(lane).not.toBeNull();
   });
 
-  it("does not position date-less (note) tasks", () => {
+  it("renders date-less (undated) tasks pinned to today's column so they can be dragged onto a date", () => {
     const tasks = [
       makeTask({ id: "note", title: "Just a note", start_date: null, due_date: null }),
     ];
     const { baseElements } = renderLane(tasks);
-    expect(baseElements.length).toBe(0);
+    // Undated tasks are now rendered (pinned to the today column) so a user can
+    // grab and drag them to assign a date.
+    expect(baseElements.length).toBe(1);
+  });
+
+  it("positions a dated task and an undated task", () => {
+    const tasks = [
+      makeTask({ id: "t1", title: "Dated", start_date: "2026-08-04", due_date: "2026-08-04" }),
+      makeTask({ id: "note", title: "Undated", start_date: null, due_date: null }),
+    ];
+    const { baseElements } = renderLane(tasks);
+    // Both the dated and undated (pinned) bars are rendered.
+    expect(baseElements.length).toBe(2);
   });
 });

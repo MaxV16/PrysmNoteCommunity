@@ -46,6 +46,7 @@ export function TaskBar({ task, style, onClick }: TaskBarProps) {
   return (
     <div
       ref={setNodeRef}
+      data-task-bar={true}
       {...listeners}
       {...attributes}
       style={barStyle}
