@@ -11,7 +11,9 @@ import { TaskLinks } from "./TaskLinks";
 import { TaskTagsEditor } from "./TaskTagsEditor";
 import { DateRecurrencePopover } from "./DateRecurrencePopover";
 import { Markdown } from "@/components/ai/Markdown";
+import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
+
 import {
   TIER_COLORS,
   TIER_LABELS,
@@ -505,32 +507,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         </div>
       )}
 
-      {isBroadTask(task.title) && (
-        <button
-          onClick={handleBreakDownNow}
-          disabled={busy}
-          className="btn mt-4 w-full gap-2 border border-accent/20 bg-accent/10 px-3 py-2 text-xs text-accent transition-all hover:border-accent/40 hover:bg-accent/20 disabled:opacity-50"
-        >
-          <span>🧠</span>
-          <span>{busy ? "Breaking down…" : "Break this down into subtasks"}</span>
-        </button>
-      )}
-
-      {/* Footer */}
-      <div className="mt-4 border-t border-border/60 pt-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <button
-              ref={statusRef}
-              onClick={() => setStatusOpen((v) => !v)}
-              className="badge"
-              style={{
-                backgroundColor: (STATUS_COLORS[task.status] || "var(--text-muted)") + "20",
-                color: STATUS_COLORS[task.status] || "var(--text-secondary)",
-              }}
-            >
-              {task.status.replace("_", " ")}
-              <svg className="ml-1" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
+      {/* Enterprise: GitHub issue/PR linkage (stripped from community builds) */}
             </button>
             <PopoverMenu
               open={statusOpen}

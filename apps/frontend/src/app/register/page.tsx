@@ -1,18 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
+import { OAuthButtons } from "@/components/auth/OAuthButtons";
+
+const SSO_ERROR_MESSAGES: Record<string, string> = {
+  sso_not_configured: "SSO is not configured on this server yet.",
+  sso_no_email: "That provider didn't return an email we could use.",
+  sso_invalid_state: "The sign-in request was invalid — please try again.",
+  sso_failed: "Sign-in with that provider failed. Please try again.",
+};
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
+  const [ssoError, setSsoError] = useState<keyof typeof SSO_ERROR_MESSAGES | null>(null);
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
   const router = useRouter();
+
+  useEffect(() => {
+    const e = new URLSearchParams(window.location.search).get("error");
+    if (e && e in SSO_ERROR_MESSAGES) setSsoError(e as keyof typeof SSO_ERROR_MESSAGES);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +67,19 @@ export default function RegisterPage() {
               {error}
             </div>
           )}
+          {ssoError && !error && (
+            <div className="mb-4 rounded-lg bg-warning/10 px-4 py-2.5 text-sm text-warning">
+              {SSO_ERROR_MESSAGES[ssoError]}
+            </div>
+          )}
+
+          <OAuthButtons />
+
+          <div className="my-5 flex items-center gap-3 text-xs text-muted">
+            <span className="h-px flex-1 bg-border" />
+            or sign up with email
+            <span className="h-px flex-1 bg-border" />
+          </div>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div>

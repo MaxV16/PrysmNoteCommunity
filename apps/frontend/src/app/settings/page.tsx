@@ -142,12 +142,13 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
   );
 }
 
-function IntegrationRow({ label, description, connected, onConnect, onDisconnect }: { label: string; description: string; connected: boolean; onConnect: () => void; onDisconnect?: () => void }) {
+function IntegrationRow({ label, description, connected, onConnect, onDisconnect, meta }: { label: string; description: string; connected: boolean; onConnect: () => void; onDisconnect?: () => void; meta?: string | null }) {
   return (
     <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
-      <div>
+      <div className="min-w-0">
         <p className="text-sm text-secondary">{label}</p>
         <p className="text-xs text-muted">{description}</p>
+        {meta && <p className="text-[10px] text-accent mt-0.5">{meta}</p>}
       </div>
       {connected ? (
         <div className="flex items-center gap-2">
@@ -241,10 +242,12 @@ export default function SettingsPage() {
   const [passwordMsg, setPasswordMsg] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
 
-  const [googleConnected, setGoogleConnected] = useState(() => !!lsGet("prysm_integration_google", ""));
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [githubLogin, setGithubLogin] = useState<string | null>(null);
   const [slackConnected, setSlackConnected] = useState(() => !!lsGet("prysm_integration_slack_webhook", ""));
-  const [githubConnected, setGithubConnected] = useState(() => !!lsGet("prysm_integration_github_token", ""));
   const [siriConnected, setSiriConnected] = useState(() => !!lsGet("prysm_integration_siri_url", ""));
+  const [integrationMsg, setIntegrationMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   const [inviteEmailCheck, setInviteEmailCheck] = useState("");
 
@@ -451,14 +454,107 @@ export default function SettingsPage() {
     setTimeout(() => setCollabMsg(""), 3000);
   };
 
-  const handleConnectGoogle = () => {
-    lsSet("prysm_integration_google", "connected");
-    setGoogleConnected(true);
+  const refreshIntegrationStatus = useCallback(async () => {
+    try {
+      const [gcal, ghub] = await Promise.allSettled([
+        api.get<{ connected: boolean }>("/ee/calendar/status"),
+        api.get<{ connected: boolean; login?: string }>("/ee/github/status"),
+      ]);
+      if (gcal.status === "fulfilled") { setGoogleConnected(gcal.value.connected); }
+      if (ghub.status === "fulfilled") {
+        setGithubConnected(ghub.value.connected);
+        setGithubLogin(ghub.value.login ?? null);
+        if (ghub.value.connected) lsSet("prysm_integration_github_token", "connected");
+      }
+    } catch {
+      setGoogleConnected(false);
+      setGithubConnected(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshIntegrationStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Handle OAuth redirect callback (?code=...) for Google Calendar / GitHub.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const provider = params.get("provider") || params.get("service");
+    if (!code) return;
+    let providerName = provider;
+    if (!providerName) {
+      // Infer from the state if present, else default to google (redirect URI is
+      // shared). We set ?provider= explicitly when initiating, so this is a fallback.
+      providerName = "google";
+    }
+    (async () => {
+      try {
+        if (providerName === "github") {
+          await api.post("/ee/github/callback", { code });
+        } else {
+          await api.post("/ee/calendar/callback", { code });
+        }
+        setIntegrationMsg({ text: `${providerName === "github" ? "GitHub" : "Google Calendar"} connected.`, ok: true });
+      } catch (e) {
+        setIntegrationMsg({ text: e instanceof Error ? e.message : "Authorization failed", ok: false });
+      } finally {
+        // Clean the code out of the URL so a refresh doesn't re-exchange a stale code.
+        const url = new URL(window.location.href);
+        url.searchParams.delete("code");
+        url.searchParams.delete("provider");
+        url.searchParams.delete("service");
+        url.searchParams.delete("state");
+        window.history.replaceState({}, "", url.toString());
+        refreshIntegrationStatus();
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleConnectGoogle = async () => {
+    setIntegrationMsg(null);
+    try {
+      const data = await api.get<{ url: string }>("/ee/calendar/connect");
+      window.location.href = data.url; // triggers Google OAuth; returns here with ?code=
+    } catch (e) {
+      setIntegrationMsg({ text: e instanceof Error ? e.message : "Could not connect Google Calendar", ok: false });
+    }
   };
 
-  const handleDisconnectGoogle = () => {
-    localStorage.removeItem("prysm_integration_google");
-    setGoogleConnected(false);
+  const handleDisconnectGoogle = async () => {
+    setIntegrationMsg(null);
+    try {
+      await api.post("/ee/calendar/disconnect");
+      setGoogleConnected(false);
+    } catch (e) {
+      setIntegrationMsg({ text: e instanceof Error ? e.message : "Could not disconnect", ok: false });
+    }
+  };
+
+  const handleConnectGithub = async () => {
+    setIntegrationMsg(null);
+    try {
+      const data = await api.get<{ url: string }>("/ee/github/connect");
+      // Append provider so the callback knows which service to exchange.
+      const sep = data.url.includes("?") ? "&" : "?";
+      window.location.href = `${data.url}${sep}provider=github&service=github`;
+    } catch (e) {
+      setIntegrationMsg({ text: e instanceof Error ? e.message : "Could not connect GitHub", ok: false });
+    }
+  };
+
+  const handleDisconnectGithub = async () => {
+    setIntegrationMsg(null);
+    try {
+      await api.post("/ee/github/disconnect");
+      setGithubConnected(false);
+      setGithubLogin(null);
+      localStorage.removeItem("prysm_integration_github_token");
+    } catch (e) {
+      setIntegrationMsg({ text: e instanceof Error ? e.message : "Could not disconnect", ok: false });
+    }
   };
 
   const handleConnectSlack = () => {
@@ -472,19 +568,6 @@ export default function SettingsPage() {
   const handleDisconnectSlack = () => {
     localStorage.removeItem("prysm_integration_slack_webhook");
     setSlackConnected(false);
-  };
-
-  const handleConnectGithub = () => {
-    const token = prompt("Enter GitHub Personal Access Token:");
-    if (token && token.trim()) {
-      lsSet("prysm_integration_github_token", token.trim());
-      setGithubConnected(true);
-    }
-  };
-
-  const handleDisconnectGithub = () => {
-    localStorage.removeItem("prysm_integration_github_token");
-    setGithubConnected(false);
   };
 
   const handleConnectSiri = () => {
@@ -1097,10 +1180,15 @@ export default function SettingsPage() {
                   <p className="text-sm text-muted">Connect external services</p>
                 </div>
               </div>
+              {integrationMsg && (
+                <div className={`rounded-xl px-4 py-2.5 text-sm border ${integrationMsg.ok ? "bg-success/10 border-success/20 text-success" : "bg-danger/10 border-danger/20 text-danger"}`}>
+                  {integrationMsg.text}
+                </div>
+              )}
               <div className="space-y-3">
-                <IntegrationRow label="Google Calendar" description="Sync tasks with Google Calendar" connected={googleConnected} onConnect={handleConnectGoogle} onDisconnect={handleDisconnectGoogle} />
+                <IntegrationRow label="Google Calendar" description="Two-way sync: import events and push tasks to your calendar" connected={googleConnected} onConnect={handleConnectGoogle} onDisconnect={handleDisconnectGoogle} />
+                <IntegrationRow label="GitHub" description="OAuth connect, then create/link issues & PRs from tasks" connected={githubConnected} onConnect={handleConnectGithub} onDisconnect={handleDisconnectGithub} meta={githubConnected ? (githubLogin ? `@{githubLogin}` : "Connected") : ""} />
                 <IntegrationRow label="Slack" description="Receive task notifications in Slack" connected={slackConnected} onConnect={handleConnectSlack} onDisconnect={handleDisconnectSlack} />
-                <IntegrationRow label="GitHub" description="Link issues and pull requests to tasks" connected={githubConnected} onConnect={handleConnectGithub} onDisconnect={handleDisconnectGithub} />
                 <IntegrationRow label="Siri Shortcuts" description="Deep-link into Prysm Note from Shortcuts" connected={siriConnected} onConnect={handleConnectSiri} onDisconnect={handleDisconnectSiri} />
               </div>
               <div className="border-t border-border pt-5 space-y-3">

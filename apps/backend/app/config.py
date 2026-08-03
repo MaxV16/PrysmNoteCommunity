@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
 
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    github_redirect_uri: str = "http://localhost:3000/settings"
+    oauth_redirect_uri: str = "http://localhost:3000/api/auth/oauth/google/callback"
+    app_origin: str = "http://localhost:3000"
+
     redis_url: str = ""
 
     smtp_host: str = ""
