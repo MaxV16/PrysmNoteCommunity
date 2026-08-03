@@ -208,13 +208,48 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
     async (event: DragEndEvent) => {
       const { active, delta } = event;
       if (!active) return;
-      const taskId = active.id as string;
+      const dragId = active.id as string;
       // Each day column is a fixed width in the infinite timeline. A tiny drag
       // still counts as at least one day so it never feels like a dead snap-back.
       const dayWidth = DAY_WIDTH;
       const whole = Math.round(delta.x / dayWidth);
       const daysShifted = delta.x === 0 ? 0 : (whole === 0 ? Math.sign(delta.x) : whole);
       if (daysShifted === 0) return;
+
+      // Resize: dragging a left/right bar handle extends the task's start/due
+      // date so it spans multiple days. id format: "<taskId>:left|right".
+      const resizeMatch = dragId.match(/^(.+):(left|right)$/);
+      if (resizeMatch) {
+        const [, resizeTaskId, side] = resizeMatch;
+        const task = tasks.find((t) => t.id === resizeTaskId);
+        if (!task) return;
+        const fields: Record<string, string> = {};
+        if (side === "left") {
+          const start = task.start_date ? parseLocalDate(task.start_date) : (task.due_date ? parseLocalDate(task.due_date) : new Date());
+          const d = new Date(start);
+          d.setDate(d.getDate() + daysShifted);
+          fields.start_date = toLocalDateString(d);
+          // An undated task grabbed by its left edge: only a start date is set
+          // (single-day bar); if it had only a due date, extending left expands
+          // backward from that due date.
+          if (!task.start_date && task.due_date) {
+            // keep due_date as-is (span backward) — start already set above.
+          }
+        } else {
+          const end = task.due_date ? parseLocalDate(task.due_date) : (task.start_date ? parseLocalDate(task.start_date) : new Date());
+          const d = new Date(end);
+          d.setDate(d.getDate() + daysShifted);
+          fields.due_date = toLocalDateString(d);
+        }
+        const store = useAppStore.getState();
+        store.setTasks(
+          store.tasks.map((t) => (t.id === resizeTaskId ? { ...t, ...fields } : t))
+        );
+        await updateTask(resizeTaskId, fields);
+        return;
+      }
+
+      const taskId = dragId;
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
 
@@ -285,8 +320,8 @@ export function TimelineView({ onToggleRight, onOpenSticky }: TimelineViewProps)
       const body = bodyRef.current;
       if (!body || e.button !== 0) return;
       const target = e.target as HTMLElement;
-      // Never pan from an interactive element (task bars, buttons, inputs).
-      if (target.closest("[data-task-bar], button, input, select, textarea, a, [data-day-column]")) {
+      // Never pan from an interactive element (task bars, resize handles, buttons, inputs).
+      if (target.closest("[data-task-bar], [data-resize-handle], button, input, select, textarea, a, [data-day-column]")) {
         return;
       }
       panStartRef.current = { x: e.clientX, scrollLeft: body.scrollLeft };
