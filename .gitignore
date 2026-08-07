@@ -2,6 +2,13 @@
 .env
 .env.local
 .env.*.local
+# Real prod/live secret files (never commit); keep *.example templates tracked.
+.env.prod
+.env.production
+.env.staging
+
+# Database backups (real data — never commit)
+backups/
 
 # Dependencies
 node_modules/
