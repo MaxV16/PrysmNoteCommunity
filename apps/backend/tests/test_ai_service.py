@@ -35,6 +35,7 @@ async def test_tool_definitions_have_all_tools():
         "convert_subtasks_to_description",
         "complete_task", "duplicate_task", "list_tags", "add_tag_to_task",
         "get_task_stats",
+        "batch_delete_tasks",
     }
     assert tool_names == expected, f"Missing tools: {expected - tool_names}"
 
@@ -184,6 +185,35 @@ async def test_execute_delete_task_invalid_uuid(db_session: AsyncSession):
     content = json.loads(results[0]["content"])
     assert "error" in content
     assert "deleted" not in content
+
+
+@pytest.mark.asyncio
+async def test_execute_batch_delete_tasks(db_session: AsyncSession, ai_user):
+    from app.models.task import Task
+    from sqlalchemy import select
+    user_id = ai_user
+    t1 = Task(user_id=user_id, title="A")
+    t2 = Task(user_id=user_id, title="B")
+    db_session.add_all([t1, t2])
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_batch",
+        "function": {
+            "name": "batch_delete_tasks",
+            "arguments": json.dumps({"task_ids": [str(t1.id), str(t2.id), "not-a-uuid"]}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    # Two valid tasks deleted, the malformed id reported as failed.
+    assert content["deleted_count"] == 2
+    assert content["failed_count"] == 1
+    assert content["requested"] == 3
+    remaining = (await db_session.execute(
+        select(Task).where(Task.user_id == user_id)
+    )).scalars().all()
+    assert len(remaining) == 0
 
 
 @pytest.mark.asyncio

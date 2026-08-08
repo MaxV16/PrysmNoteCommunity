@@ -89,6 +89,20 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "batch_delete_tasks",
+            "description": "Delete MULTIPLE tasks at once (pass a list of task_ids). DANGER: permanently removes them. ONLY call after the user has EXPLICITLY confirmed deletion of all of them. It returns exact deleted_count and failed_count (with the ids that failed), so report the real numbers in your reply — never claim everything was deleted unless deleted_count equals the number you intended to delete. If the user said the tasks are 'done'/'completed', mark them status='done' via update_task instead (never delete).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_ids": {"type": "array", "items": {"type": "string"}, "description": "list of task ids to delete"},
+                },
+                "required": ["task_ids"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_task_details",
             "description": "Get full task details with links, tags, subtasks",
             "parameters": {
@@ -451,6 +465,7 @@ TOOL USAGE TIPS:
 - Use duplicate_task when the user asks to copy/clone/repeat an existing task as a new one.
 - Use list_tags to see the user's tags, and add_tag_to_task to attach a tag (creating it if needed) when the user mentions categorizing/labeling a task.
 - Use get_task_stats when the user asks "how many tasks are done/overdue/left", "what's my progress", or similar summary questions.
+- When the user confirms deleting SEVERAL tasks, use batch_delete_tasks with ALL of their ids in ONE call, then report the exact deleted_count and failed_count from the result. NEVER claim "all deleted" unless deleted_count equals the number you intended to delete — if failed_count > 0, tell the user which tasks failed and why, and retry them. Do not use many separate delete_task calls when you can batch.
 
 NATURAL LANGUAGE UNDERSTANDING:
 - "gp appointment next week monday at 12pm" → next Monday, priority 1 (high/medical)
@@ -786,6 +801,43 @@ async def execute_tool_calls(
                         "role": "tool",
                         "content": json.dumps({"error": "Task not found"}),
                     })
+
+            elif name == "batch_delete_tasks":
+                task_ids = args.get("task_ids") or []
+                if not isinstance(task_ids, list) or not task_ids:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "task_ids must be a non-empty list"}),
+                    })
+                    continue
+                deleted_ids = []
+                failed_ids = []
+                for tid in task_ids:
+                    task_uuid = _safe_uuid(tid)
+                    if task_uuid is None:
+                        failed_ids.append({"task_id": tid, "reason": "invalid_id"})
+                        continue
+                    row = (await session.execute(
+                        select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
+                    )).scalar_one_or_none()
+                    if row:
+                        await session.delete(row)
+                        await session.flush()
+                        deleted_ids.append(str(tid))
+                    else:
+                        failed_ids.append({"task_id": tid, "reason": "not_found"})
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({
+                        "requested": len(task_ids),
+                        "deleted_count": len(deleted_ids),
+                        "failed_count": len(failed_ids),
+                        "deleted_ids": deleted_ids,
+                        "failed_ids": failed_ids,
+                    }),
+                })
 
             elif name == "get_task_details":
                 task_id = args.get("task_id")
