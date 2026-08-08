@@ -189,6 +189,7 @@ async def test_execute_delete_task_invalid_uuid(db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_execute_complete_task(db_session: AsyncSession, ai_user):
     from app.models.task import Task
+    from sqlalchemy import select
     user_id = ai_user
     task = Task(user_id=user_id, title="Finish Report")
     db_session.add(task)
