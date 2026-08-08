@@ -9,7 +9,7 @@ from app.models.api_key import ApiKey
 from app.models.user import User
 from app.utils.encryption import encrypt_api_key
 
-VALID_PROVIDERS = {"openai", "gemini", "deepseek"}
+VALID_PROVIDERS = {"openai", "gemini", "deepseek", "openrouter"}
 
 router = APIRouter(prefix="/api/keys", tags=["keys"])
 
@@ -199,6 +199,15 @@ async def test_key(request: TestKeyRequest):
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
                     f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+                    timeout=10,
+                )
+                return {"valid": resp.status_code == 200, "error": None if resp.status_code == 200 else f"HTTP {resp.status_code}"}
+
+        elif provider == "openrouter":
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
                     timeout=10,
                 )
                 return {"valid": resp.status_code == 200, "error": None if resp.status_code == 200 else f"HTTP {resp.status_code}"}

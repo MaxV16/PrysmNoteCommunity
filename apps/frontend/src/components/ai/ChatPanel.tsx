@@ -19,6 +19,7 @@ const PROVIDERS = [
   { value: "openai", label: "OpenAI" },
   { value: "gemini", label: "Gemini" },
   { value: "deepseek", label: "DeepSeek" },
+  { value: "openrouter", label: "OpenRouter" },
 ];
 
 const CHAT_HISTORY_KEY = "prysm_ai_chat_history";

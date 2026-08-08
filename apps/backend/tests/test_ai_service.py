@@ -33,6 +33,8 @@ async def test_tool_definitions_have_all_tools():
         "get_subtasks", "create_subtask", "update_subtask", "delete_subtask",
         "reorder_subtasks", "convert_description_to_subtasks",
         "convert_subtasks_to_description",
+        "complete_task", "duplicate_task", "list_tags", "add_tag_to_task",
+        "get_task_stats",
     }
     assert tool_names == expected, f"Missing tools: {expected - tool_names}"
 
@@ -165,6 +167,114 @@ async def test_execute_delete_task_not_found(db_session: AsyncSession):
     results = await execute_tool_calls(tool_calls, str(uuid4()), db_session)
     content = json.loads(results[0]["content"])
     assert "error" in content
+
+
+@pytest.mark.asyncio
+async def test_execute_delete_task_invalid_uuid(db_session: AsyncSession):
+    # A truncated/invalid UUID must return a clean error, not crash or fabricate
+    # a success (regression for the "89b98193 isn't a full valid UUID" bug).
+    tool_calls = [{
+        "id": "call_del_bad",
+        "function": {
+            "name": "delete_task",
+            "arguments": json.dumps({"task_id": "89b98193"}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(uuid4()), db_session)
+    content = json.loads(results[0]["content"])
+    assert "error" in content
+    assert "deleted" not in content
+
+
+@pytest.mark.asyncio
+async def test_execute_complete_task(db_session: AsyncSession, ai_user):
+    from app.models.task import Task
+    user_id = ai_user
+    task = Task(user_id=user_id, title="Finish Report")
+    db_session.add(task)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_done",
+        "function": {
+            "name": "complete_task",
+            "arguments": json.dumps({"task_id": str(task.id)}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert content["completed"] is True
+    assert content["status"] == "done"
+    # The task must actually be marked done, not deleted.
+    fresh = (await db_session.execute(
+        select(Task).where(Task.id == task.id)
+    )).scalar_one()
+    assert fresh.status.value == "done"
+
+
+@pytest.mark.asyncio
+async def test_execute_duplicate_task(db_session: AsyncSession, ai_user):
+    from app.models.task import Task
+    user_id = ai_user
+    task = Task(user_id=user_id, title="Original", description="copy me", priority=1)
+    db_session.add(task)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_dup",
+        "function": {
+            "name": "duplicate_task",
+            "arguments": json.dumps({"task_id": str(task.id)}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert content["created"] is True
+    assert content["task"]["title"] == "Original"
+
+
+@pytest.mark.asyncio
+async def test_execute_list_tags_and_add_tag(db_session: AsyncSession, ai_user):
+    from app.models.task import Task
+    from sqlalchemy import select
+    user_id = ai_user
+    task = Task(user_id=user_id, title="Labeled Task")
+    db_session.add(task)
+    await db_session.flush()
+
+    added = await execute_tool_calls([{
+        "id": "c_add",
+        "function": {"name": "add_tag_to_task", "arguments": json.dumps({"task_id": str(task.id), "tag_name": "work"})},
+    }], str(user_id), db_session)
+    added_content = json.loads(added[0]["content"])
+    assert added_content["added"] is True
+    assert added_content["tag"]["name"] == "work"
+
+    listed = await execute_tool_calls([{
+        "id": "c_list",
+        "function": {"name": "list_tags", "arguments": "{}"},
+    }], str(user_id), db_session)
+    listed_content = json.loads(listed[0]["content"])
+    assert any(t["name"] == "work" for t in listed_content["tags"])
+
+
+@pytest.mark.asyncio
+async def test_execute_get_task_stats(db_session: AsyncSession, ai_user):
+    from app.models.task import Task, TaskStatus
+    user_id = ai_user
+    db_session.add(Task(user_id=user_id, title="One", status=TaskStatus.DONE))
+    db_session.add(Task(user_id=user_id, title="Two", status=TaskStatus.DONE))
+    db_session.add(Task(user_id=user_id, title="Three", status=TaskStatus.TODO))
+    await db_session.flush()
+
+    results = await execute_tool_calls([{
+        "id": "c_stats",
+        "function": {"name": "get_task_stats", "arguments": "{}"},
+    }], str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert content["total"] == 3
+    assert content["stats"].get("done") == 2
+    assert content["stats"].get("todo") == 1
 
 
 @pytest.mark.asyncio

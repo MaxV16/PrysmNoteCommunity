@@ -1,4 +1,4 @@
-export type LLMProvider = "openai" | "gemini" | "deepseek";
+export type LLMProvider = "openai" | "gemini" | "deepseek" | "openrouter";
 
 interface ToolCall {
   id: string;
@@ -25,6 +25,7 @@ const API_URLS: Record<LLMProvider, string> = {
   openai: "https://api.openai.com/v1/chat/completions",
   gemini: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent",
   deepseek: "https://api.deepseek.com/v1/chat/completions",
+  openrouter: "https://openrouter.ai/api/v1/chat/completions",
 };
 
 const LOCAL_KEY_PREFIX = "prysm_key_";
@@ -151,6 +152,37 @@ async function deepseekStream(
   return res.body!;
 }
 
+async function openrouterStream(
+  apiKey: string,
+  messages: Array<{ role: string; content: string; tool_calls?: ToolCall[] }>,
+  tools: Array<unknown> | undefined,
+  signal: AbortSignal
+): Promise<ReadableStream<Uint8Array>> {
+  const body: Record<string, unknown> = {
+    model: "google/gemini-2.0-flash-001",
+    messages,
+    stream: true,
+  };
+  if (tools) body.tools = tools;
+
+  const res = await fetch(API_URLS.openrouter, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `OpenRouter error ${res.status}`);
+  }
+
+  return res.body!;
+}
+
 export async function streamChat(
   provider: LLMProvider,
   messages: Array<{ role: string; content: string; tool_calls?: ToolCall[] }>,
@@ -171,6 +203,8 @@ export async function streamChat(
       return geminiStream(apiKey, messages, tools, abortController);
     case "deepseek":
       return deepseekStream(apiKey, messages, tools, abortController);
+    case "openrouter":
+      return openrouterStream(apiKey, messages, tools, abortController);
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
@@ -188,7 +222,8 @@ export async function chat(
   }
 
   const body: Record<string, unknown> = {
-    model: provider === "openai" ? "gpt-4o" : provider === "deepseek" ? "deepseek-chat" : "gemini-2.0-flash",
+    model:
+      provider === "openai" ? "gpt-4o" : provider === "deepseek" ? "deepseek-chat" : provider === "openrouter" ? "google/gemini-2.0-flash-001" : "gemini-2.0-flash",
     messages,
   };
   if (tools) {
@@ -212,7 +247,7 @@ export async function chat(
     delete body.messages;
     delete body.model;
   } else {
-    url = provider === "openai" ? API_URLS.openai : API_URLS.deepseek;
+    url = provider === "openai" ? API_URLS.openai : provider === "openrouter" ? API_URLS.openrouter : API_URLS.deepseek;
     headers = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,

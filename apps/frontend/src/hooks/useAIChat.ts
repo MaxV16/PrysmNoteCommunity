@@ -27,6 +27,19 @@ function getToken(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+async function doRefreshToken(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function refreshTasksFromServer() {
   try {
     const data = await api.get<Task[]>("/tasks/");
@@ -429,6 +442,28 @@ export function useAIChat() {
             ...(context ? { context } : {}),
           }),
         });
+
+        // The access token is short-lived (15 min). When it expires, other API
+        // calls auto-refresh via the api wrapper, but this raw stream fetch does
+        // not — so refresh once and retry rather than surfacing "Not authenticated".
+        if (res.status === 401) {
+          const refreshed = await doRefreshToken();
+          if (refreshed) {
+            res = await fetch(`${API_URL}/ai/chat/stream`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              signal,
+              body: JSON.stringify({
+                message: content,
+                chat_history: chatMessages.slice(-CONTEXT_MAX_MESSAGES),
+                session_id: sessionId,
+                provider,
+                ...(context ? { context } : {}),
+              }),
+            });
+          }
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error && err.name !== "AbortError" ? err.message : "Failed to fetch";
         setAssistant(`Error: ${msg}. Please check your API key in Settings.`);

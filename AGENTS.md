@@ -176,6 +176,16 @@ See `.env.example` for the full list. Key variables:
 ### LLM Adapter
 All LLM providers implement the `LLMClient` abstract base class in `app/llm/base.py`. New providers register via the `@register_provider(name)` decorator. See `app/llm/openai_client.py` for reference.
 
+### AI ↔ Task-Feature Sync (MANDATORY)
+The in-app AI agent must always understand and be able to use every task-related feature it can operate on. Whenever you add, change, or extend a task feature (new field, new status, new task type, tags, recurrence, subtasks, etc.), you MUST also extend the AI so it knows how to use it:
+
+1. **Tool definitions** — add or update the function in `TOOL_DEFINITIONS` in `apps/backend/app/services/ai_service.py`, and implement its handler in `execute_tool_calls()`.
+2. **System prompt** — add guidance in `build_messages()` (in the same file) so the model knows when and how to call the new tool.
+3. **Tool descriptions** — make the tool's `description` explicit about when to use it (e.g. "when the user says a task is done, mark status=done, do NOT delete").
+4. **Tests** — add/extend a test in `apps/backend/tests/test_ai_service.py` (tool-set test + at least one handler test) and update `test_tool_definitions_have_all_tools` if you changed the tool set.
+
+Deleting is destructive: the agent MUST get explicit user confirmation before calling `delete_task`, and must mark a task done (status=done) rather than delete it when the user says it's done/completed/finished. Never claim a delete/complete succeeded unless the tool returned the success flag.
+
 ### Auth
 - JWT access tokens (15 min) + refresh tokens (7 days)
 - `bcrypt` password hashing

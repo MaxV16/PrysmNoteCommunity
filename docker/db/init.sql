@@ -32,10 +32,12 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255),
   display_name VARCHAR(100),
+  provider VARCHAR(20),
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS ix_users_provider ON users(provider);
 
 -- API keys table (user-provided LLM keys, encrypted at rest)
 CREATE TABLE IF NOT EXISTS api_keys (

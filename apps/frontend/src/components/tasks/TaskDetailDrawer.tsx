@@ -157,6 +157,10 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
   const toggleStatus = async () => {
     const newStatus = task.status === "done" ? "todo" : "done";
+    if (newStatus === "done") {
+      const { playCompletionSound } = await import("@/lib/sounds");
+      playCompletionSound();
+    }
     await updateTask(task.id, { status: newStatus });
   };
 
@@ -293,7 +297,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   }
 
   return (
-    <DrawerShell onClose={onClose}>
+    <DrawerShell onClose={onClose} dimmed={task.status === "done"}>
       {/* Header: type label + date range pill, priority flag */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-xs text-secondary">
@@ -591,10 +595,11 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 interface DrawerShellProps {
   onClose: () => void;
   title?: string;
+  dimmed?: boolean;
   children: React.ReactNode;
 }
 
-function DrawerShell({ onClose, title, children }: DrawerShellProps) {
+function DrawerShell({ onClose, title, dimmed, children }: DrawerShellProps) {
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <div
@@ -614,7 +619,7 @@ function DrawerShell({ onClose, title, children }: DrawerShellProps) {
             </button>
           </div>
         ) : null}
-        <div className="flex flex-1 flex-col overflow-y-auto px-4 py-3">{children}</div>
+        <div className={`flex flex-1 flex-col overflow-y-auto px-4 py-3 transition-opacity ${dimmed ? "opacity-50" : ""}`}>{children}</div>
       </div>
     </div>
   );

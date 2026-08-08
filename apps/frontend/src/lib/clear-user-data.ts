@@ -12,6 +12,7 @@ const PER_ACCOUNT_KEYS = [
   "prysm_key_openai",
   "prysm_key_gemini",
   "prysm_key_deepseek",
+  "prysm_key_openrouter",
   "prysm_last_provider",
   "prysm_ai_chat_history",
   "prysm_ai_active_chat",

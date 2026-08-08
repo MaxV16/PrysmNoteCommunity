@@ -181,6 +181,7 @@ export default function SettingsPage() {
   const [openaiKey, setOpenaiKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
   const [deepseekKey, setDeepseekKey] = useState("");
+  const [openrouterKey, setOpenrouterKey] = useState("");
   const [keyMsg, setKeyMsg] = useState("");
   const [keySaving, setKeySaving] = useState<string | null>(null);
   const [testingKey, setTestingKey] = useState<string | null>(null);
@@ -299,6 +300,7 @@ export default function SettingsPage() {
         if (provider === "openai") setOpenaiKey("");
         if (provider === "gemini") setGeminiKey("");
         if (provider === "deepseek") setDeepseekKey("");
+        if (provider === "openrouter") setOpenrouterKey("");
         setKeyMsg(`${provider} key saved.`);
         setTimeout(() => setKeyMsg(""), 3000);
       } catch {
@@ -1139,6 +1141,7 @@ export default function SettingsPage() {
                       localStorage.removeItem("prysm_key_openai");
                       localStorage.removeItem("prysm_key_gemini");
                       localStorage.removeItem("prysm_key_deepseek");
+                      localStorage.removeItem("prysm_key_openrouter");
                       alert("Local cache cleared.");
                     }}
                   >
@@ -1347,6 +1350,7 @@ export default function SettingsPage() {
                   { provider: "openai", label: "OpenAI", placeholder: "sk-..." },
                   { provider: "gemini", label: "Google Gemini", placeholder: "AIza..." },
                   { provider: "deepseek", label: "DeepSeek", placeholder: "sk-..." },
+                  { provider: "openrouter", label: "OpenRouter", placeholder: "sk-or-..." },
                 ].map(({ provider, label, placeholder }) => (
                   <div key={provider}>
                     <div className="flex items-center justify-between mb-1.5">
@@ -1360,7 +1364,7 @@ export default function SettingsPage() {
                       <div className="flex items-center gap-3 rounded-xl bg-elevated px-4 py-2.5 border border-border hover:border-success/30 transition-colors">
                         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-success/20 text-xs">✓</span>
                         <span className="flex-1 text-sm text-success font-medium">Key configured: {getKeyByProvider(provider)?.key_prefix}...</span>
-                        <button onClick={() => handleTestKey(provider, provider === "openai" ? openaiKey : provider === "gemini" ? geminiKey : deepseekKey)} disabled={testingKey === provider} className="rounded-lg px-2.5 py-1 text-xs text-secondary hover:bg-hover font-medium transition-colors border border-border">
+                        <button onClick={() => handleTestKey(provider, provider === "openai" ? openaiKey : provider === "gemini" ? geminiKey : provider === "openrouter" ? openrouterKey : deepseekKey)} disabled={testingKey === provider} className="rounded-lg px-2.5 py-1 text-xs text-secondary hover:bg-hover font-medium transition-colors border border-border">
                           {testingKey === provider ? "Testing..." : "Test"}
                         </button>
                         <button onClick={() => handleDeleteKey(getKeyByProvider(provider)!.id, provider)} className="rounded-lg px-2.5 py-1 text-xs text-danger hover:bg-danger/10 font-medium transition-colors">Remove</button>
@@ -1374,15 +1378,16 @@ export default function SettingsPage() {
                     ) : (
                       <div className="flex gap-2">
                         <input type="password" className="input-field flex-1" placeholder={placeholder}
-                          value={provider === "openai" ? openaiKey : provider === "gemini" ? geminiKey : deepseekKey}
+                          value={provider === "openai" ? openaiKey : provider === "gemini" ? geminiKey : provider === "openrouter" ? openrouterKey : deepseekKey}
                           onChange={(e) => {
                             if (provider === "openai") setOpenaiKey(e.target.value);
                             if (provider === "gemini") setGeminiKey(e.target.value);
                             if (provider === "deepseek") setDeepseekKey(e.target.value);
+                            if (provider === "openrouter") setOpenrouterKey(e.target.value);
                           }} />
                         <button onClick={() => handleSaveKey(provider,
-                          (provider === "openai" ? openaiKey : provider === "gemini" ? geminiKey : deepseekKey))}
-                          disabled={keySaving === provider || !(provider === "openai" ? openaiKey : provider === "gemini" ? geminiKey : deepseekKey).trim()}
+                          (provider === "openai" ? openaiKey : provider === "gemini" ? geminiKey : provider === "openrouter" ? openrouterKey : deepseekKey))}
+                          disabled={keySaving === provider || !(provider === "openai" ? openaiKey : provider === "gemini" ? geminiKey : provider === "openrouter" ? openrouterKey : deepseekKey).trim()}
                           className="btn btn-primary px-4 text-sm disabled:opacity-50 shrink-0">{keySaving === provider ? "Saving..." : "Save"}</button>
                       </div>
                     )}

@@ -53,6 +53,10 @@ export function ListView() {
 
   const handleToggleStatus = async (task: Task) => {
     const next = task.status === "done" ? "todo" : "done";
+    if (next === "done") {
+      const { playCompletionSound } = await import("@/lib/sounds");
+      playCompletionSound();
+    }
     await updateTask(task.id, { status: next });
   };
 
@@ -104,7 +108,7 @@ export function ListView() {
                 <div
                   key={task.id}
                   onClick={() => setSelectedTaskId(task.id)}
-                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-hover/20 transition-colors cursor-pointer"
+                  className={`flex items-center gap-3 px-4 py-2.5 hover:bg-hover/20 transition-opacity cursor-pointer ${isDone ? "opacity-50" : ""}`}
                 >
                   <button
                     onClick={(e) => { e.stopPropagation(); handleToggleStatus(task); }}

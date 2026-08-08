@@ -12,9 +12,9 @@ from app.utils.priority import normalize_priority
 CONTEXT_MAX_MESSAGES = 12
 
 # Cap on how many search-result tasks we hand the model in one tool result.
-TOOL_SEARCH_MAX = 12
+TOOL_SEARCH_MAX = 100
 # Cap on the serialized length of a single tool result fed back to the model.
-TOOL_RESULT_MAX_CHARS = 3000
+TOOL_RESULT_MAX_CHARS = 12000
 # Per-memory character cap when injecting the RECALLED MEMORY block, keeping it
 # to a bounded token budget (~MEMORY_TOP_K * MEMORY_CAP chars worst case).
 MEMORY_CAP = 400
@@ -63,12 +63,12 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "update_task",
-            "description": "Update task fields",
+            "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} — do NOT delete the task. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "task_id": {"type": "string"},
-                    "fields": {"type": "object", "description": "fields to update"},
+                    "fields": {"type": "object", "description": "fields to update, e.g. {\"status\": \"done\"} to mark complete"},
                 },
                 "required": ["task_id", "fields"],
             },
@@ -78,7 +78,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "delete_task",
-            "description": "Delete a task",
+            "description": "Delete a task. DANGER: this permanently removes the task. ONLY call this after the user has EXPLICITLY confirmed deletion (e.g. 'yes delete it', 'go ahead', 'delete them'). When the user first asks to delete, DO NOT call this — reply listing exactly what you will delete and ask for confirmation. If the user said a task is 'done'/'completed'/'finished', use update_task with status='done' instead (never delete).",
             "parameters": {
                 "type": "object",
                 "properties": {"task_id": {"type": "string"}},
@@ -348,6 +348,69 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "complete_task",
+            "description": "Mark a task as done/complete (sets status to done). Use this when the user says a task is done, finished, or completed. This is NOT a delete.",
+            "parameters": {
+                "type": "object",
+                "properties": {"task_id": {"type": "string"}},
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "duplicate_task",
+            "description": "Create a copy of an existing task (same title, description, priority, dates, recurrence, tags). Returns the new task.",
+            "parameters": {
+                "type": "object",
+                "properties": {"task_id": {"type": "string"}},
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tags",
+            "description": "List all the user's tags with their id and name. Use before referencing a tag by name.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_tag_to_task",
+            "description": "Add a tag to a task by tag name. If a tag with that name does not exist yet, it is created. Use list_tags first to see existing tags.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string"},
+                    "tag_name": {"type": "string"},
+                },
+                "required": ["task_id", "tag_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_task_stats",
+            "description": "Return counts of the user's tasks grouped by status (backlog, todo, in_progress, done, cancelled) and the total.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -377,6 +440,17 @@ DECISION RULES:
 - Never end the turn after doing only read-only searches when the user asked you to CREATE something. Finish the job.
 
 DON'T FABRICATE SUCCESS: When the user asked you to CREATE or SCHEDULE a task (or several), never claim "Done!" / "I've created it" / "scheduled!" in your final reply unless your tool call actually returned `"created": true` (or `"created_count": N` for batch). If you did not make a successful create call, you have NOT created anything — do NOT affirm a schedule that doesn't exist. Instead, end the turn asking the ONE clarifying question you need (date, title, or priority) so you can then actually create it. A confirmation of a non-created schedule is a bug.
+
+COMPLETING VS DELETING:
+- If the user says a task is "done", "complete", "completed", "finished", "marked off", or asks to check it off, COMPLETE it — call update_task with fields status = "done". NEVER delete a task the user said is done.
+- Deleting a task is destructive and permanent. When the user asks you to delete, do NOT delete in that same turn. First reply listing the EXACT tasks you will delete (title + date), then ask them to confirm. Only call delete_task in a LATER turn once the user has explicitly confirmed (e.g. "yes delete it", "go ahead", "delete them").
+- NEVER claim a task was deleted unless delete_task returned `"deleted": true`, and NEVER claim a task was completed unless update_task returned `"updated": true`. If a tool returns an error (e.g. "Task not found", "Invalid task_id format"), do NOT pretend the delete/complete happened — report the failure and retry with the correct id.
+
+TOOL USAGE TIPS:
+- Use complete_task to mark a task done; use update_task with status="done" as an equivalent. Never delete a task the user just said is done.
+- Use duplicate_task when the user asks to copy/clone/repeat an existing task as a new one.
+- Use list_tags to see the user's tags, and add_tag_to_task to attach a tag (creating it if needed) when the user mentions categorizing/labeling a task.
+- Use get_task_stats when the user asks "how many tasks are done/overdue/left", "what's my progress", or similar summary questions.
 
 NATURAL LANGUAGE UNDERSTANDING:
 - "gp appointment next week monday at 12pm" → next Monday, priority 1 (high/medical)
@@ -456,7 +530,7 @@ async def execute_tool_calls(
     client = None,
 ) -> list[dict]:
     import json
-    from datetime import date as _date
+    from datetime import date as _date, datetime as _datetime
     from app.models.task import Task, TaskStatus
 
     # Normalize user_id to a string. The router passes user.id, which SQLAlchemy
@@ -472,6 +546,14 @@ async def execute_tool_calls(
         except (ValueError, TypeError):
             return None
     from app.services.task_service import create_task, search_tasks, get_task
+
+    def _safe_uuid(value):
+        if not value:
+            return None
+        try:
+            return UUID(value)
+        except (ValueError, TypeError, AttributeError):
+            return None
 
     results = []
 
@@ -642,9 +724,17 @@ async def execute_tool_calls(
 
             elif name == "update_task":
                 task_id = args.get("task_id")
+                task_uuid = _safe_uuid(task_id)
+                if task_uuid is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Invalid task_id format", "task_id": task_id}),
+                    })
+                    continue
                 fields = args.get("fields", {})
                 result = await session.execute(
-                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
                 )
                 task = result.scalar_one_or_none()
                 if task:
@@ -653,6 +743,8 @@ async def execute_tool_calls(
                             if key == "priority":
                                 value = normalize_priority(value)
                             setattr(task, key, value)
+                    if (fields or {}).get("status") == "done" and task.status == TaskStatus.DONE:
+                        task.completed_at = _datetime.utcnow()
                     await session.flush()
                     results.append({
                         "tool_call_id": tc.get("id"),
@@ -668,8 +760,16 @@ async def execute_tool_calls(
 
             elif name == "delete_task":
                 task_id = args.get("task_id")
+                task_uuid = _safe_uuid(task_id)
+                if task_uuid is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Invalid task_id format", "task_id": task_id}),
+                    })
+                    continue
                 result = await session.execute(
-                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
                 )
                 task = result.scalar_one_or_none()
                 if task:
@@ -975,6 +1075,166 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                             "suggested_resolutions": resolutions,
                         }),
                     })
+
+            elif name == "complete_task":
+                task_id = args.get("task_id")
+                task_uuid = _safe_uuid(task_id)
+                if task_uuid is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Invalid task_id format", "task_id": task_id}),
+                    })
+                    continue
+                result = await session.execute(
+                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
+                )
+                task = result.scalar_one_or_none()
+                if not task:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                else:
+                    task.status = TaskStatus.DONE
+                    task.completed_at = _datetime.utcnow()
+                    await session.flush()
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"completed": True, "task_id": task_id, "status": "done"}),
+                    })
+
+            elif name == "duplicate_task":
+                task_id = args.get("task_id")
+                task_uuid = _safe_uuid(task_id)
+                if task_uuid is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Invalid task_id format", "task_id": task_id}),
+                    })
+                    continue
+                result = await session.execute(
+                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
+                )
+                task = result.scalar_one_or_none()
+                if not task:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                else:
+                    copy = Task(
+                        user_id=UUID(user_id),
+                        parent_task_id=task.parent_task_id,
+                        title=task.title,
+                        description=task.description,
+                        status=TaskStatus.TODO,
+                        priority=task.priority,
+                        start_date=task.start_date,
+                        due_date=task.due_date,
+                        is_all_day=task.is_all_day,
+                        estimated_minutes=task.estimated_minutes,
+                        recurrence_rule=task.recurrence_rule,
+                        recurrence_end_date=task.recurrence_end_date,
+                        sort_order=task.sort_order,
+                        is_archived=False,
+                    )
+                    session.add(copy)
+                    await session.flush()
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"created": True, "task": {"id": str(copy.id), "title": copy.title}}),
+                    })
+
+            elif name == "list_tags":
+                from app.models.tag import Tag
+                tag_result = await session.execute(
+                    select(Tag).where(Tag.user_id == UUID(user_id)).order_by(Tag.name)
+                )
+                tags = tag_result.scalars().all()
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({
+                        "count": len(tags),
+                        "tags": [{"id": str(t.id), "name": t.name, "color": t.color} for t in tags],
+                    }),
+                })
+
+            elif name == "add_tag_to_task":
+                from app.models.tag import Tag
+                from app.models.task_tag import TaskTag
+                from sqlalchemy.exc import IntegrityError
+                task_id = args.get("task_id")
+                tag_name = (args.get("tag_name") or "").strip()
+                task_uuid = _safe_uuid(task_id)
+                if task_uuid is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Invalid task_id format", "task_id": task_id}),
+                    })
+                    continue
+                if not tag_name:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "tag_name is required"}),
+                    })
+                    continue
+                task = (await session.execute(
+                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
+                )).scalar_one_or_none()
+                if not task:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Task not found"}),
+                    })
+                    continue
+                tag = (await session.execute(
+                    select(Tag).where(Tag.user_id == UUID(user_id), Tag.name == tag_name)
+                )).scalar_one_or_none()
+                if not tag:
+                    tag = Tag(user_id=UUID(user_id), name=tag_name[:50])
+                    session.add(tag)
+                    try:
+                        await session.flush()
+                    except IntegrityError:
+                        await session.rollback()
+                        tag = (await session.execute(
+                            select(Tag).where(Tag.user_id == UUID(user_id), Tag.name == tag_name)
+                        )).scalar_one()
+                existing = (await session.execute(
+                    select(TaskTag).where(TaskTag.task_id == task_uuid, TaskTag.tag_id == tag.id)
+                )).scalar_one_or_none()
+                if not existing:
+                    session.add(TaskTag(task_id=task_uuid, tag_id=tag.id))
+                    await session.flush()
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({"added": True, "task_id": task_id, "tag": {"id": str(tag.id), "name": tag.name}}),
+                })
+
+            elif name == "get_task_stats":
+                from sqlalchemy import func as sa_func
+                stat_rows = (await session.execute(
+                    select(Task.status, sa_func.count(Task.id))
+                    .where(Task.user_id == UUID(user_id))
+                    .group_by(Task.status)
+                )).all()
+                stats = {k.value if hasattr(k, "value") else k: int(v) for k, v in stat_rows}
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({"stats": stats, "total": sum(stats.values())}),
+                })
 
             elif name == "reschedule_task":
                 task_id = args.get("task_id")

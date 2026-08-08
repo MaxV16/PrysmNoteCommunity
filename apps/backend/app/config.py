@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     gemini_api_key: str = ""
     deepseek_api_key: str = ""
+    openrouter_api_key: str = ""
 
     google_client_id: str = ""
     google_client_secret: str = ""
