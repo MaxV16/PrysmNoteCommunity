@@ -1,0 +1,30 @@
+{
+  "name": "prysm-note",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/frontend"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "smoke:api": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/api-smoke.mjs",
+    "smoke:ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke.mjs"
+  },
+  "overrides": {
+    "postcss": "^8.5.23"
+  },
+  "packageManager": "npm@11.16.0",
+  "devDependencies": {
+    "@playwright/test": "^1.53.0",
+    "concurrently": "^10.0.4",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.3",
+    "turbo": "^2.10.7",
+    "wait-on": "^9.1.0"
+  },
+  "allowScripts": {
+    "electron@42.3.3": true
+  }
+}

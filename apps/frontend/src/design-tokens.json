@@ -1,0 +1,247 @@
+{
+  "fontPresets": [
+    "Inter",
+    "JetBrains Mono",
+    "Georgia",
+    "Roboto",
+    "Poppins",
+    "Comic Neue",
+    "Space Grotesk",
+    "DM Sans",
+    "Fira Code",
+    "Nunito"
+  ],
+  "backgroundPresets": [
+    { "id": "none", "label": "None", "type": "none", "value": "" },
+    { "id": "gradient-1", "label": "Midnight", "type": "gradient", "value": "linear-gradient(135deg, #0f0c29, #302b63, #24243e)" },
+    { "id": "gradient-2", "label": "Sunset", "type": "gradient", "value": "linear-gradient(135deg, #1a0a2e, #3d1a5c, #6b2fa0)" },
+    { "id": "gradient-3", "label": "Ocean", "type": "gradient", "value": "linear-gradient(135deg, #0c1b33, #1a3a5c, #2d6da4)" },
+    { "id": "gradient-4", "label": "Forest", "type": "gradient", "value": "linear-gradient(135deg, #0a1c0a, #1a3a1a, #2d5a2d)" },
+    { "id": "gradient-5", "label": "Crimson", "type": "gradient", "value": "linear-gradient(135deg, #1a0a0a, #3d1a1a, #6b2f2f)" },
+    { "id": "dots", "label": "Dot Pattern", "type": "pattern", "value": "radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)", "size": "24px 24px" },
+    { "id": "grid", "label": "Grid Lines", "type": "pattern", "value": "linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)", "size": "40px 40px" },
+    { "id": "noise", "label": "Film Grain", "type": "pattern", "value": "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E\")", "size": "256px 256px" }
+  ],
+  "themes": {
+    "dark": {
+      "label": "Deep Space",
+      "colors": {
+        "base": "#07070b",
+        "surface": "#0f0f16",
+        "elevated": "#181820",
+        "hover": "#22222e",
+        "border": "#2a2a3a",
+        "primary": "#f0f0f4",
+        "secondary": "#a0a0b4",
+        "muted": "#60607a",
+        "accent": "#6c5ce7",
+        "accent-hover": "#7f70f0",
+        "danger": "#ff4757",
+        "success": "#2ed573",
+        "warning": "#ffa502",
+        "shadow-sm": "0 2px 8px rgba(0,0,0,0.5)",
+        "shadow-md": "0 8px 24px rgba(0,0,0,0.6)",
+        "shadow-lg": "0 16px 48px rgba(0,0,0,0.7)",
+        "accent-glow": "rgba(108,92,231,0.35)"
+      }
+    },
+    "light": {
+      "label": "Lavender Light",
+      "colors": {
+        "base": "#f5f0ff",
+        "surface": "#ffffff",
+        "elevated": "#ede8f8",
+        "hover": "#e0d8f0",
+        "border": "#d0c8e0",
+        "primary": "#1a0a2e",
+        "secondary": "#5a4a72",
+        "muted": "#9280a8",
+        "accent": "#6c5ce7",
+        "accent-hover": "#5a4ad0",
+        "danger": "#e53e3e",
+        "success": "#38a169",
+        "warning": "#dd6b20",
+        "shadow-sm": "0 1px 3px rgba(60,40,100,0.08)",
+        "shadow-md": "0 4px 12px rgba(60,40,100,0.12)",
+        "shadow-lg": "0 8px 24px rgba(60,40,100,0.16)",
+        "accent-glow": "rgba(108,92,231,0.2)"
+      }
+    },
+    "dracula": {
+      "label": "Dracula Night",
+      "colors": {
+        "base": "#21222c",
+        "surface": "#282a36",
+        "elevated": "#2d2f3e",
+        "hover": "#363849",
+        "border": "#44475a",
+        "primary": "#f8f8f2",
+        "secondary": "#c0c0c0",
+        "muted": "#6272a4",
+        "accent": "#bd93f9",
+        "accent-hover": "#caa9fa",
+        "danger": "#ff5555",
+        "success": "#50fa7b",
+        "warning": "#ffb86c",
+        "shadow-sm": "0 2px 8px rgba(0,0,0,0.5)",
+        "shadow-md": "0 8px 24px rgba(0,0,0,0.55)",
+        "shadow-lg": "0 16px 48px rgba(0,0,0,0.6)",
+        "accent-glow": "rgba(189,147,249,0.35)"
+      }
+    },
+    "nord": {
+      "label": "Arctic Frost",
+      "colors": {
+        "base": "#2e3440",
+        "surface": "#3b4252",
+        "elevated": "#434c5e",
+        "hover": "#4c566a",
+        "border": "#4c566a",
+        "primary": "#eceff4",
+        "secondary": "#d8dee9",
+        "muted": "#81a1c1",
+        "accent": "#88c0d0",
+        "accent-hover": "#8fbcbb",
+        "danger": "#bf616a",
+        "success": "#a3be8c",
+        "warning": "#ebcb8b",
+        "shadow-sm": "0 2px 8px rgba(0,0,0,0.4)",
+        "shadow-md": "0 8px 24px rgba(0,0,0,0.45)",
+        "shadow-lg": "0 16px 48px rgba(0,0,0,0.5)",
+        "accent-glow": "rgba(136,192,208,0.3)"
+      }
+    },
+    "monokai": {
+      "label": "Monokai Blaze",
+      "colors": {
+        "base": "#272822",
+        "surface": "#2c2d27",
+        "elevated": "#353631",
+        "hover": "#3e3d32",
+        "border": "#49483e",
+        "primary": "#f8f8f2",
+        "secondary": "#a6e22e",
+        "muted": "#75715e",
+        "accent": "#66d9ef",
+        "accent-hover": "#a6e22e",
+        "danger": "#f92672",
+        "success": "#a6e22e",
+        "warning": "#fd971f",
+        "shadow-sm": "0 2px 8px rgba(0,0,0,0.45)",
+        "shadow-md": "0 8px 24px rgba(0,0,0,0.5)",
+        "shadow-lg": "0 16px 48px rgba(0,0,0,0.55)",
+        "accent-glow": "rgba(102,217,239,0.35)"
+      }
+    },
+    "slate": {
+      "label": "Slate Pro",
+      "colors": {
+        "base": "#191919",
+        "surface": "#1F1F1F",
+        "elevated": "#2C2C2C",
+        "hover": "#333333",
+        "border": "#3F3F46",
+        "primary": "#FFFFFF",
+        "secondary": "#A1A1AA",
+        "muted": "#6B7280",
+        "accent": "#4C7EFF",
+        "accent-hover": "#3B6CE8",
+        "danger": "#FF4757",
+        "success": "#22C55E",
+        "warning": "#FF9500",
+        "shadow-sm": "0 2px 8px rgba(0,0,0,0.6)",
+        "shadow-md": "0 8px 24px rgba(0,0,0,0.7)",
+        "shadow-lg": "0 16px 48px rgba(0,0,0,0.8)",
+        "accent-glow": "rgba(76,126,255,0.3)"
+      }
+    },
+    "coffee": {
+      "label": "Coffee Roast",
+      "colors": {
+        "base": "#1a1410",
+        "surface": "#241e1a",
+        "elevated": "#2d2620",
+        "hover": "#362e28",
+        "border": "#4a4038",
+        "primary": "#ead6c0",
+        "secondary": "#b8a088",
+        "muted": "#7a6a58",
+        "accent": "#d4a574",
+        "accent-hover": "#c49560",
+        "danger": "#e06050",
+        "success": "#7aac5a",
+        "warning": "#e8a840",
+        "shadow-sm": "0 2px 8px rgba(0,0,0,0.5)",
+        "shadow-md": "0 8px 24px rgba(0,0,0,0.6)",
+        "shadow-lg": "0 16px 48px rgba(0,0,0,0.7)",
+        "accent-glow": "rgba(212,165,116,0.3)"
+      }
+    },
+    "solarized": {
+      "label": "Solarized Dark",
+      "colors": {
+        "base": "#002b36",
+        "surface": "#073642",
+        "elevated": "#0d4d5e",
+        "hover": "#11576a",
+        "border": "#2a6f80",
+        "primary": "#fdf6e3",
+        "secondary": "#93a1a1",
+        "muted": "#586e75",
+        "accent": "#268bd2",
+        "accent-hover": "#1e7ab8",
+        "danger": "#dc322f",
+        "success": "#859900",
+        "warning": "#b58900",
+        "shadow-sm": "0 2px 8px rgba(0,0,0,0.4)",
+        "shadow-md": "0 8px 24px rgba(0,0,0,0.5)",
+        "shadow-lg": "0 16px 48px rgba(0,0,0,0.6)",
+        "accent-glow": "rgba(38,139,210,0.3)"
+      }
+    },
+    "github-dark": {
+      "label": "Midnight",
+      "colors": {
+        "base": "#0d1117",
+        "surface": "#161b22",
+        "elevated": "#21262d",
+        "hover": "#30363d",
+        "border": "#484f58",
+        "primary": "#e6edf3",
+        "secondary": "#8b949e",
+        "muted": "#6e7681",
+        "accent": "#58a6ff",
+        "accent-hover": "#388bfd",
+        "danger": "#f85149",
+        "success": "#3fb950",
+        "warning": "#d29922",
+        "shadow-sm": "0 2px 8px rgba(0,0,0,0.5)",
+        "shadow-md": "0 8px 24px rgba(0,0,0,0.6)",
+        "shadow-lg": "0 16px 48px rgba(0,0,0,0.7)",
+        "accent-glow": "rgba(88,166,255,0.3)"
+      }
+    },
+    "tokyo": {
+      "label": "Tokyonight",
+      "colors": {
+        "base": "#1a1b26",
+        "surface": "#24283b",
+        "elevated": "#292e42",
+        "hover": "#3b4261",
+        "border": "#565f89",
+        "primary": "#c0caf5",
+        "secondary": "#9aa5ce",
+        "muted": "#565f89",
+        "accent": "#7aa2f7",
+        "accent-hover": "#6285d6",
+        "danger": "#f7768e",
+        "success": "#9ece6a",
+        "warning": "#e0af68",
+        "shadow-sm": "0 2px 8px rgba(0,0,0,0.5)",
+        "shadow-md": "0 8px 24px rgba(0,0,0,0.55)",
+        "shadow-lg": "0 16px 48px rgba(0,0,0,0.6)",
+        "accent-glow": "rgba(122,162,247,0.3)"
+      }
+    }
+  }
+}
