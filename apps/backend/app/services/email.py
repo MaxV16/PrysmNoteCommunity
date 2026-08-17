@@ -22,14 +22,16 @@ def send_email(to_address: str, subject: str, body: str) -> bool:
     when ``BREVO_API_KEY`` is set, otherwise classic SMTP via ``SMTP_*`` envs.
     """
     if not settings.admin_email:
-        logger.info("No ADMIN_EMAIL configured, skipping email to %s: %s", to_address, subject)
+        logger.warning(
+            "No ADMIN_EMAIL configured, skipping email to %s: %s", to_address, subject
+        )
         return False
 
     if settings.brevo_api_key:
         return _send_brevo_api(to_address, subject, body)
 
     if not settings.smtp_host:
-        logger.info("SMTP not configured, skipping email to %s: %s", to_address, subject)
+        logger.warning("SMTP not configured, skipping email to %s: %s", to_address, subject)
         return False
     return _send_smtp(to_address, subject, body)
 
