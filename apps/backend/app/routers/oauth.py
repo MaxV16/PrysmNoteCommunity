@@ -10,6 +10,7 @@ Flow:
                                              set session cookies, redirect to the app
 """
 import logging
+import re
 import secrets
 
 import httpx
@@ -29,6 +30,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth/oauth", tags=["oauth"])
 
 _PROVIDERS = {"google", "github"}
+
+# GitHub shares Google's single callback URI (the `google` in the path is a
+# documented quirk), so GitHub authorization codes arrive at /google/callback.
+# GitHub codes are exactly 20 lowercase hex chars; Google codes never are.
+GITHUB_CODE_RE = re.compile(r"^[0-9a-f]{20}$")
 
 # Google verify_id_token needs the client id to enforce audience; pass it through.
 # GitHub needs user read scopes to retrieve a verified primary email.
@@ -101,6 +107,12 @@ async def oauth_callback(
 
     if provider not in _PROVIDERS:
         return RedirectResponse(url=_app_url("/login?error=unsupported_provider"), status_code=307)
+
+    # GitHub's OAuth app is registered with the same callback URL as Google (the
+    # shared OAUTH_REDIRECT_URI), so GitHub codes come back to /google/callback.
+    # Detect the 20-hex GitHub code and route it to the GitHub exchange.
+    if provider == "google" and code and GITHUB_CODE_RE.fullmatch(code):
+        provider = "github"
 
     expected_state = request.cookies.get("oauth_state") if request else None
     if not expected_state or not secrets.compare_digest(expected_state, state or ""):

@@ -70,3 +70,53 @@ async def test_oauth_getorcreate_user(db_session):
     # A pre-existing email/password user gets linked (provider back-filled).
     pw_user = await oauth_module._getorcreate_user(db_session, "pwuser@example.com", {"name": "P"}, "github")
     assert pw_user.provider == "github"
+
+
+@pytest.mark.asyncio
+async def test_github_code_on_google_callback_is_exchanged_with_github(client, monkeypatch):
+    # GitHub's OAuth app uses the SAME callback URL as Google (the "google" in
+    # the path is a quirk), so a GitHub-style code (20 lowercase hex chars)
+    # arriving at /google/callback must be exchanged with GitHub, not Google.
+    # Regression: GitHub codes were misrouted to Google's token endpoint and
+    # always failed with "Sign-in with that provider failed".
+    exchanged = {}
+    github_code = "a1b2c3d4e5f6a7b8c9d0"
+
+    async def fake_exchange_github(code):
+        exchanged["code"] = code
+        return {"email": "maxv16@example.com", "name": "Max V16"}
+
+    monkeypatch.setattr(oauth_module, "_exchange_github", fake_exchange_github)
+    monkeypatch.setattr(oauth_module, "_exchange_google", lambda code: None)
+    client.cookies.set("oauth_state", "abc123")
+
+    r = await client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": github_code, "state": "abc123"},
+    )
+    assert r.status_code in (302, 307)
+    assert exchanged.get("code") == github_code
+    # Successful exchange redirects into the app (not to a failure page).
+    assert "error=" not in r.headers.get("location", "")
+
+
+@pytest.mark.asyncio
+async def test_google_code_on_google_callback_is_exchanged_with_google(client, monkeypatch):
+    # A genuine Google code (contains '/', e.g. 4/0A...) must stay on Google.
+    exchanged = {}
+    google_code = "4/0ATsMZqCquQWD4uqhj_tvTLt8U92RQRXgUN20SEdFO61P6B4l5QqoaIcgQpCHd1LEdgpYEg"
+
+    async def fake_exchange_google(code):
+        exchanged["code"] = code
+        return {"email": "user@gmail.com", "name": "G", "email_verified": True}
+
+    monkeypatch.setattr(oauth_module, "_exchange_google", fake_exchange_google)
+    client.cookies.set("oauth_state", "abc123")
+
+    r = await client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": google_code, "state": "abc123"},
+    )
+    assert r.status_code in (302, 307)
+    assert exchanged.get("code") == google_code
+    assert "error=" not in r.headers.get("location", "")
