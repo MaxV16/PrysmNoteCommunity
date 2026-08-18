@@ -20,6 +20,7 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [ssoError, setSsoError] = useState<keyof typeof SSO_ERROR_MESSAGES | null>(null);
   const [loading, setLoading] = useState(false);
+  const [registered, setRegistered] = useState(false);
   const { register } = useAuth();
   const router = useRouter();
 
@@ -37,14 +38,48 @@ export default function RegisterPage() {
     }
     setLoading(true);
     try {
-      await register(email, password, displayName || undefined);
-      router.push("/");
+      const result = await register(email, password, displayName || undefined);
+      if (result.requiresVerification) {
+        setRegistered(true);
+      } else {
+        router.push("/");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
     } finally {
       setLoading(false);
     }
   };
+
+  if (registered) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-base p-4">
+        <div className="w-full max-w-sm scale-in">
+          <div className="card p-8 relative overflow-hidden text-center">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-accent via-purple-400 to-accent opacity-60" />
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+              </svg>
+            </div>
+            <h1 className="text-xl font-bold gradient-text">Check your inbox</h1>
+            <p className="mt-2 text-sm text-muted">
+              We sent a verification link to <span className="font-medium text-secondary">{email}</span>.
+              Click it to confirm your email — then you can sign in.
+            </p>
+            <p className="mt-4 text-xs text-muted">
+              Didn&apos;t get it? Check spam, or go to the{" "}
+              <Link href="/login" className="text-accent hover:text-accent-hover font-medium">
+                sign in
+              </Link>{" "}
+              page to resend.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-base p-4">

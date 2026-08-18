@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     admin_email: str = ""
 
+    # When enabled, email/password accounts must confirm their address via the
+    # emailed verification link before they can sign in. SSO accounts (Google /
+    # GitHub) are always treated as verified because the provider verifies the
+    # email. Turn this on only when a working mailer is configured.
+    require_email_verification: bool = False
+
     # Preferred transport: when set, the core mailer sends via the Brevo REST API
     # (port 443) instead of SMTP — reliable from the prod VM, whose network
     # blocks/flakes SMTP ports. API keys start with xkeysib-.

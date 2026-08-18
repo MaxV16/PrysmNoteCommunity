@@ -365,3 +365,175 @@ async def test_reset_password_expired_token(auth_client: AsyncClient):
         "new_password": "brandnewpass1",
     })
     assert response.status_code == 400
+
+
+# --- Email verification (REQUIRE_EMAIL_VERIFICATION=true) --------------------
+
+
+def _set_verification_required(value: bool):
+    from app.config import settings
+    settings.require_email_verification = value
+
+
+def _make_verify_token(user_id: str, email: str, minutes: int = 60) -> str:
+    from datetime import datetime, timedelta, timezone
+    from jose import jwt
+    from app.config import settings
+    expires = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    return jwt.encode(
+        {"sub": user_id, "exp": expires, "type": "verify", "email": email},
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+@pytest.mark.asyncio
+async def test_register_requires_verification_when_enabled(auth_client):
+    from unittest.mock import patch
+    _set_verification_required(True)
+    sent = []
+    try:
+        with patch("app.routers.auth._send_verification_email", side_effect=lambda u: sent.append(u.email)):
+            response = await auth_client.post("/api/auth/register", json={
+                "email": "verify-new@example.com",
+                "password": "password123",
+            })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["requires_verification"] is True
+        assert data["email_verified"] is False
+        # No session cookies: the user must confirm their address first.
+        assert "access_token" not in response.cookies
+        assert sent == ["verify-new@example.com"]
+    finally:
+        _set_verification_required(False)
+
+
+@pytest.mark.asyncio
+async def test_login_blocked_until_email_verified(auth_client):
+    from unittest.mock import patch
+    _set_verification_required(True)
+    try:
+        with patch("app.routers.auth._send_verification_email", lambda u: None):
+            await auth_client.post("/api/auth/register", json={
+                "email": "unverified@example.com",
+                "password": "password123",
+            })
+        blocked = await auth_client.post("/api/auth/login", json={
+            "email": "unverified@example.com",
+            "password": "password123",
+        })
+        assert blocked.status_code == 403
+
+        # Wrong password still reports 401 (verification check must not leak).
+        bad = await auth_client.post("/api/auth/login", json={
+            "email": "unverified@example.com",
+            "password": "wrongpass",
+        })
+        assert bad.status_code == 401
+    finally:
+        _set_verification_required(False)
+
+
+@pytest.mark.asyncio
+async def test_verify_email_then_login(auth_client, db_session):
+    from unittest.mock import patch
+    from sqlalchemy import select
+    from app.models.user import User
+    _set_verification_required(True)
+    try:
+        with patch("app.routers.auth._send_verification_email", lambda u: None):
+            await auth_client.post("/api/auth/register", json={
+                "email": "verify-then@example.com",
+                "password": "password123",
+            })
+
+        user = (await db_session.execute(
+            select(User).where(User.email == "verify-then@example.com")
+        )).scalar_one()
+        assert user.email_verified is False
+
+        token = _make_verify_token(str(user.id), user.email)
+        confirmed = await auth_client.post("/api/auth/verify-email", json={"token": token})
+        assert confirmed.status_code == 200, confirmed.text
+        assert confirmed.json()["email_verified"] is True
+        assert "access_token" in confirmed.cookies  # verify signs the user in
+
+        ok = await auth_client.post("/api/auth/login", json={
+            "email": "verify-then@example.com",
+            "password": "password123",
+        })
+        assert ok.status_code == 200
+    finally:
+        _set_verification_required(False)
+
+
+@pytest.mark.asyncio
+async def test_verify_email_invalid_or_expired_token(auth_client):
+    from datetime import datetime, timedelta, timezone
+    _set_verification_required(True)
+    try:
+        bad = await auth_client.post("/api/auth/verify-email", json={"token": "not-a-jwt"})
+        assert bad.status_code == 400
+
+        expired = _make_verify_token("00000000-0000-0000-0000-000000000000", "x@example.com", minutes=-5)
+        expired_res = await auth_client.post("/api/auth/verify-email", json={"token": expired})
+        assert expired_res.status_code == 400
+    finally:
+        _set_verification_required(False)
+
+
+@pytest.mark.asyncio
+async def test_verify_token_bound_to_original_email(auth_client, db_session):
+    # A stale token must not confirm an address the user later changed.
+    from unittest.mock import patch
+    from sqlalchemy import select
+    from app.models.user import User
+    _set_verification_required(True)
+    try:
+        with patch("app.routers.auth._send_verification_email", lambda u: None):
+            await auth_client.post("/api/auth/register", json={
+                "email": "bound@example.com",
+                "password": "password123",
+            })
+        user = (await db_session.execute(
+            select(User).where(User.email == "bound@example.com")
+        )).scalar_one()
+        stale = _make_verify_token(str(user.id), "bound@example.com")
+        user.email = "changed@example.com"
+        user.email_verified = False
+        await db_session.flush()
+
+        res = await auth_client.post("/api/auth/verify-email", json={"token": stale})
+        assert res.status_code == 400
+    finally:
+        _set_verification_required(False)
+
+
+@pytest.mark.asyncio
+async def test_resend_verification_email(auth_client):
+    from unittest.mock import patch
+    _set_verification_required(True)
+    sent = []
+    try:
+        with patch("app.routers.auth._send_verification_email", side_effect=lambda u: sent.append(u.email)):
+            await auth_client.post("/api/auth/register", json={
+                "email": "resend@example.com",
+                "password": "password123",
+            })
+            sent.clear()
+            response = await auth_client.post("/api/auth/resend-verification", json={
+                "email": "resend@example.com",
+            })
+            assert response.status_code == 200
+            assert response.json()["status"] == "sent"
+            assert sent == ["resend@example.com"]
+
+            # Unknown addresses get the same response (no enumeration).
+            r2 = await auth_client.post("/api/auth/resend-verification", json={
+                "email": "nobody@example.com",
+            })
+            assert r2.status_code == 200
+            assert r2.json()["status"] == "sent"
+    finally:
+        _set_verification_required(False)

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth, EmailNotVerifiedError } from "@/lib/auth-context";
+import { api } from "@/lib/api";
 import Link from "next/link";
 import { OAuthButtons } from "@/components/auth/OAuthButtons";
 import { BrandMark } from "@/components/ui/BrandMark";
@@ -19,6 +20,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [ssoError, setSsoError] = useState<keyof typeof SSO_ERROR_MESSAGES | null>(null);
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resent, setResent] = useState(false);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
@@ -33,14 +37,32 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setNeedsVerification(false);
     setLoading(true);
     try {
       await login(email, password);
       router.push("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      if (err instanceof EmailNotVerifiedError) {
+        setNeedsVerification(true);
+      } else {
+        setError(err instanceof Error ? err.message : "Login failed");
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setResending(true);
+    setResent(false);
+    try {
+      await api.post("/auth/resend-verification", { email });
+      setResent(true);
+    } catch {
+      setError("Couldn't resend the verification email. Please try again.");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -62,7 +84,24 @@ export default function LoginPage() {
               {error}
             </div>
           )}
-          {ssoError && !error && (
+          {needsVerification && !error && (
+            <div className="mb-4 rounded-lg bg-warning/10 px-4 py-3 text-sm text-warning">
+              <p className="font-medium">Please verify your email</p>
+              <p className="mt-1 text-xs">
+                Check {email ? <span className="text-secondary">{email}</span> : "your inbox"} for a
+                verification link before signing in.
+              </p>
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resending || resent}
+                className="mt-2 text-xs font-medium text-accent hover:text-accent-hover disabled:opacity-50"
+              >
+                {resent ? "Verification email sent" : resending ? "Sending..." : "Resend verification email"}
+              </button>
+            </div>
+          )}
+          {ssoError && !error && !needsVerification && (
             <div className="mb-4 rounded-lg bg-warning/10 px-4 py-2.5 text-sm text-warning">
               {SSO_ERROR_MESSAGES[ssoError]}
             </div>

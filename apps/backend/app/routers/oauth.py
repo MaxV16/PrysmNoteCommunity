@@ -228,10 +228,18 @@ async def _getorcreate_user(session: AsyncSession, email: str, identity: dict, p
         # Link the SSO provider if the account was previously email/password.
         if existing.provider is None:
             existing.provider = provider
-            await session.flush()
+        # The provider verified this email address, so the account is confirmed.
+        existing.email_verified = True
+        await session.flush()
         return existing
 
-    user = User(email=email, password_hash=None, display_name=name or None, provider=provider)
+    user = User(
+        email=email,
+        password_hash=None,
+        display_name=name or None,
+        provider=provider,
+        email_verified=True,  # SSO emails are verified by the provider
+    )
     session.add(user)
     await session.flush()
     return user

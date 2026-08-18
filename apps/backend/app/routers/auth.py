@@ -136,6 +136,19 @@ async def register(request: RegisterRequest, response: Response, req: Request, s
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user = await create_user(session, request.email, request.password, request.display_name)
+
+    # When the deployment requires email verification, do NOT log the user in —
+    # they must click the link in the verification email first.
+    if settings.require_email_verification:
+        _send_verification_email(user)
+        return {
+            "id": str(user.id),
+            "email": user.email,
+            "display_name": user.display_name,
+            "email_verified": False,
+            "requires_verification": True,
+        }
+
     access_token = create_access_token(str(user.id), user.token_version)
     refresh_token = create_refresh_token(str(user.id), user.token_version)
     response.set_cookie(
@@ -146,7 +159,13 @@ async def register(request: RegisterRequest, response: Response, req: Request, s
         key="refresh_token", value=refresh_token,
         httponly=True, secure=secure, samesite="lax", max_age=7 * 24 * 60 * 60, path="/"
     )
-    return {"id": str(user.id), "email": user.email, "display_name": user.display_name}
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "display_name": user.display_name,
+        "email_verified": False,
+        "requires_verification": False,
+    }
 
 
 @router.post("/login")
@@ -168,6 +187,15 @@ async def login(request: LoginRequest, response: Response, req: Request, session
     if not user or not password_ok:
         _track_failed_login(ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    # Only checked AFTER a valid password, so the check can't be used to probe
+    # which emails exist on the service.
+    if settings.require_email_verification and not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email address before signing in",
+        )
+
     access_token = create_access_token(str(user.id), user.token_version)
     refresh_token = create_refresh_token(str(user.id), user.token_version)
     response.set_cookie(
@@ -178,7 +206,12 @@ async def login(request: LoginRequest, response: Response, req: Request, session
         key="refresh_token", value=refresh_token,
         httponly=True, secure=secure, samesite="lax", max_age=7 * 24 * 60 * 60, path="/"
     )
-    return {"id": str(user.id), "email": user.email, "display_name": user.display_name}
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "display_name": user.display_name,
+        "email_verified": user.email_verified,
+    }
 
 
 @router.post("/refresh")
@@ -355,6 +388,107 @@ class ResetPasswordRequest(BaseModel):
         return v
 
 
+def _send_verification_email(user: User) -> None:
+    """Email the user a one-time verify link (24h) if a mailer is configured."""
+    import asyncio
+    from datetime import timedelta
+
+    from app.services.email import send_email
+
+    expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    token = jwt.encode(
+        {"sub": str(user.id), "exp": expires, "type": "verify", "email": user.email},
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+    verify_url = f"{settings.app_origin}/verify-email?token={token}"
+    body = (
+        "Welcome to Prysm Note!\n\n"
+        "Please confirm your email address by opening the link below (valid for 24 hours):\n\n"
+        f"{verify_url}\n\n"
+        "If you didn't create this account, you can safely ignore this email."
+    )
+    asyncio.create_task(
+        asyncio.to_thread(send_email, user.email, "[Prysm Note] Verify your email", body)
+    )
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+@router.post("/verify-email")
+async def verify_email(
+    request: VerifyEmailRequest,
+    response: Response,
+    req: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """Confirm the email address via the emailed one-time link and sign the user in."""
+    try:
+        payload = jwt.decode(request.token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        if payload.get("type") != "verify":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired link")
+        user_id = payload.get("sub")
+        expected_email = payload.get("email")
+        if not user_id or not expected_email:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired link")
+    except (JWTError, HTTPException):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired link")
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired link")
+
+    result = await session.execute(select(User).where(User.id == UUID(user_id)))
+    user = result.scalar_one_or_none()
+    # The token is bound to the email it was issued for, so a stale token can't
+    # confirm an address the user changed since (idempotent on re-click).
+    if not user or user.email != expected_email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired link")
+
+    user.email_verified = True
+    await session.flush()
+
+    secure = _cookie_secure(req)
+    access_token = create_access_token(str(user.id), user.token_version)
+    refresh_token = create_refresh_token(str(user.id), user.token_version)
+    response.set_cookie(
+        key="access_token", value=access_token,
+        httponly=True, secure=secure, samesite="lax", max_age=15 * 60, path="/"
+    )
+    response.set_cookie(
+        key="refresh_token", value=refresh_token,
+        httponly=True, secure=secure, samesite="lax", max_age=7 * 24 * 60 * 60, path="/"
+    )
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "display_name": user.display_name,
+        "email_verified": True,
+    }
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        return v.lower().strip()
+
+
+@router.post("/resend-verification")
+async def resend_verification(
+    request: ResendVerificationRequest,
+    session: AsyncSession = Depends(get_db),
+):
+    """Re-send the verification email for an unverified account. Always returns
+    the same response so the endpoint can't enumerate which emails are registered."""
+    user = await get_user_by_email(session, request.email)
+    if user and user.password_hash and not user.email_verified:
+        _send_verification_email(user)
+    return {"status": "sent"}
+
+
 @router.post("/forgot-password")
 async def forgot_password(
     request: ForgotPasswordRequest,
@@ -437,6 +571,7 @@ async def get_me(user: User = Depends(get_current_user)):
         "id": str(user.id),
         "email": user.email,
         "display_name": user.display_name,
+        "email_verified": user.email_verified,
         "created_at": user.created_at.isoformat(),
     }
 
@@ -474,7 +609,13 @@ async def update_me(
         existing = await get_user_by_email(session, request.email)
         if existing and str(existing.id) != str(user.id):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
-        user.email = request.email
+        if request.email != user.email:
+            user.email = request.email
+            # A changed address must be re-confirmed before the account can sign
+            # in again (old verification links are bound to the old address).
+            if settings.require_email_verification:
+                user.email_verified = False
+                _send_verification_email(user)
     if request.display_name is not None:
         user.display_name = request.display_name
     await session.flush()
@@ -482,6 +623,7 @@ async def update_me(
         "id": str(user.id),
         "email": user.email,
         "display_name": user.display_name,
+        "email_verified": user.email_verified,
         "created_at": user.created_at.isoformat(),
     }
 

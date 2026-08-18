@@ -10,12 +10,20 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, displayName?: string) => Promise<void>;
+  register: (email: string, password: string, displayName?: string) => Promise<{ requiresVerification: boolean }>;
   logout: () => void;
   refreshSession: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+/** Thrown when a correct password is rejected because the email isn't verified yet. */
+export class EmailNotVerifiedError extends Error {
+  constructor() {
+    super("email_not_verified");
+    this.name = "EmailNotVerifiedError";
+  }
+}
 
 // Tracks the last authenticated account so we only clear user-owned local state
 // (API keys, filters, etc.) when the ACCOUNT actually changes — not on every
@@ -68,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
+      if (res.status === 403) throw new EmailNotVerifiedError();
       const err = await res.json().catch(() => ({ detail: "Login failed" }));
       throw new Error(err.detail || "Login failed");
     }
@@ -96,12 +105,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(err.detail || "Registration failed");
       }
       const data = await res.json();
+      // When the deployment requires email confirmation, register does NOT log
+      // the user in — they must click the emailed verification link first.
+      if (data.requires_verification) {
+        return { requiresVerification: true };
+      }
       const prevUserId = getStoredUserId();
       if (prevUserId && prevUserId !== data.id) {
         clearUserData();
       }
       rememberUser(data.id);
       setUser(data as User);
+      return { requiresVerification: false };
     },
     []
   );
