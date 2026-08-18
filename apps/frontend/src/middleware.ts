@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PUBLIC_PREFIXES = ["/marketing", "/privacy", "/tos"];
+const PUBLIC_PREFIXES = ["/marketing", "/privacy", "/tos", "/privacy-policy", "/terms-of-service", "/pricing", "/about", "/contact"];
 // Auth-adjacent public pages: visible when logged out, redirected home when logged in.
 const AUTH_PATHS = ["/login", "/register", "/forgot-password", "/reset-password"];
 
