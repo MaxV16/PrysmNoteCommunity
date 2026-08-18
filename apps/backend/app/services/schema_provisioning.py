@@ -46,6 +46,9 @@ async def ensure_schema(engine: AsyncEngine) -> None:
     # tables). Idempotent + privilege-tolerant, like the statements below.
     for _stmt in (
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
+        # Email verification: existing accounts are grandfathered as verified.
+        # New rows are inserted with email_verified=False explicitly by the app.
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE",
     ):
         try:
             async with engine.begin() as _conn:

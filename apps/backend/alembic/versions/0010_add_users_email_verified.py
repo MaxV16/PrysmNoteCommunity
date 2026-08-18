@@ -17,12 +17,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # DEFAULT TRUE grandfathers existing accounts as verified; the app inserts
+    # email_verified=False explicitly for new email/password signups (and True
+    # for SSO). Matches the startup ALTER in schema_provisioning.ensure_schema.
     op.execute(
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE"
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT TRUE"
     )
-    # Grandfather existing accounts: verification only gates NEW signups (and
-    # SSO accounts are provider-verified from here on). No-op on fresh installs.
-    op.execute("UPDATE users SET email_verified = TRUE")
 
 
 def downgrade() -> None:
