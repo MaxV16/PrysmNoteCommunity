@@ -500,9 +500,12 @@ async def test_verify_token_bound_to_original_email(auth_client, db_session):
             select(User).where(User.email == "bound@example.com")
         )).scalar_one()
         stale = _make_verify_token(str(user.id), "bound@example.com")
+        # Commit the email change so the row lock is released — otherwise the
+        # verify POST below blocks on the uncommitted update (PostgreSQL) and the
+        # suite hangs. SQLite masks this because tests share one connection.
         user.email = "changed@example.com"
         user.email_verified = False
-        await db_session.flush()
+        await db_session.commit()
 
         res = await auth_client.post("/api/auth/verify-email", json={"token": stale})
         assert res.status_code == 400
