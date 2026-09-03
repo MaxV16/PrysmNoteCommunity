@@ -4,8 +4,8 @@ from app.config import settings
 
 engine = create_async_engine(
     settings.database_url,
-    pool_size=20,
-    max_overflow=10,
+    pool_size=5,
+    max_overflow=5,
     pool_pre_ping=True,
     echo=False,
 )
@@ -18,8 +18,8 @@ async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_o
 # the request URL so unconfigured environments (e.g. CI) still work.
 system_engine = create_async_engine(
     settings.system_database_url or settings.database_url,
-    pool_size=5,
-    max_overflow=5,
+    pool_size=4,
+    max_overflow=2,
     pool_pre_ping=True,
     echo=False,
 )

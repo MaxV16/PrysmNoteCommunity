@@ -11,7 +11,7 @@ dependencies = [
     "alembic>=1.13.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
-    "python-jose[cryptography]>=3.3.0",
+    "python-jose[cryptography]>=3.4.0",
     "bcrypt>=4.1.0",
     "openai>=1.12.0",
     "google-genai>=1.0.0",
@@ -20,11 +20,14 @@ dependencies = [
     "google-api-python-client>=2.120.0",
     "google-auth-httplib2>=0.2.0",
     "google-auth-oauthlib>=1.2.0",
-    "cryptography>=42.0.0",
+    "cryptography>=44.0.1",
     "python-multipart>=0.0.6",
     "sse-starlette>=2.0.0",
     "python-dateutil>=2.8.0",
     "redis>=5.0.0",
+    # Official Model Context Protocol SDK (MIT). Pinned below 2.x: the FastMCP
+    # API used by the EE MCP server was renamed to MCPServer in v2.
+    "mcp>=1.2,<2",
 ]
 
 [project.optional-dependencies]

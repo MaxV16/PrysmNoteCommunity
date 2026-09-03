@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
@@ -12,6 +10,7 @@ from app.models.tag import Tag
 from app.models.task import Task
 from app.models.task_tag import TaskTag
 from app.models.user import User
+from app.utils.uuid_helpers import require_uuid
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
 
@@ -72,7 +71,7 @@ async def get_tag_route(
     session: AsyncSession = Depends(get_db),
 ):
     result = await session.execute(
-        select(Tag).where(Tag.id == UUID(tag_id), Tag.user_id == user.id)
+        select(Tag).where(Tag.id == require_uuid(tag_id), Tag.user_id == user.id)
     )
     tag = result.scalar_one_or_none()
     if not tag:
@@ -88,7 +87,7 @@ async def update_tag_route(
     session: AsyncSession = Depends(get_db),
 ):
     result = await session.execute(
-        select(Tag).where(Tag.id == UUID(tag_id), Tag.user_id == user.id)
+        select(Tag).where(Tag.id == require_uuid(tag_id), Tag.user_id == user.id)
     )
     tag = result.scalar_one_or_none()
     if not tag:
@@ -114,7 +113,7 @@ async def delete_tag_route(
     session: AsyncSession = Depends(get_db),
 ):
     result = await session.execute(
-        select(Tag).where(Tag.id == UUID(tag_id), Tag.user_id == user.id)
+        select(Tag).where(Tag.id == require_uuid(tag_id), Tag.user_id == user.id)
     )
     tag = result.scalar_one_or_none()
     if not tag:
@@ -132,26 +131,26 @@ async def assign_tag_to_task(
     session: AsyncSession = Depends(get_db),
 ):
     task_result = await session.execute(
-        select(Task).where(Task.id == UUID(task_id), Task.user_id == user.id)
+        select(Task).where(Task.id == require_uuid(task_id), Task.user_id == user.id)
     )
     task = task_result.scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
     tag_result = await session.execute(
-        select(Tag).where(Tag.id == UUID(tag_id), Tag.user_id == user.id)
+        select(Tag).where(Tag.id == require_uuid(tag_id), Tag.user_id == user.id)
     )
     tag = tag_result.scalar_one_or_none()
     if not tag:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
 
     existing = await session.execute(
-        select(TaskTag).where(TaskTag.task_id == UUID(task_id), TaskTag.tag_id == UUID(tag_id))
+        select(TaskTag).where(TaskTag.task_id == require_uuid(task_id), TaskTag.tag_id == require_uuid(tag_id))
     )
     if existing.scalar_one_or_none():
         return {"status": "already_assigned"}
 
-    task_tag = TaskTag(task_id=UUID(task_id), tag_id=UUID(tag_id))
+    task_tag = TaskTag(task_id=require_uuid(task_id), tag_id=require_uuid(tag_id))
     session.add(task_tag)
     await session.flush()
     return {"status": "assigned"}
@@ -166,8 +165,8 @@ async def remove_tag_from_task(
 ):
     result = await session.execute(
         select(TaskTag).where(
-            TaskTag.task_id == UUID(task_id),
-            TaskTag.tag_id == UUID(tag_id),
+            TaskTag.task_id == require_uuid(task_id),
+            TaskTag.tag_id == require_uuid(tag_id),
         )
     )
     task_tag = result.scalar_one_or_none()
@@ -185,13 +184,13 @@ async def get_task_tags(
     session: AsyncSession = Depends(get_db),
 ):
     task_result = await session.execute(
-        select(Task).where(Task.id == UUID(task_id), Task.user_id == user.id)
+        select(Task).where(Task.id == require_uuid(task_id), Task.user_id == user.id)
     )
     if not task_result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
     result = await session.execute(
-        select(Tag).join(TaskTag).where(TaskTag.task_id == UUID(task_id))
+        select(Tag).join(TaskTag).where(TaskTag.task_id == require_uuid(task_id))
     )
     return [
         {"id": str(t.id), "name": t.name, "color": t.color}

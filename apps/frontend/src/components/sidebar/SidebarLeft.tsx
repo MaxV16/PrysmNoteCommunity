@@ -8,6 +8,8 @@ import { SidebarNav } from "@/components/sidebar/SidebarNav";
 import { TagList } from "@/components/sidebar/TagList";
 import { ThemeMenu } from "@/components/sidebar/ThemeMenu";
 import { BrandMark } from "@/components/ui/BrandMark";
+import { openNotesWindow } from "@/lib/notes";
+import { track } from "@/lib/track";
 import type { WorkspaceView } from "@/components/layout/AppShell";
 
 interface SidebarLeftProps {
@@ -21,7 +23,9 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
   const { user, logout } = useAuth();
   const { toggleTheme } = useTheme();
   const tagsOn = useUiModule("tagList");
-  const financeOn = useUiModule("finance");
+  const financeOn = false;
+  const watchlistOn = useUiModule("watchlist");
+  const notesOn = useUiModule("stickyNotes");
   const router = useRouter();
 
   const handleLogout = () => {
@@ -60,6 +64,26 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
             </button>
           )}
+          {watchlistOn && (
+            <button
+              onClick={() => onSelectView("watchlist")}
+              aria-label="Shows & Movies"
+              className={`icon-btn ${view === "watchlist" ? "bg-accent/15 text-accent" : ""}`}
+              title="Shows & Movies"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5"/></svg>
+            </button>
+          )}
+          {notesOn && (
+            <button
+              onClick={() => { track("feature_used", { feature: "notes" }); openNotesWindow(); }}
+              aria-label="New note"
+              className="icon-btn"
+              title="New note"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            </button>
+          )}
         </div>
         <button
           onClick={handleLogout}
@@ -96,7 +120,7 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
 
       {/* Navigation */}
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3">
-        <SidebarNav view={view} onSelectView={onSelectView} financeOn={financeOn} />
+        <SidebarNav view={view} onSelectView={onSelectView} financeOn={financeOn} watchlistOn={watchlistOn} />
         {tagsOn && (
           <div className="mt-6">
             <TagList />

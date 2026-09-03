@@ -62,3 +62,6 @@ class DeepSeekClient(LLMClient):
         )
         data = response.json()
         return data["data"][0]["embedding"]
+
+    async def aclose(self) -> None:
+        await self.client.aclose()

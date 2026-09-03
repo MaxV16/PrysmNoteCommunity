@@ -1,6 +1,4 @@
 from datetime import date, timedelta
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -11,6 +9,7 @@ from app.dependencies import get_current_user
 from app.models.habit import Habit
 from app.models.habit_log import HabitLog
 from app.models.user import User
+from app.utils.uuid_helpers import require_uuid
 
 router = APIRouter(prefix="/api/habits", tags=["habits"])
 
@@ -118,7 +117,7 @@ async def update_habit_route(
     session: AsyncSession = Depends(get_db),
 ):
     result = await session.execute(
-        select(Habit).where(Habit.id == UUID(habit_id), Habit.user_id == user.id)
+        select(Habit).where(Habit.id == require_uuid(habit_id), Habit.user_id == user.id)
     )
     habit = result.scalar_one_or_none()
     if not habit:
@@ -134,7 +133,7 @@ async def update_habit_route(
     await session.flush()
 
     logs_result = await session.execute(
-        select(HabitLog).where(HabitLog.habit_id == UUID(habit_id))
+        select(HabitLog).where(HabitLog.habit_id == require_uuid(habit_id))
     )
     streak = _compute_streak([log.completed_at for log in logs_result.scalars().all()])
 
@@ -156,7 +155,7 @@ async def delete_habit_route(
     session: AsyncSession = Depends(get_db),
 ):
     result = await session.execute(
-        select(Habit).where(Habit.id == UUID(habit_id), Habit.user_id == user.id)
+        select(Habit).where(Habit.id == require_uuid(habit_id), Habit.user_id == user.id)
     )
     habit = result.scalar_one_or_none()
     if not habit:
@@ -173,7 +172,7 @@ async def toggle_habit_log(
     session: AsyncSession = Depends(get_db),
 ):
     habit_result = await session.execute(
-        select(Habit).where(Habit.id == UUID(habit_id), Habit.user_id == user.id)
+        select(Habit).where(Habit.id == require_uuid(habit_id), Habit.user_id == user.id)
     )
     habit = habit_result.scalar_one_or_none()
     if not habit:
@@ -182,7 +181,7 @@ async def toggle_habit_log(
     today = date.today()
     existing_result = await session.execute(
         select(HabitLog).where(
-            HabitLog.habit_id == UUID(habit_id),
+            HabitLog.habit_id == require_uuid(habit_id),
             HabitLog.completed_at == today,
         )
     )
@@ -193,13 +192,13 @@ async def toggle_habit_log(
         await session.flush()
         logged = False
     else:
-        log = HabitLog(habit_id=UUID(habit_id), user_id=user.id, completed_at=today)
+        log = HabitLog(habit_id=require_uuid(habit_id), user_id=user.id, completed_at=today)
         session.add(log)
         await session.flush()
         logged = True
 
     logs_result = await session.execute(
-        select(HabitLog).where(HabitLog.habit_id == UUID(habit_id))
+        select(HabitLog).where(HabitLog.habit_id == require_uuid(habit_id))
     )
     streak = _compute_streak([log.completed_at for log in logs_result.scalars().all()])
 
@@ -215,12 +214,12 @@ async def get_habit_logs(
     session: AsyncSession = Depends(get_db),
 ):
     habit_result = await session.execute(
-        select(Habit).where(Habit.id == UUID(habit_id), Habit.user_id == user.id)
+        select(Habit).where(Habit.id == require_uuid(habit_id), Habit.user_id == user.id)
     )
     if not habit_result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found")
 
-    query = select(HabitLog).where(HabitLog.habit_id == UUID(habit_id))
+    query = select(HabitLog).where(HabitLog.habit_id == require_uuid(habit_id))
     if from_date:
         query = query.where(HabitLog.completed_at >= from_date)
     if to_date:

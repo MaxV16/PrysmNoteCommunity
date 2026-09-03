@@ -40,6 +40,26 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     deepseek_api_key: str = ""
     openrouter_api_key: str = ""
+    # TMDB API v3 key (user-supplied, free at tmdb.org). Powers the Shows &
+    # Movies watchlist: title/posters/upcoming-continuation search and watch
+    # providers. When empty, the watchlist degrades to manual entries only.
+    tmdb_api_key: str = ""
+
+    # Cap on the number of rows a single POST /api/imports/tasks request may
+    # insert. Larger files must be split and imported in parts (the 409/400
+    # message says so). Keeps one import from swamping the single-worker VM.
+    import_max_rows: int = 5000
+
+    # Model slot for PrysmAI in EU / banned-region accounts. A config
+    # placeholder only: when set, PrysmAI resolves to this model for the user's
+    # region; no region model has been chosen yet, so this stays the default.
+    prysm_ai_region_model: str = "deepseek-v4-flash"
+
+    # Cloudflare Turnstile on the registration form. Both must be set for the
+    # captcha to be enforced; when TURNSTILE_SECRET_KEY is empty the backend
+    # skips verification (fail-open, so dev/tests and the community build are
+    # unaffected).
+    turnstile_secret_key: str = ""
 
     google_client_id: str = ""
     google_client_secret: str = ""
@@ -48,11 +68,23 @@ class Settings(BaseSettings):
     github_client_secret: str = ""
     github_redirect_uri: str = "http://localhost:3000/settings"
     oauth_redirect_uri: str = "http://localhost:3000/api/auth/oauth/google/callback"
+    # Where the Google Calendar OAuth popup returns after consent. MUST match
+    # the redirect URI registered in the Google Cloud Console for the OAuth
+    # client. Never accept a client-supplied value for this (M8).
+    calendar_redirect_uri: str = ""
     app_origin: str = "http://localhost:3000"
 
-    gocardless_secret_id: str = ""
-    gocardless_secret_key: str = ""
-    gocardless_endpoint: str = ""
+
+    # Google Calendar background pull cadence (seconds) and how many users'
+    # pulls may run concurrently in the background loop (each pull runs off the
+    # event loop via to_thread, so a single worker stays responsive).
+    gcal_pull_interval: int = 900
+    gcal_pull_concurrency: int = 3
+    # Rate guard on the manual POST /api/calendar/pull endpoint per user.
+    calendar_manual_sync_min_interval: int = 60
+    # Skip recurring templates whose last background expansion is newer than
+    # this many hours (one pass per template per window instead of every hour).
+    recurring_expand_cooldown_hours: int = 12
 
     redis_url: str = ""
 
@@ -72,6 +104,7 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     admin_email: str = ""
+    notify_email: str = ""  # From address for automated notification emails (fallback: admin_email)
 
     # When enabled, email/password accounts must confirm their address via the
     # emailed verification link before they can sign in. SSO accounts (Google /
@@ -80,9 +113,27 @@ class Settings(BaseSettings):
     require_email_verification: bool = False
 
     # Preferred transport: when set, the core mailer sends via the Brevo REST API
-    # (port 443) instead of SMTP — reliable from the prod VM, whose network
+    # (port 443) instead of SMTP - reliable from the prod VM, whose network
     # blocks/flakes SMTP ports. API keys start with xkeysib-.
     brevo_api_key: str = ""
+
+    # Notifications engine (email reminders, daily digest, browser Web Push).
+    # NOTIFICATIONS_ENABLED turns the background loop on; VAPID keys power push
+    # (generate once with `npx web-push generate-vapid-keys`). When unset, the
+    # loop is a safe no-op and push/reminder endpoints still work for prefs.
+    notifications_enabled: bool = False
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:support@prysmnote.com"
+    notification_loop_interval: int = 1800  # seconds between due-alert passes
+    digest_hour: int = 7  # local hour the daily digest email is sent
+
+    # First-party product analytics: raw events are aggregated into
+    # analytics_daily and pruned after this many days (aggregates are kept
+    # forever). Internal analysis reads through the BYPASSRLS system role.
+    analytics_retention_days: int = 90
+    analytics_flush_interval: int = 5  # seconds between queue drains
+    analytics_rollup_interval: int = 3600  # seconds between rollup passes
 
     # Trusted-proxy handling. When running behind Cloudflare/nginx (production),
     # uvicorn must be started with --proxy-headers and this forwarded-allow-ips

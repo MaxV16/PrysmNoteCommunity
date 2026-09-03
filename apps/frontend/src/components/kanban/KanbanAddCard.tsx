@@ -4,11 +4,13 @@ import { useState, useRef, useEffect } from "react";
 
 interface KanbanAddCardProps {
   status: string;
+  boardSectionId?: string | null;
   onAdd: () => void;
+  autoExpand?: boolean;
 }
 
-export function KanbanAddCard({ status, onAdd }: KanbanAddCardProps) {
-  const [expanded, setExpanded] = useState(false);
+export function KanbanAddCard({ status, boardSectionId, onAdd, autoExpand = false }: KanbanAddCardProps) {
+  const [expanded, setExpanded] = useState(autoExpand);
   const [title, setTitle] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -23,7 +25,11 @@ export function KanbanAddCard({ status, onAdd }: KanbanAddCardProps) {
     if (!trimmed) return;
 
     const { api } = await import("@/lib/api");
-    await api.post("/tasks/", { title: trimmed, status });
+    await api.post("/tasks/", {
+      title: trimmed,
+      status,
+      board_section_id: boardSectionId ?? undefined,
+    });
     onAdd();
     setTitle("");
     setExpanded(false);

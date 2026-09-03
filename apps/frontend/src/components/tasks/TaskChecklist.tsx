@@ -44,8 +44,10 @@ function CheckboxButton({ checked, onChange, id }: CheckboxButtonProps) {
         setPending(true);
         void onChange().finally(() => setPending(false));
       }}
-      className={`flex h-[18px] w-[18px] shrink-0 cursor-pointer items-center justify-center rounded-full border-2 transition-colors ${
-        checked ? "border-accent bg-accent" : "border-[#5a5a72] hover:border-accent"
+      className={`flex h-[18px] w-[18px] shrink-0 cursor-pointer items-center justify-center rounded-full border-2 transition-all ${
+        checked
+          ? "check-gradient border-transparent"
+          : "border-[#5a5a72] hover:border-accent"
       }`}
     >
       {checked && (
@@ -231,9 +233,7 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
           className="input-field flex-1 text-xs"
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
         />
-        <button onClick={handleAdd} className="btn bg-accent px-2.5 py-1 text-xs text-base hover:bg-accent-hover">
-          +
-        </button>
+        <button onClick={handleAdd} className="btn btn-gradient px-2.5 py-1 text-xs rounded-lg">+</button>
       </div>
     </div>
   );

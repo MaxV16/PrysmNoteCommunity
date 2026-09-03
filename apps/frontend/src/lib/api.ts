@@ -17,12 +17,6 @@ async function doRefresh(): Promise<boolean> {
   }
 }
 
-function getToken(): string | null {
-  if (typeof document === "undefined") return null;
-  const match = document.cookie.match(/(?:^|;\s*)access_token=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -35,16 +29,21 @@ async function request<T>(
     await ensureCsrf();
   }
 
+  // Multipart bodies must NOT carry a Content-Type header: the browser sets the
+  // boundary itself, and forcing application/json would make the backend reject
+  // the file upload.
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
+
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
     ...((options.headers as Record<string, string>) || {}),
   };
-
-  const token = getToken();
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  if (!isFormData && !("Content-Type" in headers)) {
+    headers["Content-Type"] = "application/json";
   }
 
+  // Auth is cookie-based (HttpOnly access_token + refresh_token); the cookie is
+  // never readable from JS, so there is no Authorization header to attach (L2).
   const csrf = getCsrfToken();
   if (csrf && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
     headers[CSRF_HEADER] = csrf;
@@ -99,7 +98,13 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: JSON.stringify(body) }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  // Multipart upload for endpoints that take a file. The browser sets the
+  // multipart Content-Type + boundary; do not use post() here (it forces JSON).
+  upload: <T>(path: string, formData: FormData) =>
+    request<T>(path, { method: "POST", body: formData }),
 };

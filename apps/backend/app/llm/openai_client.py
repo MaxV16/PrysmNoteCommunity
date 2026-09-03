@@ -45,3 +45,6 @@ class OpenAIClient(LLMClient):
     async def embed(self, text: str) -> list[float]:
         response = await self.client.embeddings.create(model="text-embedding-3-small", input=text)
         return response.data[0].embedding
+
+    async def aclose(self) -> None:
+        await self.client.close()

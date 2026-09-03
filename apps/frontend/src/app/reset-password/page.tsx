@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -8,14 +8,19 @@ import { api } from "@/lib/api";
 export default function ResetPasswordPage({
   searchParams,
 }: {
-  searchParams: { token?: string };
+  // Next.js 15 passes searchParams as a Promise to pages.
+  searchParams: Promise<{ token?: string }>;
 }) {
-  const token = searchParams?.token || "";
+  const [token, setToken] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
   const [error, setError] = useState("");
   const router = useRouter();
+
+  useEffect(() => {
+    searchParams.then((params) => setToken(params.token || ""));
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,7 +58,7 @@ export default function ResetPasswordPage({
     <div className="flex min-h-screen items-center justify-center bg-base p-4">
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-accent via-purple-400 to-accent opacity-60" />
+          <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
           <div className="mb-8 text-center">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 float">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -78,7 +83,7 @@ export default function ResetPasswordPage({
 
           {!token && status !== "ok" && (
             <div className="rounded-lg bg-warning/10 px-4 py-2.5 text-sm text-warning">
-              This link is missing its reset token — it may be truncated. Request a new reset link.
+              This link is missing its reset token - it may be truncated. Request a new reset link.
             </div>
           )}
 

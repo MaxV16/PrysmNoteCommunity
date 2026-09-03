@@ -24,11 +24,18 @@ class Task(Base):
         Index("idx_tasks_user_archived", "user_id", "is_archived"),
         Index("idx_tasks_parent", "parent_task_id"),
         Index("idx_tasks_user_created", "user_id", "created_at"),
+        Index("ix_tasks_board_section", "user_id", "board_section_id", "board_order"),
+        Index("idx_tasks_user_import_batch", "user_id", "import_batch_id"),
     )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     user_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     parent_task_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True)
+    # Board placement: a non-NULL board_section_id pins the task to a free
+    # section of a board, independent of its status. Status sections are
+    # membership-by-status (board_section_id IS NULL + matching status).
+    board_section_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("board_sections.id", ondelete="SET NULL"), nullable=True)
+    board_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[TaskStatus] = mapped_column(Enum(TaskStatus, name="task_status", values_callable=lambda x: [e.value for e in x]), default=TaskStatus.BACKLOG, nullable=False)
@@ -39,6 +46,11 @@ class Task(Base):
     estimated_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recurrence_rule: Mapped[str | None] = mapped_column(Text, nullable=True)
     recurrence_end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    recurrence_last_expanded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Batch marker set only for rows created by POST /api/imports/tasks, so the
+    # user can undo a whole import (the Undo endpoint deletes every task in the
+    # batch, including descendants and later recurrence expansions).
+    import_batch_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

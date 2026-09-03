@@ -28,7 +28,7 @@ describe("api", () => {
     expect(opts.method ?? "GET").toBe("GET");
     expect(opts.credentials).toBe("include");
     expect(opts.headers["Content-Type"]).toBe("application/json");
-    // GETs are safe — no CSRF header needed.
+    // GETs are safe - no CSRF header needed.
     expect(opts.headers["X-CSRF-Token"]).toBeUndefined();
   });
 
@@ -101,7 +101,7 @@ describe("api", () => {
     expect(opts.method).toBe("DELETE");
   });
 
-  it("includes Authorization header when cookie present", async () => {
+  it("does not attach an Authorization header (cookie-only auth, L2)", async () => {
     document.cookie = "access_token=my-test-token";
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -110,7 +110,9 @@ describe("api", () => {
 
     await api.get("/tasks");
     const [, opts] = mockFetch.mock.calls[0];
-    expect(opts.headers["Authorization"]).toBe("Bearer my-test-token");
+    // The access_token cookie is HttpOnly, so it is never readable from JS and
+    // no Bearer header can be (or should be) derived from document.cookie.
+    expect(opts.headers["Authorization"]).toBeUndefined();
   });
 
   it("retries on 401 when refresh succeeds", async () => {

@@ -61,7 +61,7 @@ export function HabitForm({
       <button
         type="submit"
         disabled={loading || !title.trim()}
-        className="w-full btn bg-accent text-white px-4 py-2 text-sm rounded-xl disabled:opacity-50"
+        className="w-full btn btn-gradient px-4 py-2 text-sm rounded-xl disabled:opacity-50"
       >
         {loading ? "Creating..." : "Add Habit"}
       </button>

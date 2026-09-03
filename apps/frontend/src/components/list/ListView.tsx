@@ -1,12 +1,17 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
 import type { Task } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
+import { useLocalBool } from "@/lib/use-local-bool";
+import { formatDate } from "@/lib/dates";
+import { matchesSearchQuery } from "@/lib/task-search";
 
 const PRIORITY_COLORS: Record<number, string> = TIER_COLORS;
 
@@ -16,16 +21,15 @@ export function ListView() {
   const searchQuery = useAppStore((s) => s.searchQuery);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
   const { updateTask, createTask } = useTasks();
+  const soundOn = useLocalBool("prysm_notif_sound", true);
   const [sortBy, setSortBy] = useState<"date" | "priority">("date");
   const [showTaskForm, setShowTaskForm] = useState(false);
+  const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
 
   const visibleTasks = useMemo(() => {
     let filtered = tasks.filter((t) => !t.is_archived);
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (t) => t.title.toLowerCase().includes(q) || (t.description && t.description.toLowerCase().includes(q))
-      );
+      filtered = filtered.filter((t) => matchesSearchQuery(t, searchQuery));
     }
     switch (sortBy) {
       case "priority":
@@ -53,12 +57,20 @@ export function ListView() {
 
   const handleToggleStatus = async (task: Task) => {
     const next = task.status === "done" ? "todo" : "done";
-    if (next === "done") {
+    if (next === "done" && soundOn) {
       const { playCompletionSound } = await import("@/lib/sounds");
       playCompletionSound();
     }
     await updateTask(task.id, { status: next });
   };
+
+  const openCardMenu = useCallback((e: React.MouseEvent, task: Task) => {
+    setMenu({ state: { kind: "task", task }, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleEmptyNewTask = useCallback(() => {
+    setShowTaskForm(true);
+  }, []);
 
   return (
     <div className="flex flex-col h-full bg-base">
@@ -97,7 +109,13 @@ export function ListView() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div
+        className="flex-1 overflow-auto"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu({ state: { kind: "empty" }, x: e.clientX, y: e.clientY });
+        }}
+      >
         {visibleTasks.length === 0 ? (
           <div className="flex items-center justify-center py-16 text-xs text-muted">No tasks found</div>
         ) : (
@@ -107,7 +125,13 @@ export function ListView() {
               return (
                 <div
                   key={task.id}
+                  data-list-row
                   onClick={() => setSelectedTaskId(task.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openCardMenu(e, task);
+                  }}
                   className={`flex items-center gap-3 px-4 py-2.5 hover:bg-hover/20 transition-opacity cursor-pointer ${isDone ? "opacity-50" : ""}`}
                 >
                   <button
@@ -132,8 +156,8 @@ export function ListView() {
                     </span>
                     {(task.due_date || task.start_date) && (
                       <span className="text-[10px] text-muted mt-0.5 block">
-                        {task.start_date && `From ${new Date(task.start_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} `}
-                        {task.due_date && `${task.start_date ? "→ " : ""}Due ${new Date(task.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+                        {task.start_date && `From ${formatDate(new Date(task.start_date + "T00:00:00"), { includeYear: false })} `}
+                        {task.due_date && `${task.start_date ? "→ " : ""}Due ${formatDate(new Date(task.due_date + "T00:00:00"), { includeYear: false })}`}
                       </span>
                     )}
                   </div>
@@ -166,6 +190,15 @@ export function ListView() {
           onCancel={() => setShowTaskForm(false)}
         />
       </Modal>
+
+      <ContextMenu
+        open={!!menu}
+        x={menu?.x ?? 0}
+        y={menu?.y ?? 0}
+        onClose={() => setMenu(null)}
+      >
+        <TaskContextMenu menu={menu?.state ?? null} onClose={() => setMenu(null)} onNewTask={handleEmptyNewTask} />
+      </ContextMenu>
     </div>
   );
 }

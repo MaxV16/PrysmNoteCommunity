@@ -1,19 +1,32 @@
 import asyncio
+import os
+import re
 from uuid import uuid4
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import async_session_factory, get_db
 from app.dependencies import get_current_user
 from app.models.ai_conversation import AiConversation
 from app.models.ai_session import AiSession
 from app.models.api_key import ApiKey
 from app.models.user import User
+from app.services.ai_entitlement import (
+    byok_allowed,
+    check_ai_allowance,
+    parse_usage,
+    record_ai_usage,
+)
+from app.services.ai_cache import (
+    cache_response,
+    get_cached_response,
+    purge_expired,
+)
 from app.services.ai_service import (
     build_messages,
     execute_tool_calls,
@@ -44,7 +57,7 @@ async def _prune_rate_limits():
     while True:
         await asyncio.sleep(RATE_LIMIT_CLEANUP_INTERVAL)
         if _get_redis() is not None:
-            # Redis TTLs expire counters automatically — nothing to prune.
+            # Redis TTLs expire counters automatically - nothing to prune.
             continue
         now = time.time()
         stale = [uid for uid, stamps in _ai_rate_limit.items()
@@ -104,7 +117,7 @@ def _provider_error_detail(exc: Exception) -> str | None:
 
 
 def _friendly_llm_error(exc: Exception) -> str:
-    """Map provider/transport errors to a clear, actionable user message — e.g.
+    """Map provider/transport errors to a clear, actionable user message - e.g.
     when the user's OpenRouter key has no credits left."""
     import openai
 
@@ -137,6 +150,80 @@ MAX_CHAT_HISTORY = 20
 MAX_MESSAGE_LENGTH = 4000
 
 
+def _normalize_reply_markdown(text: str) -> str:
+    """Clean up sloppy model output before it is persisted or displayed.
+
+    Some providers write emphasis with stray spaces ("** what should the task
+    be ?**" or "* x *") which never renders as markdown, and insert spaces
+    around punctuation ("e .g .", "daily ,", "I 'll"). This fixes those
+    artifacts line by line so replies render as real markdown. Fenced code
+    blocks are left untouched (their whitespace is significant) and start-of-line
+    "* "/"- " list markers are preserved (they are never emphasis closers).
+    """
+    if not text:
+        return text
+
+    def _strip_delimiter_spacing(line: str, marker: str) -> str:
+        """Remove one stray-space run around paired emphasis/code delimiters.
+
+        Pairs delimiters sequentially ("** a **" -> "**a**", "* x *" -> "*x*",
+        "` x `" -> "`x`"). A start-of-line "* "/"- " is a list marker, never an
+        opener, and clean text (no space right after the opener or before the
+        closer) is left untouched.
+        """
+        positions = []
+        i = 0
+        while True:
+            idx = line.find(marker, i)
+            if idx == -1:
+                break
+            positions.append(idx)
+            i = idx + len(marker)
+        for p in range(0, len(positions) - 1, 2):
+            open_idx = positions[p]
+            close_idx = positions[p + 1]
+            if marker in ("*", "-") and not line[:open_idx].strip():
+                continue
+            after_open = open_idx + len(marker)
+            if after_open < len(line) and line[after_open].isspace():
+                line = line[:after_open] + line[after_open:].lstrip()
+                close_idx = line.find(marker, after_open)
+                if close_idx == -1:
+                    break
+            before_close = close_idx
+            k = before_close - 1
+            while k >= 0 and line[k].isspace():
+                k -= 1
+            if k != before_close - 1:
+                line = line[: k + 1] + line[before_close:]
+        return line
+
+    def _clean(line: str) -> str:
+        # Space before punctuation: "e .g ." -> "e.g.", "daily ," -> "daily,".
+        # "]" and "}" are excluded so GFM checkboxes "[ ]" stay intact.
+        line = re.sub(r"[ \t]+([,.;:?!>)])", r"\1", line)
+        # Space after an opening bracket/paren: "( e" -> "(e". An empty-bracket
+        # checkbox "[ ]" is left alone (valid GFM task-list syntax).
+        line = re.sub(r"([(\[{<])[ \t]+(?![\]}])", r"\1", line)
+        # Contractions: "I 'll" -> "I'll", "don 't" -> "don't".
+        line = re.sub(r"\b(\w) '(\w)", r"\1'\2", line)
+        # Emphasis/code delimiters written with stray spaces around the inner text.
+        for marker in ("**", "__", "*", "_", "`"):
+            line = _strip_delimiter_spacing(line, marker)
+        return line
+
+    out: list[str] = []
+    in_fence = False
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            out.append(line)
+            continue
+        out.append(line if in_fence else _clean(line))
+    return "\n".join(out)
+
+
 def _chunk_text(text: str, size: int = 400) -> list[str]:
     """Split already-computed final answer text into token-like chunks so the
     frontend can render it incrementally without a second model call."""
@@ -163,7 +250,7 @@ _CHARS_PER_TOKEN = 4
 
 def _estimate_tokens(prompt_messages: list[dict], completion: str | None = None) -> int:
     """Estimate total tokens for a prompt + (optional) completion, so the user
-    can see how expensive a turn was. Not a precise tokenizer — for visibility."""
+    can see how expensive a turn was. Not a precise tokenizer - for visibility."""
     chars = 0
     for m in prompt_messages or []:
         content = m.get("content")
@@ -215,6 +302,114 @@ async def get_user_api_key(session: AsyncSession, user: User, provider: str) -> 
         from app.utils.encryption import decrypt_api_key
         return decrypt_api_key(api_key.encrypted_key)
     return None
+
+
+async def resolve_llm_key(
+    session: AsyncSession, user: User, provider: str
+) -> tuple[str, str | None]:
+    """Resolve ``(provider, api_key)`` for a chat request.
+
+    Returns ``(provider, api_key)``. For the hosted ``prysmai`` provider this
+    validates the user's AI entitlement + allowance and returns the server's
+    DeepSeek key; for BYOK providers it returns the user's own stored key (paid
+    subscription required in the hosted build - the community build has no
+    premium tier, so BYOK stays open there).
+    Raises a 4xx HTTPException with a friendly message when access isn't allowed.
+    """
+    if provider == "prysmai":
+        ent = await check_ai_allowance(str(user.id), session)
+        if ent.get("mode") != "prysmai":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="PrysmAI requires an active plan or the 14-day free trial.",
+            )
+        if ent.get("blocked"):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Your PrysmAI token allowance is used up for this month. Upgrade your plan or wait for it to reset.",
+            )
+        server_key = os.getenv("DEEPSEEK_API_KEY") or ""
+        if not server_key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="PrysmAI is not configured on this server yet.",
+            )
+        return "prysmai", server_key
+
+    if not await byok_allowed(str(user.id), session):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI with your own API key is available on paid plans only. Start the 14-day free trial for hosted PrysmAI, or upgrade to a paid plan.",
+        )
+    api_key = await get_user_api_key(session, user, provider)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Please provide an API key in Settings.")
+    return provider, api_key
+
+
+async def record_response_usage(
+    session: AsyncSession, user_id, provider: str, response: dict
+) -> None:
+    """Record token usage from an OpenAI-style provider response (hosted only)."""
+    if provider != "prysmai":
+        return
+    u = parse_usage(response)
+    if u["input"] or u["output"]:
+        await record_ai_usage(session, user_id, "prysmai", u["input"], u["output"], u["cached_input"])
+
+
+async def record_estimated_usage(
+    session: AsyncSession, user_id, provider: str, messages: list[dict], streamed: str
+) -> None:
+    """Estimate + record usage for a streamed hosted answer (no usage in stream)."""
+    if provider != "prysmai":
+        return
+    inp = _estimate_tokens(messages, "")
+    out = _estimate_tokens([{"role": "assistant", "content": streamed}], "")
+    await record_ai_usage(session, user_id, "prysmai", inp, out, 0)
+
+
+# In-flight request coalescing: keyed by cache_key; concurrent identical tool-round
+# requests share ONE provider call instead of each re-billing it (batching). Entries
+# are removed in a finally, so a stale key can't leak.
+_in_flight: dict[str, asyncio.Future] = {}
+
+
+async def chat_with_cache(
+    session: AsyncSession, user_id, provider: str, client, messages: list[dict], tools: list[dict] | None
+) -> dict:
+    """Run a tool-round provider call, served from the response cache when the
+    exact request was answered recently (saves provider spend - the point of the
+    cache for hosted PrysmAI). Usage is only recorded for real (non-cached) calls.
+    Identical concurrent requests are coalesced into a single provider call.
+    """
+    from app.services.ai_cache import make_cache_key
+
+    cached = await get_cached_response(session, user_id, provider, messages, tools)
+    if cached is not None:
+        return cached
+
+    key = make_cache_key(user_id, provider, messages, tools)
+    fut = _in_flight.get(key)
+    if fut is not None:
+        # Another request is already running this exact call; await its result.
+        return await asyncio.shield(fut)
+
+    fut = asyncio.get_event_loop().create_future()
+    _in_flight[key] = fut
+    try:
+        response = await client.chat(messages, tools=tools)
+        await cache_response(session, user_id, provider, messages, tools, response)
+        await record_response_usage(session, user_id, provider, response)
+        if not fut.done():
+            fut.set_result(response)
+        return response
+    except Exception as exc:
+        if not fut.done():
+            fut.set_exception(exc)
+        raise
+    finally:
+        _in_flight.pop(key, None)
 
 
 async def persist_conversation(
@@ -303,7 +498,7 @@ async def _maybe_update_summary(
 
     Only runs once there's enough history for a summary to be useful, or when a
     summary already exists (so it keeps evolving). Failures fall back silently to
-    the existing truncation behavior — never breaks the user request.
+    the existing truncation behavior - never breaks the user request.
     """
     total_turns = len(sanitized_history) + 2  # + this user + assistant message
     if total_turns < SUMMARIZE_MIN_HISTORY and not current_summary:
@@ -356,6 +551,22 @@ async def _maybe_extract_memories(
     return facts
 
 
+@router.get("/entitlement")
+async def ai_entitlement(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """Return the user's AI entitlement (PrysmAI allowance + usage, or BYOK)."""
+    ent = await check_ai_allowance(str(user.id), session)
+    return {
+        "mode": ent.get("mode", "byok"),
+        "allowance": ent.get("allowance", 0),
+        "used": ent.get("used", 0),
+        "remaining": ent.get("remaining"),
+        "blocked": bool(ent.get("blocked")),
+    }
+
+
 @router.post("/chat")
 async def chat(
     request: ChatRequest,
@@ -364,12 +575,10 @@ async def chat(
 ):
     _check_ai_rate_limit(str(user.id))
 
-    api_key = await get_user_api_key(session, user, request.provider)
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Please provide an API key in Settings.")
+    provider, api_key = await resolve_llm_key(session, user, request.provider)
 
     session_id = request.session_id or str(uuid4())
-    client = await get_llm_client(request.provider, api_key)
+    client = await get_llm_client(provider, api_key)
     sanitized_history = _sanitize_chat_history(request.chat_history)
     ai_session = await load_session_summary(session, user.id, session_id)
     current_summary = ai_session.summary if ai_session else None
@@ -382,79 +591,9 @@ async def chat(
     content = ""
     tool_calls = None
     try:
-        for _round in range(MAX_TOOL_ROUNDS):
-            response = await client.chat(messages, tools=tools)
-            choice = response.get("choices", [{}])[0]
-            assistant_message = choice.get("message", {})
-            content = assistant_message.get("content", "") or ""
-            tool_calls = assistant_message.get("tool_calls")
-
-            if not tool_calls:
-                break
-
-            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-            tool_results = await execute_tool_calls(tool_calls, user.id, session, client)
-            messages.extend(tool_results)
-
-            if _round == MAX_TOOL_ROUNDS - 1:
-                fallback = await client.chat(messages, tools=None)
-                content = (fallback.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
-                tool_calls = None
-    except Exception as exc:  # provider/auth/credit errors -> a clear, actionable message
-        raise HTTPException(status_code=502, detail=_friendly_llm_error(exc)) from exc
-
-    # Durable tool side-effects before answering: commit any created/scheduled
-    # tasks so a disconnect after the response can't roll them back.
-    await session.commit()
-
-    await persist_conversation(session, user.id, session_id, "user", request.message)
-    await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
-    await _maybe_update_summary(session, user.id, session_id, client, sanitized_history, request.message, content, current_summary)
-    await _maybe_extract_memories(session, user.id, session_id, client, sanitized_history, request.message, content)
-    await session.commit()
-
-    return {
-        "content": content,
-        "tool_calls": tool_calls,
-        "session_id": session_id,
-        "estimated_tokens": _estimate_tokens(messages, content),
-    }
-
-
-@router.post("/chat/stream")
-async def chat_stream(
-    request: ChatRequest,
-    user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_db),
-):
-    _check_ai_rate_limit(str(user.id))
-
-    api_key = await get_user_api_key(session, user, request.provider)
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Please provide an API key in Settings.")
-
-    session_id = request.session_id or str(uuid4())
-    client = await get_llm_client(request.provider, api_key)
-    sanitized_history = _sanitize_chat_history(request.chat_history)
-    ai_session = await load_session_summary(session, user.id, session_id)
-    current_summary = ai_session.summary if ai_session else None
-    memories = await retrieve_relevant_memories(session, str(user.id), request.message)
-    premium = await is_premium(str(user.id), session)
-    tools = tools_for_user(premium)
-    messages = build_messages(sanitized_history, request.message, request.context, current_summary, memories, include_finance=premium)
-
-    await persist_conversation(session, user.id, session_id, "user", request.message)
-
-    async def event_generator():
-        import json
-
-        MAX_TOOL_ROUNDS = 4
-        tool_calls = None
-        content = ""
-
         try:
             for _round in range(MAX_TOOL_ROUNDS):
-                response = await client.chat(messages, tools=tools)
+                response = await chat_with_cache(session, user.id, provider, client, messages, tools)
                 choice = response.get("choices", [{}])[0]
                 assistant_message = choice.get("message", {})
                 content = assistant_message.get("content", "") or ""
@@ -463,75 +602,253 @@ async def chat_stream(
                 if not tool_calls:
                     break
 
-                # Run tool calls, feed their outputs back, and continue the loop so a
-                # search → create → conflict-check sequence can complete in one turn.
                 messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-                yield {
-                    "event": "tool_start",
-                    "data": json.dumps([tc.get("function", {}).get("name") for tc in tool_calls]),
-                }
                 tool_results = await execute_tool_calls(tool_calls, user.id, session, client)
                 messages.extend(tool_results)
-                yield {"event": "tool_results", "data": json.dumps([r["content"] for r in tool_results])}
-        except Exception as exc:  # provider/auth/credit errors should be visible, not a dead stream
-            yield {"event": "error", "data": _friendly_llm_error(exc)}
-            return
 
-        # Commit tool side-effects, the user message (persisted at request time)
-        # AND an assistant placeholder BEFORE streaming the final answer.
-        # Persisting the assistant turn here — instead of after the tokens stream
-        # — means a client abort/cancel mid-answer can never drop the reply: once
-        # we reach this point the whole turn is durable. Tool-created tasks are
-        # flushed in execute_tool_calls but not committed; this commit makes them
-        # durable too.
-        placeholder = await persist_conversation(session, user.id, session_id, "assistant", "", tool_calls)
+                if _round == MAX_TOOL_ROUNDS - 1:
+                    fallback = await client.chat(messages, tools=None)
+                    await record_response_usage(session, user.id, provider, fallback)
+                    content = (fallback.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
+                    tool_calls = None
+        except Exception as exc:  # provider/auth/credit errors -> a clear, actionable message
+            raise HTTPException(status_code=502, detail=_friendly_llm_error(exc)) from exc
+
+        # Durable tool side-effects before answering: commit any created/scheduled
+        # tasks so a disconnect after the response can't roll them back.
         await session.commit()
 
-        # Stream the final natural-language answer for real. The tool loop's
-        # completed content is only a fallback; the final round re-invokes the
-        # provider in streaming mode so tokens arrive incrementally (the cost of
-        # one extra model call per turn is accepted).
-        streamed = ""
+        await persist_conversation(session, user.id, session_id, "user", request.message)
+        await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
+        # The client must STILL be open here: summary + memory extraction make
+        # their own LLM calls through it. Closing it in the earlier finally would
+        # silently kill both (they fail open, so no error, just no summaries).
+        await _maybe_update_summary(session, user.id, session_id, client, sanitized_history, request.message, content, current_summary)
+        await _maybe_extract_memories(session, user.id, session_id, client, sanitized_history, request.message, content)
+        await session.commit()
+
+        return {
+            "content": content,
+            "tool_calls": tool_calls,
+            "session_id": session_id,
+            "estimated_tokens": _estimate_tokens(messages, content),
+        }
+    finally:
+        await _safe_aclose(client)
+
+
+async def _safe_aclose(client) -> None:
+    """Close a per-request provider client, swallowing any teardown error."""
+    try:
+        await client.aclose()
+    except Exception:
+        pass
+
+
+async def _distill_after_answer(
+    user_id,
+    session_id,
+    client,
+    sanitized_history: list[dict],
+    user_message: str,
+    assistant_content: str,
+    current_summary: str | None,
+) -> None:
+    """Best-effort summary + memory distillation, run off the SSE done path.
+
+    Opens its own DB session (never the request-scoped one, which is closed when
+    the stream ends) and owns the provider client: it closes the client when the
+    distillation finishes. Per-item try/except so one failure never loses the
+    other's work.
+    """
+    try:
+        async with async_session_factory() as bg_session:
+            try:
+                await _maybe_update_summary(
+                    bg_session, user_id, session_id, client, sanitized_history,
+                    user_message, assistant_content, current_summary,
+                )
+            except Exception:
+                pass
+            try:
+                await _maybe_extract_memories(
+                    bg_session, user_id, session_id, client, sanitized_history,
+                    user_message, assistant_content,
+                )
+            except Exception:
+                pass
+            try:
+                await bg_session.commit()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    finally:
+        await _safe_aclose(client)
+
+
+@router.post("/chat/stream")
+async def chat_stream(
+    req: ChatRequest,
+    http_request: Request,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    _check_ai_rate_limit(str(user.id))
+
+    provider, api_key = await resolve_llm_key(session, user, req.provider)
+
+    session_id = req.session_id or str(uuid4())
+    client = await get_llm_client(provider, api_key)
+    sanitized_history = _sanitize_chat_history(req.chat_history)
+    ai_session = await load_session_summary(session, user.id, session_id)
+    current_summary = ai_session.summary if ai_session else None
+    memories = await retrieve_relevant_memories(session, str(user.id), req.message)
+    premium = await is_premium(str(user.id), session)
+    tools = tools_for_user(premium)
+    messages = build_messages(sanitized_history, req.message, req.context, current_summary, memories, include_finance=premium)
+
+    await persist_conversation(session, user.id, session_id, "user", req.message)
+
+    async def event_generator():
+        import json
+
+        MAX_TOOL_ROUNDS = 4
+        tool_calls = None
+        content = ""
+        placeholder = None
+        bg_task = None
+
         try:
-            async for chunk in client.stream_chat(messages, tools=None):
-                streamed += chunk
-                yield {"event": "token", "data": chunk}
-        except Exception as exc:
-            # Fall back to the non-streaming loop output rather than an empty
-            # answer, then surface the error so the client can show it.
-            if streamed:
+            try:
+                for _round in range(MAX_TOOL_ROUNDS):
+                    if await http_request.is_disconnected():
+                        raise asyncio.CancelledError()
+                    # Run the provider round as a task so we can heartbeat the
+                    # connection every ~15s and abort when the client disconnects,
+                    # instead of letting a gone client eat up to 90s of work.
+                    round_task = asyncio.create_task(
+                        chat_with_cache(session, user.id, provider, client, messages, tools)
+                    )
+                    try:
+                        while not round_task.done():
+                            if await http_request.is_disconnected():
+                                round_task.cancel()
+                                raise asyncio.CancelledError()
+                            done_now, _ = await asyncio.wait({round_task}, timeout=15.0)
+                            if done_now:
+                                break
+                            yield {"comment": "ping"}
+                        response = await round_task
+                    except asyncio.CancelledError:
+                        round_task.cancel()
+                        raise
+                    choice = response.get("choices", [{}])[0]
+                    assistant_message = choice.get("message", {})
+                    content = assistant_message.get("content", "") or ""
+                    tool_calls = assistant_message.get("tool_calls")
+
+                    if not tool_calls:
+                        break
+
+                    # Run tool calls, feed their outputs back, and continue the loop so a
+                    # search → create → conflict-check sequence can complete in one turn.
+                    messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+                    yield {
+                        "event": "tool_start",
+                        "data": json.dumps([tc.get("function", {}).get("name") for tc in tool_calls]),
+                    }
+                    tool_results = await execute_tool_calls(tool_calls, user.id, session, client)
+                    messages.extend(tool_results)
+                    yield {"event": "tool_results", "data": json.dumps([r["content"] for r in tool_results])}
+            except Exception as exc:  # provider/auth/credit errors should be visible, not a dead stream
                 yield {"event": "error", "data": _friendly_llm_error(exc)}
                 return
-            streamed = content
-            for chunk in _chunk_text(streamed):
-                yield {"event": "token", "data": chunk}
-            yield {"event": "error", "data": _friendly_llm_error(exc)}
-            return
 
-        if not streamed:
-            streamed = content or " "
-            for chunk in _chunk_text(streamed):
-                yield {"event": "token", "data": chunk}
-
-        # Persist the streamed answer over the placeholder row.
-        placeholder.content = streamed
-        await session.commit()
-
-        estimated_tokens = _estimate_tokens(messages, streamed)
-        yield {"event": "usage", "data": json.dumps({"estimated_tokens": estimated_tokens})}
-
-        # Summary/memory distillation are best-effort and must never lose the
-        # already-committed conversation — isolate them so a failure can't tear
-        # down the SSE stream or roll anything back.
-        try:
-            await _maybe_update_summary(
-                session, user.id, session_id, client, sanitized_history, request.message, streamed, current_summary
-            )
-            await _maybe_extract_memories(session, user.id, session_id, client, sanitized_history, request.message, streamed)
+            # Commit tool side-effects, the user message (persisted at request time)
+            # AND an assistant placeholder BEFORE streaming the final answer.
+            # Persisting the assistant turn here - instead of after the tokens stream
+            # - means a client abort/cancel mid-answer can never drop the reply: once
+            # we reach this point the whole turn is durable. Tool-created tasks are
+            # flushed in execute_tool_calls but not committed; this commit makes them
+            # durable too.
+            placeholder = await persist_conversation(session, user.id, session_id, "assistant", "", tool_calls)
             await session.commit()
-        except Exception:
-            pass
-        yield {"event": "done", "data": ""}
+
+            # Stream the final natural-language answer for real. The tool loop's
+            # completed content is only a fallback; the final round re-invokes the
+            # provider in streaming mode so tokens arrive incrementally (the cost of
+            # one extra model call per turn is accepted).
+            streamed = ""
+            try:
+                async for chunk in client.stream_chat(messages, tools=None):
+                    streamed += chunk
+                    yield {"event": "token", "data": chunk}
+            except Exception as exc:
+                # Fall back to the non-streaming loop output rather than an empty
+                # answer, then surface the error so the client can show it. The
+                # placeholder ALWAYS receives real content (partial stream or the
+                # tool-loop fallback) so an interrupted turn never leaves an empty
+                # bubble in history.
+                if not streamed:
+                    streamed = content
+                    if not streamed:
+                        streamed = "Interrupted."
+                    for chunk in _chunk_text(streamed):
+                        yield {"event": "token", "data": chunk}
+                placeholder.content = _normalize_reply_markdown(streamed)
+                try:
+                    await session.commit()
+                except Exception:
+                    pass
+                yield {"event": "error", "data": _friendly_llm_error(exc)}
+                return
+
+            if not streamed:
+                streamed = content or " "
+                for chunk in _chunk_text(streamed):
+                    yield {"event": "token", "data": chunk}
+
+            # Normalize sloppy model formatting (stray-space emphasis/punctuation)
+            # so the persisted reply renders as real markdown on reload.
+            streamed = _normalize_reply_markdown(streamed)
+
+            # Persist the streamed answer over the placeholder row.
+            placeholder.content = streamed
+            # Record the streamed hosted answer's (estimated) usage before committing.
+            await record_estimated_usage(session, user.id, provider, messages, streamed)
+            await session.commit()
+
+            estimated_tokens = _estimate_tokens(messages, streamed)
+            yield {"event": "usage", "data": json.dumps({"estimated_tokens": estimated_tokens})}
+
+            # Summary/memory distillation are best-effort and slow, so they move OFF
+            # the done path: the client sees "done" immediately and the distillation
+            # runs as a background task with its own session (the background task
+            # owns the provider client and closes it when finished).
+            bg_task = asyncio.create_task(
+                _distill_after_answer(
+                    user.id, session_id, client, sanitized_history, req.message, streamed, current_summary
+                )
+            )
+            yield {"event": "done", "data": ""}
+        except asyncio.CancelledError:
+            # Client disconnected: never leave an empty turn behind. The committed
+            # placeholder gets marked interrupted so history shows a real row.
+            if placeholder is not None and not placeholder.content:
+                placeholder.content = "Interrupted."
+                try:
+                    await session.commit()
+                except Exception:
+                    pass
+            if bg_task is not None:
+                bg_task.cancel()
+            raise
+        finally:
+            # Close the per-request provider client (httpx/AsyncOpenAI pool). When a
+            # background distillation was scheduled it owns the client and closes it.
+            if bg_task is None:
+                await _safe_aclose(client)
 
     return EventSourceResponse(event_generator())
 

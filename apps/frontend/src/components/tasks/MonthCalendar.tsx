@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { calendarOffset, weekdayHeaders } from "@/lib/dates";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const DAY_HEADERS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
 interface MonthCalendarProps {
   value: string | null; // ISO date string
@@ -36,7 +36,8 @@ export function MonthCalendar({ value, onChange, accent = "var(--accent)" }: Mon
   const month = viewMonth;
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
-  const startOffset = (firstDay.getDay() + 6) % 7;
+  const startOffset = calendarOffset(firstDay);
+  const dayHeaders = weekdayHeaders();
 
   const prevMonth = () => {
     if (month === 0) {
@@ -69,7 +70,7 @@ export function MonthCalendar({ value, onChange, accent = "var(--accent)" }: Mon
         </button>
       </div>
       <div className="grid grid-cols-7 gap-0.5 text-center">
-        {DAY_HEADERS.map((h) => (
+        {dayHeaders.map((h) => (
           <span key={h} className="text-[10px] text-muted font-medium py-0.5">{h}</span>
         ))}
         {Array.from({ length: startOffset }).map((_, i) => (

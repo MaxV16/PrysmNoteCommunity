@@ -26,7 +26,7 @@ export default function ForgotPasswordPage() {
     <div className="flex min-h-screen items-center justify-center bg-base p-4">
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-accent via-purple-400 to-accent opacity-60" />
+          <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
           <div className="mb-8 text-center">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 float">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -45,7 +45,7 @@ export default function ForgotPasswordPage() {
               </div>
               <div className="rounded-lg bg-elevated border border-border px-4 py-2.5 text-xs text-secondary">
                 Signed up with Google or GitHub instead? Those accounts don&apos;t have a password
-                to reset — just use the <span className="text-accent">Continue with Gmail / GitHub</span>{" "}
+                to reset - just use the <span className="text-accent">Continue with Gmail / GitHub</span>{" "}
                 buttons on the sign-in page.
               </div>
             </div>

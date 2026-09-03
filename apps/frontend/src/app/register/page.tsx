@@ -3,15 +3,20 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { track } from "@/lib/track";
 import Link from "next/link";
 import { OAuthButtons } from "@/components/auth/OAuthButtons";
+import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 
 const SSO_ERROR_MESSAGES: Record<string, string> = {
   sso_not_configured: "SSO is not configured on this server yet.",
   sso_no_email: "That provider didn't return an email we could use.",
-  sso_invalid_state: "The sign-in request was invalid — please try again.",
+  sso_invalid_state: "The sign-in request was invalid - please try again.",
   sso_failed: "Sign-in with that provider failed. Please try again.",
 };
+
+
+const TURNSTILE_ON = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
@@ -21,6 +26,10 @@ export default function RegisterPage() {
   const [ssoError, setSsoError] = useState<keyof typeof SSO_ERROR_MESSAGES | null>(null);
   const [loading, setLoading] = useState(false);
   const [registered, setRegistered] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  // Bumped on each failed submit: the siteverify token is single-use, so the
+  // widget is remounted to mint a fresh one before the user retries.
+  const [submitAttempt, setSubmitAttempt] = useState(0);
   const { register } = useAuth();
   const router = useRouter();
 
@@ -29,6 +38,7 @@ export default function RegisterPage() {
     if (e && e in SSO_ERROR_MESSAGES) setSsoError(e as keyof typeof SSO_ERROR_MESSAGES);
   }, []);
 
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -36,9 +46,21 @@ export default function RegisterPage() {
       setError("Password must be at least 8 characters");
       return;
     }
+    if (TURNSTILE_ON && !turnstileToken) {
+      setError("Please complete the CAPTCHA to continue.");
+      return;
+    }
     setLoading(true);
+    let riskProfileArg: Record<string, unknown> | null = null;
     try {
-      const result = await register(email, password, displayName || undefined);
+      const result = await register(
+        email,
+        password,
+        displayName || undefined,
+        turnstileToken || undefined,
+        riskProfileArg
+      );
+      track("signed_up");
       if (result.requiresVerification) {
         setRegistered(true);
       } else {
@@ -46,6 +68,8 @@ export default function RegisterPage() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");
+      setTurnstileToken("");
+      setSubmitAttempt((attempt) => attempt + 1);
     } finally {
       setLoading(false);
     }
@@ -56,7 +80,7 @@ export default function RegisterPage() {
       <div className="flex min-h-screen items-center justify-center bg-base p-4">
         <div className="w-full max-w-sm scale-in">
           <div className="card p-8 relative overflow-hidden text-center">
-            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-accent via-purple-400 to-accent opacity-60" />
+            <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="4" width="20" height="16" rx="2" />
@@ -66,7 +90,7 @@ export default function RegisterPage() {
             <h1 className="text-xl font-bold gradient-text">Check your inbox</h1>
             <p className="mt-2 text-sm text-muted">
               We sent a verification link to <span className="font-medium text-secondary">{email}</span>.
-              Click it to confirm your email — then you can sign in.
+              Click it to confirm your email - then you can sign in.
             </p>
             <p className="mt-4 text-xs text-muted">
               Didn&apos;t get it? Check spam, or go to the{" "}
@@ -85,7 +109,7 @@ export default function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center bg-base p-4">
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-accent via-purple-400 to-accent opacity-60" />
+          <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
           <div className="mb-8 text-center">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 float">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -151,6 +175,13 @@ export default function RegisterPage() {
                 minLength={8}
               />
             </div>
+            {TURNSTILE_ON && (
+              <TurnstileWidget
+                key={submitAttempt}
+                onToken={setTurnstileToken}
+                onExpire={() => setTurnstileToken("")}
+              />
+            )}
             <button
               type="submit"
               disabled={loading}

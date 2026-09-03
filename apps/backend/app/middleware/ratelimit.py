@@ -5,7 +5,7 @@ limiters: this catches brute-force floods and runaway scrapers across the whole
 API. Fail-open: when Redis is unavailable the RateLimiter falls back to an
 in-memory dict, and when Redis is unreachable entirely the limit is skipped.
 
-Client IP comes from ``request.client.host`` — in production uvicorn runs with
+Client IP comes from ``request.client.host`` - in production uvicorn runs with
 ``--proxy-headers`` and ``FORWARDED_ALLOW_IPS=*``, so it is already the trusted
 proxy-derived real client IP (never the raw, spoofable X-Forwarded-For header).
 """

@@ -17,7 +17,7 @@ export function UpdateBanner() {
         <span className="text-secondary">A new update is available.</span>
         <button
           onClick={reload}
-          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-accent-hover"
+          className="btn-gradient rounded-lg px-3 py-1.5 text-xs font-semibold"
         >
           Reload
         </button>

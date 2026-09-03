@@ -1,32 +1,69 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useAppStore } from "@/stores/app-store";
 import type { Task } from "@/types/task";
 import { Modal } from "@/components/ui/Modal";
 import { TaskForm } from "@/components/tasks/TaskForm";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 import { useTasks } from "@/hooks/useTasks";
+import { api } from "@/lib/api";
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
+import { calendarOffset, weekdayHeaders } from "@/lib/dates";
 
 const PRIORITY_COLORS = TIER_COLORS;
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const DAY_HEADERS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function CalendarView() {
   const tasks = useAppStore((s) => s.tasks);
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
-  const { createTask } = useTasks();
+  const { createTask, fetchTasks } = useTasks();
   const [viewDate, setViewDate] = useState(() => new Date());
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
+  const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
+  const [calConnected, setCalConnected] = useState<boolean | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<{ connected: boolean; last_synced_at: string | null }>("/calendar/status")
+      .then((status) => {
+        if (!cancelled) setCalConnected(status.connected);
+      })
+      .catch(() => {
+        if (!cancelled) setCalConnected(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleCalendarSync = async () => {
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      await api.post("/calendar/pull");
+      await fetchTasks();
+      setSyncMessage("Synced");
+    } catch (err) {
+      setSyncMessage(err instanceof Error ? err.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
 
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
-  const startOffset = (firstDay.getDay() + 6) % 7;
+  const startOffset = calendarOffset(firstDay);
+  const dayHeaders = weekdayHeaders();
 
   const tasksByDate = useMemo(() => {
     const map: Record<string, Task[]> = {};
@@ -60,24 +97,69 @@ export function CalendarView() {
     setFormDefaultDate(null);
   };
 
+  const openCardMenu = useCallback((e: React.MouseEvent, task: Task) => {
+    setMenu({ state: { kind: "task", task }, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const openDayMenu = useCallback((e: React.MouseEvent, ds: string) => {
+    setMenu({ state: { kind: "empty", day: ds }, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const handleEmptyNewTask = useCallback(
+    (ctx: { day?: string; section?: { id: string | null; title: string } }) => {
+      if (ctx.day) {
+        const [y, m, d] = ctx.day.split("-").map(Number);
+        setFormDefaultDate(new Date(y, m - 1, d));
+        setShowTaskForm(true);
+      } else {
+        setFormDefaultDate(null);
+        setShowTaskForm(true);
+      }
+    },
+    []
+  );
+
   return (
     <div className="flex flex-col h-full bg-base">
       <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2 shrink-0">
-        <button onClick={prevMonth} className="btn bg-elevated px-3 py-1.5 text-xs text-secondary hover:bg-hover">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6"/>
-          </svg>
-        </button>
-        <span className="text-sm font-semibold text-primary">{MONTHS[month]} {year}</span>
-        <button onClick={nextMonth} className="btn bg-elevated px-3 py-1.5 text-xs text-secondary hover:bg-hover">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={prevMonth} className="btn bg-elevated px-3 py-1.5 text-xs text-secondary hover:bg-hover">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+          </button>
+          <span className="text-sm font-semibold text-primary">{MONTHS[month]} {year}</span>
+          <button onClick={nextMonth} className="btn bg-elevated px-3 py-1.5 text-xs text-secondary hover:bg-hover">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          {syncMessage && <span className="text-[10px] text-muted">{syncMessage}</span>}
+          <button
+            onClick={handleCalendarSync}
+            disabled={calConnected === false || syncing}
+            title={calConnected === false ? "Connect Google Calendar in Settings to sync" : "Pull new events from Google Calendar"}
+            className="btn bg-elevated px-3 py-1.5 text-xs text-secondary hover:bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {syncing ? (
+              <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-9-9"/>
+                <polyline points="21 3 21 9 15 9"/>
+              </svg>
+            )}
+            Sync
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-7 border-b border-border bg-surface shrink-0">
-        {DAY_HEADERS.map((h) => (
+        {dayHeaders.map((h) => (
           <div key={h} className="text-center text-[10px] font-semibold uppercase text-muted py-2 border-r border-border/30 last:border-r-0">
             {h}
           </div>
@@ -99,10 +181,15 @@ export function CalendarView() {
               key={d}
               className="border-r border-b border-border/20 p-1 overflow-hidden hover:bg-hover/20 transition-colors cursor-pointer"
               onDoubleClick={() => handleDayDoubleClick(d)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openDayMenu(e, ds);
+              }}
             >
               <span
                 className={`inline-flex items-center justify-center text-xs font-medium w-6 h-6 rounded-full mb-0.5 ${
-                  isToday ? "bg-accent text-base" : "text-secondary"
+                  isToday ? "gradient-bg text-[var(--on-gradient)] shadow-glow" : "text-secondary"
                 }`}
               >
                 {d}
@@ -112,6 +199,11 @@ export function CalendarView() {
                   <div
                     key={task.id}
                     onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openCardMenu(e, task);
+                    }}
                     className="truncate text-[10px] rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110"
                     style={{
                       backgroundColor: (PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E") + "22",
@@ -142,6 +234,15 @@ export function CalendarView() {
           defaultDate={formDefaultDate?.toISOString().split("T")[0]}
         />
       </Modal>
+
+      <ContextMenu
+        open={!!menu}
+        x={menu?.x ?? 0}
+        y={menu?.y ?? 0}
+        onClose={() => setMenu(null)}
+      >
+        <TaskContextMenu menu={menu?.state ?? null} onClose={() => setMenu(null)} onNewTask={handleEmptyNewTask} />
+      </ContextMenu>
     </div>
   );
 }

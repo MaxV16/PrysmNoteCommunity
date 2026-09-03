@@ -5,6 +5,7 @@ import { useAppStore } from "@/stores/app-store";
 import type { Task, TaskStatus } from "@/types/task";
 import { toLocalDateString } from "@/lib/utils";
 import { TIER_LABELS, TIER_VALUES, normalizePriority, type PriorityTier } from "@/lib/priority";
+import { applyEnd, parseEnd, type RecurrenceEnd } from "@/lib/recurrence";
 
 interface TaskFormProps {
   onSubmit: (data: {
@@ -16,6 +17,7 @@ interface TaskFormProps {
     priority?: number;
     tag_ids?: string[];
     recurrence_rule?: string;
+    recurrence_end_date?: string;
     estimated_minutes?: number;
   }) => void;
   onCancel: () => void;
@@ -135,7 +137,7 @@ function CalendarPicker({ value, onChange, placeholder }: { value: string; onCha
                   onClick={() => selectDate(d)}
                   className={`text-xs py-1 rounded-md transition-colors ${
                     isSelected
-                      ? "bg-accent text-base font-semibold"
+                      ? "gradient-bg text-[var(--on-gradient)] font-semibold shadow-glow"
                       : isToday
                       ? "bg-accent/15 text-accent font-medium"
                       : "text-secondary hover:bg-hover hover:text-primary"
@@ -160,7 +162,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || "");
   const [status, setStatus] = useState<TaskStatus>(initial?.status || "todo");
   const [priority, setPriority] = useState<PriorityTier>(initial?.priority ? normalizePriority(initial.priority) : 2);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>(() => initial?.tags?.map((t) => t.id) ?? []);
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     initial?.estimated_minutes?.toString() || (initial ? "" : "30")
   );
@@ -172,6 +174,9 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
     return preset ? preset.value : "custom";
   });
   const [recurrenceRule, setRecurrenceRule] = useState(initRecurrence);
+  const [recurrenceEnd, setRecurrenceEnd] = useState<RecurrenceEnd>(() =>
+    parseEnd(initial?.recurrence_rule, initial?.recurrence_end_date)
+  );
 
   const isEdit = !!initial;
 
@@ -182,6 +187,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
       setRecurrenceRule(found.rrule);
     } else if (preset === "none") {
       setRecurrenceRule("");
+      setRecurrenceEnd({ kind: "never" });
     }
   };
 
@@ -194,6 +200,12 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
     const today = toLocalDateString();
     const start = startDate || (isEdit ? "" : today);
     const due = dueDate || (isEdit ? "" : today);
+    // Single encoding point for the end condition: date ends go to the
+    // recurrence_end_date column, count ends become ;COUNT=N in the RRULE.
+    const recurrenceEnabled = recurrencePreset !== "none" && !!recurrenceRule.trim();
+    const endApplied = recurrenceEnabled
+      ? applyEnd(recurrenceRule, recurrenceEnd)
+      : { recurrence_rule: "", recurrence_end_date: null };
     onSubmit({
       title: title.trim(),
       description: description.trim() || undefined,
@@ -202,7 +214,8 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
       status: isEdit ? status : undefined,
       priority: isEdit ? priority : undefined,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
-      recurrence_rule: recurrenceRule || undefined,
+      recurrence_rule: endApplied.recurrence_rule || undefined,
+      recurrence_end_date: endApplied.recurrence_end_date || undefined,
       estimated_minutes: estimatedMinutes ? Number(estimatedMinutes) : undefined,
     });
   };
@@ -230,7 +243,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           className="input-field resize-none text-xs placeholder:text-secondary"
         />
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
         <div className="flex-1">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Start Date</label>
           <CalendarPicker value={startDate} onChange={setStartDate} placeholder="Not set" />
@@ -240,7 +253,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           <CalendarPicker value={dueDate} onChange={setDueDate} placeholder="Not set" />
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
         <div className="flex-1">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Status</label>
           <select
@@ -266,7 +279,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           </select>
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
         <div className="flex-1">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Recurrence</label>
           <select
@@ -291,18 +304,64 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
             />
           </div>
         )}
-        <div>
+        <div className="w-full sm:w-auto">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Duration (mins)</label>
           <input
             type="number"
             value={estimatedMinutes}
             onChange={(e) => setEstimatedMinutes(e.target.value)}
             placeholder="30"
-            className="input-field text-xs h-10 w-24 shrink-0"
+            className="input-field text-xs h-10 w-full sm:w-24"
             min={1}
           />
         </div>
       </div>
+      {recurrencePreset !== "none" && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+          <div className="flex-1">
+            <label className="text-xs font-medium text-secondary mb-1.5 block">Ends</label>
+            <select
+              value={recurrenceEnd.kind}
+              onChange={(e) => {
+                const kind = e.target.value as RecurrenceEnd["kind"];
+                if (kind === "never") setRecurrenceEnd({ kind: "never" });
+                else if (kind === "date")
+                  setRecurrenceEnd({ kind: "date", date: startDate || toLocalDateString() });
+                else setRecurrenceEnd({ kind: "count", count: 10 });
+              }}
+              className="input-field text-xs h-10"
+            >
+              <option value="never">Never</option>
+              <option value="date">On a date</option>
+              <option value="count">After N occurrences</option>
+            </select>
+          </div>
+          {recurrenceEnd.kind === "date" && (
+            <div className="flex-1">
+              <label className="text-xs font-medium text-secondary mb-1.5 block">End Date</label>
+              <CalendarPicker
+                value={recurrenceEnd.date}
+                onChange={(d) => setRecurrenceEnd({ kind: "date", date: d })}
+                placeholder="Select date"
+              />
+            </div>
+          )}
+          {recurrenceEnd.kind === "count" && (
+            <div className="flex-1">
+              <label className="text-xs font-medium text-secondary mb-1.5 block">Occurrences</label>
+              <input
+                type="number"
+                min={1}
+                value={recurrenceEnd.count}
+                onChange={(e) =>
+                  setRecurrenceEnd({ kind: "count", count: Math.max(1, Number(e.target.value) || 1) })
+                }
+                className="input-field text-xs h-10 w-full"
+              />
+            </div>
+          )}
+        </div>
+      )}
       {tags.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {tags.map((tag) => {
@@ -318,7 +377,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
                 }
                 className={`badge text-[10px] transition-all ${
                   isSelected
-                    ? "bg-accent text-base"
+                    ? "gradient-bg text-[var(--on-gradient)] shadow-glow"
                     : "bg-elevated text-secondary hover:text-primary"
                 }`}
               >

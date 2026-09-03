@@ -4,8 +4,9 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { api } from "@/lib/api";
 import { ensureCsrf, getCsrfToken, CSRF_HEADER } from "@/lib/csrf";
+import { track } from "@/lib/track";
+import { refreshTasksPreservingWindow } from "@/hooks/useTasks";
 import type { ChatMessage, AiSessionListItem } from "@/types/ai";
-import type { Task } from "@/types/task";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -22,12 +23,6 @@ function setStoredSessionId(id: string) {
   localStorage.setItem("ai_session_id", id);
 }
 
-function getToken(): string | null {
-  if (typeof document === "undefined") return null;
-  const match = document.cookie.match(/(?:^|;\s*)access_token=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
 async function doRefreshToken(): Promise<boolean> {
   try {
     const res = await fetch(`${API_URL}/auth/refresh`, {
@@ -41,10 +36,22 @@ async function doRefreshToken(): Promise<boolean> {
   }
 }
 
+function isAbortError(err: unknown): boolean {
+  // Aborts surface as DOMException[AbortError] (not instanceof Error) in
+  // browsers, and as Error with name AbortError under Node - match on the name.
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: unknown }).name === "AbortError"
+  );
+}
+
+// Merges the /tasks/ snapshot (never replaces) and replays the lazy far window,
+// so far-window tasks loaded by scroll-driven range fetches stay visible after
+// an AI tool turn ("the tasks disappeared" fix).
 async function refreshTasksFromServer() {
   try {
-    const data = await api.get<Task[]>("/tasks/");
-    useAppStore.getState().setTasks(data);
+    await refreshTasksPreservingWindow();
   } catch {
     // Non-fatal: the next fetch/refresh will retry the server.
   }
@@ -103,14 +110,16 @@ async function executeToolOnBackend(
   toolCall: { function: { name: string; arguments: string } },
   undoStack?: Array<{ type: string; data: unknown }>
 ): Promise<string> {
-  const token = getToken();
+  // Auth is cookie-based (HttpOnly); no Authorization header can be derived
+  // from document.cookie, and this runner is intentionally dead code (L2).
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
   const csrf = getCsrfToken();
   if (csrf) headers[CSRF_HEADER] = csrf;
 
   const fn = toolCall.function;
-  let args: Record<string, unknown>;
+  // This legacy client-side tool runner is dead code (kept off by design: it
+  // lacks ensureCsrf and would 403). Type args loosely so the file compiles.
+  let args: any;
   try {
     args = JSON.parse(fn.arguments || "{}");
   } catch {
@@ -302,7 +311,7 @@ export function useAIChat() {
 
   const clearActiveSession = useCallback(async () => {
     // Hard-delete the active server session (and, server-side, any durable
-    // memory facts extracted from it), then start fresh — mirrors the X on a
+    // memory facts extracted from it), then start fresh - mirrors the X on a
     // history row. No orphan rows or dangling "life" facts are left behind.
     const prevSid = sessionIdRef.current;
     if (prevSid) {
@@ -336,7 +345,7 @@ export function useAIChat() {
       setUsageTokens(null);
       // Account change guard: on login/register/logout clearUserData() wipes the
       // stored ai_session_id. If our ref still holds a session but storage no
-      // longer does, a different account took over — start a fresh chat session
+      // longer does, a different account took over - start a fresh chat session
       // so we never resume a previous account's conversation.
       const storedNow = getStoredSessionId();
       if (sessionIdRef.current && storedNow !== sessionIdRef.current) {
@@ -394,7 +403,7 @@ export function useAIChat() {
 
       // Track a transient "tool activity" bubble (role: "tool") shown while the
       // backend is executing tools. Once the first token arrives we drop it so
-      // the final answer renders as its own clean markdown message — never
+      // the final answer renders as its own clean markdown message - never
       // prefixed with "⚙" (which used to hijack ChatMessage into a pill).
       let toolBubbleId: string | null = null;
       const addToolBubble = (label: string) => {
@@ -425,6 +434,15 @@ export function useAIChat() {
         toolBubbleId = null;
       };
 
+      const removeAssistantPlaceholder = () => {
+        // An aborted stream must not leave an empty assistant bubble behind
+        // (ChatMessage would render its TypingIndicator forever). Drop it.
+        const store = useAppStore.getState();
+        store.setChatMessages(
+          store.chatMessages.filter((m) => m.id !== assistantId)
+        );
+      };
+
       let res: Response;
       try {
         await ensureCsrf();
@@ -447,7 +465,7 @@ export function useAIChat() {
 
         // The access token is short-lived (15 min). When it expires, other API
         // calls auto-refresh via the api wrapper, but this raw stream fetch does
-        // not — so refresh once and retry rather than surfacing "Not authenticated".
+        // not - so refresh once and retry rather than surfacing "Not authenticated".
         if (res.status === 401) {
           const refreshed = await doRefreshToken();
           if (refreshed) {
@@ -470,7 +488,11 @@ export function useAIChat() {
           }
         }
       } catch (err: unknown) {
-        const msg = err instanceof Error && err.name !== "AbortError" ? err.message : "Failed to fetch";
+        if (isAbortError(err)) {
+          removeAssistantPlaceholder();
+          return;
+        }
+        const msg = err instanceof Error ? err.message : "Failed to fetch";
         setAssistant(`Couldn't reach the server (${msg}). Please try again.`);
         return;
       }
@@ -558,13 +580,17 @@ export function useAIChat() {
         }
       } catch (err: unknown) {
         streamOk = false;
-        if (err instanceof Error && err.name !== "AbortError") {
+        if (isAbortError(err)) {
+          // User hit stop / closed the panel: drop the empty placeholder so the
+          // TypingIndicator does not render forever.
+          removeAssistantPlaceholder();
+        } else if (err instanceof Error) {
           setAssistant("Sorry, I encountered an error while reading the response. Please try again.");
         }
       } finally {
         // The backend may have created, updated, or deleted tasks via tool calls
         // (create_task, reschedule_task, batch_create_tasks). Refresh the task
-        // store so the timeline/kanban/calendar/list reflect the changes — even
+        // store so the timeline/kanban/calendar/list reflect the changes - even
         // when the stream is aborted/errors mid-answer. With the backend's
         // commit-before-answer fix, tool-created tasks are durable even if the
         // remaining tokens never arrive, so the timeline must still be refreshed.
@@ -577,6 +603,12 @@ export function useAIChat() {
       }
 
       if (!streamOk) return;
+
+      // A completed voice-diary turn counts as a "diary session" for the growth
+      // funnel (mic_pressed → trial_started → diary_session ≥3 → subscribed).
+      if (context?.voice_diary && receivedToken) {
+        track("diary_session");
+      }
 
       if (!receivedToken && !receivedTool) {
         const store = useAppStore.getState();

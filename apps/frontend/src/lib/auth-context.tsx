@@ -10,7 +10,7 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, displayName?: string) => Promise<{ requiresVerification: boolean }>;
+  register: (email: string, password: string, displayName?: string, turnstileToken?: string, riskProfile?: Record<string, unknown> | null) => Promise<{ requiresVerification: boolean }>;
   logout: () => void;
   refreshSession: () => Promise<boolean>;
 }
@@ -26,7 +26,7 @@ export class EmailNotVerifiedError extends Error {
 }
 
 // Tracks the last authenticated account so we only clear user-owned local state
-// (API keys, filters, etc.) when the ACCOUNT actually changes — not on every
+// (API keys, filters, etc.) when the ACCOUNT actually changes - not on every
 // re-login to the same account. Re-login after a session expiry (or a container
 // restart) must not wipe your saved AI provider keys.
 const USER_ID_KEY = "prysm_user_id";
@@ -93,20 +93,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const register = useCallback(
-    async (email: string, password: string, displayName?: string) => {
+    async (email: string, password: string, displayName?: string, turnstileToken?: string, riskProfile?: Record<string, unknown> | null) => {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, password, display_name: displayName }),
+        body: JSON.stringify({
+          email,
+          password,
+          display_name: displayName,
+          turnstile_token: turnstileToken,
+          risk_profile: riskProfile,
+        }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Registration failed" }));
-        throw new Error(err.detail || "Registration failed");
+        const body = await res.json().catch(() => ({ detail: "Registration failed" }));
+        const e = new Error(
+          typeof body.detail === "string" ? body.detail : body.detail?.message || "Registration failed"
+        ) as Error & { code?: string; score?: number; reference?: string; status?: number };
+        e.code = body.detail?.code;
+        e.score = body.detail?.score;
+        e.reference = body.detail?.reference;
+        e.status = res.status;
+        throw e;
       }
       const data = await res.json();
       // When the deployment requires email confirmation, register does NOT log
-      // the user in — they must click the emailed verification link first.
+      // the user in - they must click the emailed verification link first.
       if (data.requires_verification) {
         return { requiresVerification: true };
       }

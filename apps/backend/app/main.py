@@ -14,10 +14,12 @@ from app.config import settings
 from app.database import async_session_factory, system_session_factory
 from app.models.token_blacklist import TokenBlacklist
 from app.models.user_token import UserToken
-from app.routers import auth, tasks, tags, search, ai, keys, calendar, task_links, habits, oauth
+from app.routers import auth, tasks, tags, search, ai, keys, calendar, task_links, habits, oauth, notifications, teams, notes, preferences, board_sections, imports, watchlist, analytics
 from app.routers.ai import start_rate_limit_pruner
 from app.services.calendar_service import pull_and_import_events
 from app.services.recurring_task_service import recurring_task_background_loop
+from app.services.notification_service import notification_background_loop
+from app.services.analytics import analytics_flush_loop, analytics_rollup_loop
 
 _repo_root = Path(__file__).resolve().parent.parent.parent.parent
 if str(_repo_root) not in sys.path:
@@ -51,11 +53,19 @@ class CSPSecurityMiddleware(BaseHTTPMiddleware):
             if settings.is_production
             else "'self' http://localhost:* ws://localhost:*"
         )
+        # The backend never serves inline/eval'd scripts (pure JSON API), so
+        # production drops both 'unsafe-inline' and 'unsafe-eval' (M5). Dev
+        # keeps them for reload tooling.
+        script_src = (
+            "script-src 'self'; "
+            if settings.is_production
+            else "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        )
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            f"{script_src}"
             "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; "
+            "img-src 'self' data: https://image.tmdb.org https://www.themoviedb.org; "
             f"connect-src {connect_src}; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
@@ -65,7 +75,7 @@ class CSPSecurityMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
@@ -78,7 +88,8 @@ async def lifespan(app: FastAPI):
     # up to date before accepting traffic. Idempotent; never drops data.
     from app.services.schema_provisioning import ensure_schema
     from app.database import engine as _app_engine
-    await ensure_schema(_app_engine)
+    from app.database import system_engine as _system_engine
+    await ensure_schema(_app_engine, _system_engine)
 
     # Apply idempotent EE finance schema additions (new columns on existing tables).
     # create_all never alters existing tables, so this ALTER-on-startup converges both
@@ -92,8 +103,28 @@ async def lifespan(app: FastAPI):
     _prune_task = start_rate_limit_pruner()
     _background_tasks.append(_prune_task)
 
+    # Notifications engine (email reminders, daily digest, Web Push). The loop
+    # itself checks NOTIFICATIONS_ENABLED and is a safe no-op when unset.
+    _notif_task = asyncio.create_task(notification_background_loop(system_session_factory))
+    _background_tasks.append(_notif_task)
+
+    # First-party analytics: flush the in-memory event queue to the DB and roll
+    # raw rows into the forever-kept daily aggregate (plus retention pruning).
+    _analytics_flush = asyncio.create_task(analytics_flush_loop(system_session_factory))
+    _background_tasks.append(_analytics_flush)
+    _analytics_rollup = asyncio.create_task(analytics_rollup_loop(system_session_factory))
+    _background_tasks.append(_analytics_rollup)
+
+    # Shows & Movies watchlist: refresh upcoming continuations (next season,
+    # next franchise installment) on a 6h cadence. Skips itself when no TMDB
+    # key is configured.
+    from app.services.watchlist_background import watchlist_background_loop
+
+    _watchlist_task = asyncio.create_task(watchlist_background_loop(system_session_factory))
+    _background_tasks.append(_watchlist_task)
+
     # One-time, best-effort: encrypt any legacy plaintext Google Calendar OAuth
-    # tokens at rest (idempotent — already-encrypted rows are skipped).
+    # tokens at rest (idempotent - already-encrypted rows are skipped).
     try:
         from app.services.calendar_service import backfill_encrypted_tokens
 
@@ -120,31 +151,73 @@ async def lifespan(app: FastAPI):
     _background_tasks.append(_cleanup_task)
 
     async def gcal_pull_background_loop(session_factory):
+        from datetime import datetime, timezone
+
+        from app.models.user_token import UserToken
+        from app.services.calendar_service import _decrypt_token
+
         while True:
+            # List the tokens to pull in one short session (never held open
+            # during network calls), then run each user's pull as its own task
+            # with its own session, bounded by a semaphore so N external calls
+            # overlap at most `gcal_pull_concurrency` at a time.
+            due_tokens = []
             try:
                 async with session_factory() as session:
                     result = await session.execute(
                         select(UserToken).where(UserToken.provider == "google_calendar")
                     )
                     tokens = result.scalars().all()
+                    now = datetime.now(timezone.utc)
                     for token in tokens:
-                        try:
-                            from app.services.calendar_service import _decrypt_token
+                        last_pulled = token.last_pulled_at
+                        if last_pulled is not None and last_pulled.tzinfo is None:
+                            # SQLite returns naive datetimes for TIMESTAMPTZ; treat as UTC.
+                            last_pulled = last_pulled.replace(tzinfo=timezone.utc)
+                        if last_pulled is None or (now - last_pulled).total_seconds() >= settings.gcal_pull_interval:
+                            due_tokens.append(token.user_id)
+            except Exception:
+                pass
 
+            semaphore = asyncio.Semaphore(settings.gcal_pull_concurrency)
+
+            async def _pull_user(user_id):
+                async with semaphore:
+                    try:
+                        async with session_factory() as user_session:
+                            result = await user_session.execute(
+                                select(UserToken).where(
+                                    UserToken.user_id == user_id,
+                                    UserToken.provider == "google_calendar",
+                                )
+                            )
+                            token = result.scalar_one_or_none()
+                            if token is None:
+                                return
                             await pull_and_import_events(
-                                session,
-                                token.user_id,
+                                user_session,
+                                user_id,
                                 _decrypt_token(token.access_token),
                                 _decrypt_token(token.refresh_token or "") or "",
                             )
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-            await asyncio.sleep(300)
+                            # pull_and_import_events commits/rolls back its own
+                            # transaction; stamp the pull time so the interval
+                            # guard (and the manual-endpoint rate guard) sees it.
+                            token.last_pulled_at = datetime.now(timezone.utc)
+                            await user_session.commit()
+                    except Exception:
+                        pass
+
+            if due_tokens:
+                await asyncio.gather(*(_pull_user(uid) for uid in due_tokens))
+            await asyncio.sleep(settings.gcal_pull_interval)
 
     gcal_task = asyncio.create_task(gcal_pull_background_loop(system_session_factory))
     _background_tasks.append(gcal_task)
+
+
+
+
     yield
     # Cancel background tasks on shutdown
     for t in _background_tasks:
@@ -191,6 +264,14 @@ app.include_router(keys.router)
 app.include_router(calendar.router)
 app.include_router(task_links.router)
 app.include_router(habits.router)
+app.include_router(notifications.router)
+app.include_router(teams.router)
+app.include_router(notes.router)
+app.include_router(preferences.router)
+app.include_router(board_sections.router)
+app.include_router(imports.router)
+app.include_router(watchlist.router)
+app.include_router(analytics.router)
 
 
 @app.get("/api/health")

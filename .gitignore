@@ -7,7 +7,7 @@
 .env.production
 .env.staging
 
-# Database backups (real data — never commit)
+# Database backups (real data - never commit)
 backups/
 
 # Dependencies
@@ -48,6 +48,7 @@ Thumbs.db
 # Electron
 electron/out/
 
+apps/frontend/src/ee
 
 # Kilo agent plans
 .kilo/

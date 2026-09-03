@@ -17,6 +17,8 @@ export interface Task {
   id: string;
   user_id: string;
   parent_task_id: string | null;
+  board_section_id: string | null;
+  board_order: number | null;
   title: string;
   description: string | null;
   status: TaskStatus;

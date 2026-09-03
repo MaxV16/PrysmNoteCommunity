@@ -11,6 +11,78 @@ export interface CustomRecurrence {
   skipWeekends: boolean;
 }
 
+/** How a recurrence stops: never (endless), on a calendar date, or after N times. */
+export type RecurrenceEnd =
+  | { kind: "never" }
+  | { kind: "date"; date: string }
+  | { kind: "count"; count: number };
+
+/**
+ * Remove any trailing `;COUNT=` / `;UNTIL=` clause from an RRULE so a new end
+ * condition can be re-applied without stacking stale ones.
+ */
+export function stripEnd(rrule: string): string {
+  return rrule
+    .split(";")
+    .filter((part) => part && !/^(COUNT|UNTIL)=/i.test(part))
+    .join(";");
+}
+
+/**
+ * Encode an end condition onto a base RRULE. Date-based ends live in the
+ * `recurrence_end_date` column (already honored by expansion + ended-template
+ * filters); count-based ends are appended to the rule as `;COUNT=N` (honored
+ * natively by rrulestr).
+ */
+export function applyEnd(
+  rule: string,
+  end: RecurrenceEnd
+): { recurrence_rule: string; recurrence_end_date: string | null } {
+  const base = stripEnd(rule);
+  switch (end.kind) {
+    case "never":
+      return { recurrence_rule: base, recurrence_end_date: null };
+    case "date":
+      return { recurrence_rule: base, recurrence_end_date: end.date };
+    case "count": {
+      const count = Math.max(1, Math.floor(end.count) || 1);
+      return {
+        recurrence_rule: base ? `${base};COUNT=${count}` : "",
+        recurrence_end_date: null,
+      };
+    }
+  }
+}
+
+/**
+ * Reverse of applyEnd: derive the end condition for prefill when editing an
+ * existing task. Reads `COUNT=`/`UNTIL=` from the rule first, then falls back
+ * to the persisted `recurrence_end_date` column, then "never".
+ */
+export function parseEnd(
+  rule: string | null | undefined,
+  recurrenceEndDate: string | null | undefined
+): RecurrenceEnd {
+  if (rule) {
+    const countMatch = /(?:^|;)COUNT=(\d+)/i.exec(rule);
+    if (countMatch) {
+      return { kind: "count", count: Math.max(1, parseInt(countMatch[1], 10) || 1) };
+    }
+    const untilMatch = /(?:^|;)UNTIL=(\d{8})/i.exec(rule);
+    if (untilMatch) {
+      const raw = untilMatch[1];
+      return {
+        kind: "date",
+        date: `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`,
+      };
+    }
+  }
+  if (recurrenceEndDate) {
+    return { kind: "date", date: recurrenceEndDate };
+  }
+  return { kind: "never" };
+}
+
 /**
  * Resolve a display recurrence into an RRULE string understood by the backend
  * (e.g. "FREQ=WEEKLY;INTERVAL=2"). Presets derive the trailing attr from the

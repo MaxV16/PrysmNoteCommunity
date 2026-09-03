@@ -4,9 +4,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MonthCalendar } from "./MonthCalendar";
 import {
+  applyEnd,
   describeRule,
+  parseEnd,
   recurrencePresetLabel,
   toRRule,
+  type RecurrenceEnd,
   type RecurrenceFrequency,
 } from "@/lib/recurrence";
 
@@ -16,7 +19,8 @@ interface DateRecurrencePopoverProps {
   onClose: () => void;
   value: string | null; // ISO date
   recurrenceRule: string | null;
-  onChange: (value: string | null, recurrenceRule: string | null) => void;
+  recurrenceEndDate: string | null;
+  onChange: (value: string | null, recurrenceRule: string | null, recurrenceEndDate: string | null) => void;
   isAllDay?: boolean;
 }
 
@@ -52,20 +56,25 @@ export function DateRecurrencePopover({
   onClose,
   value,
   recurrenceRule,
+  recurrenceEndDate,
   onChange,
 }: DateRecurrencePopoverProps) {
   const [view, setView] = useState<View>("main");
   const [date, setDate] = useState<string | null>(value);
   const [rule, setRule] = useState<string | null>(recurrenceRule);
+  const [end, setEnd] = useState<RecurrenceEnd>(() =>
+    parseEnd(recurrenceRule, recurrenceEndDate)
+  );
 
   // Synchronize with the task values whenever reopened.
   useEffect(() => {
     if (open) {
       setDate(value);
       setRule(recurrenceRule);
+      setEnd(parseEnd(recurrenceRule, recurrenceEndDate));
       setView("main");
     }
-  }, [open, value, recurrenceRule]);
+  }, [open, value, recurrenceRule, recurrenceEndDate]);
 
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -135,14 +144,22 @@ export function DateRecurrencePopover({
     skipWeekends: boolean;
   }>({ freq: "monthly", interval: 1, byDay: weekdayFromIso(dateStr), anchor: "due", skipWeekends: false });
 
-  const commit = () => {
-    onChange(date, rule && rule.trim() ? rule : null);
+  // Single source of truth for end-condition encoding: both the recurrence and
+  // custom views commit through here so COUNT/date rules are built by applyEnd
+  // in exactly one place.
+  const commit = (ruleValue: string | null) => {
+    const { recurrence_rule, recurrence_end_date } = applyEnd(ruleValue || "", end);
+    // A repeat needs a date to anchor the series: when a rule is applied with no
+    // date picked, default it to today so the template is visible and expandable.
+    const committedDate = ruleValue ? date || new Date().toISOString().split("T")[0] : date;
+    onChange(committedDate, recurrence_rule || null, recurrence_end_date);
     onClose();
   };
 
   const clear = () => {
     setDate(null);
     setRule(null);
+    setEnd({ kind: "never" });
   };
 
   const quickActions: { label: string; build: () => string }[] = [
@@ -181,9 +198,11 @@ export function DateRecurrencePopover({
           date={dateStr}
           rule={rule}
           setRule={setRule}
+          end={end}
+          setEnd={setEnd}
           onCustom={() => setView("custom")}
           onBack={() => setView("main")}
-          onCommit={commit}
+          onCommit={() => commit(rule)}
         />
       )}
       {view === "custom" && (
@@ -197,16 +216,14 @@ export function DateRecurrencePopover({
               dayOfMonth: date ? new Date(date).getDate() : undefined,
               skipWeekends: custom.skipWeekends,
             });
-            setRule(r);
-            onChange(date, r || null);
-            onClose();
+            commit(r);
           }}
           onCancel={() => setView("recurrence")}
           custom={custom}
           setCustom={setCustom}
         />
       )}
-      {view === "main" && <Footer onCommit={commit} onClear={clear} />}
+      {view === "main" && <Footer onCommit={() => commit(rule)} onClear={clear} />}
     </div>,
     document.body
   );
@@ -314,6 +331,8 @@ function RecurrenceView({
   date,
   rule,
   setRule,
+  end,
+  setEnd,
   onCustom,
   onBack,
   onCommit,
@@ -321,10 +340,14 @@ function RecurrenceView({
   date: string;
   rule: string | null;
   setRule: (r: string) => void;
+  end: RecurrenceEnd;
+  setEnd: (e: RecurrenceEnd) => void;
   onCustom: () => void;
   onBack: () => void;
   onCommit: () => void;
 }) {
+  const endLabel = end.kind === "never" ? "Never" : end.kind === "date" ? "On a date" : "After N";
+
   return (
     <div className="flex flex-col overflow-y-auto">
       <Header title="Repeat" onBack={onBack} />
@@ -350,6 +373,39 @@ function RecurrenceView({
           <span>Custom</span>
           <span className="text-muted">›</span>
         </button>
+      </div>
+      <div className="border-t border-border px-3 py-2">
+        <div className="mb-1.5 text-[11px] font-semibold text-secondary">Ends</div>
+        <Segmented
+          options={["Never", "On a date", "After N"]}
+          value={endLabel}
+          onChange={(v) => {
+            if (v === "Never") setEnd({ kind: "never" });
+            else if (v === "On a date") setEnd({ kind: "date", date: date });
+            else setEnd({ kind: "count", count: 10 });
+          }}
+        />
+        {end.kind === "date" && (
+          <input
+            type="date"
+            value={end.date}
+            onChange={(e) => setEnd({ kind: "date", date: e.target.value })}
+            className="input-field mt-2 h-8 w-full text-xs"
+          />
+        )}
+        {end.kind === "count" && (
+          <div className="mt-2 flex items-center gap-2 text-xs text-secondary">
+            <span>After</span>
+            <input
+              type="number"
+              min={1}
+              value={end.count}
+              onChange={(e) => setEnd({ kind: "count", count: Math.max(1, Number(e.target.value) || 1) })}
+              className="input-field h-8 w-16 text-center text-xs"
+            />
+            <span>occurrences</span>
+          </div>
+        )}
       </div>
       <div className="border-t border-border px-3 py-2">
         <button onClick={onCommit} className="w-full rounded-lg bg-accent px-5 py-1.5 text-xs font-semibold text-white hover:opacity-90">

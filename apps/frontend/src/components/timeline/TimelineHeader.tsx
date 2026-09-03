@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { DAY_WIDTH, DAY_HEADER_HEIGHT } from "./constants";
 
 interface TimelineHeaderProps {
   days: Date[];
@@ -21,12 +22,14 @@ export function TimelineHeader({ days }: TimelineHeaderProps) {
   }, [days]);
 
   return (
-    <div className="flex border-b border-border bg-surface sticky top-0 z-20 shrink-0" style={{ width: "100%", minWidth: "max-content", height: 56 }}>
+    <div className="flex border-b border-border bg-surface sticky top-0 z-20 shrink-0" style={{ width: "100%", minWidth: "max-content", height: DAY_HEADER_HEIGHT }}>
       {dayRows.map(({ dayName, dayNum, isToday, key }) => (
         <div
           key={key}
+          data-day-header
+          data-is-today={isToday ? "true" : "false"}
           className="flex flex-col items-center justify-center py-3"
-          style={{ width: 120, minWidth: 120, flex: "0 0 120px" }}
+          style={{ width: DAY_WIDTH, minWidth: DAY_WIDTH, flex: `0 0 ${DAY_WIDTH}px` }}
         >
           <span className={`text-xs font-medium ${isToday ? "text-accent" : "text-secondary"}`}>
             {dayName}

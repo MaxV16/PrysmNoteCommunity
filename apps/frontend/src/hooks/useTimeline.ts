@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { parseLocalDate } from "@/lib/utils";
+import { todayStart } from "@/lib/dates";
 
 /**
  * Infinite horizontal timeline state.
@@ -33,9 +34,7 @@ export function useTimeline(initialDays = 20, baseLeftOffset = 10) {
   }, []);
 
   const visibleRange = useMemo(() => {
-    const now = new Date();
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
+    const start = todayStart();
     start.setDate(start.getDate() + scrollOffset);
     const end = new Date(start);
     end.setDate(end.getDate() + days);

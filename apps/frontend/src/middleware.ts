@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PUBLIC_PREFIXES = ["/marketing", "/privacy", "/tos", "/privacy-policy", "/terms-of-service", "/pricing", "/about", "/contact"];
+const PUBLIC_PREFIXES = ["/marketing", "/privacy", "/tos", "/privacy-policy", "/terms-of-service", "/cookie-policy", "/pricing", "/about", "/contact", "/version"];
 // Auth-adjacent public pages: visible when logged out, redirected home when logged in.
 const AUTH_PATHS = ["/login", "/register", "/forgot-password", "/reset-password"];
 
@@ -34,5 +34,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icons|icon\\.png|apple-icon\\.png|prysm-logo\\.png).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icons|icon\\.png|apple-icon\\.png|prysm-logo\\.png|prysm-icon\\.svg|sw\\.js|manifest\\.webmanifest|\\.well-known).*)"],
 };

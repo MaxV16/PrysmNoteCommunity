@@ -72,6 +72,23 @@ async def test_search_tasks_description(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_search_matches_tag_names(client: AsyncClient):
+    """Search must surface tasks whose *tags* match the query, not just title/description."""
+    tag = (await client.post("/api/tags/", json={"name": "billing"})).json()
+    await client.post("/api/tasks/", json={
+        "title": "Fix the checkout flow",
+        "tag_ids": [tag["id"]],
+    })
+    # A distractingly similar title that does NOT match the tag query.
+    await client.post("/api/tasks/", json={"title": "Billing page design mockups"})
+
+    response = await client.get("/api/search/", params={"q": "billing"})
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert any("checkout flow" in r["title"] for r in results)
+
+
+@pytest.mark.asyncio
 async def test_search_no_results(client: AsyncClient):
     response = await client.get("/api/search/", params={"q": "xyznonexistent"})
     assert response.status_code == 200

@@ -9,6 +9,7 @@ import { useTags } from "@/hooks/useTags";
 import { StickyBoardProvider } from "@/components/sticky/StickyNoteBoard";
 
 
+
 class ErrorBoundaryInner extends React.Component<
   { children: ReactNode; fallback?: ReactNode },
   { hasError: boolean }
@@ -30,7 +31,7 @@ class ErrorBoundaryInner extends React.Component<
               <p>Something went wrong. Please refresh the page.</p>
               <button
                 onClick={() => window.location.reload()}
-                className="btn bg-accent px-4 py-2 text-base text-base hover:bg-accent-hover"
+                className="btn btn-gradient px-4 py-2 text-base"
               >
                 Refresh
               </button>
@@ -49,16 +50,46 @@ function WorkspaceStage() {
 
 export function ThreePaneLayout() {
   const [dataLoaded, setDataLoaded] = useState(false);
-  const { fetchTasks } = useTasks();
+  const { fetchTasks, fetchRange } = useTasks();
   const { fetchTags } = useTags();
 
   useEffect(() => {
-    (async () => {
+    let disposed = false;
+
+    // Shared-store refresh: two months back, ~5 months forward. Lazy range
+    // fetches (timeline scroll) grow this further; recurrence expands on demand
+    // server-side. fetchRange unions with the already-loaded window, so repeat
+    // calls are cheap and idempotent.
+    const refreshWindow = async () => {
       try { await fetchTasks(); } catch {}
+      try { await fetchRange(isoDaysAgo(-60), isoDaysAgo(150)); } catch {}
+    };
+
+    (async () => {
+      await refreshWindow();
+      if (disposed) return;
       try { await fetchTags(); } catch {}
       setDataLoaded(true);
     })();
-  }, [fetchTasks, fetchTags]);
+
+    // Rolling refresh so every view (timeline, kanban, list, calendar, board)
+    // sees recurring series keep growing without a reload, and the timeline
+    // stays ahead of its scroll edge.
+    const intervalId = setInterval(() => { void refreshWindow(); }, 5 * 60_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void refreshWindow();
+    };
+    const onFocus = () => { void refreshWindow(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      disposed = true;
+      clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [fetchTasks, fetchRange, fetchTags]);
 
   return (
     <ErrorBoundaryInner>
@@ -76,4 +107,10 @@ export function ThreePaneLayout() {
       )}
     </ErrorBoundaryInner>
   );
+}
+
+function isoDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

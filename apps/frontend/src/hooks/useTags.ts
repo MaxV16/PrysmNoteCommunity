@@ -33,7 +33,7 @@ export function useTags() {
       try {
         await api.delete(`/tags/${id}`);
       } catch {
-        // tag delete failed silently — already removed from local state
+        // tag delete failed silently - already removed from local state
       }
     },
     [removeTag]

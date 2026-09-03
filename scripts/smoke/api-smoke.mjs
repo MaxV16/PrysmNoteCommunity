@@ -3,7 +3,7 @@
  * Direct-API smoke test for Prysm Note.
  *
  * Primary deterministic truth for "does task creation work and land on the
- * user's date". No external dependencies — pure Node `fetch`.
+ * user's date". No external dependencies - pure Node `fetch`.
  *
  * Flow:
  *   1. Register a throwaway user (random email).

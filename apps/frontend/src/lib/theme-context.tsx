@@ -51,11 +51,59 @@ function applyThemeColors(colors: ThemeColors) {
   root.style.setProperty("--shadow-md", colors["shadow-md"]);
   root.style.setProperty("--shadow-lg", colors["shadow-lg"]);
   root.style.setProperty("--accent-glow", colors["accent-glow"]);
+  // Primary gradient + glow (pricing-page design language). Custom themes derive
+  // these from the accent so gradient CTAs stay cohesive without extra fields.
+  root.style.setProperty("--grad-from", colors["grad-from"] ?? colors.accent);
+  root.style.setProperty("--grad-via", colors["grad-via"] ?? colors.accent);
+  root.style.setProperty(
+    "--grad-to",
+    colors["grad-to"] ?? colors["accent-hover"] ?? colors.accent,
+  );
+  root.style.setProperty(
+    "--on-gradient",
+    colors["on-gradient"] ?? (luminance(colors.accent) > 0.35 ? "#1a1a2e" : "#ffffff"),
+  );
+  root.style.setProperty(
+    "--shadow-glow-strong",
+    colors["shadow-glow-strong"] ?? `0 0 24px ${colors["accent-glow"]}`,
+  );
+}
+
+// Relative luminance (WCAG) of a hex color - used to pick readable text on the
+// gradient for custom themes with a light accent.
+function luminance(hex: string): number {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return 0;
+  const n = parseInt(m[1], 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function sanitizeFontName(fontName: string): string {
+  // Font family names must be plain: letters/digits/spaces/hyphens only, so a
+  // stored "font" value can never inject extra CSS into --font-ui (L5).
+  const cleaned = fontName.replace(/[^A-Za-z0-9 \-]/g, "").trim();
+  return cleaned && cleaned.length <= 60 ? cleaned : "";
+}
+
+// Background values are dropped into CSS custom properties; only allow a
+// conservative CSS grammar (no quotes, parens-URL breakouts, semicolons, or
+// < > which could smuggle script-ish syntax).
+const _SAFE_BG_RE = /^[A-Za-z0-9 %#(),.+\-]+$/;
+
+function sanitizeBackgroundValue(value: string): string {
+  const v = value.trim();
+  return v.length <= 500 && _SAFE_BG_RE.test(v) ? v : "";
 }
 
 function applyFont(fontName: string) {
+  const safe = sanitizeFontName(fontName);
+  if (!safe) return;
   const root = document.documentElement;
-  root.style.setProperty("--font-ui", `'${fontName}', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`);
+  root.style.setProperty("--font-ui", `'${safe}', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`);
   document.body.style.fontFamily = `var(--font-ui)`;
 
   if (typeof document !== "undefined") {
@@ -65,14 +113,15 @@ function applyFont(fontName: string) {
     const link = document.createElement("link");
     link.id = "prysm-dynamic-font";
     link.rel = "stylesheet";
-    link.href = `https://fonts.googleapis.com/css2?family=${fontName.replace(/ /g, "+")}:wght@400;500;600;700;800&display=swap`;
+    link.href = `https://fonts.googleapis.com/css2?family=${safe.replace(/ /g, "+")}:wght@400;500;600;700;800&display=swap`;
     document.head.appendChild(link);
   }
 }
 
 function applyBackground(type: string, value: string, size?: string) {
+  const safe = sanitizeBackgroundValue(value);
   const root = document.documentElement;
-  if (type === "none" || !value) {
+  if (type === "none" || !safe) {
     root.style.removeProperty("--bg-image");
     root.style.removeProperty("--bg-size");
     root.style.removeProperty("--bg-opacity");
@@ -81,15 +130,17 @@ function applyBackground(type: string, value: string, size?: string) {
   }
   root.style.setProperty("--bg-image-display", "block");
   if (type === "image") {
-    root.style.setProperty("--bg-image", `url(${value})`);
+    // Only plain http(s) image URLs are acceptable as url() input.
+    if (!/^https?:\/\//.test(safe)) return;
+    root.style.setProperty("--bg-image", `url(${safe})`);
     root.style.setProperty("--bg-size", "cover");
     root.style.setProperty("--bg-opacity", "0.12");
   } else if (type === "gradient") {
-    root.style.setProperty("--bg-image", value);
+    root.style.setProperty("--bg-image", safe);
     root.style.setProperty("--bg-size", "cover");
     root.style.setProperty("--bg-opacity", "0.2");
   } else if (type === "pattern") {
-    root.style.setProperty("--bg-image", value);
+    root.style.setProperty("--bg-image", safe);
     root.style.setProperty("--bg-size", size || "40px 40px");
     root.style.setProperty("--bg-opacity", "1");
   }

@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
+import asyncio
 import re
 import time
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -54,6 +56,85 @@ _auth_limiter = RateLimiter("rl:auth")
 _IP_BLOCKLIST: dict[str, float] = {}
 _BLOCK_DURATION = 15 * 60  # seconds an IP stays blocked after 10 failed logins
 
+# Per-email + per-IP limiter for the mail-triggering auth endpoints
+# (forgot-password, resend-verification). The endpoints are enumeration-safe by
+# design, but without a per-email limit an attacker can use them to spam
+# arbitrary addresses through our mailer (L10).
+_mail_limiter = RateLimiter("rl:mail")
+_MAIL_LIMIT = 5
+_MAIL_WINDOW = 3600  # seconds
+
+# Signup anti-abuse: thottle account creation per IP and per email so scraper
+# farms that delete-and-reregister can't churn through fresh trials/accounts.
+_signup_limiter = RateLimiter("rl:signup")
+# Flood safety net, never a normal-shared-network threshold: real shared
+# networks (office, dorm, cafe, airline WiFi) don't hit 50 signups/hour from
+# one IP. Finer per-device discrimination is handled by the EE risk engine.
+_SIGNUP_IP_LIMIT = 50
+_SIGNUP_IP_WINDOW = 3600  # seconds
+_SIGNUP_EMAIL_LIMIT = 3
+_SIGNUP_EMAIL_WINDOW = 86400  # seconds (per day)
+
+# Cloudflare Turnstile siteverify endpoint. Blank TURNSTILE_SECRET_KEY disables
+# the check (fail-open), which keeps dev/tests and the community build simple.
+_TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
+
+def _enforce_signup_rate_limit(req: Request, email: str) -> None:
+    # Unlike the mail limiter, the signup throttle only engages when Redis is
+    # up. A single-writer VM must not be able to be locked out of its own
+    # signup page by the in-memory fallback, and the test suite (no Redis)
+    # must stay deterministic. Production has Redis, so the throttle is live.
+    if _get_redis() is None:
+        return
+    ip = req.client.host if req.client else "unknown"
+    if _signup_limiter.count(f"ip:{ip}", _SIGNUP_IP_WINDOW) > _SIGNUP_IP_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many signups from this address - try again later",
+        )
+    if _signup_limiter.count(f"email:{email}", _SIGNUP_EMAIL_WINDOW) > _SIGNUP_EMAIL_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many signups for this email - try again later",
+        )
+
+
+async def _verify_turnstile(token: str, ip: str | None) -> bool:
+    """Verify a Cloudflare Turnstile response token (server-side, fail-closed on
+    a clearly-invalid token; skipped entirely when no secret is configured)."""
+    if not settings.turnstile_secret_key:
+        return True
+    if not token:
+        return False
+    form = {"secret": settings.turnstile_secret_key, "response": token}
+    if ip:
+        form["remoteip"] = ip
+    try:
+        resp = await asyncio.to_thread(
+            httpx.post, _TURNSTILE_SITEVERIFY_URL, data=form, timeout=10.0
+        )
+        data = resp.json()
+        return bool(data.get("success"))
+    except Exception:
+        # Fail open on transport errors so a Turnstile outage cannot lock out
+        # legit signups; the per-IP/per-email limiter still throttles abuse.
+        return True
+
+
+def _enforce_mail_rate_limit(req: Request, email: str) -> None:
+    ip = req.client.host if req.client else "unknown"
+    if _mail_limiter.count(f"email:{email}", _MAIL_WINDOW) > _MAIL_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests - try again later",
+        )
+    if _mail_limiter.count(f"ip:{ip}", _MAIL_WINDOW) > _MAIL_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests - try again later",
+        )
+
 
 def _is_blocked(ip: str) -> bool:
     if _get_redis() is not None:
@@ -76,6 +157,9 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     display_name: str | None = None
+    turnstile_token: str | None = None
+    # Collected by the EE risk collector (fingerprint hash + behavioral
+    # counters). Ignored here; consumed by the guarded EE risk-engine hook.
 
     @field_validator("email")
     @classmethod
@@ -129,17 +213,29 @@ class RefreshRequest(BaseModel):
 async def register(request: RegisterRequest, response: Response, req: Request, session: AsyncSession = Depends(get_db)):
     secure = _cookie_secure(req)
     ip = _get_client_ip(req)
-    if _is_blocked(ip):
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="IP blocked")
+    # Note: the legacy _is_blocked(ip) login-brute-force gate is deliberately
+    # NOT applied to register anymore - a blocked IP must not lock out legit
+    # signups from the same network. Per-device risk scoring handles signup
+    # abuse (guarded EE hook); failed-login blocking stays on login only.
+
+    if not await _verify_turnstile(request.turnstile_token or "", ip):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to verify you're human. Please try again.",
+        )
+
+    _enforce_signup_rate_limit(req, request.email)
+
 
     existing = await get_user_by_email(session, request.email)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user = await create_user(session, request.email, request.password, request.display_name)
 
-    # When the deployment requires email verification, do NOT log the user in —
-    # they must click the link in the verification email first.
-    if settings.require_email_verification:
+    # When the deployment requires email verification - OR the risk engine
+    # challenged this signup - do NOT log the user in; they must click the link
+    # in the verification email first.
+    if settings.require_email_verification or must_verify_override:
         _send_verification_email(user)
         return {
             "id": str(user.id),
@@ -479,10 +575,12 @@ class ResendVerificationRequest(BaseModel):
 @router.post("/resend-verification")
 async def resend_verification(
     request: ResendVerificationRequest,
+    req: Request,
     session: AsyncSession = Depends(get_db),
 ):
     """Re-send the verification email for an unverified account. Always returns
     the same response so the endpoint can't enumerate which emails are registered."""
+    _enforce_mail_rate_limit(req, request.email)
     user = await get_user_by_email(session, request.email)
     if user and user.password_hash and not user.email_verified:
         _send_verification_email(user)
@@ -492,6 +590,7 @@ async def resend_verification(
 @router.post("/forgot-password")
 async def forgot_password(
     request: ForgotPasswordRequest,
+    req: Request,
     session: AsyncSession = Depends(get_db),
 ):
     """Send a password-reset email if the account exists. Always returns the
@@ -500,6 +599,8 @@ async def forgot_password(
     from datetime import timedelta
 
     from app.services.email import send_email
+
+    _enforce_mail_rate_limit(req, request.email)
 
     user = await get_user_by_email(session, request.email)
     if not user or not user.password_hash:
@@ -516,7 +617,7 @@ async def forgot_password(
         "We received a request to reset the password for your Prysm Note account.\n\n"
         f"Open the link below to choose a new password (valid for 30 minutes):\n\n"
         f"{reset_url}\n\n"
-        "If you didn't request this, you can safely ignore this email — your password won't change."
+        "If you didn't request this, you can safely ignore this email - your password won't change."
     )
     asyncio.create_task(asyncio.to_thread(send_email, user.email, "[Prysm Note] Reset your password", body))
     return {"status": "sent"}

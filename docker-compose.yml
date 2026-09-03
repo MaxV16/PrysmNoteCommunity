@@ -25,7 +25,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    # Ephemeral rate-limit counters only — no named volume (data loss is fine).
+    # Ephemeral rate-limit counters only - no named volume (data loss is fine).
     ports:
       - "6379:6379"
     healthcheck:

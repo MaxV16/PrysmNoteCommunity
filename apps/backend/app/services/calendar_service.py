@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -113,6 +114,62 @@ def get_google_calendar_service(access_token: str, refresh_token: str):
     return build("calendar", "v3", credentials=creds)
 
 
+def _maybe_refreshed(service, access_token: str, refresh_token: str) -> tuple[str, str, datetime] | None:
+    """Return ``(access_token, refresh_token, expiry)`` when the credentials were
+    refreshed during the blocking call, else None (token unchanged). The
+    googleapiclient http layer mutates its credentials object in place when the
+    access token expired, so comparing the post-call token to the input reveals
+    the refresh side effect without an extra network round-trip."""
+    creds = getattr(service._http, "credentials", None)
+    if creds and creds.token != access_token:
+        return (creds.token, creds.refresh_token or refresh_token, creds.expiry)
+    return None
+
+
+def _list_events_blocking(
+    access_token: str,
+    refresh_token: str,
+    max_results: int = 50,
+) -> tuple[list[dict], tuple[str, str, datetime] | None]:
+    """Synchronous Google calendar events().list() - call via asyncio.to_thread.
+
+    Returns ``(items, refreshed_tokens_or_None)`` so the caller can persist a
+    token refresh side effect without re-fetching credentials."""
+    service = get_google_calendar_service(access_token, refresh_token)
+    refreshed = _maybe_refreshed(service, access_token, refresh_token)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    events_result = service.events().list(
+        calendarId="primary",
+        timeMin=now,
+        maxResults=max_results,
+        singleEvents=True,
+        orderBy="startTime",
+    ).execute()
+    return events_result.get("items", []), refreshed
+
+
+def _upsert_event_blocking(
+    access_token: str,
+    refresh_token: str,
+    event_body: dict,
+    google_event_id: str | None = None,
+) -> tuple[str, str, tuple[str, str, datetime] | None]:
+    """Synchronous insert-or-update of a calendar event - call via to_thread.
+
+    Returns ``(google_event_id, html_link, refreshed_tokens_or_None)``."""
+    service = get_google_calendar_service(access_token, refresh_token)
+    refreshed = _maybe_refreshed(service, access_token, refresh_token)
+    if google_event_id:
+        result = service.events().update(
+            calendarId="primary",
+            eventId=google_event_id,
+            body=event_body,
+        ).execute()
+    else:
+        result = service.events().insert(calendarId="primary", body=event_body).execute()
+    return result["id"], result.get("htmlLink", ""), refreshed
+
+
 async def push_task_to_calendar(
     session: AsyncSession,
     user_id: UUID,
@@ -121,25 +178,29 @@ async def push_task_to_calendar(
     refresh_token: str,
 ) -> dict | None:
     try:
-        service = get_google_calendar_service(access_token, refresh_token)
         event_body = {
             "summary": task.title,
             "description": task.description or "",
             "start": {"date": str(task.start_date), "timeZone": "UTC"},
             "end": {"date": str(task.due_date or task.start_date), "timeZone": "UTC"},
         }
-        created = service.events().insert(calendarId="primary", body=event_body).execute()
+        google_event_id, html_link, refreshed = await asyncio.to_thread(
+            _upsert_event_blocking, access_token, refresh_token, event_body
+        )
+        if refreshed:
+            new_access, new_refresh, expiry = refreshed
+            await store_tokens(session, user_id, new_access, new_refresh, expiry)
 
         cal_event = CalendarEvent(
             user_id=user_id,
             task_id=task.id,
-            google_event_id=created["id"],
+            google_event_id=google_event_id,
             calendar_id="primary",
             sync_action="push",
         )
         session.add(cal_event)
         await session.flush()
-        return {"id": created["id"], "htmlLink": created.get("htmlLink", "")}
+        return {"id": google_event_id, "htmlLink": html_link}
     except Exception as e:
         return None
 
@@ -151,16 +212,11 @@ async def pull_events_from_calendar(
     refresh_token: str,
 ) -> list[dict]:
     try:
-        service = get_google_calendar_service(access_token, refresh_token)
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        events_result = service.events().list(
-            calendarId="primary",
-            timeMin=now,
-            maxResults=50,
-            singleEvents=True,
-            orderBy="startTime",
-        ).execute()
-        return events_result.get("items", [])
+        items, refreshed = await asyncio.to_thread(_list_events_blocking, access_token, refresh_token)
+        if refreshed:
+            new_access, new_refresh, expiry = refreshed
+            await store_tokens(session, user_id, new_access, new_refresh, expiry)
+        return items
     except Exception:
         return []
 
@@ -172,27 +228,16 @@ async def pull_and_import_events(
     refresh_token: str,
 ) -> dict:
     try:
-        service = get_google_calendar_service(access_token, refresh_token)
-        creds = service._http.credentials
-
-        if creds and creds.token != access_token:
+        items, refreshed = await asyncio.to_thread(_list_events_blocking, access_token, refresh_token)
+        if refreshed:
+            new_access, new_refresh, expiry = refreshed
             await store_tokens(
                 session,
                 user_id,
-                creds.token,
-                creds.refresh_token or refresh_token,
-                creds.expiry,
+                new_access,
+                new_refresh,
+                expiry,
             )
-
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        events_result = service.events().list(
-            calendarId="primary",
-            timeMin=now,
-            maxResults=50,
-            singleEvents=True,
-            orderBy="startTime",
-        ).execute()
-        items = events_result.get("items", [])
 
         imported = 0
         for item in items:
@@ -249,7 +294,7 @@ async def sync_all_tasks(
     pushed = 0
     failed = 0
 
-    service = get_google_calendar_service(access_token, refresh_token)
+    service_refreshed = None
 
     result = await session.execute(
         select(Task).where(
@@ -278,18 +323,20 @@ async def sync_all_tasks(
         }
 
         try:
-            if existing_cal:
-                service.events().update(
-                    calendarId="primary",
-                    eventId=existing_cal.google_event_id,
-                    body=event_body,
-                ).execute()
-            else:
-                created = service.events().insert(calendarId="primary", body=event_body).execute()
+            google_event_id, _html, refreshed = await asyncio.to_thread(
+                _upsert_event_blocking,
+                access_token,
+                refresh_token,
+                event_body,
+                existing_cal.google_event_id if existing_cal else None,
+            )
+            if refreshed:
+                service_refreshed = refreshed
+            if not existing_cal:
                 cal_event = CalendarEvent(
                     user_id=user_id,
                     task_id=task.id,
-                    google_event_id=created["id"],
+                    google_event_id=google_event_id,
                     calendar_id="primary",
                     sync_action="push",
                 )
@@ -297,6 +344,10 @@ async def sync_all_tasks(
             pushed += 1
         except Exception:
             failed += 1
+
+    if service_refreshed:
+        new_access, new_refresh, expiry = service_refreshed
+        await store_tokens(session, user_id, new_access, new_refresh, expiry)
 
     await session.flush()
     return {"pushed": pushed, "failed": failed, "total": len(tasks)}

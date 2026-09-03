@@ -8,7 +8,7 @@ interface Tag {
   color: string | null;
 }
 
-export type NavFilter = "inbox" | "today" | "next7" | null;
+export type NavFilter = "inbox" | "today" | "next7" | "all" | "completed" | null;
 
 interface ChatSession {
   id: string;
@@ -27,6 +27,7 @@ interface AppState {
   searchQuery: string;
   navFilter: NavFilter;
   setTasks: (tasks: Task[]) => void;
+  mergeTasks: (tasks: Task[]) => void;
   setTags: (tags: Tag[]) => void;
   addTag: (tag: Tag) => void;
   removeTag: (id: string) => void;
@@ -54,6 +55,14 @@ const initialState = {
 export const useAppStore = create<AppState>((set, get) => ({
   ...initialState,
   setTasks: (tasks) => set({ tasks }),
+  mergeTasks: (tasks) =>
+    set((state) => {
+      // Union by id, newest copy wins. Far-window tasks from a previous lazy
+      // range fetch survive a later near-window refresh (no data loss).
+      const byId = new Map(state.tasks.map((t) => [t.id, t]));
+      for (const t of tasks) byId.set(t.id, t);
+      return { tasks: Array.from(byId.values()) };
+    }),
   setTags: (tags) => set({ tags }),
   addTag: (tag) => set((state) => ({ tags: [...state.tags, tag] })),
   removeTag: (id) => set((state) => ({ tags: state.tags.filter((t) => t.id !== id) })),

@@ -1,91 +1,35 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { TeamDetail } from "@/components/collaborate/TeamDetail";
-
-interface TeamMember {
-  email: string;
-  role: "owner" | "admin" | "member";
-}
-
-interface TeamProject {
-  id: string;
-  name: string;
-}
-
-interface Team {
-  id: string;
-  name: string;
-  members: TeamMember[];
-  projects: TeamProject[];
-}
-
-const STORAGE_KEY = "prysm_collab_teams";
-
-function generateId(): string {
-  return `team_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function loadTeams(): Team[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveTeams(teams: Team[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(teams));
-  } catch {}
-}
+import { useTeams } from "@/lib/teams";
 
 export function TeamList() {
-  const [teams, setTeams] = useState<Team[]>([]);
+  const {
+    teams,
+    invites,
+    loading,
+    createTeam,
+    renameTeam,
+    deleteTeam,
+    inviteMember,
+    changeRole,
+    removeMember,
+    addProject,
+    removeProject,
+    acceptInvite,
+    declineInvite,
+  } = useTeams();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
 
-  useEffect(() => {
-    setTeams(loadTeams());
-  }, []);
-
-  const persist = useCallback((updated: Team[]) => {
-    setTeams(updated);
-    saveTeams(updated);
-  }, []);
-
-  const createTeam = useCallback(() => {
+  const handleCreate = () => {
     if (!newTeamName.trim()) return;
-    const team: Team = {
-      id: generateId(),
-      name: newTeamName.trim(),
-      members: [{ email: "you@example.com", role: "owner" }],
-      projects: [],
-    };
-    persist([...teams, team]);
+    void createTeam(newTeamName.trim());
     setNewTeamName("");
     setIsCreating(false);
-    setExpandedId(team.id);
-  }, [newTeamName, teams, persist]);
-
-  const updateTeam = useCallback(
-    (id: string, patch: Partial<Team>) => {
-      persist(teams.map((t) => (t.id === id ? { ...t, ...patch } : t)));
-    },
-    [teams, persist]
-  );
-
-  const deleteTeam = useCallback(
-    (id: string) => {
-      persist(teams.filter((t) => t.id !== id));
-      if (expandedId === id) setExpandedId(null);
-    },
-    [teams, persist, expandedId]
-  );
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -108,7 +52,7 @@ export function TeamList() {
             value={newTeamName}
             onChange={(e) => setNewTeamName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") createTeam();
+              if (e.key === "Enter") handleCreate();
               if (e.key === "Escape") { setIsCreating(false); setNewTeamName(""); }
             }}
             placeholder="Team name"
@@ -116,8 +60,8 @@ export function TeamList() {
             autoFocus
           />
           <button
-            onClick={createTeam}
-            className="btn bg-accent text-base text-xs px-3 py-1 rounded font-medium"
+            onClick={handleCreate}
+            className="btn btn-gradient text-xs px-3 py-1 rounded font-medium"
           >
             Create
           </button>
@@ -127,6 +71,36 @@ export function TeamList() {
           >
             Cancel
           </button>
+        </div>
+      )}
+
+      {invites.length > 0 && (
+        <div className="rounded-xl border border-accent/30 bg-accent/5 p-3 space-y-2">
+          <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider">
+            Pending invites
+          </h4>
+          {invites.map((inv) => (
+            <div key={inv.token} className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm text-primary truncate">{inv.team_name}</p>
+                <p className="text-xs text-muted">as {inv.role}</p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  onClick={() => void acceptInvite(inv.token)}
+                  className="btn btn-gradient text-xs px-3 py-1 rounded font-medium"
+                >
+                  Accept
+                </button>
+                <button
+                  onClick={() => void declineInvite(inv.token)}
+                  className="text-xs text-muted hover:text-danger transition-colors"
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -153,16 +127,24 @@ export function TeamList() {
           {expandedId === team.id && (
             <TeamDetail
               team={team}
+              myRole={team.my_role || "member"}
               onClose={() => setExpandedId(null)}
-              onUpdate={(patch) => updateTeam(team.id, patch)}
+              onRename={(name) => renameTeam(team.id, name)}
               onDelete={() => deleteTeam(team.id)}
+              onInvite={(email) => inviteMember(team.id, email)}
+              onChangeRole={(userId, role) => changeRole(team.id, userId, role)}
+              onRemoveMember={(userId) => removeMember(team.id, userId)}
+              onAddProject={(name) => addProject(team.id, name)}
+              onRemoveProject={(projectId) => removeProject(team.id, projectId)}
             />
           )}
         </div>
       ))}
 
-      {teams.length === 0 && !isCreating && (
-        <p className="text-xs text-muted text-center py-4">No teams yet. Create one to collaborate.</p>
+      {!loading && teams.length === 0 && invites.length === 0 && !isCreating && (
+        <p className="text-xs text-muted text-center py-4">
+          No teams yet. Create one to invite members and share tasks.
+        </p>
       )}
     </div>
   );

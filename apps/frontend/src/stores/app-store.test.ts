@@ -27,6 +27,30 @@ describe("app-store", () => {
     useAppStore.getState().setTasks([]);
   });
 
+  it("mergeTasks unions by id with the newest copy winning", () => {
+    const a = { id: "1", title: "A", status: "todo" } as any;
+    const b = { id: "2", title: "B", status: "todo" } as any;
+    const a2 = { id: "1", title: "A updated", status: "done" } as any;
+    useAppStore.getState().setTasks([a]);
+    useAppStore.getState().mergeTasks([b, a2]);
+    const { tasks } = useAppStore.getState();
+    expect(tasks).toHaveLength(2);
+    expect(tasks.find((t) => t.id === "1")).toEqual(a2);
+    expect(tasks.find((t) => t.id === "2")).toEqual(b);
+    useAppStore.getState().setTasks([]);
+  });
+
+  it("mergeTasks preserves far-window tasks not in the new batch", () => {
+    const far = { id: "far", title: "Far", status: "todo" } as any;
+    const near = { id: "near", title: "Near", status: "todo" } as any;
+    useAppStore.getState().setTasks([far]);
+    useAppStore.getState().mergeTasks([near]);
+    const ids = useAppStore.getState().tasks.map((t) => t.id);
+    expect(ids).toContain("far");
+    expect(ids).toContain("near");
+    useAppStore.getState().setTasks([]);
+  });
+
   it("setTags updates tags", () => {
     const tags = [{ id: "1", name: "urgent", color: "#ff0000" }];
     useAppStore.getState().setTags(tags);

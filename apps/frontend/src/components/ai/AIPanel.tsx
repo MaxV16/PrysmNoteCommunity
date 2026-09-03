@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useAIChat } from "@/hooks/useAIChat";
 import { ChatMessage } from "./ChatMessage";
@@ -23,6 +23,14 @@ const PROVIDERS = [
   { value: "deepseek", label: "DeepSeek" },
   { value: "openrouter", label: "OpenRouter" },
 ];
+
+interface AIEntitlement {
+  mode: "byok" | "prysmai" | "none";
+  allowance: number;
+  used: number;
+  remaining: number | null;
+  blocked: boolean;
+}
 
 const CHAT_HISTORY_KEY = "prysm_ai_chat_history";
 const ACTIVE_CHAT_KEY = "prysm_ai_active_chat";
@@ -73,12 +81,26 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
   const configuredProviders = keys.map((k) => k.provider);
 
   const [provider, setProvider] = useState("openai");
+  const [entitlement, setEntitlement] = useState<AIEntitlement | null>(null);
+  const insertRef = useRef<(text: string) => void>(() => {});
+
+  useEffect(() => {
+    api.get<AIEntitlement>("/ai/entitlement").then(setEntitlement).catch(() => {});
+  }, []);
+
+  const allProviders = entitlement?.mode === "prysmai"
+    ? [{ value: "prysmai", label: "Prysm AI" }, ...PROVIDERS]
+    : PROVIDERS;
 
   useEffect(() => {
     (async () => {
       if (typeof window === "undefined") return;
       const currentKeys = await fetchKeys();
       const configured = new Set(currentKeys.map((k) => k.provider));
+      if (entitlement?.mode === "prysmai") {
+        setProvider("prysmai");
+        return;
+      }
       const last = localStorage.getItem(LAST_PROVIDER_KEY);
       if (last && configured.has(last)) {
         setProvider(last);
@@ -102,7 +124,7 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
       setProvider("openai");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [entitlement]);
 
   useEffect(() => {
     localStorage.setItem(LAST_PROVIDER_KEY, provider);
@@ -118,9 +140,17 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
 
   useEffect(() => {
     if (hasLoaded && chatMessages.length > 0) {
-      saveMessages(chatMessages);
+      // Never persist a streamed-but-aborted empty assistant bubble: only
+      // messages with content reach the local active-chat cache.
+      saveMessages(chatMessages.filter((m) => m.content));
     }
   }, [chatMessages, hasLoaded]);
+
+  // Closing the panel must cancel any in-flight stream so it cannot leak a
+  // fetch (or leave an empty placeholder behind) after the panel unmounts.
+  useEffect(() => {
+    return () => abort();
+  }, [abort]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -208,10 +238,10 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
     sendMessage(message, provider, Object.keys(context).length > 0 ? context : undefined);
   }, [sendMessage, provider, view]);
 
-  const providerOptions = PROVIDERS.map((p) => ({
+  const providerOptions = allProviders.map((p) => ({
     value: p.value,
     label: p.label,
-    configured: configuredProviders.includes(p.value),
+    configured: p.value === "prysmai" ? true : configuredProviders.includes(p.value),
   }));
 
   const localHistory: HistoryLocalSession[] = chatHistory.map((s) => ({
@@ -219,6 +249,10 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
     title: s.title,
     timestamp: s.timestamp,
   }));
+
+  // Free tier: no AI at all (no PrysmAI, no BYOK). Gate the panel with an
+  // upgrade prompt; the community build has no gate and always sees BYOK.
+  const aiLocked = entitlement?.mode === "none";
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-surface">
@@ -249,38 +283,88 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
         onClearCurrent={handleClearCurrent}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {chatMessages.length === 0 ? (
-          <AIEmptyState onSuggest={handleSend} />
-        ) : (
-          <div className="space-y-4">
-            {chatMessages.map((msg) => (
-              <ChatMessage key={msg.id} message={msg} />
-            ))}
-            {usageTokens != null && !isLoading && (
-              <div className="flex justify-end px-2">
-                <span className="text-[10px] text-muted" title="Estimated prompt + completion tokens for this turn">
-                  ~{usageTokens.toLocaleString()} tokens used
-                </span>
+      {aiLocked ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+          <div className="gradient-bg flex h-14 w-14 items-center justify-center rounded-2xl text-2xl float shadow-glow">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--on-gradient)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </div>
+          <p className="text-sm font-semibold text-primary">AI is a paid feature</p>
+          <p className="text-xs text-muted">
+            Start the 14-day free trial for hosted PrysmAI, or upgrade to any plan for PrysmAI or your own API key.
+          </p>
+          <a
+            href="/settings?tab=premium"
+            className="mt-1 rounded-xl btn btn-gradient px-5 py-2.5 text-xs font-semibold shadow-glow"
+          >
+            Start free trial / View plans
+          </a>
+        </div>
+      ) : (
+        <></>
+      )}
+
+      {!aiLocked && (
+        <>
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            {chatMessages.length === 0 ? (
+              <div className="flex h-full flex-col">
+                <div className="mx-auto max-w-sm rounded-xl border border-border/70 bg-elevated px-4 py-3 text-center text-xs leading-relaxed text-secondary">
+                  You are chatting with PrysmAI, an AI assistant. Hosted responses are
+                  powered by the DeepSeek API; you may also connect your own OpenAI, Gemini,
+                  DeepSeek, or OpenRouter key in Settings. Do not enter sensitive personal data.
+                </div>
+                <div className="min-h-0 flex-1">
+                  <AIEmptyState onSuggest={handleSend} />
+                </div>
               </div>
-            )}
-            {isLoading && (
-              <div className="flex justify-center py-3">
-                <Spinner />
+            ) : (
+              <div className="space-y-4">
+                {chatMessages.map((msg, idx) => (
+                  <ChatMessage
+                    key={msg.id}
+                    message={msg}
+                    streaming={isLoading}
+                    isLast={idx === chatMessages.length - 1}
+                  />
+                ))}
+                {provider === "prysmai" && entitlement && (
+                  <div className="flex justify-end px-2">
+                    <span className="text-[10px] text-muted" title="PrysmAI monthly token allowance">
+                      Prysm AI: {entitlement.used.toLocaleString()} / {entitlement.allowance.toLocaleString()} tokens
+                      {entitlement.blocked ? " (allowance used up)" : ""}
+                    </span>
+                  </div>
+                )}
+                {usageTokens != null && !isLoading && (
+                  <div className="flex justify-end px-2">
+                    <span className="text-[10px] text-muted" title="Estimated prompt + completion tokens for this turn">
+                      ~{usageTokens.toLocaleString()} tokens used
+                    </span>
+                  </div>
+                )}
+                {isLoading && (
+                  <div className="flex justify-center py-3">
+                    <Spinner />
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-      </div>
 
-      <AIComposer
-        onSend={handleSend}
-        disabled={isLoading}
-        isLoading={isLoading}
-        hasUndo={hasUndo}
-        onAbort={abort}
-        onUndo={undoLastAction}
-      />
+          <AIComposer
+            onSend={handleSend}
+            disabled={isLoading}
+            isLoading={isLoading}
+            hasUndo={hasUndo}
+            onAbort={abort}
+            onUndo={undoLastAction}
+            onRegisterInsert={(insert) => { insertRef.current = insert; }}
+          />
+          <p className="px-4 pb-2.5 text-center text-[10px] leading-relaxed text-muted">
+            PrysmAI is an AI assistant; check important details. Powered by DeepSeek when hosted.
+          </p>
+        </>
+      )}
     </div>
   );
 }

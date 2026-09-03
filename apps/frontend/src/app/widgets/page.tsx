@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { calendarOffset, weekdayHeaders } from "@/lib/dates";
 
 export default function WidgetsPage() {
   const [tasks, setTasks] = useState<any[]>([]);
@@ -23,7 +24,8 @@ export default function WidgetsPage() {
 
   const firstDay = new Date(currentYear, currentMonth, 1);
   const lastDay = new Date(currentYear, currentMonth + 1, 0);
-  const startOffset = (firstDay.getDay() + 6) % 7;
+  const startOffset = calendarOffset(firstDay);
+  const dayHeaders = weekdayHeaders();
 
   const daysWithTasks = tasks.filter((t) => t.due_date).reduce((acc: Record<string, number>, t: any) => {
     acc[t.due_date] = (acc[t.due_date] || 0) + 1;
@@ -62,7 +64,7 @@ export default function WidgetsPage() {
             </div>
           </div>
           <div className="grid grid-cols-7 gap-0.5 text-center">
-            {["Mo","Tu","We","Th","Fr","Sa","Su"].map((d) => (
+            {dayHeaders.map((d) => (
               <span key={d} className="text-[9px] text-muted font-medium py-0.5">{d}</span>
             ))}
             {Array.from({ length: startOffset }).map((_, i) => <div key={`e${i}`} />)}
@@ -71,7 +73,7 @@ export default function WidgetsPage() {
               const count = daysWithTasks[dateStr] || 0;
               const isToday = dateStr === today;
               return (
-                <div key={d} className={`text-xs py-1 rounded-md relative ${isToday ? "bg-accent text-base font-semibold" : "text-secondary"}`}>
+                <div key={d} className={`text-xs py-1 rounded-md relative ${isToday ? "gradient-bg text-[var(--on-gradient)] font-semibold shadow-glow" : "text-secondary"}`}>
                   {d}
                   {count > 0 && <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-accent" />}
                 </div>

@@ -13,7 +13,19 @@ def _cookie_secure(request: Request) -> bool:
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 CSRF_COOKIE_NAME = "csrf_token"
 CSRF_HEADER_NAME = "X-CSRF-Token"
-CSRF_SAFE_PATHS = {"/api/auth/login", "/api/auth/register", "/api/auth/refresh", "/api/auth/logout", "/api/health"}
+# Login/register/refresh/logout are CSRF-exempt (their own bearer/token flows
+# protect them; logout is a trivial CSRF with no state change). Webhook
+# endpoints are exempt because provider signature verification (Stripe HMAC)
+# is the auth mechanism - an external webhook sender cannot read the
+# double-submit cookie, so CSRF would only block legitimate provider deliveries.
+CSRF_SAFE_PATHS = {
+    "/api/auth/login",
+    "/api/auth/register",
+    "/api/auth/refresh",
+    "/api/auth/logout",
+    "/api/health",
+    "/api/ee/billing/webhook/stripe",
+}
 
 class CSRFSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

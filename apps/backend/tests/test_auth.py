@@ -500,7 +500,7 @@ async def test_verify_token_bound_to_original_email(auth_client, db_session):
             select(User).where(User.email == "bound@example.com")
         )).scalar_one()
         stale = _make_verify_token(str(user.id), "bound@example.com")
-        # Commit the email change so the row lock is released — otherwise the
+        # Commit the email change so the row lock is released - otherwise the
         # verify POST below blocks on the uncommitted update (PostgreSQL) and the
         # suite hangs. SQLite masks this because tests share one connection.
         user.email = "changed@example.com"
@@ -540,3 +540,201 @@ async def test_resend_verification_email(auth_client):
             assert r2.json()["status"] == "sent"
     finally:
         _set_verification_required(False)
+
+
+# --- WS4: trial anti-abuse - signup rate limit + Turnstile -------------------
+
+@pytest.mark.asyncio
+async def test_turnstile_verify_skipped_without_secret(auth_client, monkeypatch):
+    """With no TURNSTILE_SECRET_KEY the check is fail-open (dev/tests/community)."""
+    from app.config import settings
+
+    original = settings.turnstile_secret_key
+    monkeypatch.setattr(settings, "turnstile_secret_key", "")
+    try:
+        response = await auth_client.post("/api/auth/register", json={
+            "email": "ts_ok@example.com",
+            "password": "password123",
+        })
+        assert response.status_code == 200
+    finally:
+        settings.turnstile_secret_key = original
+
+
+@pytest.mark.asyncio
+async def test_turnstile_verify_rejects_missing_token_when_configured(auth_client, monkeypatch):
+    from app.config import settings
+    from app.routers import auth as auth_module
+
+    original_secret = settings.turnstile_secret_key
+    monkeypatch.setattr(settings, "turnstile_secret_key", "1x00000000000000000000AA")
+    # Force the siteverify result: token missing -> the helper returns False.
+    hits = []
+
+    original_verify = auth_module._verify_turnstile
+
+    async def fake_verify(token, ip):
+        hits.append((token, ip))
+        return await original_verify(token, ip)
+
+    monkeypatch.setattr(auth_module, "_verify_turnstile", fake_verify)
+    try:
+        response = await auth_client.post("/api/auth/register", json={
+            "email": "ts_reject@example.com",
+            "password": "password123",
+            "turnstile_token": "",
+        })
+        assert response.status_code == 400
+        assert "human" in response.json()["detail"]
+        assert hits and hits[0][0] == ""
+    finally:
+        settings.turnstile_secret_key = original_secret
+
+
+@pytest.mark.asyncio
+async def test_signup_flood_safety_net_engages_with_redis(auth_client, monkeypatch):
+    """The per-IP signup cap is a flood safety net (> 50/hour is challenged; the
+    Redis-only limiter rejects a clearly abusive rate). Real shared networks
+    never approach it - per-device risk scoring handles normal abuse."""
+    import app.routers.auth as auth_module
+    from app.utils import ratelimit as rl_utils
+
+    class _Pipe:
+        def __init__(self):
+            self.cmds = []
+
+        def incr(self, key):
+            self.cmds.append(key)
+            return self
+
+        def expire(self, key, ttl, nx=False):
+            return self
+
+        def execute(self):
+            return [51 for _ in self.cmds]
+
+    class _FakeRedis:
+        def pipeline(self):
+            return _Pipe()
+
+        def set(self, key, value, ex=None):
+            pass
+
+        def exists(self, key):
+            return 0
+
+        def ping(self):
+            return True
+
+    original_checked, original_client = rl_utils._redis_checked, rl_utils._redis_client
+    rl_utils._redis_checked = True
+    rl_utils._redis_client = _FakeRedis()
+    original_ip_limit = auth_module._SIGNUP_IP_LIMIT
+    monkeypatch.setattr(auth_module, "_SIGNUP_IP_LIMIT", 50)
+    try:
+        response = await auth_client.post("/api/auth/register", json={
+            "email": "ratelimit_ip@example.com",
+            "password": "password123",
+        })
+        assert response.status_code == 429
+        assert "signups from this address" in response.json()["detail"]
+    finally:
+        rl_utils._redis_checked, rl_utils._redis_client = original_checked, original_client
+        auth_module._SIGNUP_IP_LIMIT = original_ip_limit
+
+
+@pytest.mark.asyncio
+async def test_failed_login_block_does_not_block_register(auth_client, monkeypatch):
+    """A failed-login IP block (brute-force protection) must never lock out
+    signups from that network - register ignores the login blocklist and lets
+    the per-device risk engine judge signup abuse instead."""
+    from app.utils import ratelimit as rl_utils
+
+    class _BlockingRedis:
+        def pipeline(self):
+            raise AssertionError("signup limiter / risk engine must not run Redis here")
+
+        def exists(self, key):
+            # authblock:testclient -> true: login would be blocked.
+            return 1 if "authblock" in key else 0
+
+        def set(self, key, value, ex=None):
+            pass
+
+        def ping(self):
+            return True
+
+    original_checked, original_client = rl_utils._redis_checked, rl_utils._redis_client
+    rl_utils._redis_checked = True
+    rl_utils._redis_client = _BlockingRedis()
+    try:
+        # The IP is on the failed-login blocklist, so login gets rejected...
+        login_res = await auth_client.post("/api/auth/login", json={
+            "email": "anyone@example.com",
+            "password": "wrongpassword",
+        })
+        assert login_res.status_code == 429
+        assert login_res.json()["detail"] == "IP blocked"
+
+        # ...but a fresh signup from the same IP must still succeed.
+        register_res = await auth_client.post("/api/auth/register", json={
+            "email": "fresh@example.com",
+            "password": "password123",
+        })
+        assert register_res.status_code == 200
+    finally:
+        rl_utils._redis_checked, rl_utils._redis_client = original_checked, original_client
+
+
+@pytest.mark.asyncio
+async def test_signup_rate_limit_per_email(auth_client, monkeypatch):
+    """Once the per-email budget is spent, the same email gets a 429."""
+    import app.routers.auth as auth_module
+    from app.utils import ratelimit as rl_utils
+
+    class _Pipe:
+        def __init__(self):
+            self.cmds = []
+
+        def incr(self, key):
+            self.cmds.append(key)
+            return self
+
+        def expire(self, key, ttl, nx=False):
+            return self
+
+        def execute(self):
+            return [3 for _ in self.cmds]
+
+    class _FakeRedis:
+        def pipeline(self):
+            return _Pipe()
+
+        def set(self, key, value, ex=None):
+            pass
+
+        def exists(self, key):
+            return 0
+
+        def ping(self):
+            return True
+
+    original_checked, original_client = rl_utils._redis_checked, rl_utils._redis_client
+    rl_utils._redis_checked = True
+    rl_utils._redis_client = _FakeRedis()
+    original_ip_limit = auth_module._SIGNUP_IP_LIMIT
+    original_email_limit = auth_module._SIGNUP_EMAIL_LIMIT
+    # IP budget high enough to pass, email budget low enough to trip.
+    monkeypatch.setattr(auth_module, "_SIGNUP_IP_LIMIT", 20)
+    monkeypatch.setattr(auth_module, "_SIGNUP_EMAIL_LIMIT", 2)
+    try:
+        response = await auth_client.post("/api/auth/register", json={
+            "email": "ratelimit_email@example.com",
+            "password": "password123",
+        })
+        assert response.status_code == 429
+        assert "signups for this email" in response.json()["detail"]
+    finally:
+        rl_utils._redis_checked, rl_utils._redis_client = original_checked, original_client
+        auth_module._SIGNUP_IP_LIMIT = original_ip_limit
+        auth_module._SIGNUP_EMAIL_LIMIT = original_email_limit

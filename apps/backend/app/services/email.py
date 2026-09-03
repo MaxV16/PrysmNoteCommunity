@@ -10,37 +10,43 @@ logger = logging.getLogger(__name__)
 _BREVO_SEND_URL = "https://api.brevo.com/v3/smtp/email"
 
 
-def send_email(to_address: str, subject: str, body: str) -> bool:
+def send_email(
+    to_address: str, subject: str, body: str, from_email: str | None = None
+) -> bool:
     """Send a plain-text email through the configured provider.
 
-    Core-owned (community-safe): the EE services call into this helper — core
+    Core-owned (community-safe): the EE services call into this helper - core
     never imports from ``ee/`` (the community build strips it), so the generic
     send lives here. Returns True on success; logs and returns False when no
     provider is configured or the send fails.
 
-    Transport priority: Brevo REST API (port 443 — reliable from any network)
+    ``from_email`` overrides the From address for automated/notification mail
+    (e.g. ``notify@prysmnote.com``); defaults to ``ADMIN_EMAIL``.
+
+    Transport priority: Brevo REST API (port 443 - reliable from any network)
     when ``BREVO_API_KEY`` is set, otherwise classic SMTP via ``SMTP_*`` envs.
     """
-    if not settings.admin_email:
+    sender = from_email or settings.admin_email
+    if not sender:
         logger.warning(
             "No ADMIN_EMAIL configured, skipping email to %s: %s", to_address, subject
         )
         return False
 
     if settings.brevo_api_key:
-        return _send_brevo_api(to_address, subject, body)
+        return _send_brevo_api(to_address, subject, body, sender)
 
     if not settings.smtp_host:
         logger.warning("SMTP not configured, skipping email to %s: %s", to_address, subject)
         return False
-    return _send_smtp(to_address, subject, body)
+    return _send_smtp(to_address, subject, body, sender)
 
 
-def _send_brevo_api(to_address: str, subject: str, body: str) -> bool:
+def _send_brevo_api(to_address: str, subject: str, body: str, sender: str) -> bool:
     import httpx
 
     payload = {
-        "sender": {"name": "Prysm Note", "email": settings.admin_email},
+        "sender": {"name": "Prysm Note", "email": sender},
         "to": [{"email": to_address}],
         "subject": subject,
         "textContent": body,
@@ -71,12 +77,12 @@ def _send_brevo_api(to_address: str, subject: str, body: str) -> bool:
     return False
 
 
-def _send_smtp(to_address: str, subject: str, body: str) -> bool:
+def _send_smtp(to_address: str, subject: str, body: str, sender: str) -> bool:
     try:
         msg = MIMEMultipart("alternative")
-        # From = the public sender (ADMIN_EMAIL, e.g. support@prysmnote.com), not
+        # From = the public sender (e.g. notify@ or support@prysmnote.com), not
         # the SMTP login (which is an API key with Brevo, or a Gmail address).
-        msg["From"] = settings.admin_email or settings.smtp_user
+        msg["From"] = sender
         msg["To"] = to_address
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain", "utf-8"))

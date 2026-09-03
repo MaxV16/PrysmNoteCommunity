@@ -13,6 +13,8 @@ import { DateRecurrencePopover } from "./DateRecurrencePopover";
 import { Markdown } from "@/components/ai/Markdown";
 import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
+import { useLocalBool } from "@/lib/use-local-bool";
+import { formatDate } from "@/lib/dates";
 
 import {
   TIER_COLORS,
@@ -50,11 +52,7 @@ const STATUS_OPTIONS = [
 
 function formatDateRange(task: Task): string | null {
   if (!task.start_date && !task.due_date) return null;
-  const fmt = (d: string) =>
-    new Date(d + "T00:00:00").toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
+  const fmt = (d: string) => formatDate(new Date(d + "T00:00:00"), { includeYear: false });
   if (task.start_date && task.due_date && task.start_date !== task.due_date) {
     return `${fmt(task.start_date)} – ${fmt(task.due_date)}`;
   }
@@ -68,12 +66,44 @@ interface TaskDetailDrawerProps {
 }
 
 export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
+  const soundOn = useLocalBool("prysm_notif_sound", true);
   const [editing, setEditing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(task.title);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [teamList, setTeamList] = useState<{ id: string; name: string }[]>([]);
+  const [sharedTeamIds, setSharedTeamIds] = useState<Set<string>>(new Set());
+
+  const loadShareData = async () => {
+    try {
+      const [teamsRes, sharesRes] = await Promise.all([
+        api.get<{ teams: { id: string; name: string }[] }>("/teams/"),
+        api.get<{ team_ids: string[] }>(`/tasks/${task.id}/shares`),
+      ]);
+      setTeamList(teamsRes.teams);
+      setSharedTeamIds(new Set(sharesRes.team_ids));
+    } catch {}
+  };
+
+  const toggleShare = async (teamId: string) => {
+    const isShared = sharedTeamIds.has(teamId);
+    try {
+      if (isShared) {
+        await api.delete(`/teams/${teamId}/share-task/${task.id}`);
+        setSharedTeamIds((prev) => {
+          const next = new Set(prev);
+          next.delete(teamId);
+          return next;
+        });
+      } else {
+        await api.post(`/teams/${teamId}/share-task`, { task_id: task.id });
+        setSharedTeamIds((prev) => new Set(prev).add(teamId));
+      }
+    } catch {}
+  };
   const [editingDescription, setEditingDescription] = useState(false);
   const [descDraft, setDescDraft] = useState(task.description || "");
   const [busy, setBusy] = useState(false);
@@ -158,8 +188,10 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const toggleStatus = async () => {
     const newStatus = task.status === "done" ? "todo" : "done";
     if (newStatus === "done") {
-      const { playCompletionSound } = await import("@/lib/sounds");
-      playCompletionSound();
+      if (soundOn) {
+        const { playCompletionSound } = await import("@/lib/sounds");
+        playCompletionSound();
+      }
     }
     await updateTask(task.id, { status: newStatus });
   };
@@ -253,6 +285,9 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     due_date?: string;
     status?: string;
     priority?: number;
+    tag_ids?: string[];
+    recurrence_rule?: string;
+    recurrence_end_date?: string;
   }) => {
     const fields: Record<string, unknown> = {};
     if (data.title !== task.title) fields.title = data.title;
@@ -262,13 +297,18 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       fields.priority = data.priority;
     if (data.start_date !== (task.start_date || "")) fields.start_date = data.start_date;
     if (data.due_date !== (task.due_date || "")) fields.due_date = data.due_date;
+    if (data.tag_ids !== undefined) fields.tag_ids = data.tag_ids;
+    if (data.recurrence_rule !== (task.recurrence_rule || ""))
+      fields.recurrence_rule = data.recurrence_rule ?? null;
+    if (data.recurrence_end_date !== (task.recurrence_end_date || ""))
+      fields.recurrence_end_date = data.recurrence_end_date ?? null;
     if (Object.keys(fields).length > 0) {
       await updateTask(task.id, fields);
     }
     setEditing(false);
   };
 
-  const handleDateChange = async (newDate: string | null, newRule: string | null) => {
+  const handleDateChange = async (newDate: string | null, newRule: string | null, newEndDate: string | null) => {
     setDateOpen(false);
     const fields: Record<string, unknown> = {};
     if (newDate) {
@@ -281,6 +321,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       fields.start_date = task.start_date;
     }
     fields.recurrence_rule = newRule;
+    fields.recurrence_end_date = newEndDate;
     await updateTask(task.id, fields);
   };
 
@@ -319,6 +360,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             onClose={() => setDateOpen(false)}
             value={task.due_date || task.start_date || null}
             recurrenceRule={task.recurrence_rule}
+            recurrenceEndDate={task.recurrence_end_date}
             onChange={handleDateChange}
           />
         </div>
@@ -487,7 +529,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
                 }}
                 className="w-full rounded-lg border border-dashed border-border/60 px-3 py-4 text-left text-sm text-muted transition-colors hover:border-accent/40 hover:text-secondary"
               >
-                No description — click to add one
+                No description - click to add one
               </button>
             )}
           </div>
@@ -575,6 +617,55 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
               </svg>
             </button>
             <button
+              onClick={() => {
+                void loadShareData();
+                setShareOpen((v) => !v);
+              }}
+              className="rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
+              aria-label="Share with a team"
+              title="Share with a team"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+            </button>
+            <PopoverMenu
+              open={shareOpen}
+              triggerRef={footerMoreRef}
+              align="right"
+              preferred="above"
+              onClose={() => setShareOpen(false)}
+              className="w-64"
+            >
+              <div className="p-2">
+                <p className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">
+                  Share with a team
+                </p>
+                {teamList.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-muted">
+                    Create a team in Settings → Collaborate to share this task.
+                  </p>
+                ) : (
+                  teamList.map((t) => {
+                    const isShared = sharedTeamIds.has(t.id);
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => void toggleShare(t.id)}
+                        className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition-colors hover:bg-hover hover:text-primary"
+                      >
+                        <span className="truncate">{t.name}</span>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${isShared ? "gradient-bg text-[var(--on-gradient)]" : "bg-elevated text-muted"}`}>
+                          {isShared ? "Shared" : "Share"}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </PopoverMenu>
+            <button
               ref={footerMoreRef}
               onClick={() => {
                 setOptionsTrigger(footerMoreRef.current);
@@ -633,7 +724,7 @@ function DrawerShell({ onClose, title, dimmed, children }: DrawerShellProps) {
         aria-hidden
         onClick={onClose}
       />
-      <div className="slide-in-right flex h-full w-[400px] max-w-[92vw] flex-col border-l border-border bg-[#14141c] shadow-2xl">
+      <div className="slide-in-right flex h-full w-full flex-col border-l border-border bg-surface shadow-2xl sm:w-[400px] sm:max-w-[92vw]">
         {title ? (
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <h3 className="text-sm font-semibold text-primary">{title}</h3>

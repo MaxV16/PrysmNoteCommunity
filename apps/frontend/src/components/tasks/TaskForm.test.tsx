@@ -1,13 +1,30 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TaskForm } from "./TaskForm";
 
+const useAppStore = vi.fn(() => ({ tags: [] }));
+
 // Mock app-store
 vi.mock("@/stores/app-store", () => ({
-  useAppStore: () => ({
-    tags: [],
-  }),
+  useAppStore: () => useAppStore(),
 }));
+
+beforeEach(() => {
+  useAppStore.mockReturnValue({ tags: [] });
+});
+
+function makeTask(overrides: Record<string, unknown> = {}): any {
+  return {
+    id: "t1",
+    title: "Edit me",
+    status: "todo",
+    priority: 2,
+    start_date: null,
+    due_date: null,
+    tags: [],
+    ...overrides,
+  };
+}
 
 describe("TaskForm", () => {
   const defaultProps = {
@@ -72,5 +89,52 @@ describe("TaskForm", () => {
     fireEvent.click(submitBtn);
 
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("editing a task pre-selects its existing tags", () => {
+    const onSubmit = vi.fn();
+    render(
+      <TaskForm
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+        initial={makeTask({ tags: [{ id: "tag-1", name: "urgent", color: "#ff0000" }] })}
+      />
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Edit me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /update task/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ tag_ids: ["tag-1"] })
+    );
+  });
+
+  it("submitting an edit passes pre-existing plus newly selected tags", () => {
+    useAppStore.mockReturnValue({
+      tags: [
+        { id: "tag-1", name: "urgent", color: "#ff0000" },
+        { id: "tag-2", name: "later", color: "#00ff00" },
+      ],
+    });
+    const onSubmit = vi.fn();
+    render(
+      <TaskForm
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+        initial={makeTask({ tags: [{ id: "tag-1", name: "urgent", color: "#ff0000" }] })}
+      />
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Edit me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "later" }));
+    fireEvent.click(screen.getByRole("button", { name: /update task/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ tag_ids: ["tag-1", "tag-2"] })
+    );
   });
 });

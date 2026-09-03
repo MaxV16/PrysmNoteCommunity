@@ -10,6 +10,9 @@ interface AIComposerProps {
   onAbort?: () => void;
   onUndo?: () => void;
   additionalAction?: ReactNode;
+  /** External components (e.g. speech-to-text) register an insert fn that replaces
+   *  the composer text with new text and focuses the textarea. */
+  onRegisterInsert?: (insert: (text: string) => void) => void;
 }
 
 const MAX_LENGTH = 2000;
@@ -22,9 +25,19 @@ export function AIComposer({
   onAbort,
   onUndo,
   additionalAction,
+  onRegisterInsert,
 }: AIComposerProps) {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!onRegisterInsert) return;
+    onRegisterInsert((text: string) => {
+      setInput(text.slice(0, MAX_LENGTH));
+      textareaRef.current?.focus();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -98,7 +111,7 @@ export function AIComposer({
             type="submit"
             disabled={disabled || !input.trim()}
             aria-label="Send message"
-            className="flex h-8 w-8 items-center justify-center rounded-xl bg-accent text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+            className="gradient-bg flex h-8 w-8 items-center justify-center rounded-xl text-[var(--on-gradient)] shadow-glow transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"/>

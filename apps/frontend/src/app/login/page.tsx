@@ -11,7 +11,7 @@ import { BrandMark } from "@/components/ui/BrandMark";
 const SSO_ERROR_MESSAGES: Record<string, string> = {
   sso_not_configured: "SSO is not configured on this server yet.",
   sso_no_email: "That provider didn't return an email we could use.",
-  sso_invalid_state: "The sign-in request was invalid — please try again.",
+  sso_invalid_state: "The sign-in request was invalid - please try again.",
   sso_failed: "Sign-in with that provider failed. Please try again.",
 };
 
@@ -70,7 +70,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-base p-4">
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden">
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-accent via-purple-400 to-accent opacity-60" />
+          <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
           <div className="mb-8 text-center">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 float">
               <BrandMark size={32} />

@@ -43,7 +43,7 @@ export default function VerifyEmailPage() {
     <div className="flex min-h-screen items-center justify-center bg-base p-4">
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden text-center">
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-accent via-purple-400 to-accent opacity-60" />
+          <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
           <div className="mb-6 flex justify-center">
             <BrandMark size={32} />
           </div>
@@ -61,7 +61,7 @@ export default function VerifyEmailPage() {
                 </svg>
               </div>
               <h1 className="text-xl font-bold gradient-text">Email verified</h1>
-              <p className="mt-2 text-sm text-muted">You&apos;re signed in — taking you to your tasks...</p>
+              <p className="mt-2 text-sm text-muted">You&apos;re signed in - taking you to your tasks...</p>
             </>
           )}
 

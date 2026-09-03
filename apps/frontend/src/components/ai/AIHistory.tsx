@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { formatDate } from "@/lib/dates";
 
 export interface HistoryServerSession {
   session_id: string;
@@ -34,7 +35,7 @@ function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatDate(d, { includeYear: false });
 }
 
 export function AIHistory({
@@ -83,7 +84,7 @@ export function AIHistory({
           </div>
           <button
             onClick={onNewChat}
-            className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-accent-hover"
+            className="btn-gradient rounded-lg px-3 py-1.5 text-xs font-semibold"
           >
             New chat
           </button>

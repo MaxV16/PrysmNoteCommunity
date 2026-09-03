@@ -15,6 +15,13 @@ from app.models.ai_session import AiSession
 from app.models.ai_memory import AiMemory
 from app.models.calendar_event import CalendarEvent
 from app.models.user_token import UserToken
+from app.models.notifications import UserNotificationPrefs, PushSubscription, NotificationLog
+from app.models.teams import Team, TeamMember, TeamInvite, TeamProject, TaskShare
+from app.models.note import Note
+from app.models.user_preference import UserPreference
+from app.models.board_section import BoardSection
+from app.models.watchlist import WatchlistItem
+from app.models.analytics_event import AnalyticsEvent, AnalyticsDaily
 
 from app.models.token_blacklist import TokenBlacklist
 
@@ -34,4 +41,18 @@ __all__ = [
     "AiMemory",
     "CalendarEvent",
     "UserToken",
+    "UserNotificationPrefs",
+    "PushSubscription",
+    "NotificationLog",
+    "Team",
+    "TeamMember",
+    "TeamInvite",
+    "TeamProject",
+    "TaskShare",
+    "Note",
+    "UserPreference",
+    "BoardSection",
+    "WatchlistItem",
+    "AnalyticsEvent",
+    "AnalyticsDaily",
 ]

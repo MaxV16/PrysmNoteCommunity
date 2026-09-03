@@ -17,6 +17,8 @@ const PER_ACCOUNT_KEYS = [
   "prysm_ai_chat_history",
   "prysm_ai_active_chat",
   "prysm_kanban_columns",
+  "prysm_preferences",
+  "prysm_board_card_colors",
 ];
 
 /**

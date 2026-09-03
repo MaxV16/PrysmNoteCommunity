@@ -48,6 +48,10 @@ Open http://localhost:3000
 - **3-Pane UI**: Sidebar navigation | Timeline view | AI chat assistant
 - **Task Management**: Full CRUD with drag-and-drop rescheduling
 - **Timeline**: Gantt-style horizontal timeline with per-project lanes
+- **Board**: scrapbook-style card canvas - tasks render as tinted cards with
+  on-card subtask checklists, due dates, tag dots and completion counts; layout
+  and colors are deterministic per task (optional per-card color override)
+- **View modes**: Timeline | Kanban | Calendar | List | Board (drop-down switcher)
 
 ### AI Assistant
 - Multi-intent parsing ("Create a meeting next Thursday, recurring every 2 weeks")
@@ -55,9 +59,10 @@ Open http://localhost:3000
 - Contextual subtask suggestions ("Break this down" button on broad tasks)
 - Schedule conflict detection
 - Cross-referencing and linking tasks across projects
-- Provider routing: OpenAI, Google Gemini, DeepSeek
+- Provider routing: OpenAI, Google Gemini, DeepSeek, OpenRouter
 - Semantic search via pgvector embeddings
-
+  server transcription fallback (OpenRouter Whisper Large V3 Turbo, ZDR) for
+  implementation that opens a PR for review
 ### Security
 - JWT authentication (15-min access + 7-day refresh tokens)
 - Row-Level Security (RLS) on all database tables
@@ -68,19 +73,19 @@ Open http://localhost:3000
 
 ### Themes
 10 built-in themes + full customization:
-- **Dark** (default) — Deep space purple
-- **Light** — Lavender light mode
-- **Dracula** — Purple/green accents
-- **Nord** — Arctic blues
-- **Monokai** — Yellow/green accents
-- **Slate Pro** — Cool blue, professional
-- **Coffee Roast** — Warm browns
-- **Solarized Dark** — Teal/blue accent
-- **GitHub Dark** — GitHub's exact dark palette
-- **Tokyonight** — Neon blue/purple
-- **Custom Theme** — Create your own with 16 color token editor
-- **Font Customization** — Choose from 10 presets or type any Google Font
-- **Background Images** — Upload images or use built-in patterns/gradients
+- **Dark** (default) - Deep space purple
+- **Light** - Lavender light mode
+- **Dracula** - Purple/green accents
+- **Nord** - Arctic blues
+- **Monokai** - Yellow/green accents
+- **Slate Pro** - Cool blue, professional
+- **Coffee Roast** - Warm browns
+- **Solarized Dark** - Teal/blue accent
+- **GitHub Dark** - GitHub's exact dark palette
+- **Tokyonight** - Neon blue/purple
+- **Custom Theme** - Create your own with 16 color token editor
+- **Font Customization** - Choose from 10 presets or type any Google Font
+- **Background Images** - Upload images or use built-in patterns/gradients
 
 See the [Developer Theming Guide](#-developer-theming-guide) below for details.
 
@@ -113,7 +118,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ```
 prysm-note/
 ├── apps/
-│   ├── frontend/        # Next.js 14 App Router + Tailwind CSS
+│   ├── frontend/        # Next.js 15 App Router + Tailwind CSS
 │   └── backend/         # FastAPI + SQLAlchemy (async) + PostgreSQL/pgvector
 ├── docker/              # Dockerfiles + DB init scripts
 ├── scripts/             # Launch & setup scripts
@@ -169,14 +174,14 @@ docker-compose up # Full stack with Docker
 | Frontend | Next.js 15, React 18, TypeScript, Tailwind CSS, Zustand, @dnd-kit |
 | Backend | FastAPI, SQLAlchemy 2 (async), Pydantic v2, Alembic |
 | Database | PostgreSQL 16, pgvector |
-| AI/LLM | OpenAI, Google Gemini, DeepSeek (adapter pattern) |
+| AI/LLM | OpenAI, Google Gemini, DeepSeek, OpenRouter (adapter pattern) |
 | Auth | JWT (python-jose), bcrypt |
 | Calendar | Google Calendar API |
 | Infrastructure | Docker, Docker Compose, Turborepo |
 
 ## 🎨 Developer Theming Guide
 
-Prysm Note uses a **design token JSON system** as the single source of truth for all visual properties. Everything — colors, themes, fonts, backgrounds, radii, and shadows — is defined in one file and flows down to CSS custom properties, Tailwind config, and the React theme provider.
+Prysm Note uses a **design token JSON system** as the single source of truth for all visual properties. Everything - colors, themes, fonts, backgrounds, radii, and shadows - is defined in one file and flows down to CSS custom properties, Tailwind config, and the React theme provider.
 
 ### File Structure
 
@@ -220,7 +225,7 @@ design-tokens.json
    }
    ```
 
-2. **Add to `types/theme.ts`** — add `"my-theme"` to the `ThemeName` union type.
+2. **Add to `types/theme.ts`** - add `"my-theme"` to the `ThemeName` union type.
 
 3. **Add CSS fallback** in `globals.css`:
    ```css
@@ -234,7 +239,7 @@ design-tokens.json
    ```
    The CSS fallback ensures instant rendering before JavaScript loads.
 
-4. Done — the new theme appears automatically in the Appearance settings grid.
+4. Done - the new theme appears automatically in the Appearance settings grid.
 
 ### How to Add Font Presets
 
@@ -242,7 +247,7 @@ Add to `design-tokens.json` → `fontPresets` array:
 ```json
 "fontPresets": ["Inter", "JetBrains Mono", ..., "My Font"]
 ```
-The new font appears in the dropdown automatically. Google Fonts are loaded dynamically — the font name must be available on Google Fonts.
+The new font appears in the dropdown automatically. Google Fonts are loaded dynamically - the font name must be available on Google Fonts.
 
 ### How to Add Background Presets
 
@@ -252,9 +257,9 @@ Add to `design-tokens.json` → `backgroundPresets` array:
 ```
 
 Types:
-- `"gradient"` — CSS gradient value, rendered with `background-size: cover`
-- `"pattern"` — repeating pattern, specify `"size"` field (e.g. `"24px 24px"`)
-- `"none"` — no background
+- `"gradient"` - CSS gradient value, rendered with `background-size: cover`
+- `"pattern"` - repeating pattern, specify `"size"` field (e.g. `"24px 24px"`)
+- `"none"` - no background
 
 ### How to Change Radii / Border Widths / Spacing
 
@@ -292,7 +297,7 @@ All user customizations are stored in `localStorage` and persist across sessions
 
 ### How to Override Any CSS Globally
 
-Edit `globals.css` in the `@layer components` section. All components use the CSS custom properties listed above — changing one value propagates everywhere.
+Edit `globals.css` in the `@layer components` section. All components use the CSS custom properties listed above - changing one value propagates everywhere.
 
 To add component-specific overrides:
 ```css
@@ -304,7 +309,7 @@ To add component-specific overrides:
 
 ```mermaid
 graph TB
-    subgraph "Frontend (Next.js 14)"
+    subgraph "Frontend (Next.js 15)"
         UI[React SPA<br/>Zustand stores]
         API_CLIENT[API Client<br/>JWT auto-attach]
     end
@@ -344,8 +349,12 @@ ThreePaneLayout
 │   └── ThemeSelector
 ├── TimelineView
 │   ├── TimelineHeader (search, view switcher, +New)
-│   └── TimelineGrid (infinite horizontal scroll)
-│       └── TaskBar (drag-and-drop, resize)
+│   ├── TimelineGrid (infinite horizontal scroll)
+│   │   └── TaskBar (drag-and-drop, resize)
+│   ├── KanbanBoard
+│   ├── CalendarView
+│   ├── ListView
+│   └── BoardView (scrapbook card canvas)
 └── ChatPanel
     ├── ChatMessage
     └── ChatInput
@@ -394,8 +403,8 @@ docker compose up
 - **Backend**: Python 3.12+, type hints, async/await, Pydantic v2 schemas
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `chore:`)
 - **Tests**: Vitest (frontend) + pytest (backend) required before merge
-- **Icons**: Hand-coded inline SVGs — no icon libraries
-- **Sounds**: Web Audio API synthesis — no audio files
+- **Icons**: Hand-coded inline SVGs - no icon libraries
+- **Sounds**: Web Audio API synthesis - no audio files
 
 ### Before Submitting Changes
 

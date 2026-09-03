@@ -15,7 +15,9 @@ export const MODULE_IDS = [
   "viewKanban",
   "viewCalendar",
   "viewList",
+  "viewBoard",
   "habits",
+  "watchlist",
 ] as const;
 
 export type ModuleId = (typeof MODULE_IDS)[number];
@@ -24,7 +26,7 @@ export type ModuleId = (typeof MODULE_IDS)[number];
  * Modules that are part of the paid (EE) tier. They render for free users only
  * as locked/upgrade affordances; an active subscription enables them.
  */
-export const PREMIUM_MODULE_IDS: readonly ModuleId[] = ["finance"];
+export const PREMIUM_MODULE_IDS: readonly ModuleId[] = [];
 
 export function isPremiumModule(id: ModuleId): boolean {
   return (PREMIUM_MODULE_IDS as readonly string[]).includes(id);

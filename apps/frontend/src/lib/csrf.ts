@@ -13,8 +13,8 @@ let ensurePromise: Promise<void> | null = null;
 /**
  * Make sure a csrf_token cookie exists before an unsafe (POST/PUT/PATCH/DELETE)
  * request. The backend CSRF middleware sets the cookie as a side effect of the
- * first safe (GET) request, so this issues a bare GET to /auth/me — which is
- * NOT csrf-exempt — when no cookie is present yet. A 401 for a logged-out user
+ * first safe (GET) request, so this issues a bare GET to /auth/me - which is
+ * NOT csrf-exempt - when no cookie is present yet. A 401 for a logged-out user
  * is expected and fine (the middleware still sets the cookie on the response).
  *
  * Deliberately does NOT use api.ts (which redirects to /login on 401).

@@ -11,8 +11,11 @@ interface TimelineLaneProps {
   days: Date[];
   onTaskClick?: (id: string) => void;
   onDayDoubleClick?: (day: Date) => void;
+  onTaskContextMenu?: (e: React.MouseEvent, task: Task) => void;
+  onDayContextMenu?: (e: React.MouseEvent, day: Date) => void;
   rowLabel?: React.ReactNode;
   rowHeight?: number;
+  dragDisabled?: boolean;
 }
 
 interface PositionedTask {
@@ -73,7 +76,7 @@ function todayIndex(days: Date[]): number {
   return -1;
 }
 
-export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, rowHeight }: TimelineLaneProps) {
+export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, onTaskContextMenu, onDayContextMenu, rowHeight, dragDisabled }: TimelineLaneProps) {
   const { positioned, maxStack } = useMemo(() => {
     // Day column index for "today", used to place undated (inbox) tasks so they
     // are visible and draggable on the timeline. Falls back to the middle day if
@@ -143,8 +146,13 @@ export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, rowHe
             <div
               key={day.toISOString()}
               className="pointer-events-auto cursor-pointer"
-              style={{ width: DAY_WIDTH, minWidth: DAY_WIDTH, flex: "0 0 120px" }}
+              style={{ width: DAY_WIDTH, minWidth: DAY_WIDTH, flex: `0 0 ${DAY_WIDTH}px` }}
               onDoubleClick={() => onDayDoubleClick(day)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDayContextMenu?.(e, day);
+              }}
             />
           ))}
         </div>
@@ -156,6 +164,8 @@ export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, rowHe
             task={task}
             style={{ left: pos.left, width: pos.width, top: pos.top }}
             onClick={() => onTaskClick?.(task.id)}
+            onContextMenu={onTaskContextMenu}
+            dragDisabled={dragDisabled}
           />
         ))}
       </div>

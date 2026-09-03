@@ -35,3 +35,40 @@ describe("ChatMessage rendering regression (the 'big circle' fix)", () => {
     expect(screen.getByText("Creating task")).toBeTruthy();
   });
 });
+
+describe("ChatMessage typing indicator (WS3 empty-bubble fix)", () => {
+  it("shows the TypingIndicator only for the last assistant message while a stream is active", () => {
+    render(
+      <ChatMessage
+        message={makeMessage("")}
+        streaming={true}
+        isLast={true}
+      />
+    );
+    expect(screen.getByTestId("typing-indicator")).toBeTruthy();
+  });
+
+  it("does NOT show the TypingIndicator when a stream is inactive", () => {
+    render(
+      <ChatMessage
+        message={makeMessage("")}
+        streaming={false}
+        isLast={true}
+      />
+    );
+    expect(screen.queryByTestId("typing-indicator")).toBeFalsy();
+    // And an aborted placeholder must not render an empty bubble either.
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("does NOT show the TypingIndicator on a non-last empty message", () => {
+    render(
+      <ChatMessage
+        message={makeMessage("")}
+        streaming={true}
+        isLast={false}
+      />
+    );
+    expect(screen.queryByTestId("typing-indicator")).toBeFalsy();
+  });
+});

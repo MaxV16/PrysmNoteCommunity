@@ -1,4 +1,4 @@
-"""Initial schema — stamp baseline matching docker/db/init.sql
+"""Initial schema - stamp baseline matching docker/db/init.sql
 
 Revision ID: 0001
 Revises:

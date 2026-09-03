@@ -14,6 +14,11 @@
   --accent: #6c5ce7;
   --accent-hover: #7f70f0;
   --accent-glow: rgba(108, 92, 231, 0.3);
+  --grad-from: #4c7eff;
+  --grad-via: #7c5cff;
+  --grad-to: #a855f7;
+  --on-gradient: #ffffff;
+  --shadow-glow-strong: 0 0 24px rgba(108, 92, 231, 0.45);
   --danger: #ff4757;
   --danger-hover: #ff6b78;
   --success: #2ed573;
@@ -48,6 +53,11 @@
   --accent: #6c5ce7;
   --accent-hover: #5a4ad0;
   --accent-glow: rgba(108, 92, 231, 0.15);
+  --grad-from: #2563eb;
+  --grad-via: #6d28d9;
+  --grad-to: #9333ea;
+  --on-gradient: #ffffff;
+  --shadow-glow-strong: 0 0 24px rgba(109, 40, 217, 0.25);
   --danger: #e53e3e;
   --success: #38a169;
   --warning: #dd6b20;
@@ -70,6 +80,11 @@
   --accent: #4C7EFF;
   --accent-hover: #3B6CE8;
   --accent-glow: rgba(76, 126, 255, 0.3);
+  --grad-from: #4c7eff;
+  --grad-via: #6c5ce7;
+  --grad-to: #a855f7;
+  --on-gradient: #ffffff;
+  --shadow-glow-strong: 0 0 24px rgba(76, 126, 255, 0.4);
   --danger: #FF4757;
   --success: #22C55E;
   --warning: #FF9500;
@@ -92,6 +107,11 @@
   --accent: #d4a574;
   --accent-hover: #c49560;
   --accent-glow: rgba(212,165,116,0.3);
+  --grad-from: #c18d5a;
+  --grad-via: #d4a574;
+  --grad-to: #e8a840;
+  --on-gradient: #241e1a;
+  --shadow-glow-strong: 0 0 24px rgba(212,165,116,0.35);
   --danger: #e06050;
   --success: #7aac5a;
   --warning: #e8a840;
@@ -114,6 +134,11 @@
   --accent: #268bd2;
   --accent-hover: #1e7ab8;
   --accent-glow: rgba(38,139,210,0.3);
+  --grad-from: #268bd2;
+  --grad-via: #2aa198;
+  --grad-to: #6c71c4;
+  --on-gradient: #002b36;
+  --shadow-glow-strong: 0 0 24px rgba(38,139,210,0.35);
   --danger: #dc322f;
   --success: #859900;
   --warning: #b58900;
@@ -136,6 +161,11 @@
   --accent: #58a6ff;
   --accent-hover: #388bfd;
   --accent-glow: rgba(88,166,255,0.3);
+  --grad-from: #58a6ff;
+  --grad-via: #388bfd;
+  --grad-to: #8b5cf6;
+  --on-gradient: #ffffff;
+  --shadow-glow-strong: 0 0 24px rgba(88,166,255,0.4);
   --danger: #f85149;
   --success: #3fb950;
   --warning: #d29922;
@@ -158,6 +188,11 @@
   --accent: #7aa2f7;
   --accent-hover: #6285d6;
   --accent-glow: rgba(122,162,247,0.3);
+  --grad-from: #7aa2f7;
+  --grad-via: #bb9af7;
+  --grad-to: #2ac3de;
+  --on-gradient: #16161e;
+  --shadow-glow-strong: 0 0 24px rgba(122,162,247,0.4);
   --danger: #f7768e;
   --success: #9ece6a;
   --warning: #e0af68;
@@ -249,10 +284,10 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
   }
   .sidebar-item:hover { background: var(--bg-hover); color: var(--text-primary); }
   .sidebar-item.active {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
+    background: linear-gradient(90deg, var(--grad-from), var(--grad-via), var(--grad-to));
+    color: var(--on-gradient);
     font-weight: 600;
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+    box-shadow: var(--shadow-glow-strong);
   }
 
   .btn {
@@ -262,13 +297,16 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
   }
   .btn:active { transform: scale(0.96); }
   .btn-primary {
-    @apply bg-accent text-base font-semibold;
+    @apply font-semibold;
     border-radius: 9999px;
-    box-shadow: 0 4px 14px var(--accent-glow);
+    background: linear-gradient(90deg, var(--grad-from), var(--grad-via), var(--grad-to));
+    color: var(--on-gradient);
+    box-shadow: var(--shadow-glow-strong);
+    transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   }
   .btn-primary:hover {
-    background: var(--accent-hover);
-    box-shadow: 0 6px 20px var(--accent-glow);
+    filter: brightness(1.08);
+    box-shadow: 0 0 28px var(--accent-glow);
     transform: translateY(-1px);
   }
 
@@ -283,6 +321,26 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
   }
   .input-field::placeholder { color: var(--text-muted); }
   .input-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent), 0 0 20px var(--accent-glow); }
+
+  /* Pricing-page design language: gradient surfaces, CTAs, checks and pills. */
+  .gradient-bg {
+    background: linear-gradient(90deg, var(--grad-from), var(--grad-via), var(--grad-to));
+  }
+  .check-gradient {
+    background: linear-gradient(135deg, var(--grad-from), var(--grad-to));
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+  .btn-gradient {
+    color: var(--on-gradient);
+    background: linear-gradient(90deg, var(--grad-from), var(--grad-via), var(--grad-to));
+    box-shadow: var(--shadow-glow-strong);
+    transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  }
+  .btn-gradient:hover {
+    filter: brightness(1.08);
+    box-shadow: 0 0 28px var(--accent-glow);
+    transform: translateY(-1px);
+  }
 
   .card {
     background: var(--bg-surface);
@@ -363,6 +421,7 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
   .slide-up { animation: slideUp 0.3s ease-out; }
   .scale-in { animation: scaleIn 0.2s ease-out; }
   .slide-in-right { animation: slideInRight 0.22s ease-out; }
+  .slide-in-left { animation: slideInLeft 0.22s ease-out; }
   .float { animation: float 3s ease-in-out infinite; }
 
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -370,13 +429,14 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
   @keyframes scaleIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
   @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
   @keyframes slideInRight { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes slideInLeft { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: translateX(0); } }
   @keyframes pulseSubtle { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
   .animate-pulse-subtle { animation: pulseSubtle 2s ease-in-out infinite; }
   .animate-glow { animation: glow 2s ease-in-out infinite alternate; }
   @keyframes glow { from { box-shadow: 0 0 8px var(--accent-glow); } to { box-shadow: 0 0 24px var(--accent-glow); } }
 
   .gradient-text {
-    background: linear-gradient(135deg, var(--accent), #a78bfa, var(--accent));
+    background: linear-gradient(135deg, var(--grad-from), var(--grad-via), var(--grad-to));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -387,7 +447,7 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
     background: linear-gradient(90deg, transparent, var(--border), transparent);
   }
 
-  /* Layered surfaces — prefer elevation/contrast over borders. */
+  /* Layered surfaces - prefer elevation/contrast over borders. */
   .surface-elevated { background: var(--bg-elevated); }
   .ring-focus { box-shadow: 0 0 0 3px var(--ring); }
 
@@ -415,4 +475,11 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
     font-family: 'DM Mono', 'SF Mono', 'Consolas', monospace;
     letter-spacing: 0.02em;
   }
+
+  /* Safe-area helpers for standalone PWA (notch / home indicator). */
+  .pt-safe { padding-top: max(env(safe-area-inset-top), 0px); }
+  .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
+  .pl-safe { padding-left: max(env(safe-area-inset-left), 0px); }
+  .pr-safe { padding-right: max(env(safe-area-inset-right), 0px); }
+  .min-h-safe { min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
 }

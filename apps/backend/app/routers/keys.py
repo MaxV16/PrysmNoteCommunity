@@ -1,6 +1,6 @@
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,6 +84,7 @@ async def list_keys(
 @router.get("/{provider}/key")
 async def get_provider_key(
     provider: str,
+    response: Response,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
@@ -93,8 +94,9 @@ async def get_provider_key(
     user doesn't have to re-enter a key they already saved. Only returns a key
     that belongs to the authenticated user, is active, and is a known provider.
     The key is never logged and is only transmitted to the authenticated owner
-    over TLS.
+    over TLS. Never cached/proxied (L3).
     """
+    response.headers["Cache-Control"] = "no-store"
     if provider not in VALID_PROVIDERS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid provider")
 
@@ -230,7 +232,7 @@ async def test_key(
     if not _test_key_allowed(str(user.id)):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many key tests — try again shortly",
+            detail="Too many key tests - try again shortly",
         )
     import httpx
     import logging
@@ -277,12 +279,12 @@ async def test_key(
 
         return {"valid": False, "error": f"Unknown provider: {provider}"}
     except httpx.TimeoutException:
-        return {"valid": False, "error": "Request timed out — check network connectivity"}
+        return {"valid": False, "error": "Request timed out - check network connectivity"}
     except Exception as e:
         # Never relay raw exception text (paths, hostnames, provider quirks) to
         # the client; log it server-side instead.
         logger.warning("key test failed for provider=%s: %s", provider, e)
-        return {"valid": False, "error": "Could not validate the key — please try again"}
+        return {"valid": False, "error": "Could not validate the key - please try again"}
 
 
 @router.delete("/{key_id}")

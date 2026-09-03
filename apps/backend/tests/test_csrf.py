@@ -13,7 +13,7 @@ async def _with_csrf_enabled(settings_module, on: bool):
 @pytest.mark.asyncio
 async def test_post_without_csrf_token_is_rejected(auth_client: AsyncClient):
     """When CSRF is enabled, an unsafe request without the X-CSRF-Token header
-    must be rejected with 403 — the double-submit guard."""
+    must be rejected with 403 - the double-submit guard."""
     from app.config import settings
 
     settings.csrf_enabled = True

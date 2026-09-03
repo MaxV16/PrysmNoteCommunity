@@ -32,6 +32,8 @@ const config: Config = {
         sm: "var(--shadow-sm)",
         md: "var(--shadow-md)",
         lg: "var(--shadow-lg)",
+        glow: "var(--shadow-glow)",
+        "glow-lg": "var(--shadow-glow-strong)",
       },
       animation: {
         "fade-in": "fadeIn 0.2s ease-out",

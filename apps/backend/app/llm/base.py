@@ -15,6 +15,11 @@ class LLMClient(ABC):
     async def embed(self, text: str) -> list[float]:
         pass
 
+    async def aclose(self) -> None:
+        """Release the underlying HTTP client, if any. No-op by default so
+        providers that hold no pooled connection can skip the override."""
+        pass
+
 
 _providers: dict[str, type[LLMClient]] = {}
 

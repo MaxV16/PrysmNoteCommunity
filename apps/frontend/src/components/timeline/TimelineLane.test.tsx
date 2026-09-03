@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { DndContext } from "@dnd-kit/core";
 import { TimelineLane } from "./TimelineLane";
+import { DAY_WIDTH } from "./constants";
 import type { Task } from "@/types/task";
 
 function makeTask(partial: Partial<Task>): Task {
@@ -106,5 +107,22 @@ describe("TimelineLane stacking", () => {
     const { baseElements } = renderLane(tasks);
     // Both the dated and undated (pinned) bars are rendered.
     expect(baseElements.length).toBe(2);
+  });
+
+  it("sizes the interactive day-cell overlays from DAY_WIDTH", () => {
+    const days = daysFor("2026-08-03", 3);
+    const { container } = render(
+      <DndContext>
+        <TimelineLane tasks={[]} days={days} onDayDoubleClick={() => {}} />
+      </DndContext>
+    );
+    const cells = container.querySelectorAll("[class*='cursor-pointer']");
+    expect(cells).toHaveLength(3);
+    for (const cell of cells) {
+      const el = cell as HTMLElement;
+      expect(el.style.width).toBe(`${DAY_WIDTH}px`);
+      expect(el.style.minWidth).toBe(`${DAY_WIDTH}px`);
+      expect(el.style.flex).toBe(`0 0 ${DAY_WIDTH}px`);
+    }
   });
 });

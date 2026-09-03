@@ -6,7 +6,12 @@ import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
 import { useApiKeys } from "@/hooks/useApiKeys";
+import { useSubscription } from "@/hooks/use-subscription";
+import { TeamList } from "@/components/collaborate/TeamList";
+import { ImportPanel } from "@/components/import/ImportPanel";
+import { useNotificationPrefs, subscribeToPush, unsubscribeFromPush } from "@/lib/notifications";
 import { api } from "@/lib/api";
+import { track } from "@/lib/track";
 import { useAppStore } from "@/stores/app-store";
 import type { ThemeName, ThemeColors, BackgroundPreset } from "@/types/theme";
 import { THEMES, FONT_PRESETS, BACKGROUND_PRESETS } from "@/types/theme";
@@ -44,6 +49,7 @@ function sanitizeImportedTasks(value: unknown): Task[] | null {
 
 
 
+
 const THEME_NAMES: ThemeName[] = [...(Object.keys(THEMES) as ThemeName[]), "custom"];
 
 type SettingsTab =
@@ -55,6 +61,7 @@ type SettingsTab =
   | "appearance"
   | "more"
   | "integrations"
+  | "import"
   | "collaborate"
   | "sticky-note"
   | "widgets"
@@ -95,6 +102,12 @@ const TAB_GROUPS: TabGroup[] = [
       { id: "ai-keys", label: "AI Keys", svg: "M7 11V7a5 5 0 0 1 10 0v4 M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z" },
       { id: "shortcuts", label: "Shortcuts", svg: "M12 8V4 M8 12H4 M12 16v4 M16 12h4 M12 2v2 M12 22v-2 M2 12h2 M22 12h-2" },
       { id: "about", label: "About", svg: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 16v-4 M12 8h.01" },
+    ],
+  },
+  {
+    label: "Data",
+    tabs: [
+      { id: "import", label: "Import", svg: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8 12 3 7 8 M12 3v12" },
     ],
   },
 ];
@@ -189,7 +202,7 @@ function IntegrationRow({ label, description, connected, onConnect, onDisconnect
           )}
         </div>
       ) : (
-        <button onClick={onConnect} className="btn bg-accent text-white px-4 py-1.5 text-xs rounded-xl hover:bg-accent-hover">Connect</button>
+        <button onClick={onConnect} className="btn btn-gradient px-4 py-1.5 text-xs rounded-xl hover:bg-accent-hover">Connect</button>
       )}
     </div>
   );
@@ -197,6 +210,7 @@ function IntegrationRow({ label, description, connected, onConnect, onDisconnect
 
 export default function SettingsPage() {
   const { user, logout, refreshSession } = useAuth();
+  const subscription = useSubscription();
   const { themeName, setThemeName, fontFamily, setFontFamily, background, setBackgroundPreset, setBackgroundImage, clearBackground, customTheme, setCustomTheme } =
     useTheme();
   const router = useRouter();
@@ -229,11 +243,7 @@ export default function SettingsPage() {
   const [showAll, setShowAll] = useBoolSetting("prysm_smartlist_all", true);
   const [showCompleted, setShowCompleted] = useBoolSetting("prysm_smartlist_completed", true);
 
-  const [notifPush, setNotifPush] = useBoolSetting("prysm_notif_push");
-  const [notifEmail, setNotifEmail] = useBoolSetting("prysm_notif_email");
-  const [notifDue, setNotifDue] = useBoolSetting("prysm_notif_due", true);
-  const [notifDigest, setNotifDigest] = useBoolSetting("prysm_notif_digest");
-  const [notifSound, setNotifSound] = useBoolSetting("prysm_notif_sound");
+  const { prefs: notifPrefs, update: updateNotifPref } = useNotificationPrefs();
 
   const [startDay, setStartDay] = useStringSetting("prysm_start_day", "monday");
   const [timeFormat, setTimeFormat] = useStringSetting("prysm_time_format", "24h");
@@ -251,13 +261,6 @@ export default function SettingsPage() {
   const [widgetCalendar, setWidgetCalendar] = useBoolSetting("prysm_widget_calendar", true);
   const [widgetTasks, setWidgetTasks] = useBoolSetting("prysm_widget_tasks", true);
   const [widgetHabits, setWidgetHabits] = useBoolSetting("prysm_widget_habits", true);
-
-  const [collabTeamName, setCollabTeamName] = useState("");
-  const [collabInviteEmail, setCollabInviteEmail] = useState("");
-  const [collabMsg, setCollabMsg] = useState("");
-  const [collabTeams, setCollabTeams] = useState<{ name: string }[]>(() =>
-    lsGet<{ name: string }[]>("prysm_collab_teams", [])
-  );
 
   const [editingCustomTheme, setEditingCustomTheme] = useState(false);
   const [customThemeColors, setCustomThemeColors] = useState<ThemeColors>(() => {
@@ -311,6 +314,36 @@ export default function SettingsPage() {
     if (typeof window !== "undefined" && "Notification" in window) {
       setNotificationStatus(Notification.permission as "granted" | "denied" | "idle");
     }
+  }, []);
+
+  // Deep-link from a team invite email: /settings?tab=collaborate&invite=<token>
+  const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const token = new URLSearchParams(window.location.search).get("invite");
+    if (!token) return;
+    setActiveTab("collaborate");
+    (async () => {
+      try {
+        await api.post(`/teams/invites/${encodeURIComponent(token)}/accept`);
+        setInviteMsg("You've joined the team.");
+      } catch (e) {
+        setInviteMsg(e instanceof Error ? e.message : "Could not accept the invite.");
+      }
+      window.history.replaceState({}, "", "/settings?tab=collaborate");
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
   }, []);
 
   const handleSaveProfile = async () => {
@@ -427,6 +460,7 @@ export default function SettingsPage() {
   };
 
   const handleImport = () => {
+    track("feature_used", { feature: "import" });
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".json";
@@ -456,7 +490,27 @@ export default function SettingsPage() {
   const handleRequestNotification = async () => {
     if (!("Notification" in window)) return;
     const perm = await Notification.requestPermission();
-    setNotificationStatus(perm as "granted" | "denied" | "idle");
+    setNotificationStatus(perm as "granted" | "denied");
+    if (perm === "granted") {
+      const ok = await subscribeToPush();
+      if (ok) await updateNotifPref({ push_enabled: true });
+    }
+  };
+
+  const handlePushToggle = async (on: boolean) => {
+    if (on) {
+      if (Notification.permission !== "granted") {
+        const perm = await Notification.requestPermission();
+        setNotificationStatus(perm as "granted" | "denied");
+        if (perm !== "granted") return;
+      }
+      const ok = await subscribeToPush();
+      if (!ok) return;
+      await updateNotifPref({ push_enabled: true });
+    } else {
+      await unsubscribeFromPush();
+      await updateNotifPref({ push_enabled: false });
+    }
   };
 
   const handleImageUpload = () => {
@@ -473,28 +527,6 @@ export default function SettingsPage() {
       reader.readAsDataURL(file);
     };
     input.click();
-  };
-
-  const handleCreateTeam = () => {
-    if (!collabTeamName.trim()) return;
-    const teams = [...collabTeams, { name: collabTeamName.trim() }];
-    setCollabTeams(teams);
-    lsSet("prysm_collab_teams", teams);
-    setCollabTeamName("");
-    setCollabMsg("Team created.");
-    setTimeout(() => setCollabMsg(""), 2000);
-  };
-
-  const handleInvite = () => {
-    if (!collabInviteEmail.trim()) return;
-    const knownUsers: string[] = lsGet<string[]>("prysm_known_users", []);
-    if (!knownUsers.includes(collabInviteEmail.trim())) {
-      setCollabMsg(`This user doesn't have an account. Creating pending invite for ${collabInviteEmail.trim()}.`);
-    } else {
-      setCollabMsg(`Invitation sent to ${collabInviteEmail.trim()}.`);
-    }
-    setCollabInviteEmail("");
-    setTimeout(() => setCollabMsg(""), 3000);
   };
 
   const handleConnectSlack = () => {
@@ -651,7 +683,7 @@ export default function SettingsPage() {
                     <p className="text-sm text-secondary">Password</p>
                     <p className="text-xs text-muted">Change your account password</p>
                   </div>
-                  <button onClick={() => setPasswordResetOpen(true)} className="btn bg-accent text-white px-4 py-1.5 text-xs rounded-xl">Reset Password</button>
+                  <button onClick={() => setPasswordResetOpen(true)} className="btn btn-gradient px-4 py-1.5 text-xs rounded-xl">Reset Password</button>
                 </div>
               </div>
 
@@ -777,18 +809,21 @@ export default function SettingsPage() {
                     </p>
                   </div>
                   {notificationStatus === "idle" ? (
-                    <button onClick={handleRequestNotification} className="btn bg-accent px-4 py-1.5 text-xs rounded-xl text-white">
+                    <button onClick={handleRequestNotification} className="btn btn-gradient px-4 py-1.5 text-xs rounded-xl">
                       Enable
                     </button>
                   ) : (
-                    <Toggle value={notifPush && notificationStatus === "granted"} onChange={setNotifPush} />
+                    <Toggle
+                      value={notifPrefs.push_enabled && notificationStatus === "granted"}
+                      onChange={handlePushToggle}
+                    />
                   )}
                 </div>
                 {[
-                  { label: "Email Task Reminders", desc: "Receive reminders via email", value: notifEmail, set: setNotifEmail },
-                  { label: "Due Date Alerts (24h)", desc: "Notify 24 hours before due", value: notifDue, set: setNotifDue },
-                  { label: "Daily Digest Email", desc: "Summary of your tasks each morning", value: notifDigest, set: setNotifDigest },
-                  { label: "Sound Alerts", desc: "Play sound on notifications", value: notifSound, set: setNotifSound },
+                  { label: "Email Task Reminders", desc: "Receive reminders via email", value: notifPrefs.email_reminders, set: (v: boolean) => void updateNotifPref({ email_reminders: v }) },
+                  { label: "Due Date Alerts (24h)", desc: "Notify 24 hours before due", value: notifPrefs.due_alerts, set: (v: boolean) => void updateNotifPref({ due_alerts: v }) },
+                  { label: "Daily Digest Email", desc: "Summary of your tasks each morning", value: notifPrefs.email_digest, set: (v: boolean) => void updateNotifPref({ email_digest: v }) },
+                  { label: "Sound Alerts", desc: "Play sound on notifications", value: notifPrefs.sound, set: (v: boolean) => void updateNotifPref({ sound: v }) },
                 ].map((n) => (
                   <div key={n.label} className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
                     <div>
@@ -883,7 +918,7 @@ export default function SettingsPage() {
                         }
                       }}
                       className={`rounded-2xl border-2 p-2.5 text-center transition-all duration-200 ${
-                        active ? "border-accent bg-accent/10 shadow-glow scale-105" : "border-border bg-elevated hover:border-text-muted hover:bg-hover"
+                        active ? "border-accent bg-accent/10 shadow-glow-lg scale-105" : "border-border bg-elevated hover:border-text-muted hover:bg-hover"
                       }`}
                     >
                       <div
@@ -904,7 +939,7 @@ export default function SettingsPage() {
                   setCustomThemeColors({ ...base.colors });
                   setEditingCustomTheme(true);
                 }}
-                className="btn bg-accent text-white px-5 py-2 text-sm rounded-xl"
+                className="btn btn-gradient px-5 py-2 text-sm rounded-xl"
               >
                 + Create Custom Theme
               </button>
@@ -915,13 +950,14 @@ export default function SettingsPage() {
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {Object.keys(customThemeColors).map((key) => {
                       const k = key as keyof ThemeColors;
+                      const colorVal = customThemeColors[k] || "";
                       return (
                         <div key={k}>
                           <label className="text-[10px] text-muted block mb-1">{k.replace("accent-hover", "ahover").replace("shadow-sm", "shadowS").replace("shadow-md", "shadowM").replace("shadow-lg", "shadowL").replace("accent-glow", "glow")}</label>
                           <div className="flex items-center gap-1">
                             <input
                               type="color"
-                              value={customThemeColors[k].startsWith("#") || customThemeColors[k].startsWith("rgb") ? (customThemeColors[k].startsWith("#") ? customThemeColors[k] : "#000000") : "#000000"}
+                              value={colorVal.startsWith("#") || colorVal.startsWith("rgb") ? (colorVal.startsWith("#") ? colorVal : "#000000") : "#000000"}
                               onChange={(e) => {
                                 setCustomThemeColors((prev) => ({ ...prev, [k]: e.target.value }));
                               }}
@@ -945,7 +981,7 @@ export default function SettingsPage() {
                         setCustomTheme({ ...customThemeColors });
                         setEditingCustomTheme(false);
                       }}
-                      className="btn bg-accent text-white px-5 py-2 text-sm rounded-xl"
+                      className="btn btn-gradient px-5 py-2 text-sm rounded-xl"
                     >
                       Apply Custom Theme
                     </button>
@@ -995,7 +1031,7 @@ export default function SettingsPage() {
                           setFontInputOpen(false);
                         }
                       }}
-                      className="btn bg-accent text-white px-4 py-2 text-sm rounded-xl"
+                      className="btn btn-gradient px-4 py-2 text-sm rounded-xl"
                     >
                       Apply
                     </button>
@@ -1106,6 +1142,9 @@ export default function SettingsPage() {
             </section>
           )}
 
+          {/* === IMPORT === */}
+          {activeTab === "import" && <ImportPanel />}
+
           {/* === INTEGRATIONS === */}
           {activeTab === "integrations" && (
             <section className="card p-6 space-y-5">
@@ -1128,7 +1167,7 @@ export default function SettingsPage() {
                 <h3 className="text-sm font-semibold text-primary">Data Import/Export</h3>
                 <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
                   <div><p className="text-sm text-secondary">Export All Data</p><p className="text-xs text-muted">{lastExport ? `Last export: ${lastExport}` : "Download tasks as JSON"}</p></div>
-                  <button onClick={handleExport} className="btn bg-accent text-white px-4 py-1.5 text-xs rounded-xl">Export</button>
+                  <button onClick={handleExport} className="btn btn-gradient px-4 py-1.5 text-xs rounded-xl">Export</button>
                 </div>
                 <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
                   <div><p className="text-sm text-secondary">Import Data</p><p className="text-xs text-muted">Restore from backup JSON file</p></div>
@@ -1139,8 +1178,9 @@ export default function SettingsPage() {
           )}
 
 
+
           {/* === COLLABORATE === */}
-          {activeTab === "collaborate" && (
+              {activeTab === "collaborate" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
@@ -1150,31 +1190,29 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <h2 className="text-lg font-bold text-primary">Collaborate</h2>
-                  <p className="text-sm text-muted">Shared list settings and invitations</p>
+                  <p className="text-sm text-muted">Teams, shared projects and invitations</p>
                 </div>
               </div>
-              {collabMsg && (
-                <div className="rounded-xl bg-success/10 border border-success/20 px-4 py-2.5 text-sm text-success">{collabMsg}</div>
+              {inviteMsg && (
+                <div className="rounded-xl bg-accent/10 border border-accent/30 px-4 py-2.5 text-sm text-accent">{inviteMsg}</div>
               )}
-              <div className="space-y-3">
-                <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider">Create Team</h3>
-                <div className="flex gap-2">
-                  <input className="input-field flex-1" placeholder="Team name" value={collabTeamName} onChange={(e) => setCollabTeamName(e.target.value)} />
-                  <button onClick={handleCreateTeam} disabled={!collabTeamName.trim()} className="btn bg-accent text-white px-4 py-2 text-sm rounded-xl disabled:opacity-50">Create</button>
-                </div>
-              </div>
-              {collabTeams.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider">Your Teams</h3>
-                  {collabTeams.map((t, i) => (
-                    <div key={i} className="rounded-xl bg-elevated px-4 py-3 border border-border">
-                      <p className="text-sm font-medium text-primary">{t.name}</p>
-                      <div className="mt-2 flex gap-2">
-                        <input className="input-field flex-1 text-xs" placeholder="Invite by email" value={i === collabTeams.length - 1 ? collabInviteEmail : ""} onChange={(e) => setCollabInviteEmail(e.target.value)} />
-                        <button onClick={handleInvite} className="btn bg-elevated border border-border text-xs text-secondary px-3 py-1 rounded-xl hover:text-primary">Invite</button>
-                      </div>
-                    </div>
-                  ))}
+              {subscription.tier === "team" || subscription.tier === "company" ? (
+                <TeamList />
+              ) : (
+                <div className="rounded-2xl border border-border bg-elevated px-6 py-10 text-center">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-accent/15 text-accent">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  </div>
+                  <h3 className="text-base font-semibold text-primary">Teams are a Team plan feature</h3>
+                  <p className="mx-auto mt-2 max-w-md text-sm text-secondary">
+                    Create teams, invite members and share projects with a Team or Company
+                    subscription. Upgrade to unlock collaboration.
+                  </p>
+                  <button
+                    className="btn btn-gradient mt-6 px-6 py-2.5 text-sm rounded-xl"
+                  >
+                    View premium plans
+                  </button>
                 </div>
               )}
             </section>
@@ -1244,7 +1282,7 @@ export default function SettingsPage() {
                   </div>
                 ))}
               </div>
-              <button onClick={handleOpenWidgets} className="btn bg-accent text-white px-5 py-2 text-sm rounded-xl w-full">
+              <button onClick={handleOpenWidgets} className="btn btn-gradient px-5 py-2 text-sm rounded-xl w-full">
                 Open Widgets
               </button>
             </section>
@@ -1269,7 +1307,7 @@ export default function SettingsPage() {
                 <ul className="list-disc list-inside space-y-1 ml-1">
                   <li>Keys are encrypted with <strong className="text-primary">Fernet (AES-128)</strong> before being stored on our servers.</li>
                   <li>Keys are also cached locally in your browser (base64-encoded) for instant, direct-to-LLM AI access.</li>
-                  <li>Keys are <strong className="text-primary">only decrypted in-memory</strong> during AI requests — never logged or persisted in plaintext.</li>
+                  <li>Keys are <strong className="text-primary">only decrypted in-memory</strong> during AI requests - never logged or persisted in plaintext.</li>
                   <li>You can revoke or rotate keys at any time from your provider dashboard.</li>
                 </ul>
               </div>

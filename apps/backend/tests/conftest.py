@@ -37,7 +37,7 @@ _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, ex
 def _sqlite_connect_functions(dbapi_conn, record):
     """SQLite lacks PostgreSQL's gen_random_uuid(); register a compatible one so
     the SQLite test database can satisfy the models' server_default. Returns
-    dash-less hex so it matches the ``Uuid(as_uuid=True)`` bind format — otherwise
+    dash-less hex so it matches the ``Uuid(as_uuid=True)`` bind format - otherwise
     server-default-generated ids (dashed) can never be matched/updated by the ORM
     (which binds dash-less hex), making any id-based lookup fail on SQLite."""
     if _test_engine.dialect.name != "postgresql":
@@ -63,6 +63,21 @@ async def setup_db():
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with _test_engine.begin() as conn:
+        if _test_engine.dialect.name == "postgresql":
+            # RLS policies created by ensure_schema depend on the tables (e.g.
+            # tasks' user_isolation references task_shares), so drop them before
+            # drop_all or the teardown fails and leaves the DB dirty for every
+            # subsequent test.
+            policies = await conn.execute(
+                text(
+                    "SELECT schemaname, tablename, policyname FROM pg_policies "
+                    "WHERE schemaname = 'public'"
+                )
+            )
+            for schemaname, tablename, policyname in policies.all():
+                await conn.execute(
+                    text(f'DROP POLICY IF EXISTS "{policyname}" ON "{schemaname}"."{tablename}"')
+                )
         await conn.run_sync(Base.metadata.drop_all)
 
 
@@ -77,6 +92,8 @@ async def _reset_auth_state():
     from app.routers import auth as auth_module
     auth_module._IP_BLOCKLIST.clear()
     auth_module._FAILED_LOGINS.clear()
+    auth_module._mail_limiter._memory.clear()
+    auth_module._mail_limiter._blocked.clear()
     yield
 
 
@@ -124,7 +141,7 @@ async def _force_memory_rate_limit():
 
 @pytest_asyncio.fixture(autouse=True)
 async def _disable_email_for_tests():
-    # No mailer is configured (or reachable) in tests — send_email should no-op
+    # No mailer is configured (or reachable) in tests - send_email should no-op
     # and return False rather than attempt real sends. Clear any env-based key.
     from app.config import settings
 

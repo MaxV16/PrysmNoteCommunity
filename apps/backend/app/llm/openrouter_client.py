@@ -3,7 +3,7 @@ import httpx
 from openai import AsyncOpenAI
 from app.llm.base import LLMClient, register_provider
 
-# Default OpenRouter model: DeepSeek V4 Flash — 1M token context at near-free
+# Default OpenRouter model: DeepSeek V4 Flash - 1M token context at near-free
 # pricing. Cheap, current, and available on OpenRouter.
 DEFAULT_MODEL = "deepseek/deepseek-v4-flash-0731"
 
@@ -52,3 +52,6 @@ class OpenRouterClient(LLMClient):
         # OpenRouter support for embeddings varies by model. 
         # This is a placeholder or could be implemented if a specific embedding model is targeted.
         raise NotImplementedError("Embeddings not implemented for OpenRouter via this client.")
+
+    async def aclose(self) -> None:
+        await self.client.close()

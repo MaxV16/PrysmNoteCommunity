@@ -15,7 +15,7 @@ async def test_global_api_rate_limit_429(auth_client: AsyncClient):
     ratelimit_mod._api_limiter = rl_utils.RateLimiter("rl:api")  # fresh counter
     try:
         # The middleware counts every /api request (before auth). First 3 pass
-        # through (the route then 401s for a logged-out client — fine).
+        # through (the route then 401s for a logged-out client - fine).
         for _ in range(3):
             resp = await auth_client.get("/api/tasks/")
             assert resp.status_code != 429, resp.text

@@ -46,7 +46,7 @@ function resolveExecutable() {
     // Fall through to Playwright's own resolution if the cache isn't present.
   }
   // System-installed Chromium fallbacks (macOS / Linux / Windows), in order of
-  // preference. Only probed, never launched twice — first existing one wins.
+  // preference. Only probed, never launched twice - first existing one wins.
   const systemPaths = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",

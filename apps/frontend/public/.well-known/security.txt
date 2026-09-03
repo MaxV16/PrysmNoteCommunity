@@ -1,0 +1,5 @@
+Contact: mailto:support@prysmnote.com
+Expires: 2027-08-22T00:00:00Z
+Preferred-Languages: en
+Canonical: https://prysmnote.com/.well-known/security.txt
+Policy: https://prysmnote.com/privacy

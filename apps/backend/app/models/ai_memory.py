@@ -9,7 +9,7 @@ from app.models.base import Base
 
 class AiMemory(Base):
     """A discrete, cross-session durable memory fact the user wants the agent to
-    recall (e.g. "User has an ITV/mechanic appointment Tue 2026-08-04 ~16:00 —
+    recall (e.g. "User has an ITV/mechanic appointment Tue 2026-08-04 ~16:00 -
     needs to shower first").
 
     This is the "life memory" layer, distinct from the per-session rolling

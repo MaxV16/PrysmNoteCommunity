@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -11,83 +11,68 @@ import {
   useSensors,
   closestCorners,
 } from "@dnd-kit/core";
-import { useAppStore } from "@/stores/app-store";
 import { api } from "@/lib/api";
+import { useAppStore } from "@/stores/app-store";
+import { useTasks } from "@/hooks/useTasks";
+import { useBoardSections } from "@/hooks/useBoardSections";
+import { usePreferencesStore } from "@/stores/preferences-store";
+import {
+  PREF_BOARD_KANBAN_LAYOUT,
+  PREF_BOARD_KANBAN_SCROLL,
+  type CardLayout,
+  type ScrollDirection,
+} from "@/lib/preferences";
+import {
+  applyBoardDrop,
+  byBoardOrder,
+  computeBoardDrop,
+  sectionTasks,
+} from "@/lib/board-dnd";
 import type { Task } from "@/types/task";
+import type { BoardSection } from "@/lib/board-sections";
 import { KanbanColumn } from "./KanbanColumn";
 import { KanbanCard } from "./KanbanCard";
-
-interface ColumnConfig {
-  id: string;
-  title: string;
-  color: string;
-  status: string;
-}
-
-const STORAGE_KEY = "prysm_kanban_columns";
-
-const DEFAULT_COLUMNS: ColumnConfig[] = [
-  { id: "backlog", title: "Backlog", color: "#9E9E9E", status: "backlog" },
-  { id: "todo", title: "To Do", color: "#4FC3F7", status: "todo" },
-  { id: "in_progress", title: "In Progress", color: "#FFA726", status: "in_progress" },
-  { id: "done", title: "Done", color: "#66BB6A", status: "done" },
-];
-
-const STATUS_COLORS: Record<string, string> = {
-  backlog: "#9E9E9E",
-  todo: "#4FC3F7",
-  in_progress: "#FFA726",
-  done: "#66BB6A",
-  cancelled: "#EF5350",
-};
-
-function loadColumns(): ColumnConfig[] {
-  if (typeof window === "undefined") return DEFAULT_COLUMNS;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_COLUMNS;
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    return DEFAULT_COLUMNS;
-  } catch {
-    return DEFAULT_COLUMNS;
-  }
-}
-
-function saveColumns(cols: ColumnConfig[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cols));
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-function makeId(): string {
-  return `col_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-}
+import { KanbanToolbar } from "./KanbanToolbar";
+import { KanbanAddCard } from "./KanbanAddCard";
+import { Modal } from "@/components/ui/Modal";
+import { ContextMenu } from "@/components/ui/ContextMenu";
+import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 
 export function KanbanBoard() {
   const tasks = useAppStore((s) => s.tasks);
   const setTasks = useAppStore((s) => s.setTasks);
+  const { fetchTasks } = useTasks();
+  const { sections, addSection, renameSection, removeSection } =
+    useBoardSections("kanban");
+
+  const scrollDirection = usePreferencesStore(
+    (s) => (s.prefs[PREF_BOARD_KANBAN_SCROLL] as ScrollDirection) || "horizontal"
+  );
+  const cardLayout = usePreferencesStore(
+    (s) => (s.prefs[PREF_BOARD_KANBAN_LAYOUT] as CardLayout) || "stacked"
+  );
+  const setPreference = usePreferencesStore((s) => s.setPreference);
+
   const [activeTask, setActiveTask] = useState<Task | null>(null);
-  const [columns, setColumns] = useState<ColumnConfig[]>(DEFAULT_COLUMNS);
-  const [adding, setAdding] = useState(false);
-  const [newTitle, setNewTitle] = useState("");
-  const [newStatus, setNewStatus] = useState("todo");
-
-  useEffect(() => {
-    setColumns(loadColumns());
-  }, []);
-
-  const updateColumns = useCallback((cols: ColumnConfig[]) => {
-    setColumns(cols);
-    saveColumns(cols);
-  }, []);
+  const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
+  const [scopedCreate, setScopedCreate] = useState<BoardSection | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
+
+  const tasksBySection = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    for (const section of sections) {
+      map.set(
+        section.id,
+        sectionTasks(tasks, section)
+          .filter((t) => !t.is_archived)
+          .sort(byBoardOrder)
+      );
+    }
+    return map;
+  }, [tasks, sections]);
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
@@ -108,131 +93,139 @@ export function KanbanBoard() {
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
 
-      const overTaskId = over.id as string;
-      const overTask = tasks.find((t) => t.id === overTaskId);
-      const overColumn = columns.find((c) => c.id === over.id);
-      const newStatus = overTask?.status || overColumn?.status;
-      if (!newStatus || newStatus === task.status) return;
+      const drop = computeBoardDrop(tasks, sections, taskId, over.id as string);
+      if (!drop) return;
 
-      const updatedTasks = tasks.map((t) =>
-        t.id === taskId ? { ...t, status: newStatus } : t
-      );
-      setTasks(updatedTasks);
+      // Optimistic store update; the refetch reconciles shortly after.
+      setTasks(applyBoardDrop(tasks, taskId, drop, sections));
 
       try {
-        await api.patch(`/tasks/${taskId}`, { status: newStatus });
+        await api.post("/tasks/board-move", {
+          task_id: taskId,
+          section_id: drop.sectionId,
+          index: drop.index,
+        });
+        await fetchTasks();
       } catch {
-        const revertedTasks = tasks.map((t) =>
-          t.id === taskId ? { ...t, status: task.status } : t
-        );
-        setTasks(revertedTasks);
+        setTasks(tasks);
       }
     },
-    [tasks, setTasks, columns]
+    [tasks, sections, setTasks, fetchTasks]
   );
 
-  const getColumnTasks = useCallback(
-    (status: string) =>
-      tasks.filter((t) => t.status === status && !t.is_archived),
-    [tasks]
-  );
-
-  const renameColumn = useCallback(
-    (id: string, title: string) => {
-      updateColumns(columns.map((c) => (c.id === id ? { ...c, title } : c)));
+  const handleRemoveColumn = useCallback(
+    (section: BoardSection) => {
+      if (sections.length <= 1) return; // keep at least one section
+      void removeSection(section.id);
     },
-    [columns, updateColumns]
+    [sections.length, removeSection]
   );
 
-  const removeColumn = useCallback(
-    (id: string) => {
-      if (columns.length <= 1) return; // keep at least one column
-      updateColumns(columns.filter((c) => c.id !== id));
+  const refetchTasks = useCallback(() => {
+    void fetchTasks();
+  }, [fetchTasks]);
+
+  const openCardMenu = useCallback((e: React.MouseEvent, task: Task) => {
+    setMenu({ state: { kind: "task", task }, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const openEmptyMenu = useCallback((e: React.MouseEvent, section: BoardSection) => {
+    setMenu({
+      state: { kind: "empty", section: { id: section.id, title: section.title } },
+      x: e.clientX,
+      y: e.clientY,
+    });
+  }, []);
+
+  // "New task in {section}" reuses the KanbanAddCard quick-create flow inside a
+  // modal, pre-scoped to the section's status / board_section_id.
+  const handleEmptyNewTask = useCallback(
+    (ctx: { day?: string; section?: { id: string | null; title: string } }) => {
+      if (ctx.section?.id) {
+        const section = sections.find((s) => s.id === ctx.section!.id);
+        if (section) {
+          setScopedCreate(section);
+          return;
+        }
+      }
+      window.dispatchEvent(new CustomEvent("prysm-new-task"));
     },
-    [columns, updateColumns]
+    [sections]
   );
-
-  const addColumn = useCallback(() => {
-    const title = newTitle.trim();
-    if (!title) return;
-    updateColumns([
-      ...columns,
-      {
-        id: makeId(),
-        title,
-        color: STATUS_COLORS[newStatus] || "#9E9E9E",
-        status: newStatus,
-      },
-    ]);
-    setNewTitle("");
-    setNewStatus("todo");
-    setAdding(false);
-  }, [columns, newTitle, newStatus, updateColumns]);
 
   return (
-    <div className="flex h-full gap-4 overflow-x-auto px-4 py-4">
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
+    <div className="flex h-full min-h-0 flex-col">
+      <KanbanToolbar
+        scrollDirection={scrollDirection}
+        cardLayout={cardLayout}
+        onScrollDirectionChange={(d) => setPreference(PREF_BOARD_KANBAN_SCROLL, d)}
+        onCardLayoutChange={(l) => setPreference(PREF_BOARD_KANBAN_LAYOUT, l)}
+        onAddSection={(title) => void addSection({ title, color: "#9E9E9E" })}
+      />
+
+      <div
+        className={`min-h-0 flex-1 ${
+          scrollDirection === "horizontal"
+            ? "flex flex-row items-start gap-4 overflow-x-auto px-4 py-4"
+            : "flex flex-col items-start gap-4 overflow-y-auto px-4 py-4"
+        }`}
+        style={{ overscrollBehaviorX: "contain", WebkitOverflowScrolling: "touch" }}
       >
-        {columns.map((col) => (
-          <KanbanColumn
-            key={col.id}
-            column={col}
-            tasks={getColumnTasks(col.status)}
-            onRename={(title) => renameColumn(col.id, title)}
-            onRemove={() => removeColumn(col.id)}
-          />
-        ))}
-
-        <DragOverlay>
-          {activeTask ? (
-            <div className="opacity-90">
-              <KanbanCard task={activeTask} />
-            </div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-
-      {adding ? (
-        <div className="flex h-fit w-[280px] flex-shrink-0 flex-col gap-2 rounded-2xl bg-surface border border-border p-3">
-          <input
-            autoFocus
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") addColumn();
-              if (e.key === "Escape") setAdding(false);
-            }}
-            placeholder="Column name"
-            className="input-field text-xs"
-          />
-          <select
-            value={newStatus}
-            onChange={(e) => setNewStatus(e.target.value)}
-            className="input-field text-xs"
-          >
-            <option value="backlog">Backlog</option>
-            <option value="todo">To Do</option>
-            <option value="in_progress">In Progress</option>
-            <option value="done">Done</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <div className="flex gap-2">
-            <button onClick={addColumn} className="btn btn-primary flex-1 text-xs">Add</button>
-            <button onClick={() => setAdding(false)} className="btn bg-elevated border border-border flex-1 text-xs text-secondary">Cancel</button>
-          </div>
-        </div>
-      ) : (
-        <button
-          onClick={() => setAdding(true)}
-          className="flex h-fit w-[160px] flex-shrink-0 items-center justify-center rounded-2xl border border-dashed border-border/60 px-3 py-3 text-xs text-muted hover:border-accent/40 hover:text-secondary"
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
         >
-          + Add column
-        </button>
-      )}
+          {sections.map((section) => (
+            <KanbanColumn
+              key={section.id}
+              section={section}
+              tasks={tasksBySection.get(section.id) ?? []}
+              cardLayout={cardLayout}
+              onRefetch={refetchTasks}
+              onRename={(title) => void renameSection(section.id, title)}
+              onRemove={() => handleRemoveColumn(section)}
+              onEmptyContextMenu={openEmptyMenu}
+              onCardContextMenu={openCardMenu}
+            />
+          ))}
+
+          <DragOverlay>
+            {activeTask ? (
+              <div className="opacity-90">
+                <KanbanCard task={activeTask} />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      </div>
+
+      <Modal
+        isOpen={!!scopedCreate}
+        onClose={() => setScopedCreate(null)}
+        title={scopedCreate ? `New task in ${scopedCreate.title}` : "New Task"}
+      >
+        <KanbanAddCard
+          key={scopedCreate?.id ?? "none"}
+          autoExpand
+          status={scopedCreate?.status || "backlog"}
+          boardSectionId={scopedCreate?.status ? null : scopedCreate?.id}
+          onAdd={() => {
+            setScopedCreate(null);
+            refetchTasks();
+          }}
+        />
+      </Modal>
+
+      <ContextMenu
+        open={!!menu}
+        x={menu?.x ?? 0}
+        y={menu?.y ?? 0}
+        onClose={() => setMenu(null)}
+      >
+        <TaskContextMenu menu={menu?.state ?? null} onClose={() => setMenu(null)} onNewTask={handleEmptyNewTask} />
+      </ContextMenu>
     </div>
   );
 }

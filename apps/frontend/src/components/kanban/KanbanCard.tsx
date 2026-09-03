@@ -5,6 +5,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
+import { formatDate } from "@/lib/dates";
 
 const PRIORITY_COLORS = TIER_COLORS;
 
@@ -20,14 +21,16 @@ function formatDueDate(dateStr: string): string {
   if (diffDays < -1 && diffDays > -7) return `${Math.abs(diffDays)}d ago`;
   if (diffDays > 1 && diffDays < 7) return `in ${diffDays}d`;
 
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatDate(date, { includeYear: false });
 }
 
 interface KanbanCardProps {
   task: Task;
+  sectionId?: string | null;
+  onContextMenu?: (e: React.MouseEvent, task: Task) => void;
 }
 
-export function KanbanCard({ task }: KanbanCardProps) {
+export function KanbanCard({ task, sectionId, onContextMenu }: KanbanCardProps) {
   const {
     attributes,
     listeners,
@@ -37,7 +40,7 @@ export function KanbanCard({ task }: KanbanCardProps) {
     isDragging,
   } = useSortable({
     id: task.id,
-    data: { task },
+    data: { task, sectionId },
   });
 
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
@@ -54,6 +57,11 @@ export function KanbanCard({ task }: KanbanCardProps) {
       style={style}
       className="bg-elevated border border-border rounded-xl p-3 cursor-grab hover:bg-hover transition-colors"
       onClick={() => setSelectedTaskId(task.id)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu?.(e, task);
+      }}
     >
       <div className="flex items-start gap-2" {...attributes} {...listeners}>
         <span

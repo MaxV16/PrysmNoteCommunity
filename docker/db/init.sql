@@ -228,6 +228,25 @@ ALTER TABLE user_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE habits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE habit_logs ENABLE ROW LEVEL SECURITY;
 
+-- FORCE ROW LEVEL SECURITY on every user-scoped table so the app role (which is
+-- transferred table ownership in zz-init-roles.sh) does NOT bypass RLS as the
+-- owner. Without FORCE the backstop only applies to non-owner roles and is
+-- decorative (H1). `users` is intentionally NOT forced: it is the auth identity
+-- table - login/registration/OAuth linking read by email across all users before
+-- any app.user_id session variable exists, so forcing it breaks sign-in.
+ALTER TABLE api_keys FORCE ROW LEVEL SECURITY;
+ALTER TABLE tasks FORCE ROW LEVEL SECURITY;
+ALTER TABLE task_links FORCE ROW LEVEL SECURITY;
+ALTER TABLE tags FORCE ROW LEVEL SECURITY;
+ALTER TABLE task_tags FORCE ROW LEVEL SECURITY;
+ALTER TABLE task_embeddings FORCE ROW LEVEL SECURITY;
+ALTER TABLE ai_conversations FORCE ROW LEVEL SECURITY;
+ALTER TABLE ai_sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE calendar_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE user_tokens FORCE ROW LEVEL SECURITY;
+ALTER TABLE habits FORCE ROW LEVEL SECURITY;
+ALTER TABLE habit_logs FORCE ROW LEVEL SECURITY;
+
 -- RLS policies using session variable app.user_id
 CREATE OR REPLACE FUNCTION rls_user_id() RETURNS UUID AS $$
   SELECT NULLIF(current_setting('app.user_id', TRUE), '')::UUID;

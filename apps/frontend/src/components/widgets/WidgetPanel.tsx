@@ -94,7 +94,7 @@ function CalendarWidget() {
               key={d}
               className={`text-xs py-0.5 rounded ${
                 isToday(d)
-                  ? "bg-accent text-white font-bold"
+                  ? "gradient-bg text-[var(--on-gradient)] font-bold shadow-glow"
                   : "text-primary hover:bg-hover"
               }`}
             >

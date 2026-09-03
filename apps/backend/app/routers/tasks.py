@@ -1,17 +1,21 @@
 from uuid import UUID
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import async_session_factory, get_db
 from app.dependencies import get_current_user
 from app.models.task import Task, TaskStatus
+from app.models.board_section import BoardSection
 from app.models.user import User
 from app.services.embedding_service import generate_and_store_embedding
-from app.services.task_service import create_task, delete_task, get_task, search_tasks, update_task
+from app.services.task_service import create_task, delete_task, get_task, search_tasks, update_task, task_access_condition
 from app.services import subtask_service
+from app.models.teams import TaskShare
 from app.utils.uuid_helpers import parse_uuid
 
 VALID_STATUSES = {s.value for s in TaskStatus}
@@ -43,11 +47,13 @@ def _parse_date_arg(value: str | None) -> date_type | None:
         return None
 
 
-def _serialize_task(task: Task) -> dict:
+def _serialize_task(task: Task, tags: list[dict] | None = None) -> dict:
     return {
         "id": str(task.id),
         "user_id": str(task.user_id),
         "parent_task_id": str(task.parent_task_id) if task.parent_task_id else None,
+        "board_section_id": str(task.board_section_id) if task.board_section_id else None,
+        "board_order": task.board_order,
         "title": task.title,
         "description": task.description,
         "status": task.status.value,
@@ -63,21 +69,87 @@ def _serialize_task(task: Task) -> dict:
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+        "tags": tags or [],
     }
+
+
+async def _tags_by_task(
+    session: AsyncSession, task_ids: list[UUID]
+) -> dict[str, list[dict]]:
+    """Load Tag rows for many tasks in ONE query, grouped by task id.
+
+    Returns ``{task_id: [{"id", "name", "color"}, ...]}`` so serializers can
+    attach tags to a batch of tasks without an N+1 query per task.
+    """
+    if not task_ids:
+        return {}
+    result = await session.execute(
+        select(TaskTag.tag_id, TaskTag.task_id, Tag.name, Tag.color)
+        .join(Tag, Tag.id == TaskTag.tag_id)
+        .where(TaskTag.task_id.in_(task_ids))
+    )
+    grouped: dict[str, list[dict]] = {}
+    for tag_id, task_id, name, color in result.all():
+        grouped.setdefault(str(task_id), []).append(
+            {"id": str(tag_id), "name": name, "color": color}
+        )
+    return grouped
+
+
+async def serialize_tasks(session: AsyncSession, tasks: list[Task]) -> list[dict]:
+    """Serialize a batch of tasks with their tags attached (one tags query)."""
+    tags_by_task = await _tags_by_task(session, [t.id for t in tasks])
+    return [_serialize_task(t, tags_by_task.get(str(t.id), [])) for t in tasks]
 
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 
+async def _embed_task_background(
+    task_id: UUID,
+    user_id: UUID,
+    title: str,
+    description: str | None,
+) -> None:
+    """Generate + store a task embedding off the request path (fire-and-forget).
+
+    The request session commits its task row only at get_db teardown, so a fresh
+    session may not see the row yet; retry briefly before giving up. All
+    exceptions are swallowed - embedding loss is non-critical and must never
+    affect the create/update response.
+    """
+    from app.utils.rls import set_rls_user_id
+
+    for attempt in range(3):
+        try:
+            async with async_session_factory() as session:
+                if session.get_bind().dialect.name == "postgresql":
+                    await set_rls_user_id(session, user_id)
+                if await session.get(Task, task_id) is None:
+                    if attempt < 2:
+                        await asyncio.sleep(0.5)
+                        continue
+                    return
+                await generate_and_store_embedding(session, task_id, user_id, title, description)
+                await session.commit()
+                return
+        except Exception:
+            if attempt < 2:
+                await asyncio.sleep(0.5)
+    return
+
+
 class CreateTaskRequest(BaseModel):
     title: str
     parent_task_id: str | None = None
+    board_section_id: str | None = None
     description: str | None = None
     status: str = "backlog"
     priority: int = 3
     start_date: str | None = None
     due_date: str | None = None
     recurrence_rule: str | None = None
+    recurrence_end_date: str | None = None
     estimated_minutes: int | None = None
     tag_ids: list[str] | None = None
 
@@ -112,7 +184,7 @@ class CreateTaskRequest(BaseModel):
             raise ValueError("Priority must be between 1 and 5")
         return v
 
-    @field_validator("start_date", "due_date")
+    @field_validator("start_date", "due_date", "recurrence_end_date")
     @classmethod
     def validate_date(cls, v: str | None) -> str | None:
         if v is not None:
@@ -137,6 +209,8 @@ class UpdateTaskRequest(BaseModel):
     parent_task_id: str | None = None
     is_archived: bool | None = None
     tag_ids: list[str] | None = None
+    board_section_id: str | None = None
+    board_order: int | None = None
 
     @field_validator("title")
     @classmethod
@@ -198,11 +272,26 @@ class CreateSubtaskRequest(BaseModel):
         return v
 
 
+@router.get("/{task_id}/shares")
+async def get_task_shares(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    task = await get_task(session, _require_uuid(task_id), user.id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    result = await session.execute(select(TaskShare).where(TaskShare.task_id == task.id))
+    return {"team_ids": [str(s.team_id) for s in result.scalars().all()]}
+
+
 @router.get("/")
 async def list_tasks(
     query: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    date_from: str | None = None,
+    date_to: str | None = None,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
@@ -210,11 +299,51 @@ async def list_tasks(
     offset = max(offset, 0)
     if query:
         results = await search_tasks(session, user.id, query)
-        return [_serialize_task(t) for t, _rank in results]
+        return await serialize_tasks(session, [t for t, _rank in results])
+
+    from sqlalchemy import or_
+
+    # Range mode: lazily expand recurring templates into the window, then return
+    # the fully serialized tasks overlapping it (tags + board fields needed by
+    # kanban/board). When only one bound is given, treat the window as that
+    # single day.
+    if date_from is not None or date_to is not None:
+        from app.services.recurring_task_service import expand_recurring_for_range
+
+        from_date = _parse_date_arg(date_from) or _parse_date_arg(date_to)
+        to_date = _parse_date_arg(date_to) or _parse_date_arg(date_from)
+        if from_date is None or to_date is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="date_from and date_to must be valid YYYY-MM-DD dates",
+            )
+        if to_date < from_date:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="date_to must not be before date_from",
+            )
+
+        # Flush newly created occurrences before the read below sees them.
+        await expand_recurring_for_range(session, user.id, from_date, to_date)
+
+        result = await session.execute(
+            select(Task)
+            .where(
+                task_access_condition(user.id),
+                or_(
+                    (Task.start_date >= from_date) & (Task.start_date <= to_date),
+                    (Task.due_date >= from_date) & (Task.due_date <= to_date),
+                    (Task.start_date <= from_date) & (Task.due_date >= to_date),
+                ),
+            )
+            .order_by(Task.start_date)
+        )
+        return await serialize_tasks(session, result.scalars().all())
+
     result = await session.execute(
-        select(Task).where(Task.user_id == user.id).order_by(Task.created_at.desc()).offset(offset).limit(limit)
+        select(Task).where(task_access_condition(user.id)).order_by(Task.created_at.desc()).offset(offset).limit(limit)
     )
-    return [_serialize_task(t) for t in result.scalars().all()]
+    return await serialize_tasks(session, result.scalars().all())
 
 
 @router.post("/")
@@ -230,17 +359,33 @@ async def create_task_route(
         if not parent:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent task not found")
 
+    # Same ownership rule for board sections: creating a card pinned to someone
+    # else's section would leak its id into our task row.
+    board_section_uuid = None
+    if request.board_section_id:
+        result = await session.execute(
+            select(BoardSection.id).where(
+                BoardSection.id == _require_uuid(request.board_section_id),
+                BoardSection.user_id == user.id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board section not found")
+        board_section_uuid = _require_uuid(request.board_section_id)
+
     task = await create_task(
         session,
         user_id=user.id,
         title=request.title,
         parent_task_id=_require_uuid(request.parent_task_id) if request.parent_task_id else None,
+        board_section_id=board_section_uuid,
         description=request.description,
         status=request.status,
         priority=request.priority,
         start_date=request.start_date,
         due_date=request.due_date,
         recurrence_rule=request.recurrence_rule,
+        recurrence_end_date=request.recurrence_end_date,
     )
 
     if request.estimated_minutes is not None:
@@ -267,12 +412,12 @@ async def create_task_route(
                 session.add(TaskTag(task_id=task.id, tag_id=tag_uuid))
         await session.flush()
 
-    await generate_and_store_embedding(
-        session, task.id, user.id, task.title, task.description
+    asyncio.create_task(
+        _embed_task_background(task.id, user.id, task.title, task.description)
     )
 
     await session.refresh(task)
-    return _serialize_task(task)
+    return (await serialize_tasks(session, [task]))[0]
 
 
 @router.patch("/{task_id}")
@@ -294,8 +439,8 @@ async def update_task_route(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent task not found")
 
     if "title" in fields or "description" in fields:
-        await generate_and_store_embedding(
-            session, task.id, user.id, task.title, task.description
+        asyncio.create_task(
+            _embed_task_background(task.id, user.id, task.title, task.description)
         )
 
     if request.tag_ids is not None:
@@ -319,7 +464,7 @@ async def update_task_route(
         await session.flush()
 
     await session.refresh(task)
-    return _serialize_task(task)
+    return (await serialize_tasks(session, [task]))[0]
 
 
 @router.delete("/{task_id}")
@@ -344,7 +489,7 @@ async def list_subtasks(
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     result = await session.execute(
-        select(Task).where(Task.parent_task_id == _require_uuid(task_id), Task.user_id == user.id)
+        select(Task).where(Task.parent_task_id == _require_uuid(task_id)).where(task_access_condition(user.id))
     )
     return [
         {"id": str(t.id), "title": t.title, "status": t.status.value, "priority": t.priority}
@@ -498,7 +643,7 @@ async def search_tasks_route(
     ).label("rank")
 
     stmt = select(Task, rank_expr).where(
-        Task.user_id == user.id,
+        task_access_condition(user.id),
         or_(
             func.lower(Task.title) % q_lower,
             func.lower(func.coalesce(Task.description, "")) % q_lower,
@@ -543,11 +688,27 @@ async def list_tasks_by_date_range(
 
     from_date = _parse_date_arg(date_from)
     to_date = _parse_date_arg(date_to)
+    if from_date is None or to_date is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="date_from and date_to must be valid YYYY-MM-DD dates",
+        )
+    if to_date < from_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="date_to must not be before date_from",
+        )
+
+    # Lazily materialize recurring occurrences into the window so AI-chat date
+    # lookups expand endless templates on demand too. The reduced schema below is
+    # not fed into the task store, so this is read-only from the store's view.
+    from app.services.recurring_task_service import expand_recurring_for_range
+    await expand_recurring_for_range(session, user.id, from_date, to_date)
 
     result = await session.execute(
         select(Task)
         .where(
-            Task.user_id == user.id,
+            task_access_condition(user.id),
             Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
             or_(
                 (Task.start_date >= from_date) & (Task.start_date <= to_date),
@@ -586,7 +747,7 @@ async def get_upcoming_deadlines(
     result = await session.execute(
         select(Task)
         .where(
-            Task.user_id == user.id,
+            task_access_condition(user.id),
             Task.due_date.isnot(None),
             Task.due_date >= today,
             Task.due_date <= end,
@@ -640,6 +801,7 @@ async def batch_create_tasks(
             due_date=task_req.due_date,
             priority=task_req.priority,
             recurrence_rule=task_req.recurrence_rule,
+            recurrence_end_date=task_req.recurrence_end_date,
         )
         created.append({"id": str(task.id), "title": task.title})
 
@@ -656,6 +818,68 @@ async def expand_recurring(
     return {"expanded": created}
 
 
+class BoardMoveRequest(BaseModel):
+    task_id: str
+    section_id: str | None = None
+    index: int = 0
+
+
+@router.post("/board-move")
+async def board_move_task(
+    request: BoardMoveRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """Atomically move a task into a board section (or the implicit "Unsorted"
+    area when section_id is null) and splice it at `index` among that section's
+    tasks, renumbering board_order 0..n-1 for the destination set."""
+    task = await get_task(session, _require_uuid(request.task_id), user.id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    section = None
+    if request.section_id:
+        result = await session.execute(
+            select(BoardSection).where(
+                BoardSection.id == _require_uuid(request.section_id),
+                BoardSection.user_id == user.id,
+            )
+        )
+        section = result.scalar_one_or_none()
+        if section is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
+
+    # Membership: status sections key on status (clearing the pin); free sections
+    # and Unsorted key on board_section_id (status untouched).
+    if section is None or section.status is None:
+        task.board_section_id = None if section is None else section.id
+    else:
+        task.status = TaskStatus(section.status)
+        task.board_section_id = None
+
+    if section is None:
+        sibling_where = Task.board_section_id.is_(None)
+    elif section.status:
+        sibling_where = (Task.status == section.status) & Task.board_section_id.is_(None)
+    else:
+        sibling_where = Task.board_section_id == section.id
+
+    result = await session.execute(
+        select(Task)
+        .where(task_access_condition(user.id), sibling_where)
+        .order_by(Task.board_order.asc().nulls_last(), Task.created_at.asc())
+    )
+    siblings = [t for t in result.scalars().all() if t.id != task.id]
+
+    index = max(0, min(request.index, len(siblings)))
+    siblings.insert(index, task)
+    for rank, t in enumerate(siblings):
+        t.board_order = rank
+    await session.flush()
+    await session.refresh(task)
+    return (await serialize_tasks(session, [task]))[0]
+
+
 # Dynamic task routes are declared last so literal static paths like
 # /search, /date-range and /upcoming-deadlines match first.
 @router.get("/{task_id}")
@@ -667,4 +891,4 @@ async def get_task_route(
     task = await get_task(session, _require_uuid(task_id), user.id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    return _serialize_task(task)
+    return (await serialize_tasks(session, [task]))[0]

@@ -77,3 +77,6 @@ class GeminiClient(LLMClient):
             contents=text,
         )
         return result.embeddings[0].values
+
+    async def aclose(self) -> None:
+        await self.client.aclose()
