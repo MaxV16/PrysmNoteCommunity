@@ -687,6 +687,55 @@ async def test_failed_login_block_does_not_block_register(auth_client, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_delete_account(auth_client: AsyncClient):
+    """DELETE /api/auth/me removes the account and all session cookies; the
+    refresh token can no longer restore the session."""
+    reg = await auth_client.post("/api/auth/register", json={
+        "email": "delete_me@example.com",
+        "password": "password123",
+    })
+    assert reg.status_code == 200
+    access_token = reg.cookies.get("access_token")
+    refresh_token = reg.cookies.get("refresh_token")
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    # Confirms the session works before deletion.
+    me = await auth_client.get("/api/auth/me", headers=headers)
+    assert me.status_code == 200
+
+    response = await auth_client.delete("/api/auth/me", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"status": "deleted"}
+
+    # Both auth cookies are cleared on the delete response.
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "access_token" in set_cookie and "refresh_token" in set_cookie
+    # The old access token no longer authenticates (user row is gone).
+    me_after = await auth_client.get("/api/auth/me", headers=headers)
+    assert me_after.status_code == 401
+
+    # The refresh token cannot restore the deleted session.
+    refresh = await auth_client.post("/api/auth/refresh", json={
+        "refresh_token": refresh_token,
+    })
+    assert refresh.status_code == 401
+
+    # The same email can sign up again afterwards (no FK residue).
+    re_reg = await auth_client.post("/api/auth/register", json={
+        "email": "delete_me@example.com",
+        "password": "password123",
+    })
+    assert re_reg.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_account_unauthorized(auth_client: AsyncClient):
+    """Deleting without a session is a plain 401, not a leak of any state."""
+    response = await auth_client.delete("/api/auth/me")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_signup_rate_limit_per_email(auth_client, monkeypatch):
     """Once the per-email budget is spent, the same email gets a 429."""
     import app.routers.auth as auth_module

@@ -424,9 +424,9 @@ export default function SettingsPage() {
       await api.delete("/auth/me");
       logout();
       router.push("/login");
-    } catch {
+    } catch (e) {
       setDeletingAccount(false);
-      alert("Failed to delete account. Please try again.");
+      alert(e instanceof Error ? `Failed to delete account: ${e.message}` : "Failed to delete account. Please try again.");
     }
   };
 
