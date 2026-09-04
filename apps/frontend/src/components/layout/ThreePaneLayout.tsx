@@ -104,8 +104,8 @@ export function ThreePaneLayout() {
       ) : (
           <StickyBoardProvider>
             <WorkspaceStage />
+            <OnboardingTour />
           </StickyBoardProvider>
-          <OnboardingTour />
       )}
     </ErrorBoundaryInner>
   );
