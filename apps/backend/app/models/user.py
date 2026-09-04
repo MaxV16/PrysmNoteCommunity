@@ -28,5 +28,10 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    api_keys = relationship("ApiKey", back_populates="user", cascade="all, delete-orphan")
-    tasks = relationship("Task", back_populates="user", cascade="all, delete-orphan")
+    # passive_deletes=True: every child FK below uses ondelete="CASCADE" at the
+    # DB level, so deleting a User must NOT make the ORM load each collection and
+    # emit per-row DELETEs (pathological for accounts with thousands of tasks +
+    # embeddings - it held the transaction open for minutes and blocked retries).
+    # The database cascade cleans everything in bulk in a single statement.
+    api_keys = relationship("ApiKey", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    tasks = relationship("Task", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)

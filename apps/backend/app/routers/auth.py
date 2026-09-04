@@ -426,7 +426,14 @@ async def delete_account(
     await session.execute(
         sa_delete(TokenBlacklist).where(TokenBlacklist.user_id == user.id)
     )
-    await session.delete(user)
+    # BULK delete the user row and let the database's ON DELETE CASCADE clean up
+    # every child table (tasks, embeddings, tags, notes, habits, ai_*, calendars,
+    # watchlist, teams, EE tables...). All user FKs are declared ondelete=CASCADE
+    # (analytics_event is SET NULL), so this is safe. CRITICAL: do NOT use the
+    # ORM `session.delete(user)` here - its Python-level cascade (all, delete-
+    # orphan) loads EVERY task + embedding and issues one DELETE per row, which
+    # stalls for minutes on large accounts and blocks concurrent requests/retries.
+    await session.execute(sa_delete(User).where(User.id == user.id))
     await session.flush()
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")

@@ -736,6 +736,57 @@ async def test_delete_account_unauthorized(auth_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_delete_account_uses_db_cascade_not_orm_loop(auth_client, db_session):
+    """Regression: deleting an account must be a bulk DB-level cascade (one
+    DELETE on users), NOT the ORM all,delete-orphan cascade that loads every
+    task/embedding and emits one DELETE per row. That loop stalls for minutes on
+    large accounts, holds a long transaction, and blocks retried deletes (seen
+    in prod on an account with thousands of tasks). Assert exactly two DELETE
+    statements reach the DB: token_blacklist + users (the FK ON DELETE CASCADE
+    handles every child table server-side)."""
+    import uuid as _uuid
+
+    from sqlalchemy import event as _event
+
+    from app.models.embedding import TaskEmbedding
+    from app.models.task import Task
+    from app.utils.rls import set_rls_user_id
+
+    reg = await auth_client.post("/api/auth/register", json={
+        "email": "cascade@example.com",
+        "password": "password123",
+    })
+    access_token = reg.cookies.get("access_token")
+    headers = {"Authorization": f"Bearer {access_token}"}
+    uid = _uuid.UUID(reg.json()["id"])
+
+    await set_rls_user_id(db_session, uid)
+    for i in range(300):
+        t = Task(id=_uuid.uuid4(), user_id=uid, title=f"t{i}", start_date=None)
+        t.embedding = TaskEmbedding(id=_uuid.uuid4(), task_id=t.id, embedding=None)
+        db_session.add(t)
+    await db_session.commit()
+
+    emitted: list[str] = []
+
+    def _collect(conn, cursor, statement, parameters, context, executemany):
+        if statement.strip().upper().startswith("DELETE"):
+            emitted.append(statement.strip())
+
+    _event.listen(db_session.bind.sync_engine, "before_cursor_execute", _collect)
+    try:
+        resp = await auth_client.delete("/api/auth/me", headers=headers)
+    finally:
+        _event.remove(db_session.bind.sync_engine, "before_cursor_execute", _collect)
+
+    assert resp.status_code == 200
+    deletes = [s for s in emitted if s.strip().upper().startswith("DELETE")]
+    # Exactly the blacklist + user-row bulk DELETEs. Any RESTORE of the ORM
+    # cascade would add hundreds of per-row DELETEs here.
+    assert len(deletes) == 2, f"expected 2 bulk DELETEs, got {len(deletes)}: {deletes}"
+
+
+@pytest.mark.asyncio
 async def test_signup_rate_limit_per_email(auth_client, monkeypatch):
     """Once the per-email budget is spent, the same email gets a 429."""
     import app.routers.auth as auth_module

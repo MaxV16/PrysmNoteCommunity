@@ -425,8 +425,18 @@ export default function SettingsPage() {
       logout();
       router.push("/login");
     } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      // The account no longer exists server-side or the session is gone, e.g. a
+      // previous delete attempt completed after the request timed out (large
+      // accounts used to take minutes). There is nothing left to delete - finish
+      // the logout locally instead of blocking the user on an error dialog.
+      if (/Not authenticated|Session expired|Invalid token|User not found/i.test(msg)) {
+        logout();
+        router.push("/login");
+        return;
+      }
       setDeletingAccount(false);
-      alert(e instanceof Error ? `Failed to delete account: ${e.message}` : "Failed to delete account. Please try again.");
+      alert(`Failed to delete account: ${msg || "Please try again."}`);
     }
   };
 
