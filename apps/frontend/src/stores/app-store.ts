@@ -23,6 +23,7 @@ interface AppState {
   chatMessages: ChatMessage[];
   chatSessions: ChatSession[];
   selectedTaskId: string | null;
+  selectedTaskIds: string[];
   selectedTagId: string | null;
   searchQuery: string;
   navFilter: NavFilter;
@@ -35,6 +36,9 @@ interface AppState {
   addChatMessage: (msg: ChatMessage) => void;
   setChatSessions: (sessions: ChatSession[]) => void;
   setSelectedTaskId: (id: string | null) => void;
+  setSelectedTaskIds: (ids: string[]) => void;
+  toggleTaskSelected: (id: string) => void;
+  clearTaskSelection: () => void;
   setSelectedTagId: (id: string | null) => void;
   setSearchQuery: (query: string) => void;
   setNavFilter: (filter: NavFilter) => void;
@@ -47,6 +51,7 @@ const initialState = {
   chatMessages: [],
   chatSessions: [],
   selectedTaskId: null,
+  selectedTaskIds: [],
   selectedTagId: null,
   searchQuery: "",
   navFilter: null,
@@ -71,6 +76,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({ chatMessages: [...state.chatMessages, msg] })),
   setChatSessions: (sessions) => set({ chatSessions: sessions }),
   setSelectedTaskId: (id) => set({ selectedTaskId: id }),
+  setSelectedTaskIds: (ids) => set({ selectedTaskIds: ids }),
+  toggleTaskSelected: (id) =>
+    set((state) => ({
+      selectedTaskIds: state.selectedTaskIds.includes(id)
+        ? state.selectedTaskIds.filter((sid) => sid !== id)
+        : [...state.selectedTaskIds, id],
+    })),
+  clearTaskSelection: () => set({ selectedTaskIds: [] }),
   setSelectedTagId: (id) => set({ selectedTagId: id }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setNavFilter: (filter) => set({ navFilter: filter }),

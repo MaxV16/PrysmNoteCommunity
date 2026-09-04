@@ -19,6 +19,7 @@ import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 import { useTasks } from "@/hooks/useTasks";
+import { api } from "@/lib/api";
 import { useUiModule } from "@/lib/ui-module-registry";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { useRouter } from "next/navigation";
@@ -296,6 +297,51 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
 
+      const selectedIds = useAppStore.getState().selectedTaskIds;
+      if (selectedIds.length > 1 && selectedIds.includes(taskId)) {
+        // Multi-drag: shift every selected bar by the same delta, exactly like
+        // the single-task path below, then persist via one batch-reschedule.
+        const store = useAppStore.getState();
+        const previous = store.tasks;
+        const fieldsByTask = new Map<string, Record<string, string>>();
+        for (const id of selectedIds) {
+          const t = store.tasks.find((x) => x.id === id);
+          if (!t) continue;
+          const f: Record<string, string> = {};
+          if (t.start_date) {
+            const d = parseLocalDate(t.start_date);
+            d.setDate(d.getDate() + daysShifted);
+            f.start_date = toLocalDateString(d);
+          }
+          if (t.due_date) {
+            const d = parseLocalDate(t.due_date);
+            d.setDate(d.getDate() + daysShifted);
+            f.due_date = toLocalDateString(d);
+          }
+          if (!t.start_date && !t.due_date) {
+            const d = new Date();
+            d.setDate(d.getDate() + daysShifted);
+            f.start_date = toLocalDateString(d);
+            f.due_date = toLocalDateString(d);
+          }
+          fieldsByTask.set(id, f);
+        }
+        store.setTasks(
+          store.tasks.map((t) =>
+            fieldsByTask.has(t.id) ? { ...t, ...fieldsByTask.get(t.id) } : t
+          )
+        );
+        try {
+          await api.post("/tasks/batch-reschedule", {
+            task_ids: selectedIds,
+            delta_days: daysShifted,
+          });
+        } catch {
+          store.setTasks(previous);
+        }
+        return;
+      }
+
       const fields: Record<string, string> = {};
       if (task.start_date) {
         const d = parseLocalDate(task.start_date);
@@ -368,6 +414,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       if (target.closest("[data-task-bar], [data-resize-handle], button, input, select, textarea, a, [data-day-column]")) {
         return;
       }
+      useAppStore.getState().clearTaskSelection();
       panStartRef.current = { x: e.clientX, scrollLeft: body.scrollLeft };
       panCursorRef.current = "grabbing";
       setPanActive(true);
@@ -608,6 +655,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
             aria-haspopup="menu"
             aria-expanded={viewDropdownOpen}
             data-testid="view-mode-toggle"
+            data-tour="view-switcher"
           >
             {viewModeLabel}
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
@@ -685,7 +733,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           + New
         </button>
 
-        <button onClick={() => router.push("/settings")} className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary shrink-0" title="Settings">
+        <button onClick={() => router.push("/settings")} className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary shrink-0" title="Settings" data-tour="settings">
           ⚙
         </button>
 
@@ -699,7 +747,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           </button>
         )}
 
-        <button onClick={() => onToggleRight?.()} className="gradient-bg flex h-8 w-8 shrink-0 min-w-8 items-center justify-center rounded-full text-[var(--on-gradient)] shadow-glow hover:brightness-110" title="AI">
+        <button onClick={() => onToggleRight?.()} className="gradient-bg flex h-8 w-8 shrink-0 min-w-8 items-center justify-center rounded-full text-[var(--on-gradient)] shadow-glow hover:brightness-110" title="AI" data-tour="ai-panel">
           ⚡
         </button>
       </div>
@@ -729,7 +777,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       ) : (
       <div className="flex" style={{ flex: 1, minHeight: 0 }}>
         {/* Single timeline canvas: all tasks render in one lane */}
-        <div className="relative flex flex-col" data-timeline-canvas style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+        <div className="relative flex flex-col" data-timeline-canvas data-tour="timeline" style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
           <div
             ref={bodyRef}
             className="relative flex flex-col"

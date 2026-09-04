@@ -29,6 +29,7 @@ import {
 import {
   UNSORTED_ID,
   applyBoardDrop,
+  applyBoardGroupDrop,
   byBoardOrder,
   computeBoardDrop,
   unsortedTasks,
@@ -66,6 +67,7 @@ interface BoardGroupProps {
   scrollDirection: ScrollDirection;
   childrenByParent: Map<string, Task[]>;
   overrides: Record<string, string>;
+  selectedTaskIds: Set<string>;
   onOpen: (id: string) => void;
   onToggleSubtask: (sub: Task) => void;
   onToggleTask: (task: Task) => void;
@@ -88,6 +90,7 @@ function BoardGroup({
   onToggleTask,
   onSetColor,
   overrides,
+  selectedTaskIds,
   onEmptyContextMenu,
   onCardContextMenu,
 }: BoardGroupProps) {
@@ -133,6 +136,7 @@ function BoardGroup({
                   color={cardColor(task.id, overrides)}
                   decoration={pickDecoration(task.id)}
                   spanClass={isWideCard(task.id) ? "sm:col-span-2" : ""}
+                  selected={selectedTaskIds.has(task.id)}
                   onOpen={onOpen}
                   onToggleSubtask={(sub) => onToggleSubtask(sub)}
                   onToggleTask={(t) => onToggleTask(t)}
@@ -149,6 +153,7 @@ function BoardGroup({
                 subtasks={childrenByParent.get(task.id) ?? []}
                 color={cardColor(task.id, overrides)}
                 decoration={pickDecoration(task.id)}
+                selected={selectedTaskIds.has(task.id)}
                 onOpen={onOpen}
                 onToggleSubtask={(sub) => onToggleSubtask(sub)}
                 onToggleTask={(t) => onToggleTask(t)}
@@ -292,6 +297,8 @@ export function BoardView({ tasks }: BoardViewProps) {
     [cards]
   );
 
+  const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
+
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       setActiveTask(null);
@@ -304,6 +311,33 @@ export function BoardView({ tasks }: BoardViewProps) {
 
       const drop = computeBoardDrop(cards, sections, taskId, over.id as string);
       if (!drop) return;
+
+      const store = useAppStore.getState();
+      const selectedIds = store.selectedTaskIds;
+      const isGroupDrag = selectedIds.length > 1 && selectedIds.includes(taskId);
+
+      if (isGroupDrag) {
+        const groupOrder = selectedIds
+          .map((id) => cards.find((t) => t.id === id))
+          .filter((t): t is Task => !!t)
+          .sort(byBoardOrder)
+          .map((t) => t.id);
+        const previous = store.tasks;
+        setTasks(applyBoardGroupDrop(store.tasks, groupOrder, drop, sections));
+        try {
+          await api.post("/tasks/batch-board-move", {
+            task_ids: groupOrder,
+            section_id: drop.sectionId,
+            index: drop.index,
+          });
+          await fetchTasks();
+          store.clearTaskSelection();
+        } catch {
+          setTasks(previous);
+          store.clearTaskSelection();
+        }
+        return;
+      }
 
       setTasks(applyBoardDrop(allTasks, taskId, drop, sections));
 
@@ -349,6 +383,11 @@ export function BoardView({ tasks }: BoardViewProps) {
       <div
         className="relative z-10 min-h-0 flex-1 overflow-auto px-6 py-6"
         style={{ scrollBehavior: "smooth", overscrollBehaviorX: "contain", WebkitOverflowScrolling: "touch" }}
+        onPointerDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("[data-board-card], button, input, select, textarea, a, [data-task-bar]")) return;
+          useAppStore.getState().clearTaskSelection();
+        }}
       >
         <DndContext
           sensors={sensors}
@@ -374,6 +413,7 @@ export function BoardView({ tasks }: BoardViewProps) {
                 scrollDirection={scrollDirection}
                 childrenByParent={childrenByParent}
                 overrides={overrides}
+                selectedTaskIds={new Set(selectedTaskIds)}
                 onOpen={setSelectedTaskId}
                 onToggleSubtask={(sub) => void handleToggleSubtask(sub)}
                 onToggleTask={(t) => void handleToggleTask(t)}
@@ -392,6 +432,7 @@ export function BoardView({ tasks }: BoardViewProps) {
               scrollDirection={scrollDirection}
               childrenByParent={childrenByParent}
               overrides={overrides}
+              selectedTaskIds={new Set(selectedTaskIds)}
               onOpen={setSelectedTaskId}
               onToggleSubtask={(sub) => void handleToggleSubtask(sub)}
               onToggleTask={(t) => void handleToggleTask(t)}

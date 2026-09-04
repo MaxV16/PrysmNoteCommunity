@@ -98,7 +98,7 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
   }
 
   return (
-    <div className="flex h-full w-56 shrink-0 flex-col overflow-hidden border-r border-border bg-surface lg:w-60">
+    <div className="flex h-full w-56 shrink-0 flex-col overflow-hidden border-r border-border bg-surface lg:w-60" data-tour="sidebar">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">

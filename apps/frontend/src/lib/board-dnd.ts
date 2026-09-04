@@ -133,3 +133,53 @@ export function applyBoardDrop(
     return { ...t, board_order: orderById.get(t.id) ?? null };
   });
 }
+
+/**
+ * Optimistic store update for a whole group dropped together: mirrors the
+ * server's batch-board-move semantics (same membership rules as
+ * `applyBoardDrop`), splicing the group at `drop.index` in `taskIds` order and
+ * renumbering the destination sibling set once.
+ */
+export function applyBoardGroupDrop(
+  tasks: Task[],
+  taskIds: string[],
+  drop: BoardDrop,
+  sections: BoardSection[]
+): Task[] {
+  const movedTasks = taskIds
+    .map((id) => tasks.find((t) => t.id === id))
+    .filter((t): t is Task => !!t);
+  if (movedTasks.length === 0) return tasks;
+
+  const section = drop.sectionId ? sections.find((s) => s.id === drop.sectionId) : null;
+
+  const moved = movedTasks.map((active) => {
+    if (!section || !section.status) {
+      return { ...active, board_section_id: section ? section.id : null };
+    }
+    return {
+      ...active,
+      status: section.status as TaskStatus,
+      board_section_id: null,
+    };
+  });
+  const movedIds = new Set(moved.map((t) => t.id));
+
+  const destination = section ? sectionTasks(tasks, section) : unsortedTasks(tasks);
+  const siblings = destination
+    .filter((t) => !movedIds.has(t.id))
+    .sort(byBoardOrder);
+
+  const index = Math.max(0, Math.min(drop.index, siblings.length));
+  siblings.splice(index, 0, ...moved);
+  const orderById = new Map(siblings.map((t, i) => [t.id, i]));
+  const movedById = new Map(moved.map((t) => [t.id, t]));
+
+  return tasks.map((t) => {
+    if (movedById.has(t.id)) {
+      return { ...(movedById.get(t.id) as Task), board_order: orderById.get(t.id) ?? null };
+    }
+    if (!orderById.has(t.id)) return t;
+    return { ...t, board_order: orderById.get(t.id) ?? null };
+  });
+}

@@ -12,16 +12,30 @@ const h = vi.hoisted(() => ({
   setPreference: vi.fn(),
 }));
 
-vi.mock("@/stores/app-store", () => ({
-  useAppStore: (selector?: (s: unknown) => unknown) => {
+vi.mock("@/stores/app-store", () => {
+  const appStore = (selector?: (s: unknown) => unknown) => {
     const state = {
       tasks: h.tasks,
       setSelectedTaskId: h.setSelectedTaskId,
       setTasks: h.setTasks,
+      selectedTaskIds: [],
+      setSelectedTaskIds: vi.fn(),
+      toggleTaskSelected: vi.fn(),
+      clearTaskSelection: vi.fn(),
     };
     return selector ? selector(state) : state;
-  },
-}));
+  };
+  appStore.getState = () => ({
+    tasks: h.tasks,
+    setSelectedTaskId: h.setSelectedTaskId,
+    setTasks: h.setTasks,
+    selectedTaskIds: [],
+    setSelectedTaskIds: vi.fn(),
+    toggleTaskSelected: vi.fn(),
+    clearTaskSelection: vi.fn(),
+  });
+  return { useAppStore: appStore };
+});
 
 vi.mock("@/hooks/useTasks", () => ({
   useTasks: () => ({

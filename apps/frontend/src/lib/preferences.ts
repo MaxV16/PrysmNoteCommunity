@@ -13,6 +13,7 @@ export const PREF_FINANCE_CURRENCY = "finance_currency";
 export const PREF_FINANCE_PROJECTION_MONTHS = "finance_projection_months";
 export const PREF_FINANCE_PROJECTION_MIN_BALANCE = "finance_projection_min_balance";
 export const PREF_WATCHLIST_REGION = "watchlist_region";
+export const PREF_ONBOARDING_DONE = "onboarding_done";
 
 export type ScrollDirection = "horizontal" | "vertical";
 export type CardLayout = "stacked" | "side_by_side";

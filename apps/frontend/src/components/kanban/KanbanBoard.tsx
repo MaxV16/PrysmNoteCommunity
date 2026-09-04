@@ -24,6 +24,7 @@ import {
 } from "@/lib/preferences";
 import {
   applyBoardDrop,
+  applyBoardGroupDrop,
   byBoardOrder,
   computeBoardDrop,
   sectionTasks,
@@ -95,6 +96,35 @@ export function KanbanBoard() {
 
       const drop = computeBoardDrop(tasks, sections, taskId, over.id as string);
       if (!drop) return;
+
+      const store = useAppStore.getState();
+      const selectedIds = store.selectedTaskIds;
+      const isGroupDrag = selectedIds.length > 1 && selectedIds.includes(taskId);
+
+      if (isGroupDrag) {
+        // Group drag: the dragged card's drop index is the group's splice point.
+        // The group keeps current board order so the batch lands predictably.
+        const groupOrder = selectedIds
+          .map((id) => tasks.find((t) => t.id === id))
+          .filter((t): t is Task => !!t)
+          .sort(byBoardOrder)
+          .map((t) => t.id);
+        const previous = store.tasks;
+        setTasks(applyBoardGroupDrop(store.tasks, groupOrder, drop, sections));
+        try {
+          await api.post("/tasks/batch-board-move", {
+            task_ids: groupOrder,
+            section_id: drop.sectionId,
+            index: drop.index,
+          });
+          await fetchTasks();
+          store.clearTaskSelection();
+        } catch {
+          setTasks(previous);
+          store.clearTaskSelection();
+        }
+        return;
+      }
 
       // Optimistic store update; the refetch reconciles shortly after.
       setTasks(applyBoardDrop(tasks, taskId, drop, sections));
@@ -170,6 +200,11 @@ export function KanbanBoard() {
             : "flex flex-col items-start gap-4 overflow-y-auto px-4 py-4"
         }`}
         style={{ overscrollBehaviorX: "contain", WebkitOverflowScrolling: "touch" }}
+        onPointerDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("[data-kanban-card], button, input, select, textarea, a, [data-task-bar]")) return;
+          useAppStore.getState().clearTaskSelection();
+        }}
       >
         <DndContext
           sensors={sensors}

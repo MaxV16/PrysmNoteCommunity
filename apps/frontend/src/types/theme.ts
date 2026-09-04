@@ -32,6 +32,11 @@ export interface Theme {
   colors: ThemeColors;
 }
 
+export interface CustomTheme extends ThemeColors {
+  label?: string;
+  extra?: Record<string, string>;
+}
+
 export interface BackgroundPreset {
   id: string;
   label: string;

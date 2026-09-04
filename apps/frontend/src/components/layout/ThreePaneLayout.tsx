@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useTasks } from "@/hooks/useTasks";
 import { useTags } from "@/hooks/useTags";
 import { StickyBoardProvider } from "@/components/sticky/StickyNoteBoard";
+import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
 
 
 
@@ -104,6 +105,7 @@ export function ThreePaneLayout() {
           <StickyBoardProvider>
             <WorkspaceStage />
           </StickyBoardProvider>
+          <OnboardingTour />
       )}
     </ErrorBoundaryInner>
   );

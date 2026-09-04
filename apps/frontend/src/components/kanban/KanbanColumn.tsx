@@ -8,6 +8,7 @@ import {
 } from "@dnd-kit/sortable";
 import { useDroppable } from "@dnd-kit/core";
 import type { Task } from "@/types/task";
+import { useAppStore } from "@/stores/app-store";
 import type { BoardSection } from "@/lib/board-sections";
 import type { CardLayout } from "@/lib/preferences";
 import { KanbanCard } from "./KanbanCard";
@@ -36,6 +37,7 @@ export function KanbanColumn({
 }: KanbanColumnProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(section.title);
+  const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
 
   const { setNodeRef, isOver } = useDroppable({ id: section.id });
 
@@ -113,12 +115,12 @@ export function KanbanColumn({
           {cardLayout === "side_by_side" ? (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3">
               {tasks.map((task) => (
-                <KanbanCard key={task.id} task={task} sectionId={section.id} onContextMenu={onCardContextMenu} />
+                <KanbanCard key={task.id} task={task} sectionId={section.id} onContextMenu={onCardContextMenu} selected={selectedTaskIds.includes(task.id)} />
               ))}
             </div>
           ) : (
             tasks.map((task) => (
-              <KanbanCard key={task.id} task={task} sectionId={section.id} onContextMenu={onCardContextMenu} />
+              <KanbanCard key={task.id} task={task} sectionId={section.id} onContextMenu={onCardContextMenu} selected={selectedTaskIds.includes(task.id)} />
             ))
           )}
         </SortableContext>

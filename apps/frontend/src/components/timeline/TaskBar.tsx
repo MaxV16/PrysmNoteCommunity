@@ -2,6 +2,7 @@
 
 import { useDraggable } from "@dnd-kit/core";
 import type { Task } from "@/types/task";
+import { useAppStore } from "@/stores/app-store";
 import { TIER_COLORS, TIER_LABELS, normalizePriority, type PriorityTier } from "@/lib/priority";
 import { BAR_HEIGHT } from "./constants";
 
@@ -11,6 +12,7 @@ interface TaskBarProps {
   onClick?: () => void;
   onContextMenu?: (e: React.MouseEvent, task: Task) => void;
   dragDisabled?: boolean;
+  selected?: boolean;
 }
 
 // A drag resize handle on the left or right edge of a task bar. Uses dnd-kit so
@@ -43,7 +45,7 @@ function ResizeHandle({ taskId, side, disabled }: { taskId: string; side: "left"
   );
 }
 
-export function TaskBar({ task, style, onClick, onContextMenu, dragDisabled }: TaskBarProps) {
+export function TaskBar({ task, style, onClick, onContextMenu, dragDisabled, selected }: TaskBarProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
     disabled: !!dragDisabled,
@@ -73,7 +75,7 @@ export function TaskBar({ task, style, onClick, onContextMenu, dragDisabled }: T
     transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
     zIndex: isDragging ? 100 : 20,
     opacity: isDone ? 0.5 : 1,
-    boxShadow: isDragging ? "0 4px 12px rgba(0,0,0,0.3)" : undefined,
+    boxShadow: isDragging ? "0 4px 12px rgba(0,0,0,0.3)" : selected ? "0 0 0 2px var(--accent), 0 4px 12px rgba(0,0,0,0.3)" : undefined,
     pointerEvents: "auto",
   };
 
@@ -86,6 +88,14 @@ export function TaskBar({ task, style, onClick, onContextMenu, dragDisabled }: T
       style={barStyle}
       onClick={(e) => {
         e.stopPropagation();
+        if (e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          const { toggleTaskSelected } = useAppStore.getState();
+          toggleTaskSelected(task.id);
+          return;
+        }
+        const { clearTaskSelection } = useAppStore.getState();
+        clearTaskSelection();
         onClick?.();
       }}
       onContextMenu={(e) => {

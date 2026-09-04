@@ -3,7 +3,9 @@
 import { useState, useMemo, useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
 import type { Task } from "@/types/task";
+import type { TaskStatus } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
+import { useBoardSections } from "@/hooks/useBoardSections";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
 import { ContextMenu } from "@/components/ui/ContextMenu";
@@ -12,19 +14,40 @@ import { TIER_COLORS, normalizePriority } from "@/lib/priority";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { formatDate } from "@/lib/dates";
 import { matchesSearchQuery } from "@/lib/task-search";
+import { api } from "@/lib/api";
 
 const PRIORITY_COLORS: Record<number, string> = TIER_COLORS;
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  backlog: "Backlog",
+  todo: "To Do",
+  in_progress: "In Progress",
+  done: "Done",
+  cancelled: "Cancelled",
+};
 
 export function ListView() {
   const tasks = useAppStore((s) => s.tasks);
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
+  const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
+  const toggleTaskSelected = useAppStore((s) => s.toggleTaskSelected);
+  const clearTaskSelection = useAppStore((s) => s.clearTaskSelection);
+  const setSelectedTaskIds = useAppStore((s) => s.setSelectedTaskIds);
   const searchQuery = useAppStore((s) => s.searchQuery);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
-  const { updateTask, createTask } = useTasks();
+  const { updateTask, createTask, fetchTasks } = useTasks();
+  const { sections: boardSections } = useBoardSections("board");
+  const { sections: kanbanSections } = useBoardSections("kanban");
   const soundOn = useLocalBool("prysm_notif_sound", true);
   const [sortBy, setSortBy] = useState<"date" | "priority">("date");
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [showDateModal, setShowDateModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [moveDate, setMoveDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const visibleTasks = useMemo(() => {
     let filtered = tasks.filter((t) => !t.is_archived);
@@ -50,6 +73,19 @@ export function ListView() {
     return filtered;
   }, [tasks, searchQuery, sortBy]);
 
+  const allVisibleSelected = visibleTasks.length > 0 && visibleTasks.every((t) => selectedTaskIds.includes(t.id));
+
+  const handleSelectAll = () => {
+    const store = useAppStore.getState();
+    if (allVisibleSelected) {
+      const removed = new Set(visibleTasks.map((t) => t.id));
+      store.setSelectedTaskIds(store.selectedTaskIds.filter((id) => !removed.has(id)));
+    } else {
+      const union = Array.from(new Set([...store.selectedTaskIds, ...visibleTasks.map((t) => t.id)]));
+      store.setSelectedTaskIds(union);
+    }
+  };
+
   const handleCreateTask = async (data: Record<string, unknown>) => {
     await createTask(data);
     setShowTaskForm(false);
@@ -72,9 +108,70 @@ export function ListView() {
     setShowTaskForm(true);
   }, []);
 
+  const runBatch = async (request: () => Promise<unknown>) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await request();
+      await fetchTasks();
+      clearTaskSelection();
+      return true;
+    } catch {
+      setActionError("The batch operation failed. Try again.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleMoveTo = async (sectionId: string | null) => {
+    const ok = await runBatch(() =>
+      api.post("/tasks/batch-board-move", {
+        task_ids: selectedTaskIds,
+        section_id: sectionId,
+        index: 0,
+      })
+    );
+    if (ok) setShowMoveModal(false);
+  };
+
+  const handleSetDate = async () => {
+    if (!moveDate) return;
+    const ok = await runBatch(() =>
+      api.post("/tasks/batch-set-date", {
+        task_ids: selectedTaskIds,
+        date: moveDate,
+      })
+    );
+    if (ok) setShowDateModal(false);
+  };
+
+  const handleDelete = async () => {
+    const ok = await runBatch(() =>
+      api.post("/tasks/batch-delete", { task_ids: selectedTaskIds })
+    );
+    if (ok) setShowDeleteConfirm(false);
+  };
+
+  const statusSections = kanbanSections.filter((s) => s.status);
+
   return (
     <div className="flex flex-col h-full bg-base">
       <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2 shrink-0">
+        <button
+          onClick={handleSelectAll}
+          title={allVisibleSelected ? "Deselect all visible" : "Select all visible"}
+          aria-label="Select all visible tasks"
+          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition-colors ${
+            allVisibleSelected ? "bg-accent border-accent" : "border-border hover:border-accent/50"
+          }`}
+        >
+          {allVisibleSelected && (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--bg-base)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          )}
+        </button>
         <div className="relative flex-1">
           <input
             type="text"
@@ -109,11 +206,50 @@ export function ListView() {
         </button>
       </div>
 
+      {selectedTaskIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-elevated/60 px-4 py-2 shrink-0">
+          <span className="text-[11px] font-semibold text-primary">{selectedTaskIds.length} selected</span>
+          <button
+            onClick={() => setShowMoveModal(true)}
+            disabled={busy}
+            className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
+          >
+            Move to…
+          </button>
+          <button
+            onClick={() => setShowDateModal(true)}
+            disabled={busy}
+            className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
+          >
+            Set date
+          </button>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            disabled={busy}
+            className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-danger hover:brightness-125 rounded-full"
+          >
+            Delete
+          </button>
+          <button
+            onClick={clearTaskSelection}
+            className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
+          >
+            Clear
+          </button>
+          {actionError && <span className="text-[11px] text-danger">{actionError}</span>}
+        </div>
+      )}
+
       <div
         className="flex-1 overflow-auto"
         onContextMenu={(e) => {
           e.preventDefault();
           setMenu({ state: { kind: "empty" }, x: e.clientX, y: e.clientY });
+        }}
+        onPointerDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("[data-list-row], [data-list-check], button, input, select, textarea, a")) return;
+          clearTaskSelection();
         }}
       >
         {visibleTasks.length === 0 ? (
@@ -122,18 +258,45 @@ export function ListView() {
           <div className="divide-y divide-border/30">
             {visibleTasks.map((task) => {
               const isDone = task.status === "done";
+              const isSelected = selectedTaskIds.includes(task.id);
               return (
                 <div
                   key={task.id}
                   data-list-row
-                  onClick={() => setSelectedTaskId(task.id)}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey) {
+                      e.preventDefault();
+                      toggleTaskSelected(task.id);
+                      return;
+                    }
+                    clearTaskSelection();
+                    setSelectedTaskId(task.id);
+                  }}
                   onContextMenu={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     openCardMenu(e, task);
                   }}
-                  className={`flex items-center gap-3 px-4 py-2.5 hover:bg-hover/20 transition-opacity cursor-pointer ${isDone ? "opacity-50" : ""}`}
+                  className={`flex items-center gap-3 px-4 py-2.5 hover:bg-hover/20 transition-opacity cursor-pointer ${isDone ? "opacity-50" : ""} ${
+                    isSelected ? "bg-accent/5" : ""
+                  }`}
                 >
+                  <button
+                    data-list-check
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleTaskSelected(task.id);
+                    }}
+                    aria-pressed={isSelected}
+                    aria-label={isSelected ? `Deselect ${task.title}` : `Select ${task.title}`}
+                    className={`h-4 w-4 shrink-0 cursor-pointer rounded border-2 transition-colors ${
+                      isSelected ? "bg-accent border-accent text-[var(--bg-base)]" : "border-border hover:border-accent/50 text-transparent"
+                    } flex items-center justify-center`}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleToggleStatus(task); }}
                     className={`h-4 w-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${
@@ -179,6 +342,117 @@ export function ListView() {
           </div>
         )}
       </div>
+
+      <Modal
+        isOpen={showMoveModal}
+        onClose={() => setShowMoveModal(false)}
+        title={`Move ${selectedTaskIds.length} task${selectedTaskIds.length === 1 ? "" : "s"}`}
+      >
+        <div className="space-y-3">
+          {statusSections.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">By Status</p>
+              <div className="space-y-1">
+                {statusSections.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => void handleMoveTo(s.id)}
+                    disabled={busy}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary disabled:opacity-50"
+                  >
+                    {STATUS_LABELS[s.status as TaskStatus] ?? s.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {boardSections.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">Board Sections</p>
+              <div className="space-y-1">
+                {boardSections.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => void handleMoveTo(s.id)}
+                    disabled={busy}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary disabled:opacity-50"
+                  >
+                    {s.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button
+            onClick={() => void handleMoveTo(null)}
+            disabled={busy}
+            className="block w-full rounded-lg px-3 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary disabled:opacity-50"
+          >
+            Unsorted
+          </button>
+          {actionError && <p className="text-xs text-danger">{actionError}</p>}
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showDateModal}
+        onClose={() => setShowDateModal(false)}
+        title={`Set date for ${selectedTaskIds.length} task${selectedTaskIds.length === 1 ? "" : "s"}`}
+      >
+        <div className="space-y-3">
+          <input
+            type="date"
+            value={moveDate}
+            onChange={(e) => setMoveDate(e.target.value)}
+            className="input-field"
+            aria-label="Date to assign"
+          />
+          {actionError && <p className="text-xs text-danger">{actionError}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={() => void handleSetDate()}
+              disabled={busy || !moveDate}
+              className="btn btn-gradient px-5 py-2 text-sm rounded-xl disabled:opacity-50"
+            >
+              Apply
+            </button>
+            <button
+              onClick={() => setShowDateModal(false)}
+              className="btn bg-elevated border border-border text-secondary px-4 py-2 text-sm rounded-xl"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title="Delete tasks"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-secondary">
+            Delete {selectedTaskIds.length} task{selectedTaskIds.length === 1 ? "" : "s"}? This cannot be undone.
+          </p>
+          {actionError && <p className="text-xs text-danger">{actionError}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={() => void handleDelete()}
+              disabled={busy}
+              className="btn bg-danger/20 border border-danger/40 text-danger px-5 py-2 text-sm rounded-xl disabled:opacity-50"
+            >
+              Delete
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(false)}
+              className="btn bg-elevated border border-border text-secondary px-4 py-2 text-sm rounded-xl"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={showTaskForm}

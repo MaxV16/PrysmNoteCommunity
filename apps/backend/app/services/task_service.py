@@ -156,6 +156,138 @@ async def delete_task(session: AsyncSession, task_id: UUID, user_id: UUID) -> bo
     return True
 
 
+async def delete_tasks_batch(session: AsyncSession, task_ids: list[UUID], user_id: UUID) -> int:
+    """Delete many owned tasks in one pass. Returns the number deleted."""
+    task_ids = [t for t in task_ids if t is not None]
+    if not task_ids:
+        return 0
+    result = await session.execute(
+        select(Task).where(task_access_condition(user_id), Task.id.in_(task_ids))
+    )
+    tasks = result.scalars().all()
+    for task in tasks:
+        await session.delete(task)
+    await session.flush()
+    return len(tasks)
+
+
+async def set_task_dates_batch(
+    session: AsyncSession,
+    task_ids: list[UUID],
+    user_id: UUID,
+    date_value: date_type,
+) -> int:
+    """Assign start_date = due_date = date_value to every owned task in the batch."""
+    task_ids = [t for t in task_ids if t is not None]
+    if not task_ids:
+        return 0
+    result = await session.execute(
+        select(Task).where(task_access_condition(user_id), Task.id.in_(task_ids))
+    )
+    tasks = result.scalars().all()
+    for task in tasks:
+        task.start_date = date_value
+        task.due_date = date_value
+    await session.flush()
+    return len(tasks)
+
+
+async def reschedule_tasks_batch(
+    session: AsyncSession,
+    task_ids: list[UUID],
+    user_id: UUID,
+    delta_days: int,
+) -> int:
+    """Shift dated tasks by a day delta; undated tasks land on today + delta.
+
+    Mirrors TimelineView.handleDragEnd single-task semantics exactly so a
+    single-drag and a multi-drag agree: shift whichever date exists, and when a
+    task has neither, assign start_date = due_date = today + delta.
+    """
+    from datetime import timedelta
+
+    task_ids = [t for t in task_ids if t is not None]
+    if not task_ids:
+        return 0
+    result = await session.execute(
+        select(Task).where(task_access_condition(user_id), Task.id.in_(task_ids))
+    )
+    by_id = {t.id: t for t in result.scalars().all()}
+    today = date_type.today()
+    delta = timedelta(days=delta_days)
+    for task_id in task_ids:
+        task = by_id.get(task_id)
+        if task is None:
+            continue
+        if task.start_date:
+            task.start_date = task.start_date + delta
+        if task.due_date:
+            task.due_date = task.due_date + delta
+        if not task.start_date and not task.due_date:
+            target = today + delta
+            task.start_date = target
+            task.due_date = target
+    await session.flush()
+    return len(by_id)
+
+
+async def move_tasks_to_section(
+    session: AsyncSession,
+    task_ids: list[UUID],
+    user_id: UUID,
+    section_id: UUID | None,
+    section_status: str | None,
+    index: int,
+) -> int:
+    """Move a group of tasks into a board section (or the implicit "Unsorted"
+    area when section_id is None) and renumber the destination once.
+
+    Membership follows the single-task board-move rules: status sections set
+    status (clearing the pin), free sections/Unsorted set board_section_id. The
+    group keeps the caller's task_ids order, is spliced at `index`, then the
+    whole destination sibling set is renumbered 0..n-1.
+    """
+    task_ids = [t for t in task_ids if t is not None]
+    if not task_ids:
+        return 0
+    result = await session.execute(
+        select(Task).where(task_access_condition(user_id), Task.id.in_(task_ids))
+    )
+    by_id = {t.id: t for t in result.scalars().all()}
+
+    for task_id in task_ids:
+        task = by_id.get(task_id)
+        if task is None:
+            continue
+        if section_id is None or section_status is None:
+            task.board_section_id = section_id
+        else:
+            task.status = _coerce_status(section_status)
+            task.board_section_id = None
+
+    if section_id is None:
+        sibling_where = Task.board_section_id.is_(None)
+    elif section_status:
+        sibling_where = (Task.status == _coerce_status(section_status)) & Task.board_section_id.is_(None)
+    else:
+        sibling_where = Task.board_section_id == section_id
+
+    result = await session.execute(
+        select(Task)
+        .where(task_access_condition(user_id), sibling_where)
+        .order_by(Task.board_order.asc().nulls_last(), Task.created_at.asc())
+    )
+    moved_ids = {task_id for task_id in task_ids if task_id in by_id}
+    siblings = [t for t in result.scalars().all() if t.id not in moved_ids]
+    index = max(0, min(index, len(siblings)))
+    moved = [by_id[task_id] for task_id in task_ids if task_id in by_id]
+    siblings[index:index] = moved
+    for rank, task in enumerate(siblings):
+        task.board_order = rank
+    await session.flush()
+    return len(moved)
+
+
 async def search_tasks(
     session: AsyncSession, user_id: UUID, query: str, limit: int = 20
 ) -> list[tuple[Task, float]]:

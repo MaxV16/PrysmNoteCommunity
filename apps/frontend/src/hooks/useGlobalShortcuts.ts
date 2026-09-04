@@ -76,8 +76,9 @@ export function useGlobalShortcuts({
           onToggleTheme?.();
         }
       } else if (e.key === "Escape") {
-        // Deselect the focused task / close the detail panel.
+        // Deselect the focused task / close the detail panel / clear multi-selection.
         const store = useAppStore.getState();
+        if (store.selectedTaskIds.length > 0) store.clearTaskSelection();
         if (store.selectedTaskId) store.setSelectedTaskId(null);
       }
     };

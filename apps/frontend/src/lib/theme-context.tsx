@@ -1,8 +1,9 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import type { ThemeName, ThemeColors, BackgroundPreset } from "@/types/theme";
+import type { ThemeName, ThemeColors, BackgroundPreset, CustomTheme } from "@/types/theme";
 import { THEMES, FONT_PRESETS, BACKGROUND_PRESETS, DEFAULT_THEME, DEFAULT_FONT } from "@/types/theme";
+import { KNOWN_CSS_VARS } from "@/lib/theme-vars";
 
 const CUSTOM_THEME_KEY = "prysm-custom-theme";
 const FONT_KEY = "prysm-font";
@@ -26,13 +27,15 @@ interface ThemeContextValue {
   setBackgroundPreset: (preset: BackgroundPreset) => void;
   setBackgroundImage: (dataUrl: string) => void;
   clearBackground: () => void;
-  customTheme: ThemeColors | null;
-  setCustomTheme: (colors: ThemeColors | null) => void;
+  customTheme: CustomTheme | null;
+  setCustomTheme: (colors: CustomTheme | null) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function applyThemeColors(colors: ThemeColors) {
+const appliedExtras = new Set<string>();
+
+function applyThemeColors(colors: ThemeColors, extra?: Record<string, string>) {
   const root = document.documentElement;
   root.style.setProperty("--bg-base", colors.base);
   root.style.setProperty("--bg-surface", colors.surface);
@@ -67,6 +70,22 @@ function applyThemeColors(colors: ThemeColors) {
     "--shadow-glow-strong",
     colors["shadow-glow-strong"] ?? `0 0 24px ${colors["accent-glow"]}`,
   );
+  if (extra) {
+    for (const [name, value] of Object.entries(extra)) {
+      if (KNOWN_CSS_VARS.has(name)) {
+        root.style.setProperty(name, value);
+        appliedExtras.add(name);
+      }
+    }
+  }
+}
+
+function clearExtras() {
+  const root = document.documentElement;
+  for (const name of appliedExtras) {
+    root.style.removeProperty(name);
+  }
+  appliedExtras.clear();
 }
 
 // Relative luminance (WCAG) of a hex color - used to pick readable text on the
@@ -177,7 +196,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     type: "none",
     value: "",
   });
-  const [customTheme, setCustomThemeState] = useState<ThemeColors | null>(null);
+  const [customTheme, setCustomThemeState] = useState<CustomTheme | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem("prysm-theme") as ThemeName | null;
@@ -189,7 +208,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setThemeNameState(initial);
     }
     setFontFamilyState(ls.getStr(FONT_KEY, DEFAULT_FONT));
-    setCustomThemeState(ls.get<ThemeColors | null>(CUSTOM_THEME_KEY, null));
+    setCustomThemeState(ls.get<CustomTheme | null>(CUSTOM_THEME_KEY, null));
     const savedBg = ls.get<{ type: string; value: string; size?: string } | null>(BG_KEY, null);
     if (savedBg && ["none", "gradient", "pattern", "image"].includes(savedBg.type)) {
       setBackgroundState(savedBg as BackgroundState);
@@ -199,6 +218,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const theme = THEMES[themeName];
     if (theme) {
+      clearExtras();
       applyThemeColors(theme.colors);
       document.documentElement.setAttribute("data-theme", themeName);
     }
@@ -206,7 +226,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (customTheme) {
-      applyThemeColors(customTheme);
+      applyThemeColors(customTheme, customTheme.extra);
       document.documentElement.setAttribute("data-theme", "custom");
     }
   }, [customTheme]);
@@ -266,7 +286,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     ls.setStr(BG_IMAGE_KEY, "");
   }, []);
 
-  const setCustomTheme = useCallback((colors: ThemeColors | null) => {
+  const setCustomTheme = useCallback((colors: CustomTheme | null) => {
     setCustomThemeState(colors);
     ls.set(CUSTOM_THEME_KEY, colors);
     if (colors) setThemeNameState("custom");

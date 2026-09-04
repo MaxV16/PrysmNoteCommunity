@@ -19,6 +19,9 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 export function CalendarView() {
   const tasks = useAppStore((s) => s.tasks);
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
+  const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
+  const toggleTaskSelected = useAppStore((s) => s.toggleTaskSelected);
+  const clearTaskSelection = useAppStore((s) => s.clearTaskSelection);
   const { createTask, fetchTasks } = useTasks();
   const [viewDate, setViewDate] = useState(() => new Date());
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -27,6 +30,8 @@ export function CalendarView() {
   const [calConnected, setCalConnected] = useState<boolean | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [moveDays, setMoveDays] = useState(1);
+  const [moving, setMoving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,6 +124,24 @@ export function CalendarView() {
     []
   );
 
+  const handleBatchMove = async () => {
+    if (selectedTaskIds.length === 0 || moveDays === 0) return;
+    setMoving(true);
+    try {
+      await api.post("/tasks/batch-reschedule", {
+        task_ids: selectedTaskIds,
+        delta_days: moveDays,
+      });
+      await fetchTasks();
+      clearTaskSelection();
+      setMoveDays(1);
+    } catch {
+      setSyncMessage("Move failed");
+    } finally {
+      setMoving(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-base">
       <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2 shrink-0">
@@ -136,6 +159,26 @@ export function CalendarView() {
           </button>
         </div>
         <div className="flex items-center gap-2">
+          {selectedTaskIds.length > 0 && (
+            <div className="flex items-center gap-1.5 rounded-full bg-elevated border border-border px-2 py-1">
+              <span className="text-[10px] font-medium text-secondary">{selectedTaskIds.length} selected</span>
+              <input
+                type="number"
+                value={moveDays}
+                onChange={(e) => setMoveDays(Number(e.target.value))}
+                aria-label="Move selected tasks by days"
+                className="w-14 rounded-md border border-border bg-surface px-1.5 py-0.5 text-xs text-primary outline-none focus:border-accent"
+              />
+              <span className="text-[10px] text-muted">days</span>
+              <button
+                onClick={() => void handleBatchMove()}
+                disabled={moving || moveDays === 0}
+                className="btn btn-gradient px-2.5 py-0.5 text-[10px] rounded-full disabled:opacity-50"
+              >
+                {moving ? "Moving…" : "Move"}
+              </button>
+            </div>
+          )}
           {syncMessage && <span className="text-[10px] text-muted">{syncMessage}</span>}
           <button
             onClick={handleCalendarSync}
@@ -166,7 +209,11 @@ export function CalendarView() {
         ))}
       </div>
 
-      <div className="grid grid-cols-7 flex-1" style={{ gridTemplateRows: `repeat(${Math.ceil((lastDay.getDate() + startOffset) / 7)}, minmax(0, 1fr))` }}>
+      <div className="grid grid-cols-7 flex-1" style={{ gridTemplateRows: `repeat(${Math.ceil((lastDay.getDate() + startOffset) / 7)}, minmax(0, 1fr))` }} onPointerDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("[data-cal-task], button, input, select, textarea, a")) return;
+          clearTaskSelection();
+        }}>
         {Array.from({ length: startOffset }).map((_, i) => (
           <div key={`empty-${i}`} className="border-r border-b border-border/20" />
         ))}
@@ -198,13 +245,23 @@ export function CalendarView() {
                 {dayTasks.slice(0, maxShown).map((task) => (
                   <div
                     key={task.id}
-                    onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
+                    data-cal-task
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (e.metaKey || e.ctrlKey) {
+                        e.preventDefault();
+                        toggleTaskSelected(task.id);
+                        return;
+                      }
+                      clearTaskSelection();
+                      setSelectedTaskId(task.id);
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       openCardMenu(e, task);
                     }}
-                    className="truncate text-[10px] rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110"
+                    className={`truncate text-[10px] rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110 ${selectedTaskIds.includes(task.id) ? "ring-1 ring-accent" : ""}`}
                     style={{
                       backgroundColor: (PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E") + "22",
                       borderLeft: `2px solid ${PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E"}`,

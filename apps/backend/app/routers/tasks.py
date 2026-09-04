@@ -1,6 +1,7 @@
 from uuid import UUID
 
 import asyncio
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
@@ -13,7 +14,7 @@ from app.models.task import Task, TaskStatus
 from app.models.board_section import BoardSection
 from app.models.user import User
 from app.services.embedding_service import generate_and_store_embedding
-from app.services.task_service import create_task, delete_task, get_task, search_tasks, update_task, task_access_condition
+from app.services.task_service import create_task, delete_task, get_task, search_tasks, update_task, task_access_condition, delete_tasks_batch, reschedule_tasks_batch, move_tasks_to_section, set_task_dates_batch
 from app.services import subtask_service
 from app.models.teams import TaskShare
 from app.utils.uuid_helpers import parse_uuid
@@ -849,35 +850,178 @@ async def board_move_task(
         if section is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
 
-    # Membership: status sections key on status (clearing the pin); free sections
-    # and Unsorted key on board_section_id (status untouched).
-    if section is None or section.status is None:
-        task.board_section_id = None if section is None else section.id
-    else:
-        task.status = TaskStatus(section.status)
-        task.board_section_id = None
-
-    if section is None:
-        sibling_where = Task.board_section_id.is_(None)
-    elif section.status:
-        sibling_where = (Task.status == section.status) & Task.board_section_id.is_(None)
-    else:
-        sibling_where = Task.board_section_id == section.id
-
-    result = await session.execute(
-        select(Task)
-        .where(task_access_condition(user.id), sibling_where)
-        .order_by(Task.board_order.asc().nulls_last(), Task.created_at.asc())
+    await move_tasks_to_section(
+        session,
+        [task.id],
+        user.id,
+        section.id if section else None,
+        section.status if section else None,
+        request.index,
     )
-    siblings = [t for t in result.scalars().all() if t.id != task.id]
-
-    index = max(0, min(request.index, len(siblings)))
-    siblings.insert(index, task)
-    for rank, t in enumerate(siblings):
-        t.board_order = rank
-    await session.flush()
     await session.refresh(task)
     return (await serialize_tasks(session, [task]))[0]
+
+
+def validate_task_id_batch(v: list) -> list:
+    # Bounded batch so a single request can never touch an unbounded task set.
+    if not v:
+        raise ValueError("Batch must contain at least one task id")
+    if len(v) > 100:
+        raise ValueError("Batch must contain at most 100 task ids")
+    return v
+
+
+class BatchRescheduleRequest(BaseModel):
+    task_ids: list[str]
+    delta_days: int
+
+    @field_validator("task_ids")
+    @classmethod
+    def validate_task_ids(cls, v: list) -> list:
+        return validate_task_id_batch(v)
+
+    @field_validator("delta_days")
+    @classmethod
+    def validate_delta_days(cls, v: int) -> int:
+        if v < -3650 or v > 3650:
+            raise ValueError("delta_days must be between -3650 and 3650")
+        return v
+
+
+class BatchBoardMoveRequest(BaseModel):
+    task_ids: list[str]
+    section_id: str | None = None
+    index: int = 0
+
+    @field_validator("task_ids")
+    @classmethod
+    def validate_task_ids(cls, v: list) -> list:
+        return validate_task_id_batch(v)
+
+
+class BatchDeleteRequest(BaseModel):
+    task_ids: list[str]
+
+    @field_validator("task_ids")
+    @classmethod
+    def validate_task_ids(cls, v: list) -> list:
+        return validate_task_id_batch(v)
+
+
+class BatchSetDateRequest(BaseModel):
+    task_ids: list[str]
+    date: str
+
+    @field_validator("task_ids")
+    @classmethod
+    def validate_task_ids(cls, v: list) -> list:
+        return validate_task_id_batch(v)
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, v: str) -> str:
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            raise ValueError("Date must be in YYYY-MM-DD format")
+        return v
+
+
+@router.post("/batch-reschedule")
+async def batch_reschedule(
+    request: BatchRescheduleRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    task_ids = [parse_uuid(uid) for uid in request.task_ids]
+    if any(uid is None for uid in task_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid id")
+    moved = await reschedule_tasks_batch(
+        session,
+        [uid for uid in task_ids if uid is not None],
+        user.id,
+        request.delta_days,
+    )
+    return {"rescheduled": moved}
+
+
+@router.post("/batch-board-move")
+async def batch_board_move(
+    request: BatchBoardMoveRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    task_ids = [parse_uuid(uid) for uid in request.task_ids]
+    if any(uid is None for uid in task_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid id")
+
+    result = await session.execute(
+        select(Task).where(task_access_condition(user.id), Task.id.in_([uid for uid in task_ids if uid is not None]))
+    )
+    owned_ids = {t.id for t in result.scalars().all()}
+    for uid in task_ids:
+        if uid is None:
+            continue
+        if uid not in owned_ids:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    section = None
+    if request.section_id:
+        result = await session.execute(
+            select(BoardSection).where(
+                BoardSection.id == _require_uuid(request.section_id),
+                BoardSection.user_id == user.id,
+            )
+        )
+        section = result.scalar_one_or_none()
+        if section is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
+
+    moved = await move_tasks_to_section(
+        session,
+        [uid for uid in task_ids if uid is not None],
+        user.id,
+        section.id if section else None,
+        section.status if section else None,
+        request.index,
+    )
+    return {"moved": moved}
+
+
+@router.post("/batch-delete")
+async def batch_delete(
+    request: BatchDeleteRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    task_ids = [parse_uuid(uid) for uid in request.task_ids]
+    if any(uid is None for uid in task_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid id")
+    deleted = await delete_tasks_batch(
+        session,
+        [uid for uid in task_ids if uid is not None],
+        user.id,
+    )
+    return {"deleted": deleted}
+
+
+@router.post("/batch-set-date")
+async def batch_set_date(
+    request: BatchSetDateRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    task_ids = [parse_uuid(uid) for uid in request.task_ids]
+    if any(uid is None for uid in task_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid id")
+    parsed = _parse_date_arg(request.date)
+    if parsed is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid date")
+    dated = await set_task_dates_batch(
+        session,
+        [uid for uid in task_ids if uid is not None],
+        user.id,
+        parsed,
+    )
+    return {"updated": dated}
 
 
 # Dynamic task routes are declared last so literal static paths like

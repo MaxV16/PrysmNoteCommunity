@@ -9,10 +9,12 @@ import { useApiKeys } from "@/hooks/useApiKeys";
 import { useSubscription } from "@/hooks/use-subscription";
 import { TeamList } from "@/components/collaborate/TeamList";
 import { ImportPanel } from "@/components/import/ImportPanel";
+import { ThemeImportExport } from "@/components/settings/ThemeImportExport";
 import { useNotificationPrefs, subscribeToPush, unsubscribeFromPush } from "@/lib/notifications";
 import { api } from "@/lib/api";
 import { track } from "@/lib/track";
 import { useAppStore } from "@/stores/app-store";
+import { restartOnboardingTour } from "@/hooks/useOnboardingTour";
 import type { ThemeName, ThemeColors, BackgroundPreset } from "@/types/theme";
 import { THEMES, FONT_PRESETS, BACKGROUND_PRESETS } from "@/types/theme";
 import type { Task } from "@/types/task";
@@ -697,6 +699,17 @@ export default function SettingsPage() {
                 </div>
               </div>
 
+              <div className="border-t border-border pt-4 space-y-4">
+                <h3 className="text-sm font-semibold text-primary">Help</h3>
+                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                  <div>
+                    <p className="text-sm text-secondary">Onboarding tour</p>
+                    <p className="text-xs text-muted">Replay the guided tour of the workspace</p>
+                  </div>
+                  <button onClick={() => restartOnboardingTour()} className="btn bg-elevated border border-border text-secondary px-4 py-1.5 text-xs rounded-xl hover:text-primary">Restart tour</button>
+                </div>
+              </div>
+
               {passwordResetOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
                   <div className="card p-6 w-full max-w-md mx-4 space-y-4">
@@ -953,6 +966,8 @@ export default function SettingsPage() {
               >
                 + Create Custom Theme
               </button>
+
+              <ThemeImportExport />
 
               {editingCustomTheme && (
                 <div className="rounded-2xl bg-elevated border border-border p-4 space-y-4">

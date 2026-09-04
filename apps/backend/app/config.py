@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     app_origin: str = "http://localhost:3000"
 
 
+
     # Google Calendar background pull cadence (seconds) and how many users'
     # pulls may run concurrently in the background loop (each pull runs off the
     # event loop via to_thread, so a single worker stays responsive).

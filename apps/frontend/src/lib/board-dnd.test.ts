@@ -3,6 +3,7 @@ import type { Task } from "@/types/task";
 import type { BoardSection } from "@/lib/board-sections";
 import {
   applyBoardDrop,
+  applyBoardGroupDrop,
   byBoardOrder,
   computeBoardDrop,
   sectionTasks,
@@ -164,6 +165,39 @@ describe("applyBoardDrop", () => {
     const ordered = [...next].sort(byBoardOrder);
     expect(ordered.map((t) => t.id)).toEqual(["t3", "t1", "t2"]);
     expect(ordered.map((t) => t.board_order)).toEqual([0, 1, 2]);
+  });
+});
+
+describe("applyBoardGroupDrop", () => {
+  it("moves a whole group to a status section and renumbers once", () => {
+    const tasks = [
+      makeTask("t1", { status: "backlog", board_order: 0 }),
+      makeTask("t2", { status: "backlog", board_order: 1 }),
+      makeTask("t3", { status: "backlog", board_order: 2 }),
+    ];
+    const next = applyBoardGroupDrop(tasks, ["t3", "t1"], { sectionId: "s-done", index: 0 }, kanbanSections);
+    const done = next.filter((t) => t.status === "done").sort(byBoardOrder);
+    expect(done.map((t) => t.id)).toEqual(["t3", "t1"]);
+    expect(done.every((t) => t.board_section_id === null)).toBe(true);
+    expect(done.map((t) => t.board_order)).toEqual([0, 1]);
+  });
+
+  it("keeps membership rules for free sections", () => {
+    const tasks = [makeTask("t1"), makeTask("t2")];
+    const next = applyBoardGroupDrop(tasks, ["t2", "t1"], { sectionId: "free-1", index: 0 }, freeSections);
+    const pinned = next.filter((t) => t.board_section_id === "free-1").sort(byBoardOrder);
+    expect(pinned.map((t) => t.id)).toEqual(["t2", "t1"]);
+    expect(pinned.every((t) => t.status === "todo")).toBe(true);
+  });
+
+  it("moving to unsorted clears pins and preserves group order", () => {
+    const tasks = [
+      makeTask("t1", { board_section_id: "free-1" }),
+      makeTask("t2", { board_section_id: "free-1" }),
+    ];
+    const next = applyBoardGroupDrop(tasks, ["t2", "t1"], { sectionId: null, index: 0 }, freeSections);
+    const unsorted = next.filter((t) => t.board_section_id === null).sort(byBoardOrder);
+    expect(unsorted.map((t) => t.id)).toEqual(["t2", "t1"]);
   });
 });
 

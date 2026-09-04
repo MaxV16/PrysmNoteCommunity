@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { Task } from "@/types/task";
+import { useAppStore } from "@/stores/app-store";
 import { TaskBar } from "./TaskBar";
 import { parseLocalDate } from "@/lib/utils";
 import { DAY_WIDTH, BAR_HEIGHT, BAR_GAP, TOP_PADDING } from "./constants";
@@ -77,6 +78,7 @@ function todayIndex(days: Date[]): number {
 }
 
 export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, onTaskContextMenu, onDayContextMenu, rowHeight, dragDisabled }: TimelineLaneProps) {
+  const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
   const { positioned, maxStack } = useMemo(() => {
     // Day column index for "today", used to place undated (inbox) tasks so they
     // are visible and draggable on the timeline. Falls back to the middle day if
@@ -166,6 +168,7 @@ export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, onTas
             onClick={() => onTaskClick?.(task.id)}
             onContextMenu={onTaskContextMenu}
             dragDisabled={dragDisabled}
+            selected={selectedTaskIds.includes(task.id)}
           />
         ))}
       </div>

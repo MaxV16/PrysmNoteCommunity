@@ -93,6 +93,23 @@ describe("app-store", () => {
     useAppStore.getState().setSelectedTaskId(null);
   });
 
+  it("toggles multi-selection without opening the drawer selection", () => {
+    const store = useAppStore.getState();
+    store.toggleTaskSelected("task-1");
+    store.toggleTaskSelected("task-2");
+    store.toggleTaskSelected("task-1");
+    expect(useAppStore.getState().selectedTaskIds).toEqual(["task-2"]);
+    expect(useAppStore.getState().selectedTaskId).toBeNull();
+    useAppStore.getState().clearTaskSelection();
+    expect(useAppStore.getState().selectedTaskIds).toEqual([]);
+  });
+
+  it("setSelectedTaskIds replaces the selection", () => {
+    useAppStore.getState().setSelectedTaskIds(["a", "b", "c"]);
+    expect(useAppStore.getState().selectedTaskIds).toEqual(["a", "b", "c"]);
+    useAppStore.getState().clearTaskSelection();
+  });
+
   it("setSearchQuery updates query", () => {
     useAppStore.getState().setSearchQuery("groceries");
     expect(useAppStore.getState().searchQuery).toBe("groceries");
@@ -111,6 +128,7 @@ describe("app-store", () => {
     useAppStore.getState().setChatMessages([{ role: "user", content: "hi" } as any]);
     useAppStore.getState().setChatSessions([{ id: "s1", title: "Chat", messages: [], timestamp: "" }]);
     useAppStore.getState().setSelectedTaskId("task-1");
+    useAppStore.getState().toggleTaskSelected("task-2");
     useAppStore.getState().setSelectedTagId("tag-1");
     useAppStore.getState().setSearchQuery("groceries");
     useAppStore.getState().setNavFilter("today");
@@ -123,6 +141,7 @@ describe("app-store", () => {
     expect(state.chatMessages).toEqual([]);
     expect(state.chatSessions).toEqual([]);
     expect(state.selectedTaskId).toBeNull();
+    expect(state.selectedTaskIds).toEqual([]);
     expect(state.selectedTagId).toBeNull();
     expect(state.searchQuery).toBe("");
     expect(state.navFilter).toBeNull();

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "@/lib/theme-context";
 import { THEMES, type ThemeName } from "@/types/theme";
+import { ThemeImportExport } from "@/components/settings/ThemeImportExport";
 
 const APPEARANCE_THEMES: ThemeName[] = ["dark", "light", "slate", "dracula", "nord", "monokai", "coffee", "solarized", "github-dark", "tokyo"];
 
@@ -69,6 +70,9 @@ export function ThemeMenu() {
                 </button>
               );
             })}
+          </div>
+          <div className="mt-1 border-t border-border pt-1">
+            <ThemeImportExport variant="menu" />
           </div>
         </div>
       )}

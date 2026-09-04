@@ -28,9 +28,10 @@ interface KanbanCardProps {
   task: Task;
   sectionId?: string | null;
   onContextMenu?: (e: React.MouseEvent, task: Task) => void;
+  selected?: boolean;
 }
 
-export function KanbanCard({ task, sectionId, onContextMenu }: KanbanCardProps) {
+export function KanbanCard({ task, sectionId, onContextMenu, selected }: KanbanCardProps) {
   const {
     attributes,
     listeners,
@@ -44,6 +45,8 @@ export function KanbanCard({ task, sectionId, onContextMenu }: KanbanCardProps) 
   });
 
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
+  const toggleTaskSelected = useAppStore((s) => s.toggleTaskSelected);
+  const clearTaskSelection = useAppStore((s) => s.clearTaskSelection);
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -54,9 +57,21 @@ export function KanbanCard({ task, sectionId, onContextMenu }: KanbanCardProps) 
   return (
     <div
       ref={setNodeRef}
+      data-kanban-card={true}
       style={style}
-      className="bg-elevated border border-border rounded-xl p-3 cursor-grab hover:bg-hover transition-colors"
-      onClick={() => setSelectedTaskId(task.id)}
+      className={`bg-elevated border rounded-xl p-3 cursor-grab hover:bg-hover transition-colors ${
+        selected ? "border-accent bg-accent/5 ring-2 ring-accent/70" : "border-border"
+      }`}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleTaskSelected(task.id);
+          return;
+        }
+        clearTaskSelection();
+        setSelectedTaskId(task.id);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();

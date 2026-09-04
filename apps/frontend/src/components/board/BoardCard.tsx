@@ -3,6 +3,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "@/types/task";
+import { useAppStore } from "@/stores/app-store";
 import { formatDate } from "@/lib/dates";
 import { MUTED_PALETTE, type BoardDecoration } from "./board-utils";
 
@@ -15,6 +16,7 @@ interface BoardCardProps {
   width?: number;
   topOffset?: number;
   spanClass?: string;
+  selected?: boolean;
   decoration: BoardDecoration;
   onOpen: (id: string) => void;
   onToggleSubtask: (sub: Task) => void;
@@ -118,6 +120,7 @@ export function BoardCard({
   width,
   topOffset = 0,
   spanClass,
+  selected,
   decoration,
   onOpen,
   onToggleSubtask,
@@ -144,8 +147,18 @@ export function BoardCard({
   return (
     <div
       ref={setNodeRef}
+      data-board-card={true}
       data-testid="board-card"
-      onClick={() => onOpen(task.id)}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          useAppStore.getState().toggleTaskSelected(task.id);
+          return;
+        }
+        useAppStore.getState().clearTaskSelection();
+        onOpen(task.id);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -159,7 +172,9 @@ export function BoardCard({
         marginTop: topOffset,
         backgroundColor: "#101016",
         backgroundImage: `linear-gradient(160deg, ${color}45, #101016 70%)`,
-        boxShadow: `0 0 0 1px ${color}22, 0 2px 10px rgba(0, 0, 0, 0.35)`,
+        boxShadow: selected
+          ? "0 0 0 2px var(--accent), 0 0 16px var(--accent-glow), 0 2px 10px rgba(0, 0, 0, 0.35)"
+          : `0 0 0 1px ${color}22, 0 2px 10px rgba(0, 0, 0, 0.35)`,
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.5 : 1,
