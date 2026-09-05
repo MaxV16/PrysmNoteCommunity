@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -17,9 +18,50 @@ CONTEXT_MAX_MESSAGES = 12
 TOOL_SEARCH_MAX = 250
 # Cap on the serialized length of a single tool result fed back to the model.
 TOOL_RESULT_MAX_CHARS = 12000
+# Headroom reserved for the truncation marker ("truncated"/"omitted" fields)
+# when a list result (search, date-range) needs to be trimmed to fit.
+TOOL_LIST_BUDGET = TOOL_RESULT_MAX_CHARS - 400
 # Per-memory character cap when injecting the RECALLED MEMORY block, keeping it
 # to a bounded token budget (~MEMORY_TOP_K * MEMORY_CAP chars worst case).
 MEMORY_CAP = 400
+
+
+def _bounded_list_payload(fields: dict, list_key: str, items: list[dict],
+                          budget: int = TOOL_LIST_BUDGET) -> str:
+    """Serialize a tool-result dict that embeds a ``list_key`` list, trimming
+    entries (never mid-entry) so the payload always stays under the token
+    budget and remains valid, parseable JSON.
+
+    When the list is trimmed, the payload gains explicit ``truncated: true``
+    plus ``omitted`` (how many matches exist that were NOT shown), so the model
+    knows the result is partial and must re-run the search after acting on the
+    shown ones (see the BULK DELETION prompt rule). Without this, the generic
+    raw-string truncator would cut the JSON mid-entry and silently hide the
+    tail of the list - exactly the "delete all X" partial-sweep bug.
+    """
+    payload = {**fields, list_key: items}
+    if len(json.dumps(payload)) <= budget:
+        return json.dumps(payload)
+
+    base = {k: v for k, v in fields.items() if k != list_key}
+    kept: list[dict] = []
+    used = len(json.dumps({**base, list_key: []}))
+    for item in items:
+        # +2 per entry covers the ", " JSON array separator (comma + space), so
+        # the final serialized length can never exceed the budget.
+        item_size = len(json.dumps(item)) + 2
+        if used + item_size > budget:
+            break
+        kept.append(item)
+        used += item_size
+
+    trimmed = {
+        **base,
+        list_key: kept,
+        "truncated": True,
+        "omitted": len(items) - len(kept),
+    }
+    return json.dumps(trimmed)
 
 
 TOOL_DEFINITIONS = [
@@ -27,7 +69,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_tasks",
-            "description": "Search tasks by query string and optional date/priority filters. Returns every match (up to 250) with title, date, priority, status and description snippet. The user cannot see ids - identify tasks to the user by title + date + description, never by id. To collect ALL tasks matching a query (e.g. 'delete all tasks called work'), call with the query and NO date filters.",
+            "description": "Search tasks by query string and optional date/priority filters. Returns every match (up to 250) with title, date, priority, status and description snippet. The user cannot see ids - identify tasks to the user by title + date + description, never by id. If the result has a \"truncated\": true field, only the first part of the matches was returned and \"omitted\" says how many more exist - re-run this same search after acting on the shown ones to fetch the rest (relevant for sweeping all matching tasks). To collect ALL tasks matching a query (e.g. 'delete all tasks called work'), call with the query and NO date filters.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -576,6 +618,7 @@ USER-FACING IDENTIFIERS (the user NEVER sees raw ids):
 
 BULK DELETION - catch EVERYTHING in one sweep:
 - To collect all tasks matching a description (e.g. "delete all tasks called work"), run search_tasks ONCE with the query and NO date filters so you see the full universe (search returns up to 250 matches).
+- A search result can be TOO LARGE to return at once. If it contains "truncated": true, the listed tasks are only the FIRST PART and "omitted" tells you how many more matches exist. Treat that like any partial view: act on the listed ones (or report them), then re-run the same search to fetch the next part, and repeat until a search no longer returns "truncated".
 - After batch_delete_tasks returns, VERIFY: run search_tasks AGAIN with the same query (no date filters). If any matches remain (weekends, Mondays, date-less ones, anything), batch_delete them too. Only then report the final real total deleted. Never claim "all deleted" while matches remain.
 
 TOOL USAGE TIPS:
@@ -831,7 +874,7 @@ async def execute_tool_calls(
                 results.append({
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
-                    "content": json.dumps({"found": len(found), "tasks": found}),
+                    "content": _bounded_list_payload({"found": len(found)}, "tasks", found),
                 })
 
             elif name == "create_task":
@@ -1572,19 +1615,18 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 results.append({
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
-                    "content": json.dumps({
+                    "content": _bounded_list_payload({
                         "date_from": str(date_from) if date_from else None,
                         "date_to": str(date_to) if date_to else None,
                         "count": len(tasks),
-                        "tasks": [
-                            {"id": str(t.id), "title": t.title, "priority": t.priority,
-                             "status": t.status.value if t.status else None,
-                             "start_date": str(t.start_date) if t.start_date else None,
-                             "due_date": str(t.due_date) if t.due_date else None,
-                             "description": (t.description or "")[:160] or None}
-                            for t in tasks
-                        ],
-                    }),
+                    }, "tasks", [
+                        {"id": str(t.id), "title": t.title, "priority": t.priority,
+                         "status": t.status.value if t.status else None,
+                         "start_date": str(t.start_date) if t.start_date else None,
+                         "due_date": str(t.due_date) if t.due_date else None,
+                         "description": (t.description or "")[:160] or None}
+                        for t in tasks
+                    ]),
                 })
 
             elif name == "suggest_best_time":
