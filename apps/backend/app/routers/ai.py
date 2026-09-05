@@ -17,6 +17,7 @@ from app.models.ai_conversation import AiConversation
 from app.models.ai_session import AiSession
 from app.models.api_key import ApiKey
 from app.models.user import User
+from app.llm.base import first_choice
 from app.services.ai_entitlement import (
     byok_allowed,
     check_ai_allowance,
@@ -152,6 +153,11 @@ def _friendly_llm_error(exc: Exception, provider: str | None = None) -> str:
         return f"The AI provider returned an error (HTTP {status}).{(' ' + msg) if msg else ''}"
     if isinstance(exc, openai.APIConnectionError):
         return "Could not reach the AI provider. Check your internet connection and try again."
+    # Malformed/empty provider payloads (e.g. an empty ``choices`` array) and
+    # parsing slips surface as bare Python exceptions. Never leak internal
+    # traceback text to the user.
+    if isinstance(exc, (IndexError, KeyError, TypeError, ValueError)):
+        return "The AI provider returned an unexpected response. Please try again."
     msg = str(exc).strip()
     return f"AI request failed.{(' ' + msg) if msg else ''}"
 
@@ -533,7 +539,7 @@ async def summarize_conversation(
             temperature=0.2,
             max_tokens=300,
         )
-        content = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+        content = (first_choice(resp).get("message", {}).get("content", "") or "").strip()
         if not content or len(content) < 20:
             return existing_summary or ""
         # Collapse the "Updated ..." wrapper if the model echoed it.
@@ -656,7 +662,7 @@ async def chat(
         try:
             for _round in range(MAX_TOOL_ROUNDS):
                 response = await chat_with_cache(session, user.id, provider, client, messages, tools)
-                choice = response.get("choices", [{}])[0]
+                choice = first_choice(response)
                 assistant_message = choice.get("message", {})
                 content = assistant_message.get("content", "") or ""
                 tool_calls = assistant_message.get("tool_calls")
@@ -671,7 +677,7 @@ async def chat(
                 if _round == MAX_TOOL_ROUNDS - 1:
                     fallback = await client.chat(messages, tools=None)
                     await record_response_usage(session, user.id, provider, fallback)
-                    content = (fallback.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
+                    content = (first_choice(fallback).get("message", {}).get("content", "")) or ""
                     tool_calls = None
         except Exception as exc:  # provider/auth/credit errors -> a clear, actionable message
             raise HTTPException(status_code=502, detail=_friendly_llm_error(exc, provider)) from exc
@@ -805,7 +811,7 @@ async def chat_stream(
                     except asyncio.CancelledError:
                         round_task.cancel()
                         raise
-                    choice = response.get("choices", [{}])[0]
+                    choice = first_choice(response)
                     assistant_message = choice.get("message", {})
                     content = assistant_message.get("content", "") or ""
                     tool_calls = assistant_message.get("tool_calls")

@@ -2,6 +2,20 @@ from abc import ABC, abstractmethod
 from typing import AsyncIterator
 
 
+def first_choice(payload: dict) -> dict:
+    """Return the first ``choices`` entry from an OpenAI-style payload, or ``{}``.
+
+    The ``dict.get("choices", [{}])`` pattern only guards a MISSING key, but
+    providers (OpenRouter, reasoning/free-tier models, cap responses) can return
+    a present-but-EMPTY ``"choices": []`` array, which would raise an IndexError
+    on ``[0]``. Never trust the shape of a third-party payload.
+    """
+    choices = payload.get("choices") if isinstance(payload, dict) else None
+    if not isinstance(choices, list) or not choices:
+        return {}
+    return choices[0] if isinstance(choices[0], dict) else {}
+
+
 class LLMClient(ABC):
     @abstractmethod
     async def chat(self, messages: list[dict], tools: list[dict] | None = None, **kwargs) -> dict:

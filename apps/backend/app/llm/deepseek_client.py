@@ -3,7 +3,7 @@ from typing import AsyncIterator
 
 import httpx
 
-from app.llm.base import LLMClient, register_provider
+from app.llm.base import LLMClient, first_choice, register_provider
 
 
 @register_provider("deepseek")
@@ -47,7 +47,7 @@ class DeepSeekClient(LLMClient):
                 if line.startswith("data: ") and line != "data: [DONE]":
                     try:
                         chunk = json.loads(line[6:])
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        delta = first_choice(chunk).get("delta", {})
                         content = delta.get("content", "")
                         if content:
                             yield content

@@ -3,7 +3,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.llm.base import get_provider
+from app.llm.base import first_choice, get_provider
 from app.utils.priority import normalize_priority
 
 
@@ -1190,7 +1190,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                             temperature=0.7,
                             max_tokens=500,
                         )
-                        breakdown_content = breakdown_response.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        breakdown_content = first_choice(breakdown_response).get("message", {}).get("content", "")
                         try:
                             suggestions = json.loads(breakdown_content)
                             if not isinstance(suggestions, list):

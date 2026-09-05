@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task, TaskStatus
+from app.llm.base import first_choice
 
 BULLET_PREFIXES = ("- ", "* ", "+ ", "• ", "-", "*")
 
@@ -171,7 +172,7 @@ async def ai_breakdown_titles(
                 temperature=0.7,
                 max_tokens=500,
             )
-            content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+            content = first_choice(response).get("message", {}).get("content", "")
             parsed = json.loads(content)
             if isinstance(parsed, list):
                 titles = [str(t) for t in parsed if str(t).strip()]

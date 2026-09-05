@@ -20,7 +20,7 @@ from typing import AsyncIterator
 import httpx
 
 from app.config import settings
-from app.llm.base import LLMClient, register_provider
+from app.llm.base import LLMClient, first_choice, register_provider
 
 # Fallback model if every configured chain is empty (kept for back-compat).
 MODEL = "thinkingmachines/inkling:free"
@@ -91,7 +91,7 @@ class PrysmAIClient(LLMClient):
                         chunk = json.loads(line[6:])
                     except json.JSONDecodeError:
                         continue
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    delta = first_choice(chunk).get("delta", {})
                     # Only the visible answer text is yielded. Reasoning/thinking
                     # deltas carry ``message.reasoning`` or an empty ``content``
                     # ("") and must be skipped so reasoning models stream the

@@ -1768,3 +1768,108 @@ async def test_prysmai_client_embed_not_implemented():
         await client.aclose()
 
 
+def test_first_choice_tolerates_missing_and_empty_choices():
+    """Regression: ``payload.get("choices", [{}])[0]`` only guards a MISSING key,
+    but providers (OpenRouter, free/reasoning models) return a PRESENT-but-EMPTY
+    ``"choices": []`` array, which crashed every chat path with a bare
+    `IndexError: list index out of range`."""
+
+    from app.llm.base import first_choice
+
+    assert first_choice({}) == {}
+    assert first_choice({"choices": []}) == {}
+    assert first_choice({"choices": None}) == {}
+    assert first_choice({"choices": [{"message": {"content": "hi"}}]}) == {"message": {"content": "hi"}}
+    assert first_choice(None) == {}
+    assert first_choice({"choices": "bogus"}) == {}
+    assert first_choice({"choices": [42]}) == {}
+
+
+def test_friendly_llm_error_never_leaks_python_internals():
+    """Regression: an IndexError (e.g. an empty ``choices`` array) escaping a
+    provider path used to surface as `AI request failed. list index out of
+    range`. Bare Python parsing bugs must become a neutral, actionable message,
+    never raw traceback text."""
+    from app.routers.ai import _friendly_llm_error
+
+    for exc in (IndexError("list index out of range"), KeyError("choices"), TypeError("bogus")):
+        msg = _friendly_llm_error(exc)
+        assert "unexpected response" in msg
+        assert "list index" not in msg
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_empty_choices_does_not_crash(client, ai_user, monkeypatch):
+    """Regression: a provider returning a present-but-EMPTY ``choices`` array on
+    the tool round used to raise `list index out of range` inside the stream
+    generator, which the frontend rendered as `AI request failed. list index out
+    of range`. The stream must degrade gracefully (no traceback text) instead."""
+    class _EmptyChoicesAgent:
+        calls = 0
+
+        async def chat(self, messages, tools=None):
+            type(self).calls += 1
+            return {"choices": []}
+
+        async def stream_chat(self, messages, tools=None):
+            for piece in ["Fallback ", "reply."]:
+                yield piece
+
+        async def embed(self, text):
+            return [0.0] * 8
+
+    agent = _EmptyChoicesAgent()
+
+    async def _fake_get_client(provider, api_key):
+        return agent
+
+    monkeypatch.setattr("app.routers.ai.get_llm_client", _fake_get_client)
+    monkeypatch.setattr("app.routers.ai.get_user_api_key", _dummy_key)
+
+    response = await client.post("/api/ai/chat/stream", json={"message": "hi", "provider": "openai"})
+    assert response.status_code == 200, response.text
+    assert "list index out of range" not in response.text
+    # The stream still completes with a usable answer (tool-loop fallback path).
+    assert "Fallback " in response.text
+    assert "reply." in response.text
+
+
+@pytest.mark.asyncio
+async def test_first_choice_in_stream_clients_skips_empty_choice_chunks(monkeypatch):
+    """The raw-SSE stream clients (prysmai, deepseek) must skip chunks whose
+    ``choices`` is empty instead of raising IndexError on ``[0]``."""
+    import httpx
+
+    from app.llm.prysmai_client import PrysmAIClient
+
+    lines = [
+        'data: {"choices": []}',
+        'data: {"choices": [{"delta": {"content": "ok"}}]}',
+        "data: [DONE]",
+    ]
+
+    class _FakeStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def aiter_lines(self):
+            for ln in lines:
+                yield ln
+
+    def _fake_stream(self, method, url, headers=None, json=None, **kwargs):
+        return _FakeStream()
+
+    monkeypatch.setattr(httpx.AsyncClient, "stream", _fake_stream)
+
+    client = PrysmAIClient("sk-test", model="thinkingmachines/inkling:free")
+    try:
+        pieces = [chunk async for chunk in client.stream_chat([{"role": "user", "content": "hi"}])]
+    finally:
+        await client.aclose()
+
+    assert pieces == ["ok"]
+
+

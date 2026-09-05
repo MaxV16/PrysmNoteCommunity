@@ -14,6 +14,8 @@ block instead of re-sending raw history.
 import json
 from uuid import UUID
 
+from app.llm.base import first_choice
+
 MEMORY_TOP_K = 5
 MEMORY_PER_TURN = 5
 MEMORY_MAX_ACTIVE = 60
@@ -56,7 +58,7 @@ async def extract_memories(client, history: list[dict], user_message: str, assis
             temperature=0.1,
             max_tokens=300,
         )
-        content = (resp.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+        content = (first_choice(resp).get("message", {}).get("content", "") or "").strip()
         # Strip markdown code fences if the model wraps the JSON.
         if content.startswith("```"):
             content = content.strip("`")
