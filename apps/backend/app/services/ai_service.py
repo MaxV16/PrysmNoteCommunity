@@ -12,7 +12,9 @@ from app.utils.priority import normalize_priority
 CONTEXT_MAX_MESSAGES = 12
 
 # Cap on how many search-result tasks we hand the model in one tool result.
-TOOL_SEARCH_MAX = 100
+# Raised so "delete all tasks matching X" can see every candidate, not just the
+# first 100 (a partial view is exactly how matches got silently skipped).
+TOOL_SEARCH_MAX = 250
 # Cap on the serialized length of a single tool result fed back to the model.
 TOOL_RESULT_MAX_CHARS = 12000
 # Per-memory character cap when injecting the RECALLED MEMORY block, keeping it
@@ -25,7 +27,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_tasks",
-            "description": "Search tasks by query string and optional date/priority filters",
+            "description": "Search tasks by query string and optional date/priority filters. Returns every match (up to 250) with title, date, priority, status and description snippet. The user cannot see ids - identify tasks to the user by title + date + description, never by id. To collect ALL tasks matching a query (e.g. 'delete all tasks called work'), call with the query and NO date filters.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -91,7 +93,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "batch_delete_tasks",
-            "description": "Delete MULTIPLE tasks at once (pass a list of task_ids). DANGER: permanently removes them. ONLY call after the user has EXPLICITLY confirmed deletion of all of them. It returns exact deleted_count and failed_count (with the ids that failed), so report the real numbers in your reply - never claim everything was deleted unless deleted_count equals the number you intended to delete. If the user said the tasks are 'done'/'completed', mark them status='done' via update_task instead (never delete).",
+            "description": "Delete MULTIPLE tasks at once (pass a list of task_ids). DANGER: permanently removes them. ONLY call after the user has EXPLICITLY confirmed deletion of all of them. It returns exact deleted_count and failed_count (with the ids that failed), so report the real numbers in your reply - never claim everything was deleted unless deleted_count equals the number you intended to delete. After a bulk delete, re-run search_tasks with the same query to catch any remaining matches and delete them too, so 'delete all X' really deletes all of them. If the user said the tasks are 'done'/'completed', mark them status='done' via update_task instead (never delete).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -567,6 +569,15 @@ COMPLETING VS DELETING:
 - Deleting a task is destructive and permanent. When the user asks you to delete, do NOT delete in that same turn. First reply listing the EXACT tasks you will delete (title + date), then ask them to confirm. Only call delete_task in a LATER turn once the user has explicitly confirmed (e.g. "yes delete it", "go ahead", "delete them").
 - NEVER claim a task was deleted unless delete_task returned `"deleted": true`, and NEVER claim a task was completed unless update_task returned `"updated": true`. If a tool returns an error (e.g. "Task not found", "Invalid task_id format"), do NOT pretend the delete/complete happened - report the failure and retry with the correct id.
 
+USER-FACING IDENTIFIERS (the user NEVER sees raw ids):
+- NEVER show, mention, or ask the user for a raw task id / UUID / hex code. The user does not know them and cannot type them.
+- When you need to distinguish same-named tasks (or list which ones you will delete), identify them by TITLE + DATE + a short description snippet and priority, never by id. Example: "Work (Mon Jan 27, priority 2)" or "Work on Monday at 4pm - for the shop".
+- When a request could match several tasks with the same name, list them as titles with their dates ("Work - Mon Jan 27", "Work - Tue Jan 28") and let the user pick by day/details. If the user says "all of them", that means every matching one - batch_delete them all.
+
+BULK DELETION - catch EVERYTHING in one sweep:
+- To collect all tasks matching a description (e.g. "delete all tasks called work"), run search_tasks ONCE with the query and NO date filters so you see the full universe (search returns up to 250 matches).
+- After batch_delete_tasks returns, VERIFY: run search_tasks AGAIN with the same query (no date filters). If any matches remain (weekends, Mondays, date-less ones, anything), batch_delete them too. Only then report the final real total deleted. Never claim "all deleted" while matches remain.
+
 TOOL USAGE TIPS:
 - Use complete_task to mark a task done; use update_task with status="done" as an equivalent. Never delete a task the user just said is done.
 - Use duplicate_task when the user asks to copy/clone/repeat an existing task as a new one.
@@ -815,7 +826,8 @@ async def execute_tool_calls(
                     tasks = (await session.execute(stmt)).scalars().all()
                 found = [{"id": str(t.id), "title": t.title, "status": t.status.value if t.status else None,
                           "priority": t.priority, "start_date": str(t.start_date) if t.start_date else None,
-                          "due_date": str(t.due_date) if t.due_date else None} for t in tasks]
+                          "due_date": str(t.due_date) if t.due_date else None,
+                          "description": (t.description or "")[:160] or None} for t in tasks]
                 results.append({
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
@@ -1568,7 +1580,8 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                             {"id": str(t.id), "title": t.title, "priority": t.priority,
                              "status": t.status.value if t.status else None,
                              "start_date": str(t.start_date) if t.start_date else None,
-                             "due_date": str(t.due_date) if t.due_date else None}
+                             "due_date": str(t.due_date) if t.due_date else None,
+                             "description": (t.description or "")[:160] or None}
                             for t in tasks
                         ],
                     }),

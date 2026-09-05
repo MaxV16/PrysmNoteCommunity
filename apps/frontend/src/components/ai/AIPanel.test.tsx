@@ -62,7 +62,9 @@ describe("AIPanel EU AI Act Art. 50(1) disclosure", () => {
     expect(
       await screen.findByText(/You are chatting with PrysmAI, an AI assistant/)
     ).toBeInTheDocument();
-    expect(screen.getByText(/zero data retention/)).toBeInTheDocument();
+    // Both the first-interaction notice and the composer footnote disclose
+    // zero data retention, so the phrase legitimately appears twice.
+    expect(screen.getAllByText(/zero data retention/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Do not enter sensitive personal data/)).toBeInTheDocument();
   });
 

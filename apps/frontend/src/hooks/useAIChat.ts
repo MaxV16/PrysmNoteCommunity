@@ -262,17 +262,6 @@ export function useAIChat() {
     })();
   }, []);
 
-  useEffect(() => {
-    // Opening the AI window always starts a FRESH conversation rather than
-    // resuming a previous one. Past chats remain reachable through the history
-    // panel (loadSession). Previously this auto-loaded the stored session and
-    // resurrected an old chat on every open.
-    sessionIdRef.current = crypto.randomUUID();
-    setStoredSessionId(sessionIdRef.current);
-    setChatMessages([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const loadSession = useCallback(
     async (sid: string) => {
       sessionIdRef.current = sid;
@@ -297,6 +286,26 @@ export function useAIChat() {
     },
     [setChatMessages]
   );
+
+  // Resume the last conversation on page refresh / AI-panel reopen instead of
+  // starting fresh: the backend persists every turn (user AND assistant), so
+  // the same chat (with the AI replies) comes back. A first-time visitor (no
+  // stored session) or a different account (clearUserData wipes ai_session_id)
+  // still starts a brand-new session. Use "New chat" to leave one on purpose.
+  useEffect(() => {
+    const stored = getStoredSessionId();
+    if (stored && stored !== sessionIdRef.current) {
+      sessionIdRef.current = stored;
+    }
+    if (stored) {
+      loadSession(stored);
+    } else {
+      sessionIdRef.current = crypto.randomUUID();
+      setStoredSessionId(sessionIdRef.current);
+      setChatMessages([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const newChat = useCallback(
     async () => {

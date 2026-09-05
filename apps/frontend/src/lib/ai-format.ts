@@ -37,6 +37,19 @@ function stripDelimiterSpacing(line: string, marker: string): string {
   return line;
 }
 
+function joinSplitHexRun(line: string): string {
+  // Rejoin streaming artifacts like "3 5 8 b 2 5 0 b" (single hex chars
+  // separated by spaces) into "358b250b", and "4 0 d 8 -b 9 5 0" -> "40d8-b950".
+  // Only runs of 6+ single-character hex tokens (dash-prefixed tokens allowed
+  // so UUID dashes survive) are touched, and only when the run also contains a
+  // digit - so ordinary words can never be collapsed ("a b c" stays intact).
+  return line.replace(/\b-?[0-9a-fA-F](?: -?[0-9a-fA-F]){5,}\b/g, (m) => {
+    const tokens = m.split(" ");
+    const hasDigit = tokens.some((t) => /[0-9]/.test(t));
+    return hasDigit ? tokens.join("") : m;
+  });
+}
+
 export function normalizeAssistantMarkdown(text: string): string {
   if (!text) return text;
   let inFence = false;
@@ -56,8 +69,25 @@ export function normalizeAssistantMarkdown(text: string): string {
       // Space after an opening bracket/paren: "( e" -> "(e". An empty-bracket
       // checkbox "[ ]" is left alone (valid GFM task-list syntax).
       s = s.replace(/([(\[{<])[ \t]+(?![\]}])/g, "$1");
-      // Contractions: "I 'll" -> "I'll", "don 't" -> "don't".
-      s = s.replace(/\b(\w) '(\w)/g, "$1'$2");
+      // Contractions with a stray space: "I 'll" -> "I'll", "can 't" -> "can't",
+      // "don ’t" -> "don’t", "I ’ ll" -> "I’ll". The apostrophe sits right after
+      // the word, so contractions are fixed even mid-sentence; the suffix must
+      // be 1-3 letters, so quoted words like "said 'hello'" are never collapsed.
+      s = s.replace(
+        /(\w+)[ \t]+([’'‘])[ \t]*(\w{1,3})\b/g,
+        (_m, word, q, suffix) => word + q + suffix
+      );
+      // Spaces hugging quotes: " Work " -> "Work". The closing quote must be
+      // followed by whitespace/punctuation (really ends the phrase), so a
+      // clean pair next to the next opening quote ("Work" and " second ") is
+      // never collapsed into a bogus padded pair.
+      s = s.replace(
+        /(?<![0-9A-Za-z])(["“”])[ \t]+(?=\S)([^\s"“”][^"“”\n]*?)[ \t]+(["“”])(?=\s|["",.;:!?)\]%>]|$)/g,
+        (_m, openQ, content, closeQ) => openQ + content.trimEnd() + closeQ
+      );
+      // UUID/hex artifacts from sloppy model streaming, before the digit-join
+      // below (which would first merge "3 5 8" and break the hex run).
+      s = joinSplitHexRun(s);
       // Number/time artifacts from sloppy model streaming: stray spaces split
       // digits, ordinals, ranges and clock times ("4 - 12", "May 29th, 2027",
       // "4pm"). Handles en/em dash spacing too.

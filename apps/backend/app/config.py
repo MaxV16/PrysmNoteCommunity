@@ -62,15 +62,14 @@ class Settings(BaseSettings):
     # preferred first). Serves the EU/EEA, the UK, any country on
     # prysm_ai_deepseek_blocked_countries, and unknown/missing cf-ipcountry
     # headers (fail-safe compliant). GDPR-safe by construction: free ZDR models
-    # first, then the cheapest paid floor that is fully capable of PrysmNote's
-    # toolset and not Chinese-origin. Never contains DeepSeek.
+    # first, then a paid ZDR floor that is fully capable of PrysmNote's toolset
+    # and not Chinese-origin. Never contains DeepSeek.
     prysm_ai_eu_chain: str = (
         "thinkingmachines/inkling:free,google/gemma-4-31b-it:free,mistralai/mistral-small-3.2-24b-instruct"
     )
     # DeepSeek chain (serves every country NOT on the blocklist and NOT
-    # restricted). Free ZDR models first, then DeepSeek as the cheap paid
-    # overflow floor (~$0.1225/M blended, 20x cheaper than the old inkling
-    # floor). The USD cap prices on DeepSeek, so allowances stay profitable.
+    # restricted). Free ZDR models first, then DeepSeek as the paid overflow
+    # floor. The USD cap prices on this floor, keeping allowances economical.
     prysm_ai_deepseek_chain: str = (
         "thinkingmachines/inkling:free,google/gemma-4-31b-it:free,deepseek/deepseek-v4-flash-0731"
     )

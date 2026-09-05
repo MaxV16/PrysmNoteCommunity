@@ -5,7 +5,7 @@ request header. Three outcomes, in order:
 
 1. Restricted jurisdiction (Russia/Belarus/etc.) -> ``RegionBlockedError``; the
    router maps it to HTTP 403 and no model call or usage row ever happens.
-2. Known country NOT on the DeepSeek blocklist -> the DeepSeek chain (cheap
+2. Known country NOT on the DeepSeek blocklist -> the DeepSeek chain (paid
    overflow floor; the default for most of the world).
 3. On the DeepSeek blocklist (EU/EEA + UK by default), OR a missing/unknown
    header -> the EU chain, which by construction never contains a Chinese-origin

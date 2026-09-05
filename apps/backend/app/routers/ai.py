@@ -214,6 +214,35 @@ def _normalize_reply_markdown(text: str) -> str:
                 line = line[: k + 1] + line[before_close:]
         return line
 
+    def _join_split_hex_run(line: str) -> str:
+        """Rejoin streaming artifacts like "3 5 8 b 2 5 0 b" (single hex chars
+        separated by spaces) into "358b250b", and "4 0 d 8 -b 9 5 0" -> "40d8-b950".
+
+        Only runs of 6+ single-character hex tokens (dash-prefixed tokens allowed
+        so UUID dashes survive) are touched, and only when the run also contains a
+        digit - so ordinary words can never be collapsed ("a b c" stays intact).
+        """
+        def _repl(m: re.Match) -> str:
+            tokens = m.group(0).split()
+            if not any(c.isdigit() for t in tokens for c in t):
+                return m.group(0)
+            return "".join(tokens)
+
+        return re.sub(r"\b-?[0-9a-fA-F](?: -?[0-9a-fA-F]){5,}\b", _repl, line)
+
+    _QUOTE_CHARS = '"\u201c\u201d'
+
+    def _strip_quote_padding(line: str) -> str:
+        """Collapse padding inside quoted spans: ``" Work "`` -> ``"Work"`` and
+        ``"Work "`` -> ``"Work"``. Works on matched quote pairs on one line, so
+        quotes around a future word are never glued to it.
+        """
+        return re.sub(
+            rf'(?<![0-9A-Za-z])([{_QUOTE_CHARS}])[ \t]+(?=\S)([^\s{_QUOTE_CHARS}][^{_QUOTE_CHARS}\n]*?)[ \t]+([{_QUOTE_CHARS}])(?=\s|[",.;:!?)\]%>]|$)',
+            lambda m: f"{m.group(1)}{m.group(2).rstrip()}{m.group(3)}",
+            line,
+        )
+
     def _clean(line: str) -> str:
         # Space before punctuation: "e .g ." -> "e.g.", "daily ," -> "daily,".
         # "]" and "}" are excluded so GFM checkboxes "[ ]" stay intact.
@@ -221,8 +250,20 @@ def _normalize_reply_markdown(text: str) -> str:
         # Space after an opening bracket/paren: "( e" -> "(e". An empty-bracket
         # checkbox "[ ]" is left alone (valid GFM task-list syntax).
         line = re.sub(r"([(\[{<])[ \t]+(?![\]}])", r"\1", line)
-        # Contractions: "I 'll" -> "I'll", "don 't" -> "don't".
-        line = re.sub(r"\b(\w) '(\w)", r"\1'\2", line)
+        # Contractions with a stray space: "I 'll" -> "I'll", "can 't" -> "can't",
+        # "don ’t" -> "don’t", "I ’ ll" -> "I’ll". This runs on the word END
+        # before the apostrophe (no \\b anchor bug): the suffix must be 1-3
+        # letters, so quoted words like "said 'hello'" are never collapsed.
+        line = re.sub(
+            r"(\w+)[ \t]+([\u2018\u2019'])[ \t]*(\w{1,3})\b",
+            lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}",
+            line,
+        )
+        # Spaces hugging quotes: " Work " -> "Work" (one side or both).
+        line = _strip_quote_padding(line)
+        # UUID/hex artifacts from sloppy model streaming, before the digit-join
+        # below (which would first merge "3 5 8" and break the hex run).
+        line = _join_split_hex_run(line)
         # Number/time artifacts from sloppy model streaming: stray spaces split
         # digits, ordinals, ranges and clock times ("4 - 12", "May 29th, 2027",
         # "4pm"). Handles en/em dash spacing too.
@@ -858,10 +899,8 @@ async def chat_stream(
                 # placeholder ALWAYS receives real content (partial stream or the
                 # tool-loop fallback) so an interrupted turn never leaves an empty
                 # bubble in history.
-                if not streamed:
-                    streamed = content
-                    if not streamed:
-                        streamed = "Interrupted."
+                if not streamed.strip():
+                    streamed = content.strip() or "Interrupted."
                     for chunk in _chunk_text(streamed):
                         yield {"event": "token", "data": chunk}
                 placeholder.content = _normalize_reply_markdown(streamed)
@@ -872,10 +911,18 @@ async def chat_stream(
                 yield {"event": "error", "data": _friendly_llm_error(exc, provider)}
                 return
 
-            if not streamed:
-                streamed = content or " "
-                for chunk in _chunk_text(streamed):
-                    yield {"event": "token", "data": chunk}
+            if not streamed.strip():
+                # The streaming call produced nothing real (empty iterator or
+                # whitespace-only tokens). Prefer the non-streaming tool-loop
+                # output; as a last resort emit a human fallback instead of a
+                # blank " " bubble that renders as an empty message in history.
+                streamed = content.strip() or (
+                    "I couldn't get a response from the AI on that turn. "
+                    "Please try again or rephrase your request."
+                )
+                if streamed:
+                    for chunk in _chunk_text(streamed):
+                        yield {"event": "token", "data": chunk}
 
             # Normalize sloppy model formatting (stray-space emphasis/punctuation)
             # so the persisted reply renders as real markdown on reload.

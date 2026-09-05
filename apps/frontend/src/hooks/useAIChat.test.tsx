@@ -33,6 +33,10 @@ describe("useAIChat refresh-on-abort", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     useAppStore.getState().reset();
+    // A stored session id would make the hook resume that conversation on
+    // mount (extra fetch against the shared stream mock) - start each test
+    // with a clean local session, like a fresh visitor.
+    localStorage.clear();
   });
 
   it("refreshes tasks from the server even when the stream errors", async () => {

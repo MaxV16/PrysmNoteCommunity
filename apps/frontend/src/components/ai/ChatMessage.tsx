@@ -38,8 +38,10 @@ export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
     message.role === "assistant" && !message.content && streaming && isLast;
 
   // Empty assistant messages render as a silent gap (no bubble, no typing
-  // indicator) unless they are the actively-streamed last message.
-  const hasBody = showTyping || Boolean(message.content);
+  // indicator) unless they are the actively-streamed last message. Whitespace-
+  // only rows (legacy " " fallbacks from blank provider streams) are treated as
+  // empty so history never shows an unexplained blank bubble.
+  const hasBody = showTyping || Boolean(message.content && message.content.trim());
 
   return (
     <div className={`flex gap-2.5 ${isUser ? "justify-end" : "justify-start"} slide-up`}>

@@ -16,6 +16,33 @@ describe("normalizeAssistantMarkdown", () => {
       "Give me a title (e.g. daily, weekly)"
     );
     expect(normalizeAssistantMarkdown("I 'll create it")).toBe("I'll create it");
+    // Mid-word contractions (the word before the apostrophe is not a single
+    // letter, so the old \b anchor missed them).
+    expect(normalizeAssistantMarkdown("I can 't do that .")).toBe("I can't do that.");
+    expect(normalizeAssistantMarkdown("then I 'll delete them one by one .")).toBe(
+      "then I'll delete them one by one."
+    );
+    expect(normalizeAssistantMarkdown("we don 't have the stuff .")).toBe("we don't have the stuff.");
+  });
+
+  it("handles curly-quote apostrophes", () => {
+    expect(normalizeAssistantMarkdown("I ’ ll do that . maybe don’t worry")).toBe(
+      "I’ll do that. maybe don’t worry"
+    );
+    expect(normalizeAssistantMarkdown("he’s gone , it ’ s fine")).toBe("he’s gone, it’s fine");
+  });
+
+  it("rejoins split UUIDs and quoted words", () => {
+    expect(
+      normalizeAssistantMarkdown(
+        "1 . ID :\n\n3 5 8 b 2 5 0 b\n0 9 5 5\n4 0 d 8 -b 9 5 0\n5 7 4 b 6 2 5 1 f 2 f 2"
+      )
+    ).toBe("1. ID:\n\n358b250b\n0955\n40d8-b950\n574b6251f2f2");
+    expect(normalizeAssistantMarkdown("2 tasks titled \" Work \" scheduled .")).toBe(
+      '2 tasks titled "Work" scheduled.'
+    );
+    // A run without a digit is an ordinary list of words - never collapsed.
+    expect(normalizeAssistantMarkdown("a b c d e f g")).toBe("a b c d e f g");
   });
 
   it("rejoins digits, ordinals, ranges and clock times split by streaming", () => {

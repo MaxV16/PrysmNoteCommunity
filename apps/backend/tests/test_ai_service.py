@@ -1447,6 +1447,21 @@ def test_normalize_reply_markdown_fixes_stray_space_emphasis_and_punctuation():
     assert _normalize_reply_markdown("Give me a title ( e .g . daily , weekly )") == "Give me a title (e.g. daily, weekly)"
     # Contractions.
     assert _normalize_reply_markdown("I 'll create it") == "I'll create it"
+    # Mid-word contractions (the old \b anchor missed "can 't") and curly quotes.
+    assert _normalize_reply_markdown("I can 't do that .") == "I can't do that."
+    assert _normalize_reply_markdown("then I 'll delete them one by one .") == "then I'll delete them one by one."
+    assert _normalize_reply_markdown("I \u2019 ll do that . maybe don\u2019t worry") == "I\u2019ll do that. maybe don\u2019t worry"
+    # Spaces hugging quotes: " Work " -> "Work".
+    assert _normalize_reply_markdown('2 tasks titled " Work " scheduled .') == '2 tasks titled "Work" scheduled.'
+    # UUIDs split character-by-character by sloppy streaming are rejoined.
+    assert (
+        _normalize_reply_markdown(
+            "1 . ID :\n\n3 5 8 b 2 5 0 b\n0 9 5 5\n4 0 d 8 -b 9 5 0\n5 7 4 b 6 2 5 1 f 2 f 2"
+        )
+        == "1. ID:\n\n358b250b\n0955\n40d8-b950\n574b6251f2f2"
+    )
+    # A hex-looking run with no digit is an ordinary word list - left intact.
+    assert _normalize_reply_markdown("a b c d e f g") == "a b c d e f g"
     # Clean text is a no-op.
     clean = "Done! **Drink water** is now an endless daily task (starts today)."
     assert _normalize_reply_markdown(clean) == clean
