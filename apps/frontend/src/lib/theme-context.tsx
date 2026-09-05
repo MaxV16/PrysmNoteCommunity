@@ -226,6 +226,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (customTheme) {
+      // A previous custom theme's extras must not leak into a new one: clear
+      // the applied set first, then re-apply this theme's extras.
+      clearExtras();
       applyThemeColors(customTheme, customTheme.extra);
       document.documentElement.setAttribute("data-theme", "custom");
     }

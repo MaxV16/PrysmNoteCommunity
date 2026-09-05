@@ -93,6 +93,21 @@ describe("useOnboardingTour", () => {
     expect(result.current.stepIndex).toBe(0);
   });
 
+  it("restart from a route without the tour starts it on the next workspace mount", () => {
+    // Settings does not render OnboardingTour, so the restart sets a session
+    // flag that the hook consumes when it mounts on the next navigation.
+    mockUser.created_at = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+    act(() => {
+      restartOnboardingTour();
+    });
+    const { result } = renderHook(() => useOnboardingTour());
+    act(() => {
+      vi.advanceTimersByTime(900);
+    });
+    expect(result.current.stepIndex).toBe(0);
+    expect(sessionStorage.getItem("prysm_onboarding_force")).toBeNull();
+  });
+
   it("advances through steps and completes on the last, persisting the pref", () => {
     mockUser.created_at = new Date().toISOString();
     const { result } = renderHook(() => useOnboardingTour());

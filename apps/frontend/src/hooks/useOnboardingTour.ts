@@ -41,6 +41,13 @@ export const ONBOARDING_STEPS: TourStep[] = [
 
 export const ONBOARDING_EVENT = "prysm-start-onboarding";
 
+// The tour only ever mounts inside the workspace layout, but "Restart tour" is
+// offered from Settings which does not render the tour. The session flag bridges
+// that gap: restartOnboardingTour() sets it before dispatching the event, and the
+// hook consumes it on mount (e.g. when the user navigates back to the workspace)
+// so the tour always opens regardless of which route requested it.
+const FORCE_SESSION_KEY = "prysm_onboarding_force";
+
 /** Accounts younger than this window see the tour automatically once. */
 const NEW_ACCOUNT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -54,6 +61,11 @@ export function isNewAccount(createdAt?: string | null): boolean {
 /** Force the tour to open (Settings > "Restart tour", independent of age). */
 export function restartOnboardingTour(): void {
   if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(FORCE_SESSION_KEY, "1");
+  } catch {
+    /* storage unavailable */
+  }
   window.dispatchEvent(new CustomEvent(ONBOARDING_EVENT));
 }
 
@@ -66,6 +78,20 @@ export function useOnboardingTour() {
   const forcedRef = useRef(false);
   const stepIndexRef = useRef<number | null>(null);
   stepIndexRef.current = stepIndex;
+
+  // If "Restart tour" was requested from a route that does not mount the tour
+  // (Settings), the session flag survives the navigation and force-starts here.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (sessionStorage.getItem(FORCE_SESSION_KEY) === "1") {
+        forcedRef.current = true;
+        sessionStorage.removeItem(FORCE_SESSION_KEY);
+      }
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
 
   // Manual "Restart tour" events always open the tour, whatever the account age.
   useEffect(() => {
@@ -89,6 +115,7 @@ export function useOnboardingTour() {
   }, [user, hydrated, prefs, stepIndex]);
 
   const complete = useCallback(() => {
+    tryUnsetForceFlag();
     setPreference(PREF_ONBOARDING_DONE, true);
     setStepIndex(null);
   }, [setPreference]);
@@ -104,9 +131,19 @@ export function useOnboardingTour() {
   }, [complete]);
 
   const skip = useCallback(() => {
+    tryUnsetForceFlag();
     setPreference(PREF_ONBOARDING_DONE, true);
     setStepIndex(null);
   }, [setPreference]);
 
   return { stepIndex, goNext, skip };
+}
+
+function tryUnsetForceFlag(): void {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(FORCE_SESSION_KEY);
+  } catch {
+    /* storage unavailable */
+  }
 }

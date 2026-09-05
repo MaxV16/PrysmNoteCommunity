@@ -16,7 +16,7 @@ interface Rect {
 
 const PADDING = 8;
 const RETRY_MS = 600;
-const MAX_TRIES = 3;
+const MAX_TRIES = 2;
 const Z_INDEX = 300;
 
 /** True on the last step, where the primary button reads "Got it". */
@@ -138,7 +138,10 @@ export function OnboardingTour() {
             borderRadius: 14,
             boxShadow: "0 0 0 9999px rgba(0, 0, 0, 0.45)",
             transition:
-              "top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease",
+              typeof window !== "undefined" &&
+              window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                ? undefined
+                : "top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease",
           }}
         />
       )}

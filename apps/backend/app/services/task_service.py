@@ -250,6 +250,17 @@ async def move_tasks_to_section(
     task_ids = [t for t in task_ids if t is not None]
     if not task_ids:
         return 0
+    # Dedupe preserving order: a repeated id would otherwise splice the same task
+    # into the destination twice (the UI never sends duplicates, but the route is
+    # defensive anyway).
+    seen: set[UUID] = set()
+    deduped: list[UUID] = []
+    for task_id in task_ids:
+        if task_id in seen:
+            continue
+        seen.add(task_id)
+        deduped.append(task_id)
+    task_ids = deduped
     result = await session.execute(
         select(Task).where(task_access_condition(user_id), Task.id.in_(task_ids))
     )

@@ -3,6 +3,7 @@ from httpx import AsyncClient
 from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.task import Task
 from app.models.user import User
 
 
@@ -30,18 +31,24 @@ async def test_batch_delete_skips_foreign_tasks(client: AsyncClient, db_session:
     other = User(id=uuid4(), email="foreign-delete@test", password_hash="x")
     db_session.add(other)
     await db_session.flush()
+    # A real task owned by the second user must survive the batch unchanged.
+    foreign = Task(id=uuid4(), user_id=other.id, title="Foreign", status="todo")
+    db_session.add(foreign)
     await db_session.commit()
 
     mine = await _create_task(client, "Mine")
     resp = await client.post(
         "/api/tasks/batch-delete",
-        json={"task_ids": [mine["id"], str(uuid4())]},
+        json={"task_ids": [mine["id"], str(foreign.id)]},
     )
     assert resp.status_code == 200
     assert resp.json()["deleted"] == 1
 
     still = await client.get(f"/api/tasks/{mine['id']}")
     assert still.status_code == 404
+    # RLS keeps the foreign row out of this user's reads too.
+    tasks = (await client.get("/api/tasks/?limit=200")).json()
+    assert all(t["title"] != "Foreign" for t in tasks)
 
 
 @pytest.mark.asyncio

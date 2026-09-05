@@ -75,11 +75,10 @@ describe("validateCustomTheme", () => {
     expect(validateCustomTheme({ ...validTheme, extra: { "--evil-payload": "x" } })).toBeNull();
   });
 
-  it("drops extra values that can smuggle CSS", () => {
-    const theme = validateCustomTheme({ ...validTheme, extra: { "--danger-hover": "red; } body { display: none", "--radius-sm": "14px" } });
-    expect(theme).not.toBeNull();
-    expect(theme!.extra?.["--danger-hover"]).toBeUndefined();
-    expect(theme!.extra?.["--radius-sm"]).toBe("14px");
+  it("rejects extra values that can smuggle CSS", () => {
+    const theme = { ...validTheme, extra: { "--danger-hover": "red; } body { display: none", "--radius-sm": "14px" } };
+    expect(validateCustomThemeError(theme)).toContain("--danger-hover");
+    expect(validateCustomTheme(theme)).toBeNull();
   });
 
   it("rejects a shadow with a semicolon", () => {

@@ -145,6 +145,13 @@ export function validateCustomThemeError(raw: unknown): string | null {
       if (typeof value !== "string") {
         return `Import failed: "${key}" must be a string`;
       }
+      // Extra values drop straight into CSS custom properties, so anything that
+      // is not the safe grammar must fail inline rather than being silently
+      // discarded (a `;`/`{}` would never run, but the user should see why).
+      const trimmed = value.trim();
+      if (trimmed.length > MAX_VALUE_LENGTH || !SAFE_CSS_RE.test(trimmed)) {
+        return `Import failed: "${key}" is not a safe CSS value`;
+      }
     }
   }
   return null;
