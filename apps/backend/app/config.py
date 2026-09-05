@@ -51,31 +51,37 @@ class Settings(BaseSettings):
     import_max_rows: int = 5000
 
     # Deprecated single-model override for PrysmAI (EU / banned-region accounts).
-    # Kept for back-compat: when set, it pins the default GDPR-compliant chain to
-    # that one model (no fallbacks). Empty = use prysm_ai_default_chain.
+    # Kept for back-compat: when set, it pins the EU GDPR-compliant chain to
+    # that one model (no fallbacks). Empty = use prysm_ai_eu_chain.
     prysm_ai_region_model: str = ""
 
     # Base URL for the PrysmAI provider's OpenAI-compatible endpoint. Defaults to
     # OpenRouter; override for testing or a future proxy.
     prysm_ai_base_url: str = "https://openrouter.ai/api/v1"
-    # Global GDPR-safe model chain (comma-separated, most preferred first). No
-    # Chinese-origin providers (DeepSeek/GLM/MiniMax/inclusionAI are excluded by
-    # default); the trailing paid model is the cheap floor that absorbs OpenRouter
-    # free-tier caps/congestion. ZDR routing is enforced for every member.
-    prysm_ai_default_chain: str = (
-        "thinkingmachines/inkling:free,google/gemma-4-31b-it:free,thinkingmachines/inkling"
+    # EU / DeepSeek-blocklisted-region model chain (comma-separated, most
+    # preferred first). Serves the EU/EEA, the UK, any country on
+    # prysm_ai_deepseek_blocked_countries, and unknown/missing cf-ipcountry
+    # headers (fail-safe compliant). GDPR-safe by construction: free ZDR models
+    # first, then the cheapest paid floor that is fully capable of PrysmNote's
+    # toolset and not Chinese-origin. Never contains DeepSeek.
+    prysm_ai_eu_chain: str = (
+        "thinkingmachines/inkling:free,google/gemma-4-31b-it:free,mistralai/mistral-small-3.2-24b-instruct"
     )
-    # DeepSeek allowlist chain (opt-in: only used for countries explicitly listed
-    # in prysm_ai_deepseek_countries). Free DeepSeek variant first, then compliant
-    # fallbacks so ZDR is preserved even on this path.
+    # DeepSeek chain (serves every country NOT on the blocklist and NOT
+    # restricted). Free ZDR models first, then DeepSeek as the cheap paid
+    # overflow floor (~$0.1225/M blended, 20x cheaper than the old inkling
+    # floor). The USD cap prices on DeepSeek, so allowances stay profitable.
     prysm_ai_deepseek_chain: str = (
-        "deepseek/deepseek-v4-flash-0731,thinkingmachines/inkling:free,thinkingmachines/inkling"
+        "thinkingmachines/inkling:free,google/gemma-4-31b-it:free,deepseek/deepseek-v4-flash-0731"
     )
-    # Comma-separated ISO alpha-2 countries allowed to use the DeepSeek chain.
-    # Empty (the default) = DeepSeek disabled everywhere. This is an explicit
-    # allowlist, never a denylist - unknown/missing countries get the default
-    # GDPR-safe chain.
-    prysm_ai_deepseek_countries: str = ""
+    # Comma-separated ISO alpha-2 countries where the DeepSeek chain must NOT
+    # serve (EU/EEA-30 + UK by default - mirrors DeepSeek's own restrictions;
+    # extend per policy). This is a BLOCKLIST, never an allowlist: empty =
+    # DeepSeek everywhere except RESTRICTED countries. Unknown/missing headers
+    # are NOT blocked here - they get the EU chain (compliant fail-safe).
+    prysm_ai_deepseek_blocked_countries: str = (
+        "AT,BE,BG,HR,CY,CZ,DK,EE,FI,FR,DE,GR,HU,IE,IT,LV,LT,LU,MT,NL,PL,PT,RO,SK,SI,ES,SE,IS,LI,NO,GB"
+    )
     # Comma-separated ISO alpha-2 countries that are DENIED hosted PrysmAI with
     # HTTP 403 (no model call, no usage recorded). Russia/Belarus by default;
     # extend per policy (e.g. Cuba, Iran, North Korea, Syria, Crimea/UA-43).
@@ -86,8 +92,10 @@ class Settings(BaseSettings):
     # Safety buffer applied to per-user USD sub-key limits: the limit is computed
     # from the token allowance x blended per-token price, then multiplied by this
     # factor so a slightly more-expensive model / price shift cannot starve a
-    # paying user mid-month.
-    prysm_ai_key_limit_buffer: float = 1.5
+    # paying user mid-month. 1.0 = the USD cap IS the 40%-of-price worst-case
+    # budget exactly (a higher buffer would let a user overspend the budget and
+    # collapse the 60% margin).
+    prysm_ai_key_limit_buffer: float = 1.0
 
     # Cloudflare Turnstile on the registration form. Both must be set for the
     # captcha to be enforced; when TURNSTILE_SECRET_KEY is empty the backend

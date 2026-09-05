@@ -5,8 +5,9 @@ their own key. Talks to the OpenAI-compatible endpoint configured by
 ``settings.prysm_ai_base_url`` (OpenRouter by default) with a per-user sub-key
 created by the EE key service (community build: the legacy server key).
 
-The default model chain never contains a Chinese-origin provider (DeepSeek/GLM/
-MiniMax/inclusionAI are excluded by default), a ``models`` array gives ordered
+The EU chain never contains a Chinese-origin provider (DeepSeek/GLM/MiniMax/
+inclusionAI are excluded there); only the DeepSeek chain can include DeepSeek, and
+it is reserved for regions that allow it. A ``models`` array gives ordered
 fallbacks on OpenRouter congestion/free-tier caps, and ZDR routing
 (``provider.data_collection="deny"``) is enforced so no prompt/completion is
 stored or trained on. The server-side key is resolved in the router (never

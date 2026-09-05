@@ -362,7 +362,7 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
             onRegisterInsert={(insert) => { insertRef.current = insert; }}
           />
           <p className="px-4 pb-2.5 text-center text-[10px] leading-relaxed text-muted">
-            PrysmAI is an AI assistant; check important details. Hosted models vary by region and are not retained.
+            PrysmAI is an AI assistant; check important details. Hosted models vary by region (free models first, with a low-cost overflow model) and are not retained.
           </p>
         </>
       )}
