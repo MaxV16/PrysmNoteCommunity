@@ -35,3 +35,31 @@ export function playCompletionSound(): void {
   playTone(880, 0, 0.15, 0.12);
   playTone(1318.5, 0.12, 0.25, 0.12);
 }
+
+// A soft, short ping for when the AI finishes a reply (replaces the removed
+// spoken voice feedback). Distinctly quieter and shorter than the completion
+// chime so it never sounds like a task was completed. Generated with the Web
+// Audio API so no audio asset is required.
+export function playAiReplyPing(): void {
+  const audio = getCtx();
+  if (!audio) return;
+  if (audio.state === "suspended") audio.resume();
+
+  const now = audio.currentTime;
+  const playTone = (freq: number, start: number, duration: number, gain: number) => {
+    const osc = audio.createOscillator();
+    const g = audio.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, now + start);
+    g.gain.exponentialRampToValueAtTime(gain, now + start + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + start + duration);
+    osc.connect(g);
+    g.connect(audio.destination);
+    osc.start(now + start);
+    osc.stop(now + start + duration + 0.03);
+  };
+
+  playTone(1046.5, 0, 0.12, 0.08);
+  playTone(1568, 0.09, 0.18, 0.06);
+}

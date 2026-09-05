@@ -18,6 +18,12 @@ describe("normalizeAssistantMarkdown", () => {
     expect(normalizeAssistantMarkdown("I 'll create it")).toBe("I'll create it");
   });
 
+  it("rejoins digits, ordinals, ranges and clock times split by streaming", () => {
+    expect(normalizeAssistantMarkdown("4 \u2013 1 2 (recurs daily)")).toBe("4-12 (recurs daily)");
+    expect(normalizeAssistantMarkdown("May 2 9 th , 2 0 2 7")).toBe("May 29th, 2027");
+    expect(normalizeAssistantMarkdown("4 pm to 1 2 am")).toBe("4pm to 12am");
+  });
+
   it("leaves clean markdown untouched", () => {
     const clean =
       "Done! **Drink water** is now an endless daily task (starts today).";

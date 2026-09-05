@@ -58,6 +58,17 @@ export function normalizeAssistantMarkdown(text: string): string {
       s = s.replace(/([(\[{<])[ \t]+(?![\]}])/g, "$1");
       // Contractions: "I 'll" -> "I'll", "don 't" -> "don't".
       s = s.replace(/\b(\w) '(\w)/g, "$1'$2");
+      // Number/time artifacts from sloppy model streaming: stray spaces split
+      // digits, ordinals, ranges and clock times ("4 - 12", "May 29th, 2027",
+      // "4pm"). Handles en/em dash spacing too.
+      // Number ranges: "4 - 12" / "4- 12" / "4\u201312" -> "4-12".
+      s = s.replace(/(\d)[ \t]*[\u2013\u2014-][ \t]*(\d)/g, "$1-$2");
+      // Split digits: "2 0 2 7" -> "2027", "May 2 9 th" -> "May 29 th".
+      s = s.replace(/(\d)[ \t]+(?=\d)/g, "$1");
+      // Ordinal suffixes: "2 9 th" -> "29th" (after the digit join above).
+      s = s.replace(/(\d)[ \t]+(?=(?:st|nd|rd|th)\b)/gi, "$1");
+      // 12-hour clock: "4 pm" -> "4pm".
+      s = s.replace(/(\d)[ \t]+(?=(?:am|pm)\b)/gi, "$1");
       // Emphasis/code delimiters written with stray spaces around the inner text.
       for (const marker of ["**", "__", "*", "_", "`"]) {
         s = stripDelimiterSpacing(s, marker);

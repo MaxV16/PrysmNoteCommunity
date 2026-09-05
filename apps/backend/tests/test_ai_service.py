@@ -1287,6 +1287,67 @@ async def test_chat_stream_emits_single_answer_and_usage(client, ai_user, monkey
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_reply_persists_even_when_usage_recording_fails(client, test_user, db_session: AsyncSession, monkeypatch):
+    """Regression: the assistant reply must be written to ai_conversations even
+    when usage recording throws AFTER the answer streams. A failure there used
+    to abort the SSE generator before the placeholder row was filled, so the
+    session existed in history but the AI output was an empty bubble ("AI output
+    not saved in chat history"). The reply commit must happen first and usage
+    must be best-effort."""
+    from uuid import UUID as _UUID
+    from app.models.ai_conversation import AiConversation
+
+    class _StreamAgent:
+        async def chat(self, messages, tools=None):
+            return {"choices": [{"message": {"role": "assistant", "content": "Done."}}]}
+
+        async def stream_chat(self, messages, tools=None):
+            for piece in ["Saved ", "reply."]:
+                yield piece
+
+        async def embed(self, text):
+            return [0.0] * 8
+
+    agent = _StreamAgent()
+
+    async def _fake_get_client(provider, api_key):
+        return agent
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("usage recording is down")
+
+    monkeypatch.setattr("app.routers.ai.get_llm_client", _fake_get_client)
+    monkeypatch.setattr("app.routers.ai.get_user_api_key", _dummy_key)
+    monkeypatch.setattr("app.routers.ai.record_estimated_usage", _boom)
+
+    session_id = str(uuid4())
+    response = await client.post("/api/ai/chat/stream", json={
+        "message": "save this reply",
+        "provider": "openai",
+        "session_id": session_id,
+    })
+    assert response.status_code == 200, response.text
+    assert "Saved " in response.text
+    assert "reply." in response.text
+
+    user_uuid = _UUID(str(test_user.id))
+    rows = (
+        await db_session.execute(
+            select(AiConversation)
+            .where(
+                AiConversation.user_id == user_uuid,
+                AiConversation.session_id == _UUID(session_id),
+            )
+            .order_by(AiConversation.created_at)
+        )
+    ).scalars().all()
+    roles = {r.role for r in rows}
+    assert roles == {"user", "assistant"}
+    assistant = next(r for r in rows if r.role == "assistant")
+    assert assistant.content == "Saved reply."
+
+
+@pytest.mark.asyncio
 async def test_provider_chat_accepts_temperature_max_tokens_kwargs():
     """Regression: summary/memory/subtask calls pass temperature & max_tokens to
     client.chat(). Provider clients must accept those kwargs instead of raising
@@ -1396,6 +1457,10 @@ def test_normalize_reply_markdown_fixes_stray_space_emphasis_and_punctuation():
     assert _normalize_reply_markdown("* item one\n* item two") == "* item one\n* item two"
     # GFM task-list checkboxes are valid syntax, not a stray-space artifact.
     assert _normalize_reply_markdown("- [x] done\n- [ ] todo") == "- [x] done\n- [ ] todo"
+    # Sloppy streaming splits digits, ranges, ordinals and clock times.
+    assert _normalize_reply_markdown("4 \u2013 1 2 (recurs daily)") == "4-12 (recurs daily)"
+    assert _normalize_reply_markdown("May 2 9 th , 2 0 2 7") == "May 29th, 2027"
+    assert _normalize_reply_markdown("4 pm to 1 2 am") == "4pm to 12am"
 
 
 @pytest.mark.asyncio

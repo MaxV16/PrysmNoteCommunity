@@ -217,6 +217,17 @@ def _normalize_reply_markdown(text: str) -> str:
         line = re.sub(r"([(\[{<])[ \t]+(?![\]}])", r"\1", line)
         # Contractions: "I 'll" -> "I'll", "don 't" -> "don't".
         line = re.sub(r"\b(\w) '(\w)", r"\1'\2", line)
+        # Number/time artifacts from sloppy model streaming: stray spaces split
+        # digits, ordinals, ranges and clock times ("4 - 12", "May 29th, 2027",
+        # "4pm"). Handles en/em dash spacing too.
+        # Number ranges: "4 - 12" / "4- 12" / "4\u201312" -> "4-12".
+        line = re.sub(r"(\d)[ \t]*[\u2013\u2014-][ \t]*(\d)", r"\1-\2", line)
+        # Split digits: "2 0 2 7" -> "2027", "May 2 9 th" -> "May 29 th".
+        line = re.sub(r"(\d)[ \t]+(?=\d)", r"\1", line)
+        # Ordinal suffixes: "2 9 th" -> "29th" (after the digit join above).
+        line = re.sub(r"(?i)(\d)[ \t]+(?=(?:st|nd|rd|th)\b)", r"\1", line)
+        # 12-hour clock: "4 pm" -> "4pm".
+        line = re.sub(r"(?i)(\d)[ \t]+(?=(?:am|pm)\b)", r"\1", line)
         # Emphasis/code delimiters written with stray spaces around the inner text.
         for marker in ("**", "__", "*", "_", "`"):
             line = _strip_delimiter_spacing(line, marker)
@@ -864,11 +875,25 @@ async def chat_stream(
             # so the persisted reply renders as real markdown on reload.
             streamed = _normalize_reply_markdown(streamed)
 
-            # Persist the streamed answer over the placeholder row.
+            # Persist the streamed answer over the placeholder row FIRST: once the
+            # reply is committed, a later bookkeeping failure (usage recording, SSE
+            # teardown) can never leave an empty assistant row in history.
             placeholder.content = streamed
-            # Record the streamed hosted answer's (estimated) usage before committing.
-            await record_estimated_usage(session, user.id, provider, messages, streamed)
-            await session.commit()
+            try:
+                await session.commit()
+            except Exception:
+                pass
+
+            # Record the streamed hosted answer's (estimated) usage best-effort. A
+            # usage failure must never drop or change the already-persisted reply.
+            try:
+                await record_estimated_usage(session, user.id, provider, messages, streamed)
+                try:
+                    await session.commit()
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
             estimated_tokens = _estimate_tokens(messages, streamed)
             yield {"event": "usage", "data": json.dumps({"estimated_tokens": estimated_tokens})}
