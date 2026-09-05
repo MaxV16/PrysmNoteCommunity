@@ -62,7 +62,7 @@ describe("AIPanel EU AI Act Art. 50(1) disclosure", () => {
     expect(
       await screen.findByText(/You are chatting with PrysmAI, an AI assistant/)
     ).toBeInTheDocument();
-    expect(screen.getByText(/powered by the DeepSeek API/)).toBeInTheDocument();
+    expect(screen.getByText(/zero data retention/)).toBeInTheDocument();
     expect(screen.getByText(/Do not enter sensitive personal data/)).toBeInTheDocument();
   });
 
@@ -71,6 +71,6 @@ describe("AIPanel EU AI Act Art. 50(1) disclosure", () => {
     expect(
       await screen.findByText(/PrysmAI is an AI assistant; check important details/)
     ).toBeInTheDocument();
-    expect(screen.getByText(/Powered by DeepSeek when hosted/)).toBeInTheDocument();
+    expect(screen.getByText(/Hosted models vary by region/)).toBeInTheDocument();
   });
 });

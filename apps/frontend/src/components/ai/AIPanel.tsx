@@ -309,9 +309,10 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
             {chatMessages.length === 0 ? (
               <div className="flex h-full flex-col">
                 <div className="mx-auto max-w-sm rounded-xl border border-border/70 bg-elevated px-4 py-3 text-center text-xs leading-relaxed text-secondary">
-                  You are chatting with PrysmAI, an AI assistant. Hosted responses are
-                  powered by the DeepSeek API; you may also connect your own OpenAI, Gemini,
-                  DeepSeek, or OpenRouter key in Settings. Do not enter sensitive personal data.
+                  You are chatting with PrysmAI, an AI assistant. Hosted responses are routed with
+                  zero data retention and may use different models depending on your region; you may
+                  also connect your own OpenAI, Gemini, DeepSeek, or OpenRouter key in Settings.
+                  Do not enter sensitive personal data.
                 </div>
                 <div className="min-h-0 flex-1">
                   <AIEmptyState onSuggest={handleSend} />
@@ -361,7 +362,7 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
             onRegisterInsert={(insert) => { insertRef.current = insert; }}
           />
           <p className="px-4 pb-2.5 text-center text-[10px] leading-relaxed text-muted">
-            PrysmAI is an AI assistant; check important details. Powered by DeepSeek when hosted.
+            PrysmAI is an AI assistant; check important details. Hosted models vary by region and are not retained.
           </p>
         </>
       )}
