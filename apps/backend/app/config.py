@@ -50,10 +50,44 @@ class Settings(BaseSettings):
     # message says so). Keeps one import from swamping the single-worker VM.
     import_max_rows: int = 5000
 
-    # Model slot for PrysmAI in EU / banned-region accounts. A config
-    # placeholder only: when set, PrysmAI resolves to this model for the user's
-    # region; no region model has been chosen yet, so this stays the default.
-    prysm_ai_region_model: str = "deepseek-v4-flash"
+    # Deprecated single-model override for PrysmAI (EU / banned-region accounts).
+    # Kept for back-compat: when set, it pins the default GDPR-compliant chain to
+    # that one model (no fallbacks). Empty = use prysm_ai_default_chain.
+    prysm_ai_region_model: str = ""
+
+    # Base URL for the PrysmAI provider's OpenAI-compatible endpoint. Defaults to
+    # OpenRouter; override for testing or a future proxy.
+    prysm_ai_base_url: str = "https://openrouter.ai/api/v1"
+    # Global GDPR-safe model chain (comma-separated, most preferred first). No
+    # Chinese-origin providers (DeepSeek/GLM/MiniMax/inclusionAI are excluded by
+    # default); the trailing paid model is the cheap floor that absorbs OpenRouter
+    # free-tier caps/congestion. ZDR routing is enforced for every member.
+    prysm_ai_default_chain: str = (
+        "thinkingmachines/inkling:free,google/gemma-4-31b-it:free,thinkingmachines/inkling"
+    )
+    # DeepSeek allowlist chain (opt-in: only used for countries explicitly listed
+    # in prysm_ai_deepseek_countries). Free DeepSeek variant first, then compliant
+    # fallbacks so ZDR is preserved even on this path.
+    prysm_ai_deepseek_chain: str = (
+        "deepseek/deepseek-v4-flash-0731,thinkingmachines/inkling:free,thinkingmachines/inkling"
+    )
+    # Comma-separated ISO alpha-2 countries allowed to use the DeepSeek chain.
+    # Empty (the default) = DeepSeek disabled everywhere. This is an explicit
+    # allowlist, never a denylist - unknown/missing countries get the default
+    # GDPR-safe chain.
+    prysm_ai_deepseek_countries: str = ""
+    # Comma-separated ISO alpha-2 countries that are DENIED hosted PrysmAI with
+    # HTTP 403 (no model call, no usage recorded). Russia/Belarus by default;
+    # extend per policy (e.g. Cuba, Iran, North Korea, Syria, Crimea/UA-43).
+    prysm_ai_restricted_countries: str = "RU,BY"
+    # Force Zero-Data-Retention routing: send provider.data_collection="deny" on
+    # every PrysmAI model request so no prompt/completion is stored or trained on.
+    prysm_ai_zdr: bool = True
+    # Safety buffer applied to per-user USD sub-key limits: the limit is computed
+    # from the token allowance x blended per-token price, then multiplied by this
+    # factor so a slightly more-expensive model / price shift cannot starve a
+    # paying user mid-month.
+    prysm_ai_key_limit_buffer: float = 1.5
 
     # Cloudflare Turnstile on the registration form. Both must be set for the
     # captcha to be enforced; when TURNSTILE_SECRET_KEY is empty the backend

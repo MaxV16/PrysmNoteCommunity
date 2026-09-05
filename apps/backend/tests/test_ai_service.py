@@ -1568,3 +1568,138 @@ async def test_chat_stream_emits_error_event_on_provider_failure(client, ai_user
     assert "api key" in response.text.lower()
 
 
+@pytest.mark.asyncio
+async def test_prysmai_client_sends_models_fallback_array_and_zdr(monkeypatch):
+    """PrysmAI (hosted) must send an ordered ``models`` fallback chain and ZDR
+    ``provider.data_collection="deny"`` on every OpenAI-format request body."""
+    import httpx
+
+    from app.llm.prysmai_client import PrysmAIClient
+    from app.services.ai_service import get_llm_client
+
+    captured = {}
+
+    async def _fake_post(self, url, headers=None, json=None, **kwargs):
+        captured["body"] = json
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+            },
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", _fake_post)
+
+    client = await get_llm_client(
+        "prysmai",
+        "sk-test",
+        model="thinkingmachines/inkling:free",
+        fallbacks=["google/gemma-4-31b-it:free", "thinkingmachines/inkling"],
+        zdr=True,
+    )
+    assert isinstance(client, PrysmAIClient)
+    try:
+        resp = await client.chat([{"role": "user", "content": "hi"}])
+    finally:
+        await client.aclose()
+
+    body = captured["body"]
+    assert body["model"] == "thinkingmachines/inkling:free"
+    assert body["models"] == [
+        "thinkingmachines/inkling:free",
+        "google/gemma-4-31b-it:free",
+        "thinkingmachines/inkling",
+    ]
+    assert body["provider"] == {"data_collection": "deny"}
+    assert resp["usage"]["prompt_tokens"] == 3
+
+
+@pytest.mark.asyncio
+async def test_prysmai_client_zdr_off_omits_provider_block(monkeypatch):
+    import httpx
+
+    from app.llm.prysmai_client import PrysmAIClient
+    from app.services.ai_service import get_llm_client
+
+    captured = {}
+
+    async def _fake_post(self, url, headers=None, json=None, **kwargs):
+        captured["body"] = json
+        return httpx.Response(
+            200, json={"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", _fake_post)
+
+    client = await get_llm_client(
+        "prysmai", "sk-test", model="thinkingmachines/inkling:free", fallbacks=(), zdr=False
+    )
+    try:
+        await client.chat([{"role": "user", "content": "hi"}])
+    finally:
+        await client.aclose()
+
+    body = captured["body"]
+    assert "provider" not in body
+    assert "models" not in body
+
+
+@pytest.mark.asyncio
+async def test_prysmai_client_stream_skips_reasoning_deltas(monkeypatch):
+    """Streaming must only yield visible ``delta.content``: reasoning/thinking
+    deltas arrive with NULL content (thinking tokens) and must not corrupt the
+    user-visible answer."""
+    import httpx
+
+    from app.llm.prysmai_client import PrysmAIClient
+
+    def _sse(event: str) -> str:
+        return f"data: {event}"
+
+    lines = [
+        _sse('{"choices": [{"delta": {"content": null, "reasoning": "let me think"}}]}'),
+        _sse('{"choices": [{"delta": {"content": null}}]}'),
+        _sse('{"choices": [{"delta": {"content": "Real answer"}}]}'),
+        _sse("data: [DONE]"),
+    ]
+
+    class _FakeStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def aiter_lines(self):
+            for ln in lines:
+                yield ln
+
+    def _fake_stream(self, method, url, headers=None, json=None, **kwargs):
+        return _FakeStream()
+
+    monkeypatch.setattr(httpx.AsyncClient, "stream", _fake_stream)
+
+    client = PrysmAIClient("sk-test", model="thinkingmachines/inkling:free")
+    try:
+        pieces = [chunk async for chunk in client.stream_chat([{"role": "user", "content": "hi"}])]
+    finally:
+        await client.aclose()
+
+    assert pieces == ["Real answer"]
+
+
+@pytest.mark.asyncio
+async def test_prysmai_client_embed_not_implemented():
+    """Hosted PrysmAI embeddings are unreachable in practice; the client must
+    raise NotImplementedError (embeddings flow through user BYOK keys)."""
+    from app.llm.prysmai_client import PrysmAIClient
+
+    client = PrysmAIClient("sk-test")
+    try:
+        with pytest.raises(NotImplementedError):
+            await client.embed("hello")
+    finally:
+        await client.aclose()
+
+

@@ -691,7 +691,23 @@ ALWAYS:
     return messages
 
 
-async def get_llm_client(provider: str, api_key: str):
+async def get_llm_client(
+    provider: str,
+    api_key: str,
+    *,
+    model: str | None = None,
+    fallbacks: tuple | list = (),
+    zdr: bool = True,
+):
+    """Factory for a provider client.
+
+    ``model`` / ``fallbacks`` / ``zdr`` are PrysmAI-only parameters (the client
+    is constructed per-request with the resolved model chain + ZDR routing); the
+    BYOK providers accept just a key, so we only forward those kwargs to
+    ``prysmai``. No behavior change for any other provider.
+    """
+    if provider == "prysmai":
+        return get_provider(provider, api_key, model=model, fallbacks=fallbacks, zdr=zdr)
     return get_provider(provider, api_key)
 
 

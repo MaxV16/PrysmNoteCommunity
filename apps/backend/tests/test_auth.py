@@ -781,9 +781,14 @@ async def test_delete_account_uses_db_cascade_not_orm_loop(auth_client, db_sessi
 
     assert resp.status_code == 200
     deletes = [s for s in emitted if s.strip().upper().startswith("DELETE")]
-    # Exactly the blacklist + user-row bulk DELETEs. Any RESTORE of the ORM
+    # Bulk DELETE statements only: token_blacklist + users (+ the EE OpenRouter
+    # sub-key purge when the EE build is installed). Any RESTORE of the ORM
     # cascade would add hundreds of per-row DELETEs here.
-    assert len(deletes) == 2, f"expected 2 bulk DELETEs, got {len(deletes)}: {deletes}"
+    assert len(deletes) <= 3, f"expected only bulk DELETEs, got {len(deletes)}: {deletes}"
+    assert any("FROM users" in s for s in deletes), f"users delete missing: {deletes}"
+    assert not any("task" in s.lower() or "embedding" in s.lower() for s in deletes), (
+        f"ORM per-row cascade leaked: {deletes}"
+    )
 
 
 @pytest.mark.asyncio

@@ -31,11 +31,11 @@ def register_provider(name: str):
     return decorator
 
 
-def get_provider(name: str, api_key: str) -> LLMClient:
+def get_provider(name: str, api_key: str, **kwargs) -> LLMClient:
     cls = _providers.get(name)
     if cls is None:
         raise ValueError(f"Unknown LLM provider: {name}")
-    return cls(api_key=api_key)
+    return cls(api_key=api_key, **kwargs)
 
 
 def list_providers() -> list[str]:

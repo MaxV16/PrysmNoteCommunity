@@ -10,6 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import async_session_factory, get_db
 from app.dependencies import get_current_user
 from app.models.ai_conversation import AiConversation
@@ -27,6 +28,7 @@ from app.services.ai_cache import (
     get_cached_response,
     purge_expired,
 )
+from app.services.ai_region import RegionBlockedError, resolve_ai_chain
 from app.services.ai_service import (
     build_messages,
     execute_tool_calls,
@@ -116,7 +118,7 @@ def _provider_error_detail(exc: Exception) -> str | None:
     return None
 
 
-def _friendly_llm_error(exc: Exception) -> str:
+def _friendly_llm_error(exc: Exception, provider: str | None = None) -> str:
     """Map provider/transport errors to a clear, actionable user message - e.g.
     when the user's OpenRouter key has no credits left."""
     import openai
@@ -130,6 +132,14 @@ def _friendly_llm_error(exc: Exception) -> str:
     status = exc.status_code if isinstance(exc, openai.APIStatusError) else None
 
     if status == 402 or "insufficient credit" in detail or "no credit" in detail or "payment required" in detail:
+        if provider == "prysmai":
+            # Hosted PrysmAI sub-keys are server-managed; a 402 means the user's
+            # USD key limit (mirror of the token allowance) is exhausted, not a
+            # missing credit balance on their own account.
+            return (
+                "Your PrysmAI token allowance is used up for this month. "
+                "Upgrade your plan or wait for it to reset."
+            )
         return (
             "Your AI provider account is out of credits, so the AI can't respond. "
             "Top up your account (e.g. at openrouter.ai) and try again."
@@ -304,16 +314,50 @@ async def get_user_api_key(session: AsyncSession, user: User, provider: str) -> 
     return None
 
 
-async def resolve_llm_key(
-    session: AsyncSession, user: User, provider: str
-) -> tuple[str, str | None]:
-    """Resolve ``(provider, api_key)`` for a chat request.
+def _resolve_chain(http_request: Request | None) -> tuple[str, list[str]]:
+    """Resolve ``(primary, fallbacks)`` from the request's ``cf-ipcountry``.
 
-    Returns ``(provider, api_key)``. For the hosted ``prysmai`` provider this
-    validates the user's AI entitlement + allowance and returns the server's
-    DeepSeek key; for BYOK providers it returns the user's own stored key (paid
-    subscription required in the hosted build - the community build has no
-    premium tier, so BYOK stays open there).
+    Restricted countries raise HTTP 403 before any model call or usage happens;
+    missing/unknown countries fall through to the global compliant chain.
+    """
+    country = http_request.headers.get("cf-ipcountry") if http_request else None
+    try:
+        return resolve_ai_chain(country)
+    except RegionBlockedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="PrysmAI is not available in your region.",
+        ) from None
+
+
+def _build_llm_client(provider: str, api_key: str | None, chain: tuple[str, list[str]] | None):
+    """Construct the provider client, feeding the hosting chain to PrysmAI.
+
+    ``chain`` is ``(primary, fallbacks)`` for the hosted ``prysmai`` provider
+    and ``None`` for BYOK providers (which take only their key). ZDR is always
+    forced for hosted calls.
+    """
+    if provider == "prysmai" and chain:
+        return get_llm_client(
+            provider,
+            api_key or "",
+            model=chain[0],
+            fallbacks=chain[1],
+            zdr=settings.prysm_ai_zdr,
+        )
+    return get_llm_client(provider, api_key or "")
+
+
+async def resolve_llm_key(
+    session: AsyncSession, user: User, provider: str, http_request: Request | None = None
+) -> tuple[str, str | None, tuple[str, list[str]] | None]:
+    """Resolve ``(provider, api_key, chain)`` for a chat request.
+
+    For the hosted ``prysmai`` provider this validates the user's AI entitlement
+    + allowance, resolves the region-routes model chain, and (EE build) returns
+    the user's per-user OpenRouter sub-key; BYOK providers return the user's own
+    stored key with ``chain=None`` (paid subscription required in the hosted
+    build - the community build has no premium tier, so BYOK stays open there).
     Raises a 4xx HTTPException with a friendly message when access isn't allowed.
     """
     if provider == "prysmai":
@@ -328,13 +372,19 @@ async def resolve_llm_key(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Your PrysmAI token allowance is used up for this month. Upgrade your plan or wait for it to reset.",
             )
-        server_key = os.getenv("DEEPSEEK_API_KEY") or ""
+        chain_primary, chain_fallbacks = _resolve_chain(http_request)
+
+
+        # Community build (no EE key service): fall back to the legacy server-key
+        # behavior. The client now targets OpenRouter, so prefer the server's
+        # OpenRouter key (a DeepSeek key only ever worked against api.deepseek.com).
+        server_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or ""
         if not server_key:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="PrysmAI is not configured on this server yet.",
             )
-        return "prysmai", server_key
+        return "prysmai", server_key, (chain_primary, chain_fallbacks)
 
     if not await byok_allowed(str(user.id), session):
         raise HTTPException(
@@ -344,7 +394,7 @@ async def resolve_llm_key(
     api_key = await get_user_api_key(session, user, provider)
     if not api_key:
         raise HTTPException(status_code=400, detail="Please provide an API key in Settings.")
-    return provider, api_key
+    return provider, api_key, None
 
 
 async def record_response_usage(
@@ -570,15 +620,16 @@ async def ai_entitlement(
 @router.post("/chat")
 async def chat(
     request: ChatRequest,
+    http_request: Request,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
     _check_ai_rate_limit(str(user.id))
 
-    provider, api_key = await resolve_llm_key(session, user, request.provider)
+    provider, api_key, chain = await resolve_llm_key(session, user, request.provider, http_request)
 
     session_id = request.session_id or str(uuid4())
-    client = await get_llm_client(provider, api_key)
+    client = await _build_llm_client(provider, api_key, chain)
     sanitized_history = _sanitize_chat_history(request.chat_history)
     ai_session = await load_session_summary(session, user.id, session_id)
     current_summary = ai_session.summary if ai_session else None
@@ -612,7 +663,7 @@ async def chat(
                     content = (fallback.get("choices", [{}])[0].get("message", {}).get("content", "")) or ""
                     tool_calls = None
         except Exception as exc:  # provider/auth/credit errors -> a clear, actionable message
-            raise HTTPException(status_code=502, detail=_friendly_llm_error(exc)) from exc
+            raise HTTPException(status_code=502, detail=_friendly_llm_error(exc, provider)) from exc
 
         # Durable tool side-effects before answering: commit any created/scheduled
         # tasks so a disconnect after the response can't roll them back.
@@ -696,10 +747,10 @@ async def chat_stream(
 ):
     _check_ai_rate_limit(str(user.id))
 
-    provider, api_key = await resolve_llm_key(session, user, req.provider)
+    provider, api_key, chain = await resolve_llm_key(session, user, req.provider, http_request)
 
     session_id = req.session_id or str(uuid4())
-    client = await get_llm_client(provider, api_key)
+    client = await _build_llm_client(provider, api_key, chain)
     sanitized_history = _sanitize_chat_history(req.chat_history)
     ai_session = await load_session_summary(session, user.id, session_id)
     current_summary = ai_session.summary if ai_session else None
@@ -762,7 +813,7 @@ async def chat_stream(
                     messages.extend(tool_results)
                     yield {"event": "tool_results", "data": json.dumps([r["content"] for r in tool_results])}
             except Exception as exc:  # provider/auth/credit errors should be visible, not a dead stream
-                yield {"event": "error", "data": _friendly_llm_error(exc)}
+                yield {"event": "error", "data": _friendly_llm_error(exc, provider)}
                 return
 
             # Commit tool side-effects, the user message (persisted at request time)
@@ -801,7 +852,7 @@ async def chat_stream(
                     await session.commit()
                 except Exception:
                     pass
-                yield {"event": "error", "data": _friendly_llm_error(exc)}
+                yield {"event": "error", "data": _friendly_llm_error(exc, provider)}
                 return
 
             if not streamed:
