@@ -1,5 +1,15 @@
 import os
+import sys
+from pathlib import Path
 from uuid import uuid4
+
+# The enterprise `ee` package lives at the repo root, outside this package. A
+# fresh `pip install -e .[test]` does not reliably map it on every CI image,
+# so make the repo root importable before anything pulls in the EE-guarded
+# imports (finance/OpenClaw tool definitions).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 import pytest
 import pytest_asyncio
