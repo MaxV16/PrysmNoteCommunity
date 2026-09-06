@@ -295,6 +295,15 @@ export function normalizeAssistantMarkdown(text: string): string {
       for (const marker of ["**", "__", "*", "_", "`"]) {
         s = stripDelimiterSpacing(s, marker);
       }
+      // A word split around a hyphen by a dropped/spurious space ("hyper -int",
+      // "hyper- int", "hyper - int") collapses to the compound ("hyper-int").
+      // Only when at least one side is NOT a dictionary word (a streaming
+      // fragment), so a deliberate spaced dash clause ("mean - it works")
+      // survives untouched.
+      s = s.replace(/([A-Za-z]+)[ \t]*-[ \t]*([A-Za-z]+)/g, (_m, a, b) => {
+        if (COMMON_WORDS.has(a.toLowerCase()) && COMMON_WORDS.has(b.toLowerCase())) return _m;
+        return `${a}-${b}`;
+      });
       // Words split by fragmented streaming ("Fin ance", "Pr ys m Note") and
       // words merged by dropped spaces ("Trackand Manage"). Runs with digits or
       // punctuation were already cleaned above; only pure-letter runs are tried.

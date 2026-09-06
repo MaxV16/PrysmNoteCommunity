@@ -1558,6 +1558,17 @@ def test_normalize_reply_markdown_user_qa_corpus():
     assert _normalize_reply_markdown("Trackand Manage your day") == "Track and Manage your day"
     assert _normalize_reply_markdown("** Settings **") == "**Settings**"
 
+    # The exact user QA string (parity with the frontend corpus): the fragment
+    # rejoin handles "int elligent", but the stray space before the hyphen in
+    # "hyper -int" must also collapse.
+    assert (
+        _normalize_reply_markdown(
+            "I 'm Pr ys m AI , a hyper -int elligent task management agent designed to assist with scheduling , organizing , and optimizing your tasks and productivity ."
+        )
+        == "I'm Prysm AI, a hyper-intelligent task management agent designed to assist with scheduling, organizing, and optimizing your tasks and productivity."
+    )
+    assert _normalize_reply_markdown("Pr ys m AI") == "Prysm AI"
+
     # Safety net: ordinary prose is never touched.
     for clean in [
         "it is now the time",
@@ -1580,6 +1591,10 @@ def test_clean_text_tool_json_feed_through_word_repairs():
     assert _clean_text_tool_json("Work ( tom orrow 4 \u2013 1 2 )") == "Work (tomorrow 4-12)"
     assert _clean_text_tool_json("Pr ys m Note") == "Prysm Note"
     assert _clean_text_tool_json("I 've cancelled the following tasks :") == "I've cancelled the following tasks:"
+    assert (
+        _clean_text_tool_json("I 'm Pr ys m AI , a hyper -int elligent task management agent")
+        == "I'm Prysm AI, a hyper-intelligent task management agent"
+    )
 
 
 def test_text_tool_call_helpers_parse_strip_and_clean():

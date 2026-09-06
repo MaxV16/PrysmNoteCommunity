@@ -92,6 +92,17 @@ describe("user QA corpus (fragmented streaming artifacts)", () => {
     ).toBe("In Finance you can track Expenses, Loans and Deleting.");
   });
 
+  it("cleans the exact user QA string (voice-dictated welcome copy) and caps variant", () => {
+    expect(
+      normalizeAssistantMarkdown(
+        "I 'm Pr ys m AI , a hyper -int elligent task management agent designed to assist with scheduling , organizing , and optimizing your tasks and productivity ."
+      )
+    ).toBe(
+      "I'm Prysm AI, a hyper-intelligent task management agent designed to assist with scheduling, organizing, and optimizing your tasks and productivity."
+    );
+    expect(normalizeAssistantMarkdown("Pr ys m AI")).toBe("Prysm AI");
+  });
+
   it("re-splits words merged by a dropped space", () => {
     expect(normalizeAssistantMarkdown("Trackand Manage your day")).toBe("Track and Manage your day");
   });

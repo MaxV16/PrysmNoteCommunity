@@ -64,6 +64,20 @@ def _normalize_reply_markdown(text: str) -> str:
             line,
         )
 
+    def _collapse_hyphen_spacing(line: str) -> str:
+        # A word split around a hyphen by a dropped/spurious space ("hyper -int",
+        # "hyper- int", "hyper - int") collapses to the compound ("hyper-int").
+        # Only when at least one side is NOT a dictionary word (a streaming
+        # fragment), so a deliberate spaced dash clause ("mean - it works")
+        # survives untouched. Mirrors ai-format.ts.
+        def _repl(m: re.Match) -> str:
+            a, b = m.group(1), m.group(2)
+            if a.lower() in COMMON_WORDS and b.lower() in COMMON_WORDS:
+                return m.group(0)
+            return f"{a}-{b}"
+
+        return re.sub(r"([A-Za-z]+)[ \t]*-[ \t]*([A-Za-z]+)", _repl, line)
+
     def _clean(line: str) -> str:
         line = re.sub(r"[ \t]+([,.;:?!>)])", r"\1", line)
         line = re.sub(r"([(\[{<])[ \t]+(?![\]}])", r"\1", line)
@@ -80,6 +94,7 @@ def _normalize_reply_markdown(text: str) -> str:
         line = re.sub(r"(?i)(\d)[ \t]+(?=(?:am|pm)\b)", r"\1", line)
         for marker in ("**", "__", "*", "_", "`"):
             line = _strip_delimiter_spacing(line, marker)
+        line = _collapse_hyphen_spacing(line)
         # Words split by fragmented streaming ("Fin ance", "Pr ys m Note") and
         # words merged by dropped spaces ("Trackand Manage"). Runs with digits
         # or punctuation were already cleaned above; only letter runs are tried.
