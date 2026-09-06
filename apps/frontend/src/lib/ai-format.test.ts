@@ -75,6 +75,46 @@ describe("normalizeAssistantMarkdown", () => {
   });
 });
 
+describe("user QA corpus (fragmented streaming artifacts)", () => {
+  it("rejoins words split by fragmented streaming and fixes the literal prod artifacts", () => {
+    expect(normalizeAssistantMarkdown("I 've cancelled the following tasks :")).toBe(
+      "I've cancelled the following tasks:"
+    );
+    expect(normalizeAssistantMarkdown("Work ( tom orrow 4 \u2013 1 2 )")).toBe(
+      "Work (tomorrow 4-12)"
+    );
+    expect(normalizeAssistantMarkdown("Pr ys m Note")).toBe("Prysm Note");
+    expect(normalizeAssistantMarkdown("To use the finance feature in Pr ys m Note")).toBe(
+      "To use the finance feature in Prysm Note"
+    );
+    expect(
+      normalizeAssistantMarkdown("In Fin ance you can track Exp enses, Lo ans and De leting.")
+    ).toBe("In Finance you can track Expenses, Loans and Deleting.");
+  });
+
+  it("re-splits words merged by a dropped space", () => {
+    expect(normalizeAssistantMarkdown("Trackand Manage your day")).toBe("Track and Manage your day");
+  });
+
+  it("keeps emphasis markers tight even when the inner text was split", () => {
+    expect(normalizeAssistantMarkdown("** Settings **")).toBe("**Settings**");
+  });
+
+  it("never changes ordinary prose (safety net)", () => {
+    for (const clean of [
+      "it is now the time",
+      "to be or not to be",
+      "new house",
+      "a b c",
+      "no one knows",
+      "in to",
+      "Track and Manage is a real feature",
+    ]) {
+      expect(normalizeAssistantMarkdown(clean)).toBe(clean);
+    }
+  });
+});
+
 describe("stripTextToolCalls", () => {
   it("removes [TOOL_CALLS] name {json} blocks but keeps surrounding prose", () => {
     expect(

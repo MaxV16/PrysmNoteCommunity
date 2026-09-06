@@ -7,6 +7,8 @@ import re
 import json
 from uuid import uuid4
 
+from app.services.common_words import COMMON_WORDS
+
 
 _TEXT_TOOL_CALL_MARKER = "[TOOL_CALLS]"
 
@@ -78,6 +80,11 @@ def _normalize_reply_markdown(text: str) -> str:
         line = re.sub(r"(?i)(\d)[ \t]+(?=(?:am|pm)\b)", r"\1", line)
         for marker in ("**", "__", "*", "_", "`"):
             line = _strip_delimiter_spacing(line, marker)
+        # Words split by fragmented streaming ("Fin ance", "Pr ys m Note") and
+        # words merged by dropped spaces ("Trackand Manage"). Runs with digits
+        # or punctuation were already cleaned above; only letter runs are tried.
+        line = _rejoin_fragmented_words(line)
+        line = _split_merged_words(line)
         return line
 
     out: list[str] = []
@@ -90,6 +97,117 @@ def _normalize_reply_markdown(text: str) -> str:
             continue
         out.append(line if in_fence else _clean(line))
     return "\n".join(out)
+
+
+_FRAGMENT_RE = re.compile(r"[A-Za-z]+")
+
+
+def _rejoin_fragmented_words(line: str) -> str:
+    """Rejoin words split by fragmented streaming ("Fin ance", "Pr ys m Note").
+
+    A fragment run is a maximal sequence of pure-letter tokens where each
+    consecutive pair is separated by whitespace only. Tokens that the earlier
+    rules merged punctuation into ("(tom", "tasks:") still take part: only the
+    letters are rejoined and the punctuation shell is preserved. Mirrors the
+    rejoin pass in apps/frontend/src/lib/ai-format.ts.
+    """
+    items = [(m.start(), m.end(), m.group(0)) for m in _FRAGMENT_RE.finditer(line)]
+    if len(items) < 2:
+        return line
+    out: list[str] = []
+    pos = 0
+    i = 0
+    n = len(items)
+    while i < n:
+        j = i + 1
+        while j < n and not line[items[j - 1][1]: items[j][0]].strip():
+            j += 1
+        run = items[i:j]
+        out.append(line[pos: run[0][0]])
+        if len(run) == 1:
+            out.append(run[0][2])
+        else:
+            tokens = [it[2] for it in run]
+            gaps = [line[run[k][1]: run[k + 1][0]] for k in range(len(run) - 1)]
+            out.append(_rejoin_run(tokens, gaps))
+        pos = run[-1][1]
+        i = j
+    out.append(line[pos:])
+    return "".join(out)
+
+
+def _is_valid_join(tokens: list[str], i: int, k: int) -> bool:
+    joined = "".join(tokens[i: i + k])
+    if not (4 <= len(joined) <= 24) or joined.lower() not in COMMON_WORDS:
+        return False
+    return any(t.lower() not in COMMON_WORDS for t in tokens[i: i + k])
+
+
+def _rejoin_length(tokens: list[str], i: int) -> int:
+    n = len(tokens)
+    # Longest prefix that ends right before a standalone dictionary word, so a
+    # real word like "Note" in "Pr ys m Note" is never absorbed.
+    for k in range(min(n - i - 1, 24), 1, -1):
+        if _is_valid_join(tokens, i, k) and tokens[i + k].lower() in COMMON_WORDS:
+            return k
+    # Whole-run fallback (covers "Fin ance", "tom orrow", "go ing").
+    for k in range(min(n - i, 24), 1, -1):
+        if _is_valid_join(tokens, i, k):
+            return k
+    return 0
+
+
+def _rejoin_run(tokens: list[str], gaps: list[str]) -> str:
+    result: list[str] = []
+    i = 0
+    prev_end = -1
+    while i < len(tokens):
+        gap = "" if prev_end == -1 else gaps[prev_end]
+        k = _rejoin_length(tokens, i)
+        if k >= 2:
+            result.append(gap + "".join(tokens[i: i + k]))
+            prev_end = i + k - 1
+            i += k
+        else:
+            result.append(gap + tokens[i])
+            prev_end = i
+            i += 1
+    return "".join(result)
+
+
+def _split_merged_words(line: str) -> str:
+    """Reinsert a space in words merged by a dropped space ("Trackand Manage").
+
+    Only unknown 6+ letter tokens are candidates, and the split point must
+    leave two dictionary-word halves on both sides, so known words like "into"
+    or "alright" are never touched. The first non-suffix split wins; a trailing
+    "s"/"ed"/"ing" split is only used when nothing else fits. Mirrors
+    splitMergedWord in apps/frontend/src/lib/ai-format.ts.
+    """
+
+    def _repl(m: re.Match) -> str:
+        tok = m.group(0)
+        lower = tok.lower()
+        if lower in COMMON_WORDS:
+            return tok
+        first_valid = -1
+        first_clean = -1
+        for i in range(4, len(lower) - 1):
+            left = lower[:i]
+            right = lower[i:]
+            if left not in COMMON_WORDS or right not in COMMON_WORDS:
+                continue
+            if first_valid == -1:
+                first_valid = i
+            if right not in ("s", "ed", "ing"):
+                first_clean = i
+                break
+        at = first_clean if first_clean != -1 else first_valid
+        if at == -1:
+            return tok
+        return tok[:at] + " " + tok[at:]
+
+    return re.sub(r"[A-Za-z]{6,}", _repl, line)
 
 
 def _strip_text_tool_calls(text: str) -> str:

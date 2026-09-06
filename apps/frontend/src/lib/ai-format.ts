@@ -2,9 +2,12 @@
 //
 // Some providers write emphasis with stray spaces ("** what should the task
 // be ?**" or "* x *") which never renders as markdown, and insert spaces around
-// punctuation ("e .g .", "daily ,", "I 'll"). This mirrors the backend
-// _normalize_reply_markdown (app/routers/ai.py) so the live stream and the
-// persisted history both display cleanly.
+// punctuation ("e .g .", "daily ,", "I 'll"). Others stream fragmented BPE
+// tokens that split words ("Fin ance") or merge them ("Trackand Manage").
+// This mirrors the backend _normalize_reply_markdown (app/services/ai_shared.py)
+// so the live stream and the persisted history both display cleanly.
+
+import { COMMON_WORDS } from "./common-words";
 
 const TOOL_CALL_MARKER = "[TOOL_CALLS]";
 
@@ -119,6 +122,126 @@ function joinSplitHexRun(line: string): string {
   });
 }
 
+// Dictionary-based repair for words split by fragmented streaming.
+//
+// A "fragment run" is a maximal sequence of pure-letter tokens where each
+// consecutive pair is separated by whitespace only. Tokens that the earlier
+// rules merged punctuation into ("(tom", "tasks:") still take part: only the
+// letters are rejoined and the punctuation shell is preserved.
+//
+// Rejoin rule for a run:
+//   1. Longest prefix that is a dictionary word (4..24 chars) coming right
+//      before a standalone dictionary word takes priority, so "Pr ys m Note"
+//      becomes "Prysm Note" (never "Prysmnote").
+//   2. Otherwise the whole run rejoins when its joined form is a dictionary
+//      word and at least one fragment is not ("Fin ance" -> "Finance",
+//      "tom orrow" -> "tomorrow"). When every fragment is a dictionary word
+//      ("in to", "new house") the run is left intact.
+function isValidJoin(tokens: string[], i: number, k: number): boolean {
+  const joined = tokens.slice(i, i + k).join("");
+  if (joined.length < 4 || joined.length > 24) return false;
+  if (!COMMON_WORDS.has(joined.toLowerCase())) return false;
+  for (let t = i; t < i + k; t++) {
+    if (!COMMON_WORDS.has(tokens[t].toLowerCase())) return true;
+  }
+  return false;
+}
+
+function rejoinLength(tokens: string[], i: number): number {
+  const n = tokens.length;
+  // Longest prefix that ends right before a standalone dictionary word.
+  for (let k = Math.min(n - i - 1, 24); k >= 2; k--) {
+    if (isValidJoin(tokens, i, k) && COMMON_WORDS.has(tokens[i + k].toLowerCase())) {
+      return k;
+    }
+  }
+  // Whole-run fallback (covers "Fin ance", "tom orrow", "go ing").
+  for (let k = Math.min(n - i, 24); k >= 2; k--) {
+    if (isValidJoin(tokens, i, k)) return k;
+  }
+  return 0;
+}
+
+function rejoinRun(tokens: string[], gaps: string[]): string {
+  let result = "";
+  let i = 0;
+  let prevEnd = -1;
+  while (i < tokens.length) {
+    const gap = prevEnd === -1 ? "" : gaps[prevEnd];
+    const k = rejoinLength(tokens, i);
+    if (k >= 2) {
+      result += gap + tokens.slice(i, i + k).join("");
+      prevEnd = i + k - 1;
+      i += k;
+    } else {
+      result += gap + tokens[i];
+      prevEnd = i;
+      i += 1;
+    }
+  }
+  return result;
+}
+
+function rejoinWordFragments(line: string): string {
+  const fragRe = /[A-Za-z]+/g;
+  const items: Array<{ start: number; end: number; word: string }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = fragRe.exec(line)) !== null) {
+    items.push({ start: m.index, end: m.index + m[0].length, word: m[0] });
+  }
+  if (items.length < 2) return line;
+
+  const out: string[] = [];
+  let pos = 0;
+  let i = 0;
+  while (i < items.length) {
+    let j = i + 1;
+    while (j < items.length && /^[ \t]*$/.test(line.slice(items[j - 1].end, items[j].start))) {
+      j += 1;
+    }
+    const run = items.slice(i, j);
+    out.push(line.slice(pos, run[0].start));
+    if (run.length === 1) {
+      out.push(run[0].word);
+    } else {
+      const tokens = run.map((it) => it.word);
+      const gaps = run.slice(0, -1).map((it, k) => line.slice(it.end, run[k + 1].start));
+      out.push(rejoinRun(tokens, gaps));
+    }
+    pos = run[run.length - 1].end;
+    i = j;
+  }
+  out.push(line.slice(pos));
+  return out.join("");
+}
+
+// Dictionary-based repair for words merged by a dropped space ("Trackand
+// Manage"). Only unknown 6+ letter tokens are candidates, and the split point
+// must leave two dictionary-word halves on both sides, so known words like
+// "into" or "alright" are never touched. The first non-suffix split wins;
+// a trailing "s"/"ed"/"ing" split is only used when nothing else fits.
+function splitMergedWord(line: string): string {
+  return line.replace(/[A-Za-z]{6,}/g, (tok) => {
+    const lower = tok.toLowerCase();
+    if (COMMON_WORDS.has(lower)) return tok;
+    let firstValid = -1;
+    let firstClean = -1;
+    for (let i = 4; i <= lower.length - 2; i++) {
+      const right = lower.slice(i);
+      if (!COMMON_WORDS.has(lower.slice(0, i))) continue;
+      if (!COMMON_WORDS.has(right)) continue;
+      if (firstValid === -1) firstValid = i;
+      if (right !== "s" && right !== "ed" && right !== "ing") {
+        firstClean = i;
+        break;
+      }
+    }
+    const splitAt = firstClean !== -1 ? firstClean : firstValid;
+    if (splitAt === -1) return tok;
+    return tok.slice(0, splitAt) + " " + tok.slice(splitAt);
+  });
+}
+
 export function normalizeAssistantMarkdown(text: string): string {
   if (!text) return text;
   let inFence = false;
@@ -172,6 +295,11 @@ export function normalizeAssistantMarkdown(text: string): string {
       for (const marker of ["**", "__", "*", "_", "`"]) {
         s = stripDelimiterSpacing(s, marker);
       }
+      // Words split by fragmented streaming ("Fin ance", "Pr ys m Note") and
+      // words merged by dropped spaces ("Trackand Manage"). Runs with digits or
+      // punctuation were already cleaned above; only pure-letter runs are tried.
+      s = rejoinWordFragments(s);
+      s = splitMergedWord(s);
       return s;
     })
     .join("\n");

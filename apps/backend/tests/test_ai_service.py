@@ -1539,6 +1539,49 @@ def test_normalize_reply_markdown_fixes_stray_space_emphasis_and_punctuation():
     assert _normalize_reply_markdown("4 pm to 1 2 am") == "4pm to 12am"
 
 
+def test_normalize_reply_markdown_user_qa_corpus():
+    """User QA corpus (parity with apps/frontend/src/lib/ai-format.test.ts):
+    words split by fragmented streaming must be rejoined, words merged by a
+    dropped space re-split, and ordinary prose must never change."""
+    from app.routers.ai import _normalize_reply_markdown
+
+    # Split words rejoined + the literal prod artifacts.
+    assert _normalize_reply_markdown("I 've cancelled the following tasks :") == "I've cancelled the following tasks:"
+    assert _normalize_reply_markdown("Work ( tom orrow 4 \u2013 1 2 )") == "Work (tomorrow 4-12)"
+    assert _normalize_reply_markdown("Pr ys m Note") == "Prysm Note"
+    assert _normalize_reply_markdown("To use the finance feature in Pr ys m Note") == "To use the finance feature in Prysm Note"
+    assert (
+        _normalize_reply_markdown("In Fin ance you can track Exp enses, Lo ans and De leting.")
+        == "In Finance you can track Expenses, Loans and Deleting."
+    )
+    # Merged words re-split.
+    assert _normalize_reply_markdown("Trackand Manage your day") == "Track and Manage your day"
+    assert _normalize_reply_markdown("** Settings **") == "**Settings**"
+
+    # Safety net: ordinary prose is never touched.
+    for clean in [
+        "it is now the time",
+        "to be or not to be",
+        "new house",
+        "a b c",
+        "no one knows",
+        "in to",
+        "Track and Manage is a real feature",
+    ]:
+        assert _normalize_reply_markdown(clean) == clean
+
+
+def test_clean_text_tool_json_feed_through_word_repairs():
+    """The text-tool-call cleaner (used for '[TOOL_CALLS]' JSON payloads) runs
+    the same word repairs: corpus strings fed through _clean_text_tool_json
+    come out with their fragmented words rejoined and whitespace collapsed."""
+    from app.services.ai_shared import _clean_text_tool_json
+
+    assert _clean_text_tool_json("Work ( tom orrow 4 \u2013 1 2 )") == "Work (tomorrow 4-12)"
+    assert _clean_text_tool_json("Pr ys m Note") == "Prysm Note"
+    assert _clean_text_tool_json("I 've cancelled the following tasks :") == "I've cancelled the following tasks:"
+
+
 def test_text_tool_call_helpers_parse_strip_and_clean():
     """Some models cannot emit structured tool_calls and instead write them as
     literal text: `[TOOL_CALLS] <name> {json}`, often carrying the same
