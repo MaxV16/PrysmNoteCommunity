@@ -202,6 +202,33 @@ TODOIST_PROJECT_NAME_CSV = (
 ).encode("utf-8")
 
 
+def build_ticktick_same_titled_items() -> bytes:
+    # Two id-less checklists with identical dates and an identically-titled
+    # item: each item must nest under ITS OWN parent, not dedupe against the
+    # other (child rows share the parent's date fields).
+    header = TICKTICK_NO_IDS_HEADER + "\n"
+    first = (
+        'Work,Work,Alpha,,"▫ Review",Y,2022-03-14,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1\n"
+    )
+    second = (
+        'Work,Work,Beta,,"▫ Review",Y,2022-03-14,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1\n"
+    )
+    return (header + first + second).encode("utf-8")
+
+
+def build_ticktick_plain_single_line() -> bytes:
+    # Single-line prose that contains a stray marker char is a description,
+    # not a checklist: it must not be split into bogus subtask items.
+    return (
+        TICKTICK_HEADER
+        + "\n"
+        + 'Work,Work,Prose task,,"Budget is 2*3 per unit",N,2022-03-14,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-p1,\n"
+    ).encode("utf-8")
+
+
 async def get_task_by_title(
     db_session: AsyncSession, title: str, top_level_only: bool = True
 ) -> Task | None:
@@ -870,3 +897,52 @@ async def test_import_todoist_project_name_variant_tag_description_and_note(
     note = note_result.scalar_one_or_none()
     assert note is not None
     assert note.content == "A sticky idea"
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_same_titled_items_under_different_parents(
+    client: AsyncClient, db_session: AsyncSession
+):
+    # Two checklists with the same dates and an identically-titled item must
+    # each keep their own subtask: child dedupe must not collapse on the bare
+    # (title, start, due) tuple, which is identical for both items.
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("ticktick.csv", build_ticktick_same_titled_items(), "text/csv")},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 4
+    assert body["failed"] == 0
+    assert body["skipped"] == 0
+
+    alpha = await get_task_by_title(db_session, "Alpha")
+    beta = await get_task_by_title(db_session, "Beta")
+    assert alpha is not None and beta is not None
+    assert alpha.parent_task_id is None and beta.parent_task_id is None
+    assert await _subtask_titles(db_session, alpha.id) == {"Review"}
+    assert await _subtask_titles(db_session, beta.id) == {"Review"}
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_single_line_prose_is_not_split_into_items(
+    client: AsyncClient, db_session: AsyncSession
+):
+    # A non-checklist single-line description with a stray "*" must stay a
+    # description; the concatenated-item scanner must not fire without a marker
+    # at the start of the content.
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("ticktick.csv", build_ticktick_plain_single_line(), "text/csv")},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 1
+    assert body["failed"] == 0
+
+    parent = await get_task_by_title(db_session, "Prose task")
+    assert parent is not None
+    assert parent.description == "Budget is 2*3 per unit"
+    assert await _subtask_titles(db_session, parent.id) == set()

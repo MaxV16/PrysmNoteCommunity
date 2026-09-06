@@ -199,7 +199,7 @@ def _valid_rrule(rule: str | None) -> str | None:
 
 _TEXT_HIGH = {"urgent", "high", "p1", "p2"}
 _TEXT_MEDIUM = {"medium", "normal", "p3"}
-_TEXT_LOW = {"low", "p4", "p5", "none", ""}
+_TEXT_LOW = {"low", "p4", "p5", "none"}
 
 
 def _map_priority(value: str | None, scale: str) -> int:
@@ -575,17 +575,20 @@ def _parse_checklist_items(content: str) -> list[tuple[str, bool]]:
     content = content or ""
     lines = content.splitlines()
     # TickTick sometimes concatenates checklist items onto one line with no
-    # line breaks (e.g. "▫ A▪ B▫ C"). A single line never needs newline
-    # splitting, so scan it for consecutive marker runs directly.
+    # line breaks (e.g. "▫ A▪ B▫ C"). Only treat single-line content as a list
+    # when it actually starts with a marker: plain prose containing a stray
+    # "*"/"-" must not be split into bogus items.
     if len(lines) <= 1:
-        items = []
-        for m in CONCAT_CHECKLIST_RE.finditer(content):
-            done = bool(m.group(1) and m.group(1).lower() == "x")
-            label = m.group(2).strip()
-            if label:
-                items.append((label, done))
-        if items:
-            return items
+        stripped = content.strip()
+        if stripped and stripped[0] in "▫▪•*-":
+            items = []
+            for m in CONCAT_CHECKLIST_RE.finditer(content):
+                done = bool(m.group(1) and m.group(1).lower() == "x")
+                label = m.group(2).strip()
+                if label:
+                    items.append((label, done))
+            if items:
+                return items
     items = []
     for line in lines:
         s = line.strip()
@@ -1029,6 +1032,24 @@ async def _run_import(
     children: list[tuple[int, dict]] = []
     tag_cache = await _load_tag_cache(session, user_id)
 
+    # Children dedupe by their stable source key within a batch, NOT by the
+    # bare (title, start, due) tuple: checklist items inherit the parent's
+    # dates, so two parents with identical dates and an identically-titled
+    # item are distinct tasks that must both import. Cross-batch idempotency
+    # still comes from the preloaded `existing` snapshot.
+    child_keys: set[tuple] = set()
+
+    def _child_duplicate(row: dict) -> bool:
+        if _dedupe_key(row) in existing:
+            return True
+        src = row.get("source_key")
+        return bool(src and (_dedupe_key(row) + (src,)) in child_keys)
+
+    def _mark_child_imported(row: dict) -> None:
+        src = row.get("source_key")
+        if src:
+            child_keys.add(_dedupe_key(row) + (src,))
+
     # Batched inserts: simple rows (no recurrence rule) are built as ORM objects
     # and flushed in bulk every COMMIT_EVERY rows instead of one flush per row.
     # Rows with a recurrence rule keep using create_task, which materializes the
@@ -1135,7 +1156,7 @@ async def _run_import(
         remaining: list[tuple[int, dict]] = []
         made_progress = False
         for idx, row in worklist:
-            if _dedupe_key(row) in existing:
+            if _child_duplicate(row):
                 stats["skipped"] += 1
                 processed += 1
                 await _maybe_commit(processed)
@@ -1159,7 +1180,7 @@ async def _run_import(
                     if task is None:
                         stats["skipped"] += 1
                     else:
-                        existing.add(_dedupe_key(row))
+                        _mark_child_imported(row)
                         if row.get("source_key"):
                             parent_ids[row["source_key"]] = task.id
                         title_ids.setdefault((row.get("title") or ""), task.id)
@@ -1171,7 +1192,7 @@ async def _run_import(
                     if task is None:
                         stats["skipped"] += 1
                     else:
-                        existing.add(_dedupe_key(row))
+                        _mark_child_imported(row)
                         pending.append((idx, row, task))
                         stats["imported"] += 1
             except Exception as e:
@@ -1187,7 +1208,7 @@ async def _run_import(
         if not made_progress:
             # Orphans: no parent surfaced in any round - import as top level.
             for idx, row in remaining:
-                if _dedupe_key(row) in existing:
+                if _child_duplicate(row):
                     stats["skipped"] += 1
                     processed += 1
                     await _maybe_commit(processed)
@@ -1202,7 +1223,7 @@ async def _run_import(
                             processed += 1
                             await _maybe_commit(processed)
                             continue
-                        existing.add(_dedupe_key(row))
+                        _mark_child_imported(row)
                         if row.get("source_key"):
                             parent_ids[row["source_key"]] = task.id
                         title_ids.setdefault((row.get("title") or ""), task.id)
@@ -1214,7 +1235,7 @@ async def _run_import(
                             processed += 1
                             await _maybe_commit(processed)
                             continue
-                        existing.add(_dedupe_key(row))
+                        _mark_child_imported(row)
                         pending.append((idx, row, task))
                         stats["imported"] += 1
                     errors.append({
