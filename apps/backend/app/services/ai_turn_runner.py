@@ -221,6 +221,14 @@ async def _run_turn(job: TurnJob) -> None:
                     content = (first_choice(fallback).get("message", {}).get("content", "")) or ""
                     tool_calls = None
 
+            # Commit tool side-effects. If a failing tool left the session in a
+            # rolled-back state despite execute_tool_calls' own recovery, roll
+            # back and start a fresh transaction so the turn can still finish.
+            try:
+                if not session.is_active:
+                    await session.rollback()
+            except Exception:
+                pass
             await session.commit()
 
             job.phase = "final"

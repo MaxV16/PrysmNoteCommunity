@@ -2131,6 +2131,17 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             logging.getLogger("app.ai_service").warning(
                 "tool call %s failed: %s", tc.get("name"), e
             )
+            # A failed handler can leave the session mid-transaction in a
+            # rolled-back state (e.g. a constraint violation during flush).
+            # Roll back so later tool calls in the same round, the caller's
+            # next provider round, and the final session.commit() can all
+            # still run - otherwise the whole turn dies with a confusing
+            # "transaction has been rolled back" error.
+            try:
+                if not session.is_active:
+                    await session.rollback()
+            except Exception:
+                pass
             results.append({
                 "tool_call_id": tc.get("id"),
                 "role": "tool",
