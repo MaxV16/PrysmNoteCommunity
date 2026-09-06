@@ -173,6 +173,13 @@ async def _run_turn(job: TurnJob) -> None:
                 if job.cancel_requested:
                     return await _cancel_job_finish(session, job)
 
+                # Recover the session if tool execution or retry logic left it stale.
+                try:
+                    if not session.is_active:
+                        await session.rollback()
+                except Exception:
+                    pass
+
                 response = await _cwc(
                     session, job.user_id, job.provider, client, messages, tools,
                     model=job.chain[job.current_model_index] if job.chain else None,
@@ -199,7 +206,12 @@ async def _run_turn(job: TurnJob) -> None:
 
                 messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
                 await job.events.put(("tool_start", [tc.get("function", {}).get("name") for tc in tool_calls]))
-                tool_results = await execute_tool_calls(tool_calls, job.user_id, session, client)
+                try:
+                    tool_results = await execute_tool_calls(tool_calls, job.user_id, session, client)
+                except Exception as tee:
+                    logger.warning("tool execution failed round=%d user=%s: %s", _round, job.user_id, tee)
+                    await session.rollback()
+                    tool_results = [{"tool_call_id": tc.get("id"), "role": "tool", "content": json.dumps({"error": f"Tool execution failed: {tee}"})} for tc in tool_calls]
                 messages.extend(tool_results)
                 await job.events.put(("tool_results", [r["content"] for r in tool_results]))
 
