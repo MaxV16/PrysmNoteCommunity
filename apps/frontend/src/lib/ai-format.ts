@@ -217,6 +217,143 @@ function rejoinWordFragments(line: string): string {
 
 const NO_BREAK_HYPHEN = "\u2011";
 
+const FRAGMENT_LINE_MAX = 24;
+const FRAGMENT_LINE_SKIP_START = ["```", "~~~", "#", ">", "|", "`", "~"];
+const FRAGMENT_LINE_SKIP_RE = /^([-*_=]{2,})$|^[*+]$|^\d+[.)]$/;
+const ORDINAL_SUFFIXES = new Set(["st", "nd", "rd", "th"]);
+
+// Inflected and function words the Oxford-3000-based COMMON_WORDS omits (it
+// stores base forms like "be" not "is/was/been"). These must never absorb a
+// neighbour, so "is an" and "has been" keep their space even though none of
+// the tokens are dictionary words.
+const INFLECTED_STOP = new Set([
+  "i", "is", "am", "are", "was", "were", "been", "has", "had", "does",
+  "did", "you", "we", "they", "he", "she", "me", "him", "her", "us",
+  "them", "my", "our", "your", "their", "this", "that", "these", "those",
+  "who", "whom", "whose", "which", "what", "when", "where", "why", "how",
+  "than", "then", "now", "here", "there", "not", "no", "yes", "so", "if",
+  "but", "yet", "nor", "all", "some", "any", "each", "every", "few",
+  "more", "most", "other", "such", "own", "same", "both", "must", "shall",
+  "should", "would", "could", "might", "cannot", "ive", "youve", "weve",
+  "theyve",
+]);
+
+// A trimmed line is one atomic streamed token when it has no internal
+// whitespace: a word fragment, a punctuation mark, or digits. Such lines can
+// join their neighbours. Blank lines, fenced content, headings, list markers,
+// and thematic breaks never can.
+function isFragmentLine(stripped: string): boolean {
+  if (!stripped || stripped.length > FRAGMENT_LINE_MAX) return false;
+  if (/\s/.test(stripped)) return false;
+  if (FRAGMENT_LINE_SKIP_START.some((m) => stripped.startsWith(m))) return false;
+  if (FRAGMENT_LINE_SKIP_RE.test(stripped)) return false;
+  return true;
+}
+
+// Separator between two reflowed tokens: "" when they are one unit
+// (skipped-space contraction "don" + "'t", or a split dictionary word
+// "communic" + "ation"), "-" for dated values (2026 / 09 / 05), and a single
+// space otherwise so the per-line repair rules finish the job. Ordinal
+// suffixes ("th", "st", "nd", "rd") are not dictionary words and never absorb
+// a neighbour: keep the space so the per-line rule can join them to the
+// number ("24 th" -> "24th").
+function joinSeparator(prev: string, nxt: string): string {
+  if (nxt.startsWith("'") || nxt.startsWith("\u2019") || nxt.startsWith("\u2018")) return "";
+  if (prev.endsWith("-") || nxt === "-") return "";
+  if (ORDINAL_SUFFIXES.has(prev) || ORDINAL_SUFFIXES.has(nxt)) return " ";
+  if (/^\d{4}$/.test(prev) && /^\d{2}$/.test(nxt)) return "-";
+  if (/^\d{2}$/.test(prev) && /^\d{2}$/.test(nxt)) return "-";
+  if (/^[a-z]+$/.test(prev) && /^[a-z]+$/.test(nxt)) {
+    const combined = prev + nxt;
+    if (COMMON_WORDS.has(combined) && combined.length >= 4 && combined.length <= FRAGMENT_LINE_MAX) {
+      return "";
+    }
+    if (
+      !COMMON_WORDS.has(prev) &&
+      !COMMON_WORDS.has(nxt) &&
+      !INFLECTED_STOP.has(prev) &&
+      !INFLECTED_STOP.has(nxt) &&
+      combined.length >= 4 &&
+      combined.length <= FRAGMENT_LINE_MAX
+    ) {
+      return "";
+    }
+  }
+  return " ";
+}
+
+function joinFragmentRun(tokens: string[]): string {
+  let result = tokens[0].trim();
+  for (let i = 1; i < tokens.length; i++) {
+    const nxt = tokens[i].trim();
+    result += joinSeparator(tokens[i - 1].trim(), nxt) + nxt;
+  }
+  return result;
+}
+
+// Reflow streaming artifacts where the model put each token on its own line
+// ("I\n'm\nsorry\n...\n2\n4\nth\nof\neach\nmonth\n."). Consecutive single-
+// token lines (skipping fenced blocks) are joined into one line so the
+// per-line repair rules can then fix contractions, ordinals and punctuation.
+// Mirrors _reflow_single_token_lines in app/services/ai_shared.py.
+export function reflowSingleTokenLines(text: string): string {
+  if (!text) return text;
+  const lines = text.split("\n");
+  const fragment: boolean[] = new Array(lines.length).fill(false);
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const stripped = lines[i].trim();
+    if (stripped.startsWith("```") || stripped.startsWith("~~~")) {
+      inFence = !inFence;
+    } else if (inFence) {
+      continue;
+    } else if (isFragmentLine(stripped)) {
+      fragment[i] = true;
+    }
+  }
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (!fragment[i]) {
+      out.push(lines[i]);
+      i += 1;
+      continue;
+    }
+    const run = [lines[i]];
+    let j = i + 1;
+    while (j < lines.length && fragment[j]) {
+      run.push(lines[j]);
+      j += 1;
+    }
+    out.push(run.length >= 2 ? joinFragmentRun(run) : lines[i]);
+    i = j;
+  }
+  // Collapse runs of blank lines (outside fenced blocks) to a single
+  // paragraph break - streamed tokens often arrive padded with "\n\n\n".
+  const final: string[] = [];
+  let prevBlank = false;
+  inFence = false;
+  for (const line of out) {
+    const stripped = line.trim();
+    if (stripped.startsWith("```") || stripped.startsWith("~~~")) {
+      inFence = !inFence;
+      prevBlank = false;
+      final.push(line);
+    } else if (inFence) {
+      final.push(line);
+    } else if (!stripped) {
+      if (!prevBlank) {
+        prevBlank = true;
+        final.push(line);
+      }
+    } else {
+      prevBlank = false;
+      final.push(line);
+    }
+  }
+  return final.join("\n");
+}
+
 // Repair a date that a model wrapped mid-value, e.g. "Due Date : 2026 -\n
 // 09 - 05". The per-line pass already collapses "09 - 05" -> "09-05", but a
 // year stranded at the end of a line ("2026 -") can never meet its month on
@@ -311,6 +448,9 @@ function splitMergedWord(line: string): string {
 
 export function normalizeAssistantMarkdown(text: string): string {
   if (!text) return text;
+  // Reflow one-token-per-line streaming artifacts first so the per-line pass
+  // sees real sentences instead of lines that each hold one fragment.
+  text = reflowSingleTokenLines(text);
   let inFence = false;
   const cleaned = text
     .split("\n")

@@ -1734,6 +1734,61 @@ def test_normalize_reply_markdown_rejoins_line_broken_dates():
     )
 
 
+def test_normalize_reply_markdown_reflows_one_token_per_line_artifacts():
+    """A model that puts every streamed token on its own line produces a
+    degenerate reply; the reflow pass flattens those runs back into sentences
+    (parity with apps/frontend/src/lib/ai-format.test.ts)."""
+    from app.routers.ai import _normalize_reply_markdown
+
+    # The exact prod artifact: every token on its own line.
+    raw = "\n".join([
+        "I", "'m", "sorry", "for", "any", "inconven", "ience", ",",
+        "but", "I", "currently", "don", "'t", "have", "the", "tools",
+        "to", "assist", "with", "changing", "your", "payment", "date", ".",
+        "However", ",", "I", "can", "guide", "you", "on", "how", "to", "do",
+        "it", "yourself", ".",
+        "You", "should", "be", "able", "to", "change", "your", "payment",
+        "date", "by", "logging", "into", "your", "credit", "card", "account",
+        "online", "or", "by", "contacting", "your", "credit", "card", "iss",
+        "uer", "'s", "customer", "service", ".",
+        "They", "can", "walk", "you", "through", "the", "process", "of",
+        "updating", "your", "payment", "date", "to", "the", "",
+        "", "2", "4", "th", "of", "each", "month", ".",
+    ])
+    assert _normalize_reply_markdown(raw) == (
+        "I'm sorry for any inconvenience, but I currently don't have the tools "
+        "to assist with changing your payment date. However, I can guide you on "
+        "how to do it yourself. You should be able to change your payment date "
+        "by logging into your credit card account online or by contacting your "
+        "credit card issuer's customer service. They can walk you through the "
+        "process of updating your payment date to the\n\n24th of each month."
+    )
+
+    # Split-digit dates and ordinals across lines.
+    assert _normalize_reply_markdown("the\n2026\n09\n05\nmeeting") == "the 2026-09-05 meeting"
+    assert _normalize_reply_markdown("the\n2026\n-\n09\n-\n05") == "the 2026-09-05"
+    assert _normalize_reply_markdown("Due\n:\n2026\n-\n09\n-05") == "Due: 2026-09-05"
+    assert _normalize_reply_markdown("2\n4\nth\nof\neach\nmonth") == "24th of each month"
+
+    # Words split across a line break.
+    assert _normalize_reply_markdown("inconven\nience") == "inconvenience"
+    assert _normalize_reply_markdown("iss\nuer\n's") == "issuer's"
+    assert _normalize_reply_markdown("don\n't") == "don't"
+
+    # Fenced code and blank lines stay intact while prose reflows.
+    assert (
+        _normalize_reply_markdown("Here\nis\nan\nanswer\n.\n\n```\nx\ny\nz\n```\nnext\nline")
+        == "Here is an answer.\n\n```\nx\ny\nz\n```\nnext line"
+    )
+    # Blank-line runs outside fences collapse to one paragraph break.
+    assert _normalize_reply_markdown("to the\n\n\n2 4 th of each month") == "to the\n\n24th of each month"
+
+    # Single short lines and structural markers are untouched.
+    assert _normalize_reply_markdown("Done!") == "Done!"
+    assert _normalize_reply_markdown("---\nDone") == "---\nDone"
+    assert _normalize_reply_markdown("1.\nfoo\n2.\nbar") == "1.\nfoo\n2.\nbar"
+
+
 def test_clean_text_tool_json_feed_through_word_repairs():
     """The text-tool-call cleaner (used for '[TOOL_CALLS]' JSON payloads) runs
     the same word repairs: corpus strings fed through _clean_text_tool_json

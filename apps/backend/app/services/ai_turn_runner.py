@@ -25,6 +25,7 @@ from app.services.ai_shared import (
 )
 from app.services.ai_service import (
     MONEY_NUDGE,
+    _TOOL_REFUSAL_PATTERNS,
     _needs_tool_retry,
     build_messages,
     execute_tool_calls,
@@ -157,6 +158,19 @@ def stream_fallback_reply(
             f"- {a}" for a in applied_actions
         )
     return cold
+
+
+async def _retry_final_non_streaming(client, messages, session, job) -> str:
+    """One last non-streaming attempt when the final stream died with nothing
+    else to report: some providers' streaming path can fail while the plain
+    chat path still answers. Returns the reply text, or "" when it also fails
+    or produces nothing."""
+    try:
+        response = await client.chat(messages, tools=None)
+        await record_usage(session, job, response)
+        return (first_choice(response).get("message", {}).get("content", "")) or ""
+    except Exception:
+        return ""
 
 
 @dataclass
@@ -345,6 +359,18 @@ async def _run_turn(job: TurnJob) -> None:
 
                 if not tool_calls and _needs_tool_retry(content, job.user_message):
                     if job.current_model_index < min(len(job.chain) - 1, MAX_RETRY_BUMPS):
+                        # A premium money request refused without any tool call
+                        # gets the finance nudge once, so the bumped model re-
+                        # asks with the finance tools instead of refusing again
+                        # in the same tone.
+                        if (
+                            premium
+                            and not job.money_nudged
+                            and money_intent(job.user_message)
+                            and _TOOL_REFUSAL_PATTERNS.search(content)
+                        ):
+                            job.money_nudged = True
+                            messages.append({"role": "system", "content": MONEY_NUDGE})
                         job.current_model_index += 1
                         await _safe_aclose(client)
                         client = await _build_turn_client(job)
@@ -425,6 +451,10 @@ async def _run_turn(job: TurnJob) -> None:
                     streamed = stream_fallback_reply(
                         content, job.applied_actions, cold="Interrupted."
                     )
+                    if streamed == "Interrupted.":
+                        retried = await _retry_final_non_streaming(client, messages, session, job)
+                        if retried:
+                            streamed = retried
                     for chunk in _chunk_text(streamed):
                         await job.events.put(("token", chunk))
                 placeholder.content = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
@@ -432,11 +462,19 @@ async def _run_turn(job: TurnJob) -> None:
                     await _commit()
                 except Exception:
                     pass
-                await job.events.put(("error", _fle(exc, job.provider)))
+                # Only surface the error when there is genuinely nothing to
+                # show: a partial stream or a retried answer is the reply.
+                if streamed == "Interrupted.":
+                    await job.events.put(("error", _fle(exc, job.provider)))
                 return
 
             if not streamed.strip():
-                streamed = stream_fallback_reply(content, job.applied_actions)
+                fallback = stream_fallback_reply(content, job.applied_actions)
+                if not content.strip() and not job.applied_actions:
+                    retried = await _retry_final_non_streaming(client, messages, session, job)
+                    if retried:
+                        fallback = retried
+                streamed = fallback
                 for chunk in _chunk_text(streamed):
                     await job.events.put(("token", chunk))
 

@@ -593,7 +593,7 @@ def tools_for_user(premium: bool) -> list:
 _TOOL_REFUSAL_PATTERNS = re.compile(
     r"(?:"
     r"don't have the necessary tools|"
-    r"don't have (?:access|any tools|a tool)|"
+    r"don't have (?:access|any tools|a tool|the tools|tools to|tools for)|"
     r"cannot assist|"
     r"can't assist|"
     r"as an ai|"

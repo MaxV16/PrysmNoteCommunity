@@ -13,10 +13,156 @@ from app.services.common_words import COMMON_WORDS
 _TEXT_TOOL_CALL_MARKER = "[TOOL_CALLS]"
 
 
+_FRAGMENT_LINE_MAX = 24
+
+_ORDINAL_SUFFIXES = frozenset({"st", "nd", "rd", "th"})
+
+# Inflected and function words the Oxford-3000-based COMMON_WORDS omits (it
+# stores base forms like "be" not "is/was/been"). These must never absorb a
+# neighbour, so "is an" and "has been" keep their space even though none of
+# the tokens are dictionary words.
+_INFLECTED_STOP = frozenset({
+    "i", "is", "am", "are", "was", "were", "been", "has", "had", "does",
+    "did", "you", "we", "they", "he", "she", "me", "him", "her", "us",
+    "them", "my", "our", "your", "their", "this", "that", "these", "those",
+    "who", "whom", "whose", "which", "what", "when", "where", "why", "how",
+    "than", "then", "now", "here", "there", "not", "no", "yes", "so", "if",
+    "but", "yet", "nor", "all", "some", "any", "each", "every", "few",
+    "more", "most", "other", "such", "own", "same", "both", "must", "shall",
+    "should", "would", "could", "might", "cannot", "ive", "youve", "weve",
+    "theyve",
+})
+
+# A single-token line that must never be reflowed: markdown structure, bare
+# list/quote markers, thematic breaks, and numbered list markers.
+_FRAGMENT_LINE_SKIP_START = ("```", "~~~", "#", ">", "|", "`", "~")
+_FRAGMENT_LINE_SKIP_RE = re.compile(r"^([-*_=]{2,})$|^[*+]$|^\d+[.)]$")
+
+
+def _is_fragment_line(stripped: str) -> bool:
+    """True when a trimmed line is one atomic streamed token (no internal
+    whitespace) that can join its neighbours: word fragments, punctuation,
+    digits. Never true for blank lines, fenced content, headings, list markers,
+    or thematic breaks."""
+    if not stripped or len(stripped) > _FRAGMENT_LINE_MAX:
+        return False
+    if re.search(r"\s", stripped):
+        return False
+    if stripped.startswith(_FRAGMENT_LINE_SKIP_START):
+        return False
+    if _FRAGMENT_LINE_SKIP_RE.search(stripped):
+        return False
+    return True
+
+
+def _join_separator(prev: str, nxt: str) -> str:
+    """Separator between two reflowed tokens: "" when they are one unit
+    (skipped-space contraction "don" + "'t", a split dictionary word
+    "communic" + "ation", or two non-dictionary fragments that form a word
+    "inconven" + "ience"), "-" for dated values (2026 / 09 / 05), and a single
+    space otherwise so the per-line repair rules finish the job. Ordinal
+    suffixes ("th", "st", "nd", "rd") never absorb a neighbour, and neither do
+    inflected/function words that the word list omits ("is an", "has been"):
+    those keep the space."""
+    if nxt.startswith(("'", "\u2019", "\u2018")):
+        return ""
+    if prev.endswith("-") or nxt == "-":
+        return ""
+    if prev in _ORDINAL_SUFFIXES or nxt in _ORDINAL_SUFFIXES:
+        return " "
+    if re.fullmatch(r"\d{4}", prev) and re.fullmatch(r"\d{2}", nxt):
+        return "-"
+    if re.fullmatch(r"\d{2}", prev) and re.fullmatch(r"\d{2}", nxt):
+        return "-"
+    if re.fullmatch(r"[a-z]+", prev) and re.fullmatch(r"[a-z]+", nxt):
+        combined = prev + nxt
+        if combined in COMMON_WORDS and 4 <= len(combined) <= _FRAGMENT_LINE_MAX:
+            return ""
+        if (
+            prev not in COMMON_WORDS
+            and nxt not in COMMON_WORDS
+            and prev not in _INFLECTED_STOP
+            and nxt not in _INFLECTED_STOP
+            and 4 <= len(combined) <= _FRAGMENT_LINE_MAX
+        ):
+            return ""
+    return " "
+
+
+def _join_fragment_run(tokens: list[str]) -> str:
+    """Join a run of single-token lines into one line, spacing or compressing
+    each adjacent pair via _join_separator."""
+    result = tokens[0].strip()
+    for i in range(1, len(tokens)):
+        nxt = tokens[i].strip()
+        result += _join_separator(tokens[i - 1].strip(), nxt) + nxt
+    return result
+
+
+def _reflow_single_token_lines(text: str) -> str:
+    """Reflow streaming artifacts where the model put each token on its own
+    line ("I\\n'm\\nsorry\\n...\\n2\\n4\\nth\\nof\\neach\\nmonth\\n."). Consecutive
+    single-token lines (skipping fenced blocks) are joined into one line so the
+    per-line repair rules can then fix contractions, ordinals and punctuation.
+    Mirrors reflowSingleTokenLines in apps/frontend/src/lib/ai-format.ts."""
+    if not text:
+        return text
+    lines = text.split("\n")
+    in_fence = False
+    fragment = [False] * len(lines)
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+        elif in_fence:
+            continue
+        elif _is_fragment_line(stripped):
+            fragment[i] = True
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        if not fragment[i]:
+            out.append(lines[i])
+            i += 1
+            continue
+        run = [lines[i]]
+        j = i + 1
+        while j < n and fragment[j]:
+            run.append(lines[j])
+            j += 1
+        out.append(_join_fragment_run(run) if len(run) >= 2 else lines[i])
+        i = j
+    # Collapse runs of blank lines (outside fenced blocks) to a single
+    # paragraph break - streamed tokens often arrive padded with "\n\n\n".
+    final: list[str] = []
+    prev_blank = False
+    in_fence = False
+    for line in out:
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            prev_blank = False
+            final.append(line)
+        elif in_fence:
+            final.append(line)
+        elif not stripped:
+            if not prev_blank:
+                prev_blank = True
+                final.append(line)
+        else:
+            prev_blank = False
+            final.append(line)
+    return "\n".join(final)
+
+
 def _normalize_reply_markdown(text: str) -> str:
     """Clean up sloppy model output before it is persisted or displayed."""
     if not text:
         return text
+    # Reflow one-token-per-line streaming artifacts first so the per-line pass
+    # sees real sentences instead of lines that each hold one fragment.
+    text = _reflow_single_token_lines(text)
 
     def _strip_delimiter_spacing(line: str, marker: str) -> str:
         positions = []

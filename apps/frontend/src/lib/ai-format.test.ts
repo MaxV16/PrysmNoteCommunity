@@ -148,6 +148,62 @@ describe("user QA corpus (fragmented streaming artifacts)", () => {
   });
 });
 
+describe("reflowSingleTokenLines / one-token-per-line artifacts", () => {
+  it("flattens the exact prod artifact (every token on its own line)", () => {
+    const raw = [
+      "I", "'m", "sorry", "for", "any", "inconven", "ience", ",",
+      "but", "I", "currently", "don", "'t", "have", "the", "tools",
+      "to", "assist", "with", "changing", "your", "payment", "date", ".",
+      "However", ",", "I", "can", "guide", "you", "on", "how", "to", "do",
+      "it", "yourself", ".",
+      "You", "should", "be", "able", "to", "change", "your", "payment",
+      "date", "by", "logging", "into", "your", "credit", "card", "account",
+      "online", "or", "by", "contacting", "your", "credit", "card", "iss",
+      "uer", "'s", "customer", "service", ".",
+      "They", "can", "walk", "you", "through", "the", "process", "of",
+      "updating", "your", "payment", "date", "to", "the", "",
+      "", "2", "4", "th", "of", "each", "month", ".",
+    ].join("\n");
+    expect(normalizeAssistantMarkdown(raw)).toBe(
+      "I'm sorry for any inconvenience, but I currently don't have the tools to assist with changing your payment date. However, I can guide you on how to do it yourself. You should be able to change your payment date by logging into your credit card account online or by contacting your credit card issuer's customer service. They can walk you through the process of updating your payment date to the\n\n24th of each month."
+    );
+  });
+
+  it("joins split-digit dates and ordinals across lines", () => {
+    expect(normalizeAssistantMarkdown("the\n2026\n09\n05\nmeeting")).toBe(
+      "the 2026-09-05 meeting"
+    );
+    expect(normalizeAssistantMarkdown("the\n2026\n-\n09\n-\n05")).toBe(
+      "the 2026-09-05"
+    );
+    expect(normalizeAssistantMarkdown("Due\n:\n2026\n-\n09\n-05")).toBe(
+      "Due: 2026-09-05"
+    );
+    expect(normalizeAssistantMarkdown("2\n4\nth\nof\neach\nmonth")).toBe(
+      "24th of each month"
+    );
+  });
+
+  it("rejoins words split across a line break", () => {
+    expect(normalizeAssistantMarkdown("inconven\nience")).toBe("inconvenience");
+    expect(normalizeAssistantMarkdown("iss\nuer\n's")).toBe("issuer's");
+    expect(normalizeAssistantMarkdown("don\n't")).toBe("don't");
+  });
+
+  it("keeps fenced code and blank lines intact while reflowing prose", () => {
+    const raw = "Here\nis\nan\nanswer\n.\n\n```\nx\ny\nz\n```\nnext\nline";
+    expect(normalizeAssistantMarkdown(raw)).toBe(
+      "Here is an answer.\n\n```\nx\ny\nz\n```\nnext line"
+    );
+  });
+
+  it("leaves single short lines and structural markers alone", () => {
+    expect(normalizeAssistantMarkdown("Done!")).toBe("Done!");
+    expect(normalizeAssistantMarkdown("---\nDone")).toBe("---\nDone");
+    expect(normalizeAssistantMarkdown("1.\nfoo\n2.\nbar")).toBe("1.\nfoo\n2.\nbar");
+  });
+});
+
 describe("protectDateLineBreaks", () => {
   it("swaps ISO date hyphens for non-breaking hyphens so dates never wrap", () => {
     expect(protectDateLineBreaks("Due Date: 2026-09-05")).toBe(

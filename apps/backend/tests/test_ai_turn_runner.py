@@ -372,3 +372,78 @@ async def test_commit_and_reapply_rls_reapplies_after_commit(db_session, ai_user
     # set_config must have been re-issued after EVERY commit (2 commits -> 2
     # re-applications), not just once at session open.
     assert reapply_calls == [str(user), str(user)]
+
+
+def test_money_refusal_detection_feeds_nudge():
+    """The inline money-refusal nudge (triggered when a premium money request is
+    answered with a tool-free refusal) depends on money_intent + the refusal
+    patterns: both must fire on the prod conversation, and stay quiet for a
+    neutral question."""
+    from app.services.ai_service import _TOOL_REFUSAL_PATTERNS, money_intent
+
+    user_msg = (
+        "I actually cancel the 25th payment every month for a credit card, "
+        "all of those, and instead make it be the 24th to pay off credit card."
+    )
+    refusal = (
+        "I'm sorry for any inconvenience, but I currently don't have the tools "
+        "to assist with changing your payment date."
+    )
+    assert money_intent(user_msg) is True
+    assert _TOOL_REFUSAL_PATTERNS.search(refusal) is not None
+    # A neutral question is neither money nor refusal.
+    assert money_intent("what is 2 plus 2") is False
+    assert _TOOL_REFUSAL_PATTERNS.search("the toolshed is behind the house") is None
+
+
+@pytest.mark.asyncio
+async def test_retry_final_non_streaming_uses_plain_chat():
+    """When the final stream dies with nothing to report, one non-streaming
+    `client.chat` attempt can still produce a reply (some providers' streaming
+    path fails while the plain chat path answers)."""
+    from app.services import ai_turn_runner as tr
+    from app.services.ai_turn_runner import _retry_final_non_streaming
+
+    class _FakeClient:
+        def __init__(self, content="Done via non-streaming."):
+            self.content = content
+            self.calls = 0
+
+        async def chat(self, messages, tools=None):
+            self.calls += 1
+            return {"choices": [{"message": {"content": self.content}}]}
+
+    async def _fake_record_usage(session, job, response):
+        pass
+
+    client = _FakeClient()
+    original = tr.record_usage
+    tr.record_usage = _fake_record_usage
+    try:
+        reply = await _retry_final_non_streaming(client, [{"role": "user", "content": "hi"}], None, object())
+        assert reply == "Done via non-streaming."
+        assert client.calls == 1
+    finally:
+        tr.record_usage = original
+
+
+@pytest.mark.asyncio
+async def test_retry_final_non_streaming_empty_when_chat_fails():
+    """A failing non-streaming retry yields "" so the cold fallback text stays."""
+    from app.services import ai_turn_runner as tr
+    from app.services.ai_turn_runner import _retry_final_non_streaming
+
+    class _BoomClient:
+        async def chat(self, messages, tools=None):
+            raise RuntimeError("stream provider down")
+
+    async def _fake_record_usage(session, job, response):
+        pass
+
+    original = tr.record_usage
+    tr.record_usage = _fake_record_usage
+    try:
+        reply = await _retry_final_non_streaming(_BoomClient(), [{"role": "user", "content": "hi"}], None, object())
+        assert reply == ""
+    finally:
+        tr.record_usage = original

@@ -41,5 +41,14 @@ asyncio_default_fixture_loop_scope = "function"
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+# The enterprise backend package lives at the repo root, one level above this
+# package. A plain `where=["."]` find only sees the empty `apps/backend/ee`
+# shim directory (and a fresh `pip install -e .[test]` then maps `ee` to it, so
+# every EE-guarded import silently degrades to its community no-op under pytest,
+# see test_should_money_nudge). Map the top-level `ee` package to the real repo
+# root explicitly; subpackages resolve through its __init__.py hierarchy.
+[tool.setuptools]
+package-dir = { ee = "../../ee" }
+
 [tool.setuptools.packages.find]
 include = ["app*", "ee*"]
