@@ -250,6 +250,35 @@ function isFragmentLine(stripped: string): boolean {
   return true;
 }
 
+// True when `word` is a dictionary word or a simple inflection of one
+// ("conflicting" -> conflict, "tasks" -> task, "created" -> create). Used so a
+// fragment run never welds two real words together ("conflicting tasks" must
+// not become "conflictingtasks") while still rejoining broken halves like
+// "communic" + "ation".
+function isLooseCommonWord(word: string): boolean {
+  const w = word.toLowerCase().replace(/[’'\u2019\u2018]/g, "");
+  if (!w) return false;
+  if (COMMON_WORDS.has(w)) return true;
+  const candidates: string[] = [];
+  if (w.endsWith("ies")) candidates.push(w.slice(0, -3) + "y");
+  if (w.endsWith("ing")) {
+    candidates.push(w.slice(0, -3));
+    candidates.push(w.slice(0, -3) + "e");
+  }
+  if (w.endsWith("ied")) candidates.push(w.slice(0, -3) + "y");
+  if (w.endsWith("ed")) {
+    candidates.push(w.slice(0, -2));
+    candidates.push(w.slice(0, -2) + "e");
+  }
+  if (w.endsWith("es")) {
+    candidates.push(w.slice(0, -2));
+    candidates.push(w.slice(0, -2) + "e");
+  } else if (w.endsWith("s")) {
+    candidates.push(w.slice(0, -1));
+  }
+  return candidates.some((c) => c.length >= 3 && COMMON_WORDS.has(c));
+}
+
 // Separator between two reflowed tokens: "" when they are one unit
 // (skipped-space contraction "don" + "'t", or a split dictionary word
 // "communic" + "ation"), "-" for dated values (2026 / 09 / 05), and a single
@@ -271,6 +300,8 @@ function joinSeparator(prev: string, nxt: string): string {
     if (
       !COMMON_WORDS.has(prev) &&
       !COMMON_WORDS.has(nxt) &&
+      !isLooseCommonWord(prev) &&
+      !isLooseCommonWord(nxt) &&
       !INFLECTED_STOP.has(prev) &&
       !INFLECTED_STOP.has(nxt) &&
       combined.length >= 4 &&
@@ -313,6 +344,36 @@ export function reflowSingleTokenLines(text: string): string {
   }
   const out: string[] = [];
   let i = 0;
+  // Blank-line padding a streaming model leaves inside a one-token-per-line
+  // reply is not a paragraph break: "to the\n\n2 4 th" is just noise. A blank
+  // block collapses to a space when the previous non-blank line is a fragment
+  // that does not end a sentence and the next non-blank line is also a
+  // fragment. Real breaks (a sentence end followed by a blank, a blank before
+  // a fence/heading/list marker, leading/trailing blanks) are preserved.
+  const swallowed: boolean[] = new Array(lines.length).fill(false);
+  inFence = false;
+  for (let b = 0; b < lines.length; b++) {
+    const strippedB = lines[b].trim();
+    if (strippedB.startsWith("```") || strippedB.startsWith("~~~")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || strippedB) continue;
+    const prevNonBlank = (() => {
+      let k = b - 1;
+      while (k >= 0 && !lines[k].trim()) k -= 1;
+      return k;
+    })();
+    const nextNonBlank = (() => {
+      let k = b + 1;
+      while (k < lines.length && !lines[k].trim()) k += 1;
+      return k;
+    })();
+    if (prevNonBlank < 0 || nextNonBlank >= lines.length) continue;
+    if (!fragment[prevNonBlank] || !fragment[nextNonBlank]) continue;
+    if (/[.!?:;]$/.test(lines[prevNonBlank].trim())) continue;
+    swallowed[b] = true;
+  }
   while (i < lines.length) {
     if (!fragment[i]) {
       out.push(lines[i]);
@@ -321,9 +382,16 @@ export function reflowSingleTokenLines(text: string): string {
     }
     const run = [lines[i]];
     let j = i + 1;
-    while (j < lines.length && fragment[j]) {
-      run.push(lines[j]);
-      j += 1;
+    while (j < lines.length) {
+      if (fragment[j]) {
+        run.push(lines[j]);
+        j += 1;
+      } else if (!lines[j].trim() && swallowed[j]) {
+        // Transparent padding blank: the run continues across it.
+        j += 1;
+      } else {
+        break;
+      }
     }
     out.push(run.length >= 2 ? joinFragmentRun(run) : lines[i]);
     i = j;
@@ -421,19 +489,22 @@ export function protectDateLineBreaks(text: string): string {
 
 // Dictionary-based repair for words merged by a dropped space ("Trackand
 // Manage"). Only unknown 6+ letter tokens are candidates, and the split point
-// must leave two dictionary-word halves on both sides, so known words like
-// "into" or "alright" are never touched. The first non-suffix split wins;
-// a trailing "s"/"ed"/"ing" split is only used when nothing else fits.
+// must leave two word halves (dictionary words or simple inflections of them,
+// so "conflictingtasks" -> "conflicting tasks") on both sides. Known words
+// like "into" or "alright" are never touched, and a real standalone inflected
+// word ("conflicting", "changing") never splits. The first non-suffix split
+// wins; a trailing "s"/"ed"/"ing" split is only used when nothing else fits.
 function splitMergedWord(line: string): string {
   return line.replace(/[A-Za-z]{6,}/g, (tok) => {
     const lower = tok.toLowerCase();
-    if (COMMON_WORDS.has(lower)) return tok;
+    if (COMMON_WORDS.has(lower) || isLooseCommonWord(lower)) return tok;
     let firstValid = -1;
     let firstClean = -1;
     for (let i = 4; i <= lower.length - 2; i++) {
+      const left = lower.slice(0, i);
       const right = lower.slice(i);
-      if (!COMMON_WORDS.has(lower.slice(0, i))) continue;
-      if (!COMMON_WORDS.has(right)) continue;
+      if (left.length < 3 || !isLooseCommonWord(left)) continue;
+      if (!isLooseCommonWord(right)) continue;
       if (firstValid === -1) firstValid = i;
       if (right !== "s" && right !== "ed" && right !== "ing") {
         firstClean = i;
@@ -465,6 +536,10 @@ export function normalizeAssistantMarkdown(text: string): string {
       // Space before punctuation: "e .g ." -> "e.g.", "daily ," -> "daily,".
       // "]" and "}" are excluded so GFM checkboxes "[ ]" stay intact.
       s = s.replace(/[ \t]+([,.;:?!>)])/g, "$1");
+      // Fragmented abbreviations: "3 p . m ." -> "3 p.m.", "e . g ." -> "e.g."
+      // (the punctuation rule above already reattached the dots, but a space
+      // can still sit between the two abbreviation letters).
+      s = s.replace(/([a-z])\.([ \t]+)([a-z])(?=\.)/gi, "$1.$3");
       // Space after an opening bracket/paren: "( e" -> "(e". An empty-bracket
       // checkbox "[ ]" is left alone (valid GFM task-list syntax).
       s = s.replace(/([(\[{<])[ \t]+(?![\]}])/g, "$1");

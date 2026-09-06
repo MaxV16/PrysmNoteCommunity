@@ -1761,7 +1761,7 @@ def test_normalize_reply_markdown_reflows_one_token_per_line_artifacts():
         "how to do it yourself. You should be able to change your payment date "
         "by logging into your credit card account online or by contacting your "
         "credit card issuer's customer service. They can walk you through the "
-        "process of updating your payment date to the\n\n24th of each month."
+        "process of updating your payment date to the 24th of each month."
     )
 
     # Split-digit dates and ordinals across lines.
@@ -1787,6 +1787,66 @@ def test_normalize_reply_markdown_reflows_one_token_per_line_artifacts():
     assert _normalize_reply_markdown("Done!") == "Done!"
     assert _normalize_reply_markdown("---\nDone") == "---\nDone"
     assert _normalize_reply_markdown("1.\nfoo\n2.\nbar") == "1.\nfoo\n2.\nbar"
+
+
+def test_normalize_reply_markdown_real_words_and_blank_padding():
+    """Follow-up readability fixes: real words split across fragment lines
+    must never re-weld ("conflicting" + "tasks"), blank-line padding inside a
+    fragmented reply collapses ("to the\\n\\n2 4 th"), fragmented abbreviations
+    close ("3 p . m ."), and inflected halves re-split ("conflictingtasks").
+    Mirrors apps/frontend/src/lib/ai-format.test.ts."""
+    from app.routers.ai import _normalize_reply_markdown
+
+    # Real, inflected words stay apart when streaming splits them across lines.
+    assert (
+        _normalize_reply_markdown("several\nconflicting\ntasks\non\nthe\nsame\nday")
+        == "several conflicting tasks on the same day"
+    )
+    assert _normalize_reply_markdown("in\nthe\nsame\nday") == "in the same day"
+
+    # Blank-line padding inside a fragmented reply is a space, not a break.
+    assert _normalize_reply_markdown("at\n\n\n3\np\n.m\n.") == "at 3 p.m."
+    assert _normalize_reply_markdown("priority\n(\npriority\n\n1\n)\n.") == "priority (priority 1)."
+    assert _normalize_reply_markdown("to\nthe\n\n2\n4\nth\nof\neach\nmonth") == "to the 24th of each month"
+    assert _normalize_reply_markdown("due\nSep\n\n2\n0\n,\n2\n0\n2\n6\n)") == "due Sep 20, 2026)"
+
+    # Blank-line paragraph breaks after a sentence end are preserved.
+    assert _normalize_reply_markdown("known\n.\n\nNext\nline") == "known.\n\nNext line"
+
+    # Fragmented abbreviations close up.
+    assert _normalize_reply_markdown("3\np\n.\nm\n.") == "3 p.m."
+    assert _normalize_reply_markdown("3 p . m .") == "3 p.m."
+    assert _normalize_reply_markdown("at 4 p . m . tomorrow") == "at 4 p.m. tomorrow"
+    assert _normalize_reply_markdown("e . g . daily , weekly") == "e.g. daily, weekly"
+
+    # Inflected halves merged by a dropped space re-split.
+    assert _normalize_reply_markdown("several conflictingtasks") == "several conflicting tasks"
+    assert _normalize_reply_markdown("the conflictingtasks list") == "the conflicting tasks list"
+
+
+def test_normalize_reply_markdown_exact_user_reported_task_reply():
+    """The exact leaked conversation reply: every token on its own line plus
+    blank-line padding and plural/inflected words. Must render as one clean
+    paragraph with the conflicts list intact."""
+    from app.routers.ai import _normalize_reply_markdown
+
+    raw = "\n".join([
+        "I", "'ve", "created", "the", "task", '"', "1", "2", "3", "test", '"',
+        "for", "tomorrow", "at", "", "",
+        "3", "p", ".m", ".",
+        "However", ",", "there", "are", "several", "conflicting", "tasks", "on",
+        "the", "same", "day", ",", "some", "of", "which", "have", "higher",
+        "priority", "(", "priority", "", "",
+        "1", ")", ".",
+        "Here", "are", "the", "conflicting", "tasks", ":",
+        "ne", "xo", "(", "priority", "", "1", ",", "due", "Sep", "", "2", "0", ",",
+        "2", "0", "2", "6", ")",
+    ])
+    assert _normalize_reply_markdown(raw) == (
+        'I\'ve created the task "123 test" for tomorrow at 3 p.m. However, there are '
+        "several conflicting tasks on the same day, some of which have higher priority "
+        "(priority 1). Here are the conflicting tasks: nexo (priority 1, due Sep 20, 2026)"
+    )
 
 
 def test_clean_text_tool_json_feed_through_word_repairs():

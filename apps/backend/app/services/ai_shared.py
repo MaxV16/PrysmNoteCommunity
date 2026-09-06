@@ -55,6 +55,37 @@ def _is_fragment_line(stripped: str) -> bool:
     return True
 
 
+def _loose_common_word(word: str) -> bool:
+    """True when word is a dictionary word or a simple inflection of one
+    ("conflicting" -> conflict, "tasks" -> task, "created" -> create), so a
+    fragment run never welds two real words together ("conflicting tasks" must
+    not become "conflictingtasks") while still rejoining broken halves like
+    "communic" + "ation". Mirrors isLooseCommonWord in
+    apps/frontend/src/lib/ai-format.ts."""
+    w = re.sub(r"[\u2018\u2019']", "", word.lower())
+    if not w:
+        return False
+    if w in COMMON_WORDS:
+        return True
+    candidates: list[str] = []
+    if w.endswith("ies"):
+        candidates.append(w[:-3] + "y")
+    if w.endswith("ing"):
+        candidates.append(w[:-3])
+        candidates.append(w[:-3] + "e")
+    if w.endswith("ied"):
+        candidates.append(w[:-3] + "y")
+    if w.endswith("ed"):
+        candidates.append(w[:-2])
+        candidates.append(w[:-2] + "e")
+    if w.endswith("es"):
+        candidates.append(w[:-2])
+        candidates.append(w[:-2] + "e")
+    elif w.endswith("s"):
+        candidates.append(w[:-1])
+    return any(len(c) >= 3 and c in COMMON_WORDS for c in candidates)
+
+
 def _join_separator(prev: str, nxt: str) -> str:
     """Separator between two reflowed tokens: "" when they are one unit
     (skipped-space contraction "don" + "'t", a split dictionary word
@@ -81,6 +112,8 @@ def _join_separator(prev: str, nxt: str) -> str:
         if (
             prev not in COMMON_WORDS
             and nxt not in COMMON_WORDS
+            and not _loose_common_word(prev)
+            and not _loose_common_word(nxt)
             and prev not in _INFLECTED_STOP
             and nxt not in _INFLECTED_STOP
             and 4 <= len(combined) <= _FRAGMENT_LINE_MAX
@@ -121,6 +154,34 @@ def _reflow_single_token_lines(text: str) -> str:
     out: list[str] = []
     i = 0
     n = len(lines)
+    # Blank-line padding a streaming model leaves inside a one-token-per-line
+    # reply is not a paragraph break: "to the\n\n2 4 th" is just noise. A blank
+    # block collapses to a space when the previous non-blank line is a fragment
+    # that does not end a sentence and the next non-blank line is also a
+    # fragment. Real breaks (a sentence end followed by a blank, a blank before
+    # a fence/heading/list marker, leading/trailing blanks) are preserved.
+    swallowed: list[bool] = [False] * n
+    in_fence = False
+    for b, line_b in enumerate(lines):
+        stripped_b = line_b.strip()
+        if stripped_b.startswith("```") or stripped_b.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence or stripped_b:
+            continue
+        p = b - 1
+        while p >= 0 and not lines[p].strip():
+            p -= 1
+        nx = b + 1
+        while nx < n and not lines[nx].strip():
+            nx += 1
+        if p < 0 or nx >= n:
+            continue
+        if not fragment[p] or not fragment[nx]:
+            continue
+        if re.search(r"[.!?:;]$", lines[p].strip()):
+            continue
+        swallowed[b] = True
     while i < n:
         if not fragment[i]:
             out.append(lines[i])
@@ -128,9 +189,15 @@ def _reflow_single_token_lines(text: str) -> str:
             continue
         run = [lines[i]]
         j = i + 1
-        while j < n and fragment[j]:
-            run.append(lines[j])
-            j += 1
+        while j < n:
+            if fragment[j]:
+                run.append(lines[j])
+                j += 1
+            elif not lines[j].strip() and swallowed[j]:
+                # Transparent padding blank: the run continues across it.
+                j += 1
+            else:
+                break
         out.append(_join_fragment_run(run) if len(run) >= 2 else lines[i])
         i = j
     # Collapse runs of blank lines (outside fenced blocks) to a single
@@ -226,6 +293,10 @@ def _normalize_reply_markdown(text: str) -> str:
 
     def _clean(line: str) -> str:
         line = re.sub(r"[ \t]+([,.;:?!>)])", r"\1", line)
+        # Fragmented abbreviations: "3 p . m ." -> "3 p.m.", "e . g ." -> "e.g."
+        # (the punctuation rule above already reattached the dots, but a space
+        # can still sit between the two abbreviation letters).
+        line = re.sub(r"(?i)([a-z])\.([ \t]+)([a-z])(?=\.)", lambda m: f"{m.group(1)}.{m.group(3)}", line)
         line = re.sub(r"([(\[{<])[ \t]+(?![\]}])", r"\1", line)
         line = re.sub(
             r"(\w+)[ \t]+([\u2018\u2019'])[ \t]*(\w{1,3})\b",
@@ -378,26 +449,31 @@ def _rejoin_run(tokens: list[str], gaps: list[str]) -> str:
 
 
 def _split_merged_words(line: str) -> str:
-    """Reinsert a space in words merged by a dropped space ("Trackand Manage").
+    """Reinsert a space in words merged by a dropped space ("Trackand Manage",
+    "conflictingtasks").
 
     Only unknown 6+ letter tokens are candidates, and the split point must
-    leave two dictionary-word halves on both sides, so known words like "into"
-    or "alright" are never touched. The first non-suffix split wins; a trailing
-    "s"/"ed"/"ing" split is only used when nothing else fits. Mirrors
-    splitMergedWord in apps/frontend/src/lib/ai-format.ts.
+    leave two word halves (dictionary words or simple inflections of them) on
+    both sides, so known words like "into" or "alright" are never touched and
+    a real standalone inflected word ("conflicting", "changing") never splits.
+    The first non-suffix split wins; a trailing "s"/"ed"/"ing" split is only
+    used when nothing else fits. Mirrors splitMergedWord in
+    apps/frontend/src/lib/ai-format.ts.
     """
 
     def _repl(m: re.Match) -> str:
         tok = m.group(0)
         lower = tok.lower()
-        if lower in COMMON_WORDS:
+        if lower in COMMON_WORDS or _loose_common_word(lower):
             return tok
         first_valid = -1
         first_clean = -1
         for i in range(4, len(lower) - 1):
             left = lower[:i]
             right = lower[i:]
-            if left not in COMMON_WORDS or right not in COMMON_WORDS:
+            if len(left) < 3 or not _loose_common_word(left):
+                continue
+            if not _loose_common_word(right):
                 continue
             if first_valid == -1:
                 first_valid = i

@@ -165,7 +165,7 @@ describe("reflowSingleTokenLines / one-token-per-line artifacts", () => {
       "", "2", "4", "th", "of", "each", "month", ".",
     ].join("\n");
     expect(normalizeAssistantMarkdown(raw)).toBe(
-      "I'm sorry for any inconvenience, but I currently don't have the tools to assist with changing your payment date. However, I can guide you on how to do it yourself. You should be able to change your payment date by logging into your credit card account online or by contacting your credit card issuer's customer service. They can walk you through the process of updating your payment date to the\n\n24th of each month."
+      "I'm sorry for any inconvenience, but I currently don't have the tools to assist with changing your payment date. However, I can guide you on how to do it yourself. You should be able to change your payment date by logging into your credit card account online or by contacting your credit card issuer's customer service. They can walk you through the process of updating your payment date to the 24th of each month."
     );
   });
 
@@ -201,6 +201,63 @@ describe("reflowSingleTokenLines / one-token-per-line artifacts", () => {
     expect(normalizeAssistantMarkdown("Done!")).toBe("Done!");
     expect(normalizeAssistantMarkdown("---\nDone")).toBe("---\nDone");
     expect(normalizeAssistantMarkdown("1.\nfoo\n2.\nbar")).toBe("1.\nfoo\n2.\nbar");
+  });
+
+  it("keeps real words apart when streaming splits them across lines", () => {
+    expect(normalizeAssistantMarkdown("several\nconflicting\ntasks\non\nthe\nsame\nday")).toBe(
+      "several conflicting tasks on the same day"
+    );
+    expect(normalizeAssistantMarkdown("in\nthe\nsame\nday")).toBe("in the same day");
+  });
+
+  it("collapses blank-line padding inside a fragmented reply", () => {
+    expect(normalizeAssistantMarkdown("at\n\n\n3\np\n.m\n.")).toBe("at 3 p.m.");
+    expect(normalizeAssistantMarkdown("priority\n(\npriority\n\n1\n)\n.")).toBe(
+      "priority (priority 1)."
+    );
+    expect(normalizeAssistantMarkdown("to\nthe\n\n2\n4\nth\nof\neach\nmonth")).toBe(
+      "to the 24th of each month"
+    );
+    expect(normalizeAssistantMarkdown("due\nSep\n\n2\n0\n,\n2\n0\n2\n6\n)")).toBe("due Sep 20, 2026)");
+  });
+
+  it("keeps blank-line paragraph breaks after a sentence end", () => {
+    expect(normalizeAssistantMarkdown("known\n.\n\nNext\nline")).toBe("known.\n\nNext line");
+    expect(normalizeAssistantMarkdown("answer\n.\n\nHere\nis\nmore")).toBe("answer.\n\nHere is more");
+  });
+
+  it("joins fragmented abbreviations like p.m. and e.g.", () => {
+    expect(normalizeAssistantMarkdown("3\np\n.\nm\n.")).toBe("3 p.m.");
+    expect(normalizeAssistantMarkdown("3 p . m .")).toBe("3 p.m.");
+    expect(normalizeAssistantMarkdown("at 4 p . m . tomorrow")).toBe("at 4 p.m. tomorrow");
+    expect(normalizeAssistantMarkdown("e . g . daily , weekly")).toBe("e.g. daily, weekly");
+  });
+
+  it("cleans the exact user-reported task-creation reply", () => {
+    const raw = [
+      "I", "'ve", "created", "the", "task", '"', "1", "2", "3", "test", '"',
+      "for", "tomorrow", "at", "", "",
+      "3", "p", ".m", ".",
+      "However", ",", "there", "are", "several", "conflicting", "tasks", "on",
+      "the", "same", "day", ",", "some", "of", "which", "have", "higher",
+      "priority", "(", "priority", "", "",
+      "1", ")", ".",
+      "Here", "are", "the", "conflicting", "tasks", ":",
+      "ne", "xo", "(", "priority", "", "1", ",", "due", "Sep", "", "2", "0", ",",
+      "2", "0", "2", "6", ")",
+    ].join("\n");
+    expect(normalizeAssistantMarkdown(raw)).toBe(
+      'I\'ve created the task "123 test" for tomorrow at 3 p.m. However, there are several conflicting tasks on the same day, some of which have higher priority (priority 1). Here are the conflicting tasks: nexo (priority 1, due Sep 20, 2026)'
+    );
+  });
+
+  it("re-splits words whose halves are inflected forms", () => {
+    expect(normalizeAssistantMarkdown("several conflictingtasks")).toBe(
+      "several conflicting tasks"
+    );
+    expect(normalizeAssistantMarkdown("the conflictingtasks list")).toBe(
+      "the conflicting tasks list"
+    );
   });
 });
 
