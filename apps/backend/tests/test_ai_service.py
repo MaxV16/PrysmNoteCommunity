@@ -1533,7 +1533,7 @@ def test_text_tool_call_helpers_parse_strip_and_clean():
     artifact: `{" query ": " work ", " limit ":\n\n2 5 0 }`). The helpers must
     extract + parse those blocks and strip them so raw JSON never reaches the
     user."""
-    from app.routers.ai import (
+    from app.services.ai_shared import (
         _clean_text_tool_json,
         _extract_text_tool_calls,
         _parse_text_tool_calls,
