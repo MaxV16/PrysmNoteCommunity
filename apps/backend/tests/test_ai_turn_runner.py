@@ -126,52 +126,36 @@ async def test_execute_tool_calls_recovers_session_after_flush_failure(db_sessio
 
 
 @pytest.mark.asyncio
-async def test_turn_runner_reapplies_rls_after_commit():
-    """Regression (Postgres): the turn runner's commits must preserve RLS.
+async def test_commit_and_reapply_rls_reapplies_after_commit(db_session, ai_user):
+    """Regression (Postgres): committing must re-apply the RLS user context.
 
-    The RLS context (``app.user_id``) is transaction-scoped. The background
-    turn commits several times (user message, tool side-effects, assistant
-    reply, usage, summary); if the context is not re-applied after EVERY
-    commit, the next write on the fresh pooled connection violates RLS and the
-    chat never persists (empty history on reload + "new row violates row-level
-    security policy" errors).
-
-    Assert the commit helper re-issues set_config after commit by monkeypatching
-    set_rls_user_id and running the internal commit wrapper.
+    The RLS context (``app.user_id``) is transaction-scoped: ``commit`` ends
+    the transaction and releases the pooled connection, so a bare commit leaves
+    the next write without RLS - "new row violates row-level security policy"
+    plus empty chat history on reload. The turn runner uses
+    ``commit_and_reapply_rls`` on every commit/rollback.
     """
     import os
 
     if not os.getenv("TEST_DATABASE_URL", "").startswith("postgresql"):
         pytest.skip("RLS re-application is PostgreSQL-only")
 
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import patch
+    from uuid import UUID
 
-    from app.services.ai_turn_runner import _run_turn
+    from app.utils.rls import commit_and_reapply_rls
 
-    calls: list = []
-    async def _fake_set_rls(session, user_id):
-        calls.append(str(user_id))
-        from app.utils.rls import set_rls_user_id as real
-        await real(session, user_id)
+    user = UUID(str(ai_user))
 
-    with patch("app.services.ai_turn_runner.set_rls_user_id", _fake_set_rls):
-        await _run_turn(_make_job())
+    reapply_calls: list = []
 
-    # At least the first apply AND the re-apply after the first commit must
-    # have happened (i.e. more than one call).
-    assert len(calls) >= 2
+    async def _fake_reapply(session, uid):
+        reapply_calls.append(str(uid))
 
+    with patch("app.utils.rls.set_rls_user_id", _fake_reapply):
+        await commit_and_reapply_rls(db_session, user)
+        await commit_and_reapply_rls(db_session, user)
 
-def _make_job():
-    from app.services.ai_turn_runner import TurnJob
-
-    return TurnJob(
-        user_id=str(uuid4()),
-        session_id=str(uuid4()),
-        provider="openai",
-        api_key="sk-test",
-        chain=[],
-        sanitized_history=[],
-        user_message="hi",
-        context=None,
-    )
+    # set_config must have been re-issued after EVERY commit (2 commits -> 2
+    # re-applications), not just once at session open.
+    assert reapply_calls == [str(user), str(user)]

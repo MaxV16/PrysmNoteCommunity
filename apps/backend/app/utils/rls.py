@@ -33,6 +33,26 @@ async def set_rls_user_id(session: AsyncSession, user_id: UUID) -> None:
     )
 
 
+async def commit_and_reapply_rls(session: AsyncSession, user_id: UUID) -> None:
+    """Commit the current transaction, then re-apply the RLS user context.
+
+    Committing hands the pooled connection back and ends the transaction, so
+    the transaction-scoped ``app.user_id`` is lost on the next query. Sessions
+    that commit several times (background turn runner) MUST call this on every
+    commit/rollback or the next write violates RLS.
+    """
+    await session.commit()
+    if session.get_bind().dialect.name == "postgresql":
+        await set_rls_user_id(session, user_id)
+
+
+async def rollback_and_reapply_rls(session: AsyncSession, user_id: UUID) -> None:
+    """Roll back the current transaction, then re-apply the RLS context."""
+    await session.rollback()
+    if session.get_bind().dialect.name == "postgresql":
+        await set_rls_user_id(session, user_id)
+
+
 @asynccontextmanager
 async def rls_session(user_id: UUID | str):
     """Open a session pre-applied with the given user's RLS context.

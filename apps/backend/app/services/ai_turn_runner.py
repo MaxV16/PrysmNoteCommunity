@@ -32,7 +32,12 @@ from app.services.ai_service import (
     tools_for_user,
 )
 from app.services.memory_service import retrieve_relevant_memories
-from app.utils.rls import rls_session, set_rls_user_id
+from app.utils.rls import (
+    commit_and_reapply_rls,
+    rls_session,
+    rollback_and_reapply_rls,
+    set_rls_user_id,
+)
 
 logger = logging.getLogger("app.ai_turn_runner")
 
@@ -138,14 +143,10 @@ async def _run_turn(job: TurnJob) -> None:
                 # Every commit ends the transaction and hands the pooled
                 # connection back. The transaction-scoped app.user_id is then
                 # gone, so re-apply it or the next write violates RLS.
-                await session.commit()
-                if is_pg:
-                    await set_rls_user_id(session, UUID(job.user_id))
+                await commit_and_reapply_rls(session, UUID(job.user_id))
 
             async def _rollback():
-                await session.rollback()
-                if is_pg:
-                    await set_rls_user_id(session, UUID(job.user_id))
+                await rollback_and_reapply_rls(session, UUID(job.user_id))
 
             async def _cancel_job_finish():
                 """Finish cancelled turn."""
