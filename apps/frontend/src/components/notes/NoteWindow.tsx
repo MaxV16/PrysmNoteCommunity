@@ -42,7 +42,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
   const resizeRef = useRef<ResizeState | null>(null);
 
   useEffect(() => {
-    const handleMove = (e: MouseEvent) => {
+    const handleMove = (e: PointerEvent) => {
       const current = noteRef.current;
       if (dragRef.current) {
         const { startX, startY, origX, origY } = dragRef.current;
@@ -73,17 +73,20 @@ export function NoteWindow({ note }: { note: StickyNote }) {
       dragRef.current = null;
       resizeRef.current = null;
     };
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
+    // Pointer Events unify mouse and touch; listeners stay on the window so
+    // dragging continues when the pointer leaves the note.
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
     return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
     };
   }, []);
 
-  const onHeaderMouseDown = (e: React.MouseEvent) => {
+  const onHeaderPointerDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("input, button")) return;
-    e.preventDefault();
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
@@ -92,8 +95,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
     };
   };
 
-  const onResizeStart = (edge: string) => (e: React.MouseEvent) => {
-    e.preventDefault();
+  const onResizeStart = (edge: string) => (e: React.PointerEvent) => {
     e.stopPropagation();
     resizeRef.current = {
       edge,
@@ -106,7 +108,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
     };
   };
 
-  const onWindowMouseDown = () => {
+  const onWindowPointerDown = () => {
     const z = (getNotes().reduce((max, n) => Math.max(max, n.zIndex || 0), 0) || 0) + 1;
     if ((noteRef.current.zIndex || 0) < z) upsertNote(noteRef.current.id, { zIndex: z });
   };
@@ -121,13 +123,14 @@ export function NoteWindow({ note }: { note: StickyNote }) {
 
   return (
     <div
-      onMouseDown={onWindowMouseDown}
+      onPointerDown={onWindowPointerDown}
       className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-surface/85 shadow-glow-lg backdrop-blur-xl"
       style={style}
     >
       <div
         className="flex h-10 shrink-0 cursor-move select-none items-center justify-between gap-2 border-b border-white/10 px-3"
-        onMouseDown={onHeaderMouseDown}
+        style={{ touchAction: "none" }}
+        onPointerDown={onHeaderPointerDown}
       >
         <span
           className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -138,7 +141,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
           type="text"
           value={note.title}
           onChange={(e) => upsertNote(note.id, { title: e.target.value })}
-          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
           placeholder="Title"
           className="w-full min-w-0 flex-1 bg-transparent text-sm font-medium text-primary outline-none placeholder:text-muted"
         />
@@ -192,13 +195,17 @@ export function NoteWindow({ note }: { note: StickyNote }) {
       {["nw", "ne", "sw", "se"].map((edge) => (
         <div
           key={edge}
-          className="absolute h-3.5 w-3.5"
+          className="absolute h-7 w-7"
           style={{
-            ...(edge.includes("n") ? { top: -2 } : { bottom: -2 }),
-            ...(edge.includes("w") ? { left: -2 } : { right: -2 }),
+            ...(edge.includes("n") ? { top: -14 } : { bottom: -14 }),
+            ...(edge.includes("w") ? { left: -14 } : { right: -14 }),
             cursor: `${edge}-resize`,
+            // Never let the touch scroll gesture hijack a resize (Pointer Events
+            // already unify mouse + touch; this must stay so it is a real hit
+            // target, not a scroll region).
+            touchAction: "none",
           }}
-          onMouseDown={onResizeStart(edge)}
+          onPointerDown={onResizeStart(edge)}
         />
       ))}
     </div>

@@ -167,6 +167,18 @@ npm run launch    # Build + start both frontend & backend
 docker-compose up # Full stack with Docker
 ```
 
+### Desktop app (Electron)
+
+The desktop shell is packaged for Windows / macOS / Linux with electron-builder:
+
+```bash
+npm run build:desktop -- --mac   # or --win / --linux
+```
+
+Installers land in `release/` under the desktop app directory. A release
+workflow builds all three platforms and publishes them to the downloads page;
+see the private runbook for the R2 bucket and signing details.
+
 ## Tech Stack
 
 | Layer | Technology |

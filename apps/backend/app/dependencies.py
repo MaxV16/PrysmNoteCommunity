@@ -55,8 +55,11 @@ async def get_current_user(
     if payload.get("tv", 0) != user.token_version:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
 
-    await set_rls_user_id(session, user.id)
-    await session.execute(
-        text("SELECT set_config('app.user_email', :email, true)").bindparams(email=user.email)
-    )
+    # RLS session variables are PostgreSQL-only (SQLite/tests skip them); the
+    # conftest's _get_test_db applies RLS for Postgres test runs instead.
+    if session.get_bind().dialect.name == "postgresql":
+        await set_rls_user_id(session, user.id)
+        await session.execute(
+            text("SELECT set_config('app.user_email', :email, true)").bindparams(email=user.email)
+        )
     return user

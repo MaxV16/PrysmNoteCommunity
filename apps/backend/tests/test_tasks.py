@@ -44,6 +44,47 @@ async def test_create_task(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_task_time_round_trip(client: AsyncClient):
+    """start_time/end_time round-trip as HH:MM strings: validated on create,
+    echoed on GET, and updatable via PATCH (frontend contract)."""
+    from datetime import time as dtime
+
+    response = await client.post("/api/tasks/", json={
+        "title": "Mechanic at 2",
+        "start_date": "2026-09-08",
+        "start_time": "14:00",
+        "end_time": "16:30",
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["start_time"] == "14:00"
+    assert data["end_time"] == "16:30"
+    tid = data["id"]
+
+    fetched = await client.get(f"/api/tasks/{tid}")
+    assert fetched.status_code == 200
+    assert fetched.json()["start_time"] == "14:00"
+
+    patched = await client.patch(f"/api/tasks/{tid}", json={"start_time": "09:30", "end_time": None})
+    assert patched.status_code == 200
+    assert patched.json()["start_time"] == "09:30"
+    assert patched.json()["end_time"] is None
+
+
+@pytest.mark.asyncio
+async def test_task_time_rejects_bad_format(client: AsyncClient):
+    response = await client.post("/api/tasks/", json={
+        "title": "Bad time",
+        "start_time": "2pm",
+    })
+    assert response.status_code == 422
+
+    created = await client.post("/api/tasks/", json={"title": "Patch bad time"})
+    tid = created.json()["id"]
+    assert (await client.patch(f"/api/tasks/{tid}", json={"end_time": "noon"})).status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_create_task_empty_title(client: AsyncClient):
     response = await client.post("/api/tasks/", json={"title": ""})
     assert response.status_code == 422
@@ -665,6 +706,39 @@ async def test_expand_recurring_for_range_does_not_stamp_cooldown(db_session: As
     assert await expand_recurring_for_range(db_session, user.id, date.today(), date.today() + timedelta(days=3)) == 4
     await db_session.refresh(task)
     assert task.recurrence_last_expanded_at is None
+
+
+@pytest.mark.asyncio
+async def test_expand_recurring_copies_start_end_time(db_session: AsyncSession):
+    """Recurring children must inherit the template's start_time/end_time so
+    previews and the timeline keep the clock slot on every occurrence."""
+    from datetime import time as dtime
+    from app.services.recurring_task_service import expand_recurring_for_range
+
+    user = await _recurring_user(db_session)
+    task = Task(
+        user_id=user.id,
+        title="Timed Daily",
+        start_date=date.today(),
+        start_time=dtime(14, 0),
+        end_time=dtime(16, 30),
+        recurrence_rule="FREQ=DAILY",
+        status=TaskStatus.TODO,
+    )
+    db_session.add(task)
+    await db_session.commit()
+
+    assert await expand_recurring_for_range(db_session, user.id, date.today() + timedelta(days=1), date.today() + timedelta(days=4)) == 4
+
+    children = (
+        await db_session.execute(
+            select(Task).where(Task.parent_task_id.isnot(None), Task.title == "Timed Daily")
+        )
+    ).scalars().all()
+    assert len(children) == 4
+    for child in children:
+        assert child.start_time == dtime(14, 0)
+        assert child.end_time == dtime(16, 30)
 
 
 @pytest.mark.asyncio

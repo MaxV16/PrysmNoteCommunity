@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { createNote, openNote, syncNotesFromServer } from "@/lib/notes";
 import { useUiModule } from "@/lib/ui-module-registry";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { NotesOverlay } from "@/components/notes/NoteWindow";
 import { NotesSection } from "@/components/sidebar/NotesSection";
 
@@ -12,7 +13,12 @@ import { NotesSection } from "@/components/sidebar/NotesSection";
 function NotesWorkspace() {
   const searchParams = useSearchParams();
   const stickyOn = useUiModule("stickyNotes");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const smallScreen = useMediaQuery("(max-width: 767px)");
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    // On small screens start with the list collapsed; it opens as an overlay.
+    if (typeof window === "undefined") return true;
+    return !window.matchMedia("(max-width: 767px)").matches;
+  });
 
   useEffect(() => {
     void syncNotesFromServer();
@@ -24,7 +30,7 @@ function NotesWorkspace() {
   }, [searchParams]);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-base">
+    <div className="flex h-dvh w-screen flex-col overflow-hidden bg-base">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-surface px-4">
         <div className="flex items-center gap-2">
           <button
@@ -58,11 +64,23 @@ function NotesWorkspace() {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          {sidebarOpen && (
-            <aside className="w-64 shrink-0 overflow-y-auto border-r border-border bg-surface px-2 py-3">
-              <NotesSection />
-            </aside>
+          {/* Mobile: slide-in overlay drawer for the note list */}
+          {smallScreen && sidebarOpen && (
+            <>
+              <div
+                className="fixed inset-0 z-40 bg-black/40"
+                aria-hidden
+                onClick={() => setSidebarOpen(false)}
+              />
+              <aside className="fixed inset-y-0 left-0 z-40 w-64 overflow-y-auto border-r border-border bg-surface px-2 py-3 slide-in-left">
+                <NotesSection />
+              </aside>
+            </>
           )}
+          {/* Desktop (md+): inline note list, always visible */}
+          <aside className="hidden w-64 shrink-0 overflow-y-auto border-r border-border bg-surface px-2 py-3 md:block">
+            <NotesSection />
+          </aside>
           <main className="relative min-h-0 flex-1 overflow-hidden">
             <NotesOverlay />
           </main>

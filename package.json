@@ -10,7 +10,9 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "smoke:api": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/api-smoke.mjs",
-    "smoke:ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke.mjs"
+    "smoke:ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke.mjs",
+    "smoke:ui-mobile": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke-mobile.mjs",
+    "build:desktop": "node scripts/build-desktop.mjs"
   },
   "overrides": {
     "postcss": "^8.5.23"

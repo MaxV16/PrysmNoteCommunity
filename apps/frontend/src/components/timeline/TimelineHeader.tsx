@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { DAY_WIDTH, DAY_HEADER_HEIGHT } from "./constants";
+import { DAY_HEADER_HEIGHT } from "./constants";
 
 interface TimelineHeaderProps {
   days: Date[];
+  dayWidth?: number;
 }
 
-export function TimelineHeader({ days }: TimelineHeaderProps) {
+export function TimelineHeader({ days, dayWidth = 120 }: TimelineHeaderProps) {
   const dayRows = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -29,7 +30,7 @@ export function TimelineHeader({ days }: TimelineHeaderProps) {
           data-day-header
           data-is-today={isToday ? "true" : "false"}
           className="flex flex-col items-center justify-center py-3"
-          style={{ width: DAY_WIDTH, minWidth: DAY_WIDTH, flex: `0 0 ${DAY_WIDTH}px` }}
+          style={{ width: dayWidth, minWidth: dayWidth, flex: `0 0 ${dayWidth}px` }}
         >
           <span className={`text-xs font-medium ${isToday ? "text-accent" : "text-secondary"}`}>
             {dayName}

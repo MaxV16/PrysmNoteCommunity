@@ -15,6 +15,7 @@ import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { formatDate } from "@/lib/dates";
+import { taskTimeLabel } from "@/lib/task-time";
 
 import {
   TIER_COLORS,
@@ -53,11 +54,15 @@ const STATUS_OPTIONS = [
 function formatDateRange(task: Task): string | null {
   if (!task.start_date && !task.due_date) return null;
   const fmt = (d: string) => formatDate(new Date(d + "T00:00:00"), { includeYear: false });
+  let range: string;
   if (task.start_date && task.due_date && task.start_date !== task.due_date) {
-    return `${fmt(task.start_date)} – ${fmt(task.due_date)}`;
+    range = `${fmt(task.start_date)} – ${fmt(task.due_date)}`;
+  } else {
+    const d = task.start_date || task.due_date!;
+    range = fmt(d);
   }
-  const d = task.start_date || task.due_date!;
-  return fmt(d);
+  const time = taskTimeLabel(task);
+  return time ? `${range} · ${time}` : range;
 }
 
 interface TaskDetailDrawerProps {
@@ -278,11 +283,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     }
   };
 
-  const handleUpdate = async (data: {
+const handleUpdate = async (data: {
     title: string;
     description?: string;
     start_date?: string;
     due_date?: string;
+    start_time?: string;
+    end_time?: string;
     status?: string;
     priority?: number;
     tag_ids?: string[];
@@ -291,12 +298,16 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   }) => {
     const fields: Record<string, unknown> = {};
     if (data.title !== task.title) fields.title = data.title;
-    if (data.description !== (task.description || "")) fields.description = data.description;
     if (data.status && data.status !== task.status) fields.status = data.status;
+    if (data.description !== undefined && data.description !== (task.description || "")) {
+      fields.description = data.description || null;
+    }
     if (data.priority && data.priority !== normalizePriority(task.priority))
       fields.priority = data.priority;
     if (data.start_date !== (task.start_date || "")) fields.start_date = data.start_date;
     if (data.due_date !== (task.due_date || "")) fields.due_date = data.due_date;
+    if (data.start_time !== (task.start_time || "")) fields.start_time = data.start_time || null;
+    if (data.end_time !== (task.end_time || "")) fields.end_time = data.end_time || null;
     if (data.tag_ids !== undefined) fields.tag_ids = data.tag_ids;
     if (data.recurrence_rule !== (task.recurrence_rule || ""))
       fields.recurrence_rule = data.recurrence_rule ?? null;
@@ -439,16 +450,28 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
             className="input-field w-full bg-transparent text-lg font-semibold text-primary"
           />
         ) : (
-          <h2
-            onDoubleClick={() => {
-              setDraftTitle(task.title);
-              setRenaming(true);
-            }}
-            title="Double-click to rename"
-            className={task.status === "done" ? "text-lg font-semibold leading-snug text-muted line-through" : "text-lg font-semibold leading-snug text-primary"}
-          >
-            {task.title}
-          </h2>
+          <div className="flex min-w-0 flex-1 items-start gap-1.5">
+            <h2
+              onDoubleClick={() => {
+                setDraftTitle(task.title);
+                setRenaming(true);
+              }}
+              title="Double-click to rename"
+              className={task.status === "done" ? "min-w-0 flex-1 text-lg font-semibold leading-snug text-muted line-through" : "min-w-0 flex-1 text-lg font-semibold leading-snug text-primary"}
+            >
+              {task.title}
+            </h2>
+            <button
+              onClick={() => {
+                setDraftTitle(task.title);
+                setRenaming(true);
+              }}
+              aria-label="Rename task"
+              className="pointer-coarse:opacity-100 pointer-coarse:flex mt-0.5 hidden shrink-0 items-center justify-center rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-primary"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+            </button>
+          </div>
         )}
         <div className="relative shrink-0">
           <button

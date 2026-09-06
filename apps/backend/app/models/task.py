@@ -1,7 +1,7 @@
 import enum
-from datetime import date, datetime
+from datetime import date, datetime, time
 
-from sqlalchemy import Boolean, Date, DateTime, Integer, SmallInteger, String, Text, ForeignKey, Enum, func, Uuid, Index
+from sqlalchemy import Boolean, Date, DateTime, Integer, SmallInteger, String, Text, ForeignKey, Enum, func, Uuid, Index, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -42,6 +42,10 @@ class Task(Base):
     priority: Mapped[int] = mapped_column(SmallInteger, default=2, nullable=False)
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Naive HH:MM local times (no tz column): "at 2" -> "14:00". Used by the
+    # AI to capture clock times and by the timeline to order same-day bars.
+    start_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    end_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     is_all_day: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     estimated_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     recurrence_rule: Mapped[str | None] = mapped_column(Text, nullable=True)

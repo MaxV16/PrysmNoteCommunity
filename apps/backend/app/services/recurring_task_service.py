@@ -111,6 +111,8 @@ async def expand_task_occurrences(session: AsyncSession, task: Task) -> int:
             priority=task.priority,
             start_date=instance_date,
             due_date=instance_date,
+            start_time=task.start_time,
+            end_time=task.end_time,
             parent_task_id=task.id,
         )
         session.add(new_task)
@@ -191,6 +193,8 @@ async def expand_task_occurrences_for_range(
             priority=task.priority,
             start_date=instance_date,
             due_date=instance_date,
+            start_time=task.start_time,
+            end_time=task.end_time,
             parent_task_id=task.id,
         )
         session.add(new_task)

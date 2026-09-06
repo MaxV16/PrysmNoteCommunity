@@ -95,7 +95,7 @@ export function ThreePaneLayout() {
   return (
     <ErrorBoundaryInner>
       {!dataLoaded ? (
-        <div className="flex h-screen items-center justify-center bg-base">
+        <div className="flex h-dvh items-center justify-center bg-base">
           <div className="flex flex-col items-center gap-4 fade-in">
             <Spinner />
             <p className="text-sm text-muted">Loading your workspace...</p>

@@ -21,13 +21,25 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-lg">
+    // Backdrop: clicking outside the panel closes. On small screens the panel
+    // becomes a safe-area-aware bottom sheet instead of a centered card.
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="w-full max-w-md rounded-t-2xl border border-border bg-surface p-6 pb-safe shadow-lg sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-primary">{title}</h2>
           <button
             onClick={onClose}
-            className="text-sm text-secondary hover:text-primary"
+            aria-label="Close"
+            className="pointer-coarse:h-11 pointer-coarse:w-11 flex h-8 w-8 items-center justify-center rounded-full text-sm text-secondary transition-colors hover:bg-hover hover:text-primary"
           >
             ✕
           </button>

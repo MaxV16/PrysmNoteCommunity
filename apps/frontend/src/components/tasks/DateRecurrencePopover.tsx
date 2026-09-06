@@ -182,7 +182,7 @@ export function DateRecurrencePopover({
       ref={menuRef}
       role="dialog"
       className="fixed z-[70] flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
-      style={{ top: pos?.top, left: pos?.left, width: 320, maxHeight: "min(32rem, 90vh)" }}
+      style={{ top: pos?.top, left: pos?.left, width: "min(320px, calc(100vw - 24px))", maxHeight: "min(32rem, 90dvh)" }}
     >
       {view === "main" && (
         <MainView

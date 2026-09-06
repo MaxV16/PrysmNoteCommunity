@@ -63,7 +63,7 @@ export function ChatInput({ onSend, disabled, additionalAction }: ChatInputProps
           <button
             type="submit"
             disabled={disabled || !input.trim()}
-            className="gradient-bg flex h-8 w-8 items-center justify-center rounded-full text-[var(--on-gradient)] text-sm shadow-glow hover:brightness-110 hover:shadow-glow-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:brightness-100 transition-all"
+            className="pointer-coarse:h-11 pointer-coarse:w-11 gradient-bg flex h-8 w-8 items-center justify-center rounded-full text-[var(--on-gradient)] text-sm shadow-glow hover:brightness-110 hover:shadow-glow-lg disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:brightness-100 transition-all"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"/>

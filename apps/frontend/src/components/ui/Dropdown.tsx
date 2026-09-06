@@ -12,13 +12,18 @@ export function Dropdown({ trigger, children }: DropdownProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
+    const handleClick = (e: MouseEvent | PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setIsOpen(false);
       }
     };
+    // pointerdown covers touch (some Android WebViews skip synthesized mousedown)
+    document.addEventListener("pointerdown", handleClick);
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    return () => {
+      document.removeEventListener("pointerdown", handleClick);
+      document.removeEventListener("mousedown", handleClick);
+    };
   }, []);
 
   return (

@@ -94,7 +94,7 @@ function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
       <button
         {...listeners}
         {...attributes}
-        className="cursor-grab touch-none text-[#4a4a60] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+        className="pointer-coarse:opacity-100 cursor-grab touch-none text-[#4a4a60] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
         title="Drag to reorder"
         onClick={(e) => e.stopPropagation()}
       >
@@ -130,13 +130,25 @@ function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
           className="input-field flex-1 bg-transparent text-sm px-1 py-0"
         />
       ) : (
-        <span
-          className={`flex-1 min-w-0 break-words text-sm ${done ? "line-through text-muted" : "text-primary"}`}
-        >
-          {sub.title}
-        </span>
-      )}
-      <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            <span
+              className={`min-w-0 flex-1 break-words text-sm ${done ? "line-through text-muted" : "text-primary"}`}
+            >
+              {sub.title}
+            </span>
+            <button
+              onClick={() => {
+                setEditing(true);
+                setDraft(sub.title);
+              }}
+              aria-label={`Rename ${sub.title}`}
+              className="pointer-coarse:opacity-100 hidden shrink-0 rounded p-1 text-[#4a4a60] opacity-0 transition-opacity group-hover:opacity-100 hover:text-primary"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+            </button>
+          </div>
+        )}
+      <div className="pointer-coarse:opacity-100 flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <button
           onClick={() => void onDelete(sub)}
           className="rounded p-1 text-[#4a4a60] transition-colors hover:text-danger"

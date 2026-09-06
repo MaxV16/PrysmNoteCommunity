@@ -56,10 +56,10 @@ export function TagList() {
         {tags.map((tag) => {
           const isActive = selectedTagId === tag.id;
           return (
-            <span
+            <button
               key={tag.id}
               onClick={() => handleTagClick(tag.id)}
-              className={`badge gap-1.5 cursor-pointer group transition-all ${
+              className={`badge gap-1.5 cursor-pointer group transition-all text-left ${
                 isActive ? "ring-2 ring-accent/50 scale-105" : ""
               }`}
               style={{
@@ -82,11 +82,12 @@ export function TagList() {
                     // tag delete failed silently
                   }
                 }}
-                className="ml-1 opacity-0 group-hover:opacity-100 hover:text-danger transition-opacity text-xs font-bold"
+                className="pointer-coarse:opacity-100 ml-1 opacity-0 group-hover:opacity-100 hover:text-danger transition-opacity text-xs font-bold"
+                aria-label={`Delete tag ${tag.name}`}
               >
                 ✕
               </button>
-            </span>
+            </button>
           );
         })}
         {tags.length === 0 && !isAdding && (

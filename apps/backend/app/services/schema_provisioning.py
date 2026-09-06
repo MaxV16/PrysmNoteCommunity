@@ -38,17 +38,18 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
     """
     import app.models  # noqa: F401  # ensure every model is registered on Base
 
-    for _stmt in (
-        "CREATE EXTENSION IF NOT EXISTS vector",
-        "CREATE EXTENSION IF NOT EXISTS pgcrypto",
-        "CREATE EXTENSION IF NOT EXISTS pg_trgm",
-    ):
-        try:
-            async with engine.begin() as _conn:
-                await _conn.execute(text(_stmt))
-        except ProgrammingError as _err:
-            if not _is_privilege_error(_err):
-                raise
+    if engine.dialect.name == "postgresql":
+        for _stmt in (
+            "CREATE EXTENSION IF NOT EXISTS vector",
+            "CREATE EXTENSION IF NOT EXISTS pgcrypto",
+            "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+        ):
+            try:
+                async with engine.begin() as _conn:
+                    await _conn.execute(text(_stmt))
+            except ProgrammingError as _err:
+                if not _is_privilege_error(_err):
+                    raise
 
     async with engine.begin() as conn:
         await conn.run_sync(lambda sync_conn: app.models.Base.metadata.create_all(sync_conn))
@@ -291,6 +292,10 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         # (idempotent; mirrored by alembic 0012).
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence_last_expanded_at TIMESTAMPTZ",
         "ALTER TABLE user_tokens ADD COLUMN IF NOT EXISTS last_pulled_at TIMESTAMPTZ",
+        # Task time slots for AI-captured clock times ("at 2pm") and timeline
+        # ordering (idempotent; mirrored by alembic 0015). Naive HH:MM, no tz.
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS start_time TIME",
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS end_time TIME",
         # Theatrical-release flag for watchlist movies (create_all cannot alter).
         "ALTER TABLE watchlist_items ADD COLUMN IF NOT EXISTS is_theatrical BOOLEAN NOT NULL DEFAULT FALSE",
         # Import batch tracking for undo (create_all cannot alter; mirrored by

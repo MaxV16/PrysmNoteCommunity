@@ -69,7 +69,7 @@ export function NotesSection() {
                 onClick={() => {
                   if (window.confirm("Delete this note?")) deleteNote(n.id);
                 }}
-                className="mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-danger/20 hover:text-danger group-hover:opacity-100"
+                className="pointer-coarse:opacity-100 mr-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-danger/20 hover:text-danger group-hover:opacity-100"
                 title="Delete note"
                 aria-label={`Delete ${n.title || "note"}`}
               >

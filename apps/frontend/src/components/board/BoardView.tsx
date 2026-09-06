@@ -107,7 +107,7 @@ function BoardGroup({
         onEmptyContextMenu?.(e, droppableId, title);
       }}
       className={`flex ${
-        scrollDirection === "horizontal" ? "min-w-[480px] flex-1" : "w-full"
+        scrollDirection === "horizontal" ? "min-w-full flex-1 lg:min-w-[480px]" : "w-full"
       } flex-col rounded-2xl border bg-white/[0.02] p-4 transition-colors ${
         isOver ? "border-accent/60 ring-2 ring-accent/30" : "border-white/5"
       }`}

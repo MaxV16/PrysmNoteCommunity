@@ -13,6 +13,7 @@ import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskC
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { formatDate } from "@/lib/dates";
+import { taskTimeLabel } from "@/lib/task-time";
 import { matchesSearchQuery } from "@/lib/task-search";
 import { api } from "@/lib/api";
 
@@ -63,10 +64,21 @@ export function ListView() {
         filtered.sort((a, b) => {
           const da = a.due_date || a.start_date || "";
           const db = b.due_date || b.start_date || "";
-          if (!da && !db) return 0;
+          if (!da && !db) {
+            const ta = a.start_time || "";
+            const tb = b.start_time || "";
+            if (ta && tb && ta !== tb) return ta < tb ? -1 : 1;
+            return 0;
+          }
           if (!da) return 1;
           if (!db) return -1;
-          return da.localeCompare(db);
+          if (da !== db) return da.localeCompare(db);
+          const ta = a.start_time || "";
+          const tb = b.start_time || "";
+          if (ta && tb && ta !== tb) return ta < tb ? -1 : 1;
+          if (ta && !tb) return -1;
+          if (!ta && tb) return 1;
+          return 0;
         });
         break;
     }
@@ -321,6 +333,7 @@ export function ListView() {
                       <span className="text-[10px] text-muted mt-0.5 block">
                         {task.start_date && `From ${formatDate(new Date(task.start_date + "T00:00:00"), { includeYear: false })} `}
                         {task.due_date && `${task.start_date ? "→ " : ""}Due ${formatDate(new Date(task.due_date + "T00:00:00"), { includeYear: false })}`}
+                        {taskTimeLabel(task) && ` · ${taskTimeLabel(task)}`}
                       </span>
                     )}
                   </div>

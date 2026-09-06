@@ -1,4 +1,4 @@
-from datetime import date as date_type
+from datetime import date as date_type, time as time_type
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
@@ -36,6 +36,24 @@ def _parse_date(value: str | None) -> date_type | None:
         return None
 
 
+def _parse_time(value: str | None) -> time_type | None:
+    if value is None:
+        return None
+    # Accept "HH:MM" and "HH:MM:SS" (python time.fromisoformat needs the full
+    # form for the latter; the former is its own ISO format).
+    if isinstance(value, time_type):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if len(value) == 5 and value[2] == ":":
+            value = f"{value}:00"
+        try:
+            return time_type.fromisoformat(value)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 def _coerce_status(status: str | TaskStatus) -> TaskStatus:
     if isinstance(status, TaskStatus):
         return status
@@ -53,6 +71,8 @@ async def create_task(
     priority: int = 2,
     start_date: str | None = None,
     due_date: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
     recurrence_rule: str | None = None,
     recurrence_end_date: str | None = None,
 ) -> Task:
@@ -71,6 +91,8 @@ async def create_task(
         priority=normalize_priority(priority),
         start_date=_parse_date(start_date),
         due_date=_parse_date(due_date),
+        start_time=_parse_time(start_time),
+        end_time=_parse_time(end_time),
         recurrence_rule=recurrence_rule,
         recurrence_end_date=_parse_date(recurrence_end_date),
     )
@@ -109,13 +131,15 @@ def _coerce_uuid(value: UUID | str | None) -> UUID | None:
 
 ALLOWED_UPDATE_FIELDS = {
     "title", "description", "status", "priority",
-    "start_date", "due_date", "is_all_day", "estimated_minutes",
+    "start_date", "due_date", "start_time", "end_time", "is_all_day", "estimated_minutes",
     "recurrence_rule", "recurrence_end_date", "sort_order",
     "parent_task_id", "is_archived", "board_section_id", "board_order",
 }
 
 
 DATE_FIELDS = {"start_date", "due_date", "recurrence_end_date"}
+
+TIME_FIELDS = {"start_time", "end_time"}
 
 
 async def update_task(session: AsyncSession, task_id: UUID, fields: dict, user_id: UUID) -> Task | None:
@@ -126,6 +150,10 @@ async def update_task(session: AsyncSession, task_id: UUID, fields: dict, user_i
         if key in ALLOWED_UPDATE_FIELDS:
             if key in DATE_FIELDS:
                 value = _parse_date(value)
+            if key in TIME_FIELDS:
+                value = _parse_time(value)
+            if key in ("parent_task_id", "board_section_id") and value is not None:
+                value = UUID(str(value))
             if key == "status":
                 value = _coerce_status(value)
             if key == "priority":

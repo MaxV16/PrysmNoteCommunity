@@ -760,7 +760,8 @@ async def test_delete_account_uses_db_cascade_not_orm_loop(auth_client, db_sessi
     headers = {"Authorization": f"Bearer {access_token}"}
     uid = _uuid.UUID(reg.json()["id"])
 
-    await set_rls_user_id(db_session, uid)
+    if db_session.get_bind().dialect.name == "postgresql":
+        await set_rls_user_id(db_session, uid)
     for i in range(300):
         t = Task(id=_uuid.uuid4(), user_id=uid, title=f"t{i}", start_date=None)
         t.embedding = TaskEmbedding(id=_uuid.uuid4(), task_id=t.id, embedding=None)

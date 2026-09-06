@@ -13,6 +13,8 @@ interface TaskFormProps {
     description?: string;
     start_date?: string;
     due_date?: string;
+    start_time?: string;
+    end_time?: string;
     status?: string;
     priority?: number;
     tag_ids?: string[];
@@ -160,6 +162,8 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   const [description, setDescription] = useState(initial?.description || "");
   const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || "");
   const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || "");
+  const [startTime, setStartTime] = useState(initial?.start_time || "");
+  const [endTime, setEndTime] = useState(initial?.end_time || "");
   const [status, setStatus] = useState<TaskStatus>(initial?.status || "todo");
   const [priority, setPriority] = useState<PriorityTier>(initial?.priority ? normalizePriority(initial.priority) : 2);
   const [selectedTags, setSelectedTags] = useState<string[]>(() => initial?.tags?.map((t) => t.id) ?? []);
@@ -211,6 +215,8 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
       description: description.trim() || undefined,
       start_date: start || undefined,
       due_date: due || undefined,
+      start_time: startTime.trim() || undefined,
+      end_time: endTime.trim() || undefined,
       status: isEdit ? status : undefined,
       priority: isEdit ? priority : undefined,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
@@ -221,7 +227,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-y-auto max-h-[60vh]" style={{ minHeight: 0 }}>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-y-auto max-h-[60dvh] pb-safe" style={{ minHeight: 0 }}>
       <div>
         <label className="text-xs font-medium text-secondary mb-1.5 block">Task Title</label>
         <input
@@ -251,6 +257,26 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
         <div className="flex-1">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Due Date</label>
           <CalendarPicker value={dueDate} onChange={setDueDate} placeholder="Not set" />
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+        <div className="flex-1">
+          <label className="text-xs font-medium text-secondary mb-1.5 block">Start Time</label>
+          <input
+            type="time"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            className="input-field text-xs h-10"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="text-xs font-medium text-secondary mb-1.5 block">End Time</label>
+          <input
+            type="time"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            className="input-field text-xs h-10"
+          />
         </div>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">

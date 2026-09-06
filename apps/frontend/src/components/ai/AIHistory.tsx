@@ -124,7 +124,7 @@ export function AIHistory({
                   <button
                     onClick={() => onDeleteServer(s.session_id)}
                     aria-label={`Delete ${s.title || "conversation"}`}
-                    className="mt-0.5 rounded p-1 text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                    className="pointer-coarse:opacity-100 mt-0.5 rounded p-1 text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                   </button>
@@ -162,7 +162,7 @@ export function AIHistory({
                   <button
                     onClick={() => onDeleteLocal(s.id)}
                     aria-label={`Delete ${s.title || "conversation"}`}
-                    className="mt-0.5 rounded p-1 text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                    className="pointer-coarse:opacity-100 mt-0.5 rounded p-1 text-muted opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                   </button>

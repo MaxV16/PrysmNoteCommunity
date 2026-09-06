@@ -1,6 +1,11 @@
 """Tests for OAuth SSO login (endpoint + account creation)."""
+from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
+
 import pytest
 from httpx import AsyncClient
+from jose import jwt
 
 from app.config import settings
 from app.routers import oauth as oauth_module
@@ -120,3 +125,110 @@ async def test_google_code_on_google_callback_is_exchanged_with_google(client, m
     assert r.status_code in (302, 307)
     assert exchanged.get("code") == google_code
     assert "error=" not in r.headers.get("location", "")
+
+
+@pytest.mark.asyncio
+async def test_oauth_start_mobile_marks_state_cookie(client):
+    # ?redirect=mobile prefixes the state cookie so the callback issues a mobile
+    # one-time code instead of setting cookies in the system browser.
+    orig_id, orig_secret = settings.google_client_id, settings.google_client_secret
+    try:
+        settings.google_client_id = "test-client"
+        settings.google_client_secret = "test-secret"
+        r = await client.get("/api/auth/oauth/google/start", params={"redirect": "mobile"})
+        assert r.status_code == 302
+        assert "accounts.google.com" in r.headers.get("location", "")
+        cookie = r.cookies.get("oauth_state")
+        assert cookie and cookie.startswith("mobile:")
+    finally:
+        settings.google_client_id = orig_id
+        settings.google_client_secret = orig_secret
+
+    # Web flow stays unprefixed.
+    try:
+        settings.google_client_id = "test-client"
+        settings.google_client_secret = "test-secret"
+        r = await client.get("/api/auth/oauth/google/start")
+        assert r.status_code == 302
+        cookie = r.cookies.get("oauth_state")
+        assert cookie and not cookie.startswith("mobile:")
+    finally:
+        settings.google_client_id = orig_id
+        settings.google_client_secret = orig_secret
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_mobile_redirects_to_deep_link_and_code_exchanges(client, monkeypatch):
+    # Full mobile loop: callback (running in the system browser) issues a mobile
+    # code and 307s to the custom deep link; the code then exchanges inside the
+    # WebView, sets session cookies, and is single-use.
+    async def fake_fetch_identity(provider, code):
+        return {"email": "test@example.com", "name": "Test User", "email_verified": True}
+
+    monkeypatch.setattr(oauth_module, "_fetch_identity", fake_fetch_identity)
+    client.cookies.set("oauth_state", "mobile:abc123")
+
+    r = await client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": "4/0fake", "state": "abc123"},
+    )
+    assert r.status_code in (302, 307)
+    loc = r.headers.get("location", "")
+    assert loc.startswith("com.prysmnote.app://oauth/client?code=")
+    # No session cookies in the system browser.
+    assert "access_token" not in r.headers.get("set-cookie", "")
+
+    code = parse_qs(urlparse(loc).query)["code"][0]
+    r2 = await client.get(f"/api/auth/mobile/exchange?code={code}")
+    assert r2.status_code == 307
+    assert "access_token" in r2.headers.get("set-cookie", "")
+    assert r2.headers.get("location", "").startswith(settings.app_origin)
+
+    r3 = await client.get(f"/api/auth/mobile/exchange?code={code}")
+    assert r3.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_mobile_exchange_sets_cookies_and_is_single_use(client, test_user):
+    code = oauth_module._create_mobile_code(test_user)
+    r = await client.get(f"/api/auth/mobile/exchange?code={code}")
+    assert r.status_code == 307
+    assert "access_token" in r.headers.get("set-cookie", "")
+    assert "refresh_token" in r.headers.get("set-cookie", "")
+    assert r.headers.get("location", "").startswith(settings.app_origin)
+
+    # Replay is rejected identically (single-use).
+    r2 = await client.get(f"/api/auth/mobile/exchange?code={code}")
+    assert r2.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_mobile_exchange_rejects_wrong_token_type(client, test_user):
+    other = jwt.encode(
+        {
+            "sub": str(test_user.id),
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+            "type": "reset",
+            "jti": str(uuid4()),
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+    r = await client.get(f"/api/auth/mobile/exchange?code={other}")
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_mobile_exchange_rejects_expired_code(client, test_user):
+    expired = jwt.encode(
+        {
+            "sub": str(test_user.id),
+            "exp": datetime.now(timezone.utc) - timedelta(minutes=5),
+            "type": "mobile_oauth",
+            "jti": str(uuid4()),
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+    r = await client.get(f"/api/auth/mobile/exchange?code={expired}")
+    assert r.status_code == 400

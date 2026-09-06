@@ -226,6 +226,135 @@ async def test_create_task_tool_definition_exposes_recurrence_end_date():
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_create_task_tool_definition_exposes_times():
+    """The create_task schema must advertise start_time/end_time so the model can
+    express clock-times ('at 2', '2pm', '9-12')."""
+    create_def = next(
+        t for t in TOOL_DEFINITIONS if t["function"]["name"] == "create_task"
+    )
+    props = create_def["function"]["parameters"]["properties"]
+    assert "start_time" in props
+    assert "end_time" in props
+    assert "HH:MM" in props["start_time"]["description"]
+
+
+@pytest.mark.asyncio
+async def test_execute_create_task_with_times(db_session: AsyncSession, ai_user):
+    """create_task must persist start_time/end_time as naive HH:MM times and
+    keep them off the description (the clock lives in the time columns)."""
+    from datetime import time as dtime
+
+    user_id = ai_user
+    tool_calls = [{
+        "id": "call_time",
+        "function": {
+            "name": "create_task",
+            "arguments": json.dumps({
+                "title": "Mechanic appointment",
+                "start_date": "2026-09-08",
+                "start_time": "14:00",
+                "end_time": "16:30",
+                "description": "Engine oil and supplies",
+            }),
+        },
+    }]
+
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    assert json.loads(results[0]["content"])["created"] is True
+
+    row = (
+        await db_session.execute(
+            select(Task).where(
+                Task.title == "Mechanic appointment",
+                Task.user_id == user_id,
+            )
+        )
+    ).scalar_one()
+    assert row.start_time == dtime(14, 0)
+    assert row.end_time == dtime(16, 30)
+
+
+@pytest.mark.asyncio
+async def test_execute_update_task_with_times(db_session: AsyncSession, ai_user):
+    """update_task accepts start_time/end_time and coerces to time objects."""
+    from datetime import time as dtime
+
+    user_id = ai_user
+    created = await execute_tool_calls([{
+        "id": "c1",
+        "function": {"name": "create_task", "arguments": json.dumps({"title": "GP visit"})},
+    }], str(user_id), db_session)
+    task_id = json.loads(created[0]["content"])["task"]["id"]
+
+    await execute_tool_calls([{
+        "id": "c2",
+        "function": {
+            "name": "update_task",
+            "arguments": json.dumps({"task_id": task_id, "fields": {"start_time": "09:30"}}),
+        },
+    }], str(user_id), db_session)
+
+    row = (
+        await db_session.execute(select(Task).where(Task.id == task_id))
+    ).scalar_one()
+    assert row.start_time == dtime(9, 30)
+
+
+@pytest.mark.asyncio
+async def test_build_messages_includes_money_rule_only_for_finance():
+    """MONEY RULE is injected only when finance tools are present (premium);
+    the free-user prompt must not promise finance tools."""
+    free = build_messages(
+        [{"role": "user", "content": "hi"}], "i earn 1100 a month", include_finance=False
+    )
+    assert "MONEY RULE" not in free[0]["content"]
+
+    paid = build_messages(
+        [{"role": "user", "content": "hi"}], "i earn 1100 a month", include_finance=True
+    )
+    assert "MONEY RULE" in paid[0]["content"]
+    assert "add_financial_item" in paid[0]["content"]
+
+
+def test_money_intent_matches_money_language():
+    from app.services.ai_service import money_intent
+
+    for msg in (
+        "I get a salary of 1100 euros every month",
+        "my bank loan is 2500euro every 3 months",
+        "rent is due on the 1st",
+        "how much is the credit card payment",
+        "I earn 1,100/month",
+        "paid 2500 EUR for the car",
+        "check my savings",
+        "my mortgage payment is 800$",
+    ):
+        assert money_intent(msg), f"should match: {msg}"
+
+    for msg in (
+        "mechanic appointment at 2 tomorrow",
+        "buy engine oil",
+        "call the dentist",
+        "what's on my schedule today",
+    ):
+        assert not money_intent(msg), f"should not match: {msg}"
+
+
+def test_needs_tool_retry_money_message_no_tool_call():
+    """A money request with a tool-free text reply bumps to the paid floor: the
+    free chain cannot act on finance, the paid floor can."""
+    assert _needs_tool_retry(
+        "I can help you track that income!",
+        "add my monthly income of 1100 euros",
+    )
+    # Pure finance Q&A stays a clean Q&A (no money-keyword spine), unchanged.
+    assert not _needs_tool_retry(
+        "Your schedule is clear today.",
+        "what's my schedule today",
+    )
+
+
 async def test_execute_search_tasks(db_session: AsyncSession, ai_user):
     user_id = ai_user
     tool_calls = [{

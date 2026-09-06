@@ -104,7 +104,7 @@ export function ContextMenu({ open, x, y, onClose, children, className = "" }: C
       }
     };
 
-    const onMouseDown = (e: MouseEvent) => {
+    const onMouseDown = (e: MouseEvent | PointerEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) onCloseRef.current();
     };
     const onScroll = () => onCloseRef.current();
@@ -115,12 +115,15 @@ export function ContextMenu({ open, x, y, onClose, children, className = "" }: C
     items()[0]?.focus();
 
     document.addEventListener("keydown", onKey);
+    // pointerdown covers touch (some Android WebViews skip synthesized mousedown)
+    document.addEventListener("pointerdown", onMouseDown);
     document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onResize);
     window.addEventListener("blur", onWindowBlur);
     return () => {
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onMouseDown);
       document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);

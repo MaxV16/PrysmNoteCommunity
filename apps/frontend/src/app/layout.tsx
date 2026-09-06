@@ -7,6 +7,8 @@ import { ToastProvider } from "@/lib/toast-context";
 import { SubscriptionProvider } from "@/lib/subscription-context";
 import { UpdateBanner } from "@/components/ui/UpdateBanner";
 import { CookieBanner } from "@/components/ui/CookieBanner";
+import { DesktopTitlebar } from "@/components/desktop/DesktopTitlebar";
+import { CapbridgeInit } from "@/components/capbridge/CapbridgeInit";
 import Script from "next/script";
 
 export const metadata: Metadata = {
@@ -49,6 +51,8 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
       </head>
       <body>
+        <DesktopTitlebar />
+        <CapbridgeInit />
         <ThemeProvider>
           <DynamicFontLoader />
           <AuthProvider>

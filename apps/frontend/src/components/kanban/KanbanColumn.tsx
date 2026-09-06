@@ -54,7 +54,9 @@ export function KanbanColumn({
       ref={setNodeRef}
       data-testid="kanban-column"
       className={`flex h-full flex-shrink-0 flex-col rounded-2xl bg-surface border transition-colors ${
-        cardLayout === "side_by_side" ? "min-w-[640px]" : "w-[280px]"
+        cardLayout === "side_by_side"
+          ? "w-full min-w-[280px] lg:min-w-[640px]"
+          : "w-[280px] shrink-0"
       } ${isOver ? "border-accent ring-2 ring-accent/30" : "border-border"}`}
     >
       <div className="mb-1 flex items-center gap-2 px-4 pt-3 pb-2">

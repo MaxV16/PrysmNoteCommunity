@@ -25,6 +25,8 @@ export interface Task {
   priority: number;
   start_date: string | null;
   due_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
   is_all_day: boolean;
   estimated_minutes: number | null;
   recurrence_rule: string | null;

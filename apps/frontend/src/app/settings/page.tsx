@@ -21,7 +21,7 @@ import type { Task } from "@/types/task";
 
 const IMPORT_TASK_FIELDS = new Set([
   "id", "user_id", "parent_task_id", "title", "description", "status",
-  "priority", "start_date", "due_date", "is_all_day", "estimated_minutes",
+  "priority", "start_date", "due_date", "start_time", "end_time", "is_all_day", "estimated_minutes",
   "recurrence_rule", "recurrence_end_date", "sort_order", "is_archived",
   "completed_at", "created_at", "updated_at",
 ]);
@@ -53,6 +53,76 @@ function sanitizeImportedTasks(value: unknown): Task[] | null {
 
 
 const THEME_NAMES: ThemeName[] = [...(Object.keys(THEMES) as ThemeName[]), "custom"];
+
+/** Shared settings navigation rail: rendered inline on desktop (md+) and in a
+    slide-in drawer on mobile. Selecting a tab closes the drawer. */
+function SettingsNav({
+  activeTab,
+  onSelectTab,
+  onBack,
+  onLogout,
+}: {
+  activeTab: SettingsTab;
+  onSelectTab: (tab: SettingsTab) => void;
+  onBack: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
+        <button
+          onClick={onBack}
+          className="flex h-9 w-9 items-center justify-center rounded-xl bg-elevated text-sm text-secondary hover:bg-hover hover:text-primary transition-colors"
+          aria-label="Back to app"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+        <div className="min-w-0">
+          <h1 className="text-sm font-bold gradient-text leading-tight">Settings</h1>
+          <p className="text-[10px] text-muted">Manage your workspace</p>
+        </div>
+      </div>
+      <nav className="flex-1 overflow-auto p-2">
+        {TAB_GROUPS.map((group) => (
+          <div key={group.label} className="mb-1">
+            <p className="text-[10px] uppercase tracking-wider font-semibold text-muted px-2 pt-3 pb-1.5">
+              {group.label}
+            </p>
+            <div className="space-y-0.5">
+              {group.tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => onSelectTab(tab.id)}
+                  className={`sidebar-item w-full ${activeTab === tab.id ? "active" : ""}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d={tab.svg} />
+                  </svg>
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
+      <div className="border-t border-border p-3">
+        <button
+          onClick={onLogout}
+          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-danger hover:bg-hover transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+          Sign Out
+        </button>
+      </div>
+    </div>
+  );
+}
 
 type SettingsTab =
   | "account"
@@ -220,6 +290,11 @@ export default function SettingsPage() {
   const { tasks } = useAppStore();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("account");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const selectTab = (tab: SettingsTab) => {
+    setActiveTab(tab);
+    setMobileNavOpen(false);
+  };
   const [displayName, setDisplayName] = useState(user?.display_name || "");
   const [email, setEmail] = useState(user?.email || "");
   const [profileMsg, setProfileMsg] = useState("");
@@ -593,72 +668,66 @@ export default function SettingsPage() {
     (t) => t.status === "done" && t.completed_at && new Date(t.completed_at) >= weekStart
   ).length;
 
-  if (!user) return <div className="flex h-screen items-center justify-center bg-base" />;
+  if (!user) return <div className="flex h-dvh items-center justify-center bg-base" />;
 
   const getKeyByProvider = (provider: string) => keys.find((k) => k.provider === provider);
 
   return (
-    <div className="flex min-h-screen bg-base">
-      {/* Sidebar nav */}
-      <div className="flex w-56 flex-col border-r border-border bg-surface overflow-hidden shrink-0">
-        <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
-          <button
-            onClick={() => router.push("/")}
-            className="flex h-8 w-8 items-center justify-center rounded-xl bg-elevated text-sm text-secondary hover:bg-hover hover:text-primary transition-colors"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
-          <div>
-            <h1 className="text-sm font-bold gradient-text leading-tight">Settings</h1>
-            <p className="text-[10px] text-muted">Manage your workspace</p>
+    <div className="flex min-h-dvh bg-base">
+      {/* Mobile settings nav: slide-in drawer under md (content keeps full width) */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 md:hidden">
+          <div
+            className="absolute inset-0 bg-black/40"
+            aria-hidden
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <div className="absolute inset-y-0 left-0 flex w-64 flex-col border-r border-border bg-surface slide-in-left">
+            <SettingsNav
+              activeTab={activeTab}
+              onSelectTab={selectTab}
+              onBack={() => router.push("/")}
+              onLogout={() => {
+                logout();
+                router.push("/login");
+              }}
+            />
           </div>
         </div>
-        <nav className="flex-1 overflow-auto p-2">
-          {TAB_GROUPS.map((group) => (
-            <div key={group.label} className="mb-1">
-              <p className="text-[10px] uppercase tracking-wider font-semibold text-muted px-2 pt-3 pb-1.5">
-                {group.label}
-              </p>
-              <div className="space-y-0.5">
-                {group.tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`sidebar-item w-full ${activeTab === tab.id ? "active" : ""}`}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d={tab.svg} />
-                    </svg>
-                    <span>{tab.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </nav>
-        <div className="border-t border-border p-3">
-          <button
-            onClick={() => {
-              logout();
-              router.push("/login");
-            }}
-            className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-danger hover:bg-hover transition-colors"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            Sign Out
-          </button>
-        </div>
+      )}
+
+      {/* Desktop settings nav (md+) */}
+      <div className="hidden w-56 shrink-0 flex-col overflow-hidden border-r border-border bg-surface md:flex">
+        <SettingsNav
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          onBack={() => router.push("/")}
+          onLogout={() => {
+            logout();
+            router.push("/login");
+          }}
+        />
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8 fade-in">
+          {/* Mobile settings header with a menu button to reopen the drawer */}
+          <div className="flex items-center gap-2 md:hidden">
+            <button
+              onClick={() => setMobileNavOpen(true)}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-elevated text-secondary transition-colors hover:bg-hover hover:text-primary"
+              aria-label="Open settings menu"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
+            <div>
+              <h1 className="text-sm font-bold gradient-text leading-tight">Settings</h1>
+              <p className="text-[10px] text-muted">
+                {TAB_GROUPS.flatMap((g) => g.tabs).find((t) => t.id === activeTab)?.label}
+              </p>
+            </div>
+          </div>
 
           {/* === ACCOUNT === */}
           {activeTab === "account" && (

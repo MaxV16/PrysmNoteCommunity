@@ -256,6 +256,7 @@ app.add_middleware(CSRFSecurityMiddleware)
 
 app.include_router(auth.router)
 app.include_router(oauth.router)
+app.include_router(oauth.mobile_router)
 app.include_router(tasks.router)
 app.include_router(tags.router)
 app.include_router(search.router)

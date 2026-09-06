@@ -1,8 +1,14 @@
 "use client";
 
+import { openMobileSso } from "@/lib/capbridge";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
-function startSso(provider: "google" | "github") {
+async function startSso(provider: "google" | "github") {
+  // Inside the Capacitor WebView open the provider in the system browser
+  // (@capacitor/browser + one-time-code deep link), because Google blocks
+  // OAuth in embedded webviews. Everywhere else the plain redirect works.
+  if (await openMobileSso(provider)) return;
   // The start endpoint 307-redirects the browser to the provider, and the SSO
   // callback sets the session cookies and bounces back to the app.
   window.location.href = `${API_URL}/auth/oauth/${provider}/start`;

@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { DAY_WIDTH, DAY_HEADER_HEIGHT } from "./constants";
+import { DAY_HEADER_HEIGHT } from "./constants";
 
 interface TimelineGridProps {
   days: Date[];
+  dayWidth?: number;
 }
 
-export function TimelineGrid({ days }: TimelineGridProps) {
+export function TimelineGrid({ days, dayWidth = 120 }: TimelineGridProps) {
   const todayStr = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -29,9 +30,9 @@ export function TimelineGrid({ days }: TimelineGridProps) {
               data-is-today={isToday ? "true" : "false"}
               className="relative"
               style={{
-                width: DAY_WIDTH,
-                minWidth: DAY_WIDTH,
-                flex: `0 0 ${DAY_WIDTH}px`,
+                width: dayWidth,
+                minWidth: dayWidth,
+                flex: `0 0 ${dayWidth}px`,
                 backgroundColor: isToday ? "color-mix(in srgb, var(--accent) 10%, transparent)" : undefined,
               }}
             >

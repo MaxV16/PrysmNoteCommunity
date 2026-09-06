@@ -94,6 +94,9 @@ async def _reset_auth_state():
     auth_module._FAILED_LOGINS.clear()
     auth_module._mail_limiter._memory.clear()
     auth_module._mail_limiter._blocked.clear()
+    from app.routers import oauth as oauth_module
+    oauth_module._mobile_exchange_limiter._memory.clear()
+    oauth_module._mobile_exchange_limiter._blocked.clear()
     yield
 
 

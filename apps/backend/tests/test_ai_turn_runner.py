@@ -15,6 +15,11 @@ import pytest
 from app.services.ai_turn_runner import (
     get_active_turn,
     cancel_turn,
+    _APPLIED_LINE_CAP,
+    _extract_applied_actions,
+    _summarize_tool_result,
+    should_money_nudge,
+    stream_fallback_reply,
 )
 
 
@@ -177,6 +182,90 @@ async def test_start_turn_atomic_under_concurrency():
             assert registered == 1
         finally:
             tr._turns.pop(user_id, None)
+
+
+@pytest.mark.asyncio
+async def test_summarize_tool_result_extracts_applied_actions():
+    """Tool results with committed side effects produce one human line each;
+    read-only listings and errors produce none."""
+    assert (
+        _summarize_tool_result(json.dumps({"created": True, "task": {"title": "Car mechanic appointment", "start_date": "2026-09-07"}}))
+        == 'Added "Car mechanic appointment" (2026-09-07)'
+    )
+    assert (
+        _summarize_tool_result(json.dumps({"created": True, "name": "Monthly income"}))
+        == 'Added "Monthly income"'
+    )
+    assert _summarize_tool_result(json.dumps({"created_count": 3, "tasks": [{"title": "A"}, {"title": "B"}]})) == "Added 3 task(s)"
+    assert _summarize_tool_result(json.dumps({"completed": True, "task_id": "x"})) == "Completed an item"
+    assert _summarize_tool_result(json.dumps({"updated": True, "name": "Rent"})) == 'Updated "Rent"'
+    assert _summarize_tool_result(json.dumps({"deleted": True, "task_id": "x"})) == "Deleted an item"
+    assert _summarize_tool_result(json.dumps({"cancelled_count": 2})) == "Cancelled 2 task(s)"
+    # Read-only / error / no-op results carry no side-effect key.
+    assert _summarize_tool_result(json.dumps({"found": 4, "tasks": []})) is None
+    assert _summarize_tool_result(json.dumps({"error": "Task not found"})) is None
+    assert _summarize_tool_result("not json") is None
+
+
+@pytest.mark.asyncio
+async def test_extract_applied_actions_dedupes_and_caps():
+    """The per-round extraction dedupes repeated lines and caps the list."""
+    results = [
+        {"content": json.dumps({"created": True, "name": "One"})},
+        {"content": json.dumps({"created": True, "name": "One"})},
+        {"content": json.dumps({"created": True, "name": "Two"})},
+        {"content": json.dumps({"found": 1, "tasks": []})},
+    ]
+    lines = _extract_applied_actions(results)
+    assert lines == ['Added "One"', 'Added "Two"']
+
+    many = [
+        {"content": json.dumps({"created": True, "name": f"Item {i}"})}
+        for i in range(20)
+    ]
+    # Extraction itself does not truncate (the loop caps by slicing); verify it
+    # keeps all distinct lines so the cap stays in the runner loop.
+    assert len(_extract_applied_actions(many)) == 20
+    assert _APPLIED_LINE_CAP == 6
+
+
+def test_stream_fallback_reply_summary():
+    """Item 24a: when tool work committed but the final stream died, the reply
+    summarizes the applied actions and never shows the cold generic error."""
+    applied = ['Added "Car mechanic appointment" (2026-09-07)', 'Added "Monthly income"']
+    reply = stream_fallback_reply("", applied)
+    assert "Car mechanic appointment" in reply
+    assert "Monthly income" in reply
+    assert "couldn't get a response" not in reply
+
+    # Tool-round content wins over the summary when present.
+    assert stream_fallback_reply("I created the tasks for you.", applied) == "I created the tasks for you."
+
+    # Item 24b: no tool work + empty stream -> the generic text stays.
+    cold = stream_fallback_reply("", [])
+    assert "couldn't get a response" in cold
+
+
+def test_should_money_nudge():
+    """Item 29: premium user whose tool round only called task tools on a money
+    message gets nudged toward finance (once); free users are never nudged."""
+    task_call = [{"function": {"name": "create_task"}}]
+    finance_call = [{"function": {"name": "add_financial_item"}}]
+
+    # Money + only task tools -> nudge (bump available).
+    assert should_money_nudge(True, task_call, money_hit=True, money_nudged=False, current_model_index=0, chain_len=2)
+    # Free user -> never nudge (no finance tools exist for them).
+    assert not should_money_nudge(False, task_call, money_hit=True, money_nudged=False, current_model_index=0, chain_len=2)
+    # No money intent -> no nudge.
+    assert not should_money_nudge(True, task_call, money_hit=False, money_nudged=False, current_model_index=0, chain_len=2)
+    # Already nudged -> never twice.
+    assert not should_money_nudge(True, task_call, money_hit=True, money_nudged=True, current_model_index=0, chain_len=2)
+    # Finance tool already in the round -> no nudge needed.
+    assert not should_money_nudge(True, finance_call, money_hit=True, money_nudged=False, current_model_index=0, chain_len=2)
+    # No model bump left -> no nudge.
+    assert not should_money_nudge(True, task_call, money_hit=True, money_nudged=False, current_model_index=1, chain_len=2)
+    # No tool calls at all -> retry logic handles it, not the nudge.
+    assert not should_money_nudge(True, None, money_hit=True, money_nudged=False, current_model_index=0, chain_len=2)
 
 
 @pytest.mark.asyncio

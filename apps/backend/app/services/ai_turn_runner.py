@@ -24,11 +24,14 @@ from app.services.ai_shared import (
     _strip_text_tool_calls,
 )
 from app.services.ai_service import (
+    MONEY_NUDGE,
     _needs_tool_retry,
     build_messages,
     execute_tool_calls,
+    finance_tool_names,
     get_llm_client,
     is_premium,
+    money_intent,
     tools_for_user,
 )
 from app.services.memory_service import retrieve_relevant_memories
@@ -43,6 +46,117 @@ logger = logging.getLogger("app.ai_turn_runner")
 
 MAX_TOOL_ROUNDS = 4
 MAX_RETRY_BUMPS = 2
+
+_APPLIED_LINE_CAP = 6
+
+
+def _summarize_tool_result(content: str) -> str | None:
+    """Turn one tool-result JSON into a short human line, or None when the
+    result records no user-visible side effect (a read-only listing, an error,
+    a no-op).
+
+    Handles the generic applied-action keys the handlers emit: created,
+    created_count, updated, deleted, completed, cancelled(+count), plus the
+    entity name from task.title/name. E.g. 'Added task "Car mechanic
+    appointment" (2026-09-07)'.
+    """
+    try:
+        payload = json.loads(content)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("error"):
+        return None
+    # Plain read-only listings (searches, tag lists, financial listings,
+    # projections) are not applied actions.
+    if not any(
+        k in payload
+        for k in (
+            "created", "created_count", "updated", "deleted", "completed",
+            "cancelled", "cancelled_count",
+        )
+    ):
+        return None
+    if payload.get("created_count"):
+        n = payload["created_count"]
+        return f"Added {n} task(s)"
+    if payload.get("cancelled_count"):
+        n = payload["cancelled_count"]
+        return f"Cancelled {n} task(s)" if n > 0 else None
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else None
+    name = payload.get("name") or (task or {}).get("title") or payload.get("title")
+    if payload.get("created") is True:
+        label = "Added"
+    elif payload.get("completed") is True:
+        label = "Completed"
+    elif payload.get("deleted") is True:
+        label = "Deleted"
+    elif payload.get("updated") is True:
+        label = "Updated"
+    elif payload.get("cancelled") is True:
+        label = "Cancelled"
+    else:
+        return None
+    if name:
+        date = (task or {}).get("start_date") or payload.get("start_date")
+        suffix = f" ({date})" if date else ""
+        return f'{label} "{name}"{suffix}'
+    return f"{label} an item"
+
+
+def _extract_applied_actions(tool_results: list[dict]) -> list[str]:
+    """Human summaries of the committed side-effects in one tool round,
+    preserving order and dropping duplicates."""
+    lines = []
+    for r in tool_results:
+        line = _summarize_tool_result((r or {}).get("content", ""))
+        if line and line not in lines:
+            lines.append(line)
+    return lines
+
+
+def should_money_nudge(
+    premium: bool,
+    tool_calls: list[dict] | None,
+    money_hit: bool,
+    money_nudged: bool,
+    current_model_index: int,
+    chain_len: int,
+) -> bool:
+    """Decision helper for the money-routing safety net: nudge the model once
+    toward the finance tools when a premium turn called only task tools on a
+    money request and there is still a model bump left. Never nudges free users
+    (they have no finance tools) and never nudges twice."""
+    if not premium or money_nudged or not money_hit:
+        return False
+    if not tool_calls:
+        return False
+    if any(
+        (tc.get("function", {}).get("name") or "") in finance_tool_names()
+        for tc in tool_calls
+    ):
+        return False
+    return current_model_index < min(chain_len - 1, MAX_RETRY_BUMPS)
+
+
+def stream_fallback_reply(
+    content: str,
+    applied_actions: list[str],
+    cold: str = "I couldn't get a response from the AI on that turn. "
+    "Please try again or rephrase your request.",
+) -> str:
+    """Reply when the final stream died: prefer whatever the model already
+    produced in tool rounds, else a summary of the committed actions, else the
+    cold text (generic for the success path, "Interrupted." on exception)."""
+    fallback = _strip_text_tool_calls(content).strip()
+    if fallback:
+        return fallback
+    if applied_actions:
+        return "Done before the stream cut out:\n" + "\n".join(
+            f"- {a}" for a in applied_actions
+        )
+    return cold
 
 
 @dataclass
@@ -64,6 +178,11 @@ class TurnJob:
     events: asyncio.Queue = field(default_factory=asyncio.Queue)
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
     cancel_requested: bool = False
+    # Human summaries of tool side-effects committed this turn, so a dropped
+    # final stream can still report what was actually done.
+    applied_actions: list[str] = field(default_factory=list)
+    # True once the money-routing nudge has been delivered (never nudge twice).
+    money_nudged: bool = False
 
 
 _turns: dict[str, TurnJob] = {}
@@ -231,6 +350,25 @@ async def _run_turn(job: TurnJob) -> None:
                         client = await _build_turn_client(job)
                         continue
 
+                # Money safety net (Part 5): the model called only task tools
+                # for a money request. Nudge it once toward the finance tools
+                # for premium users (free users have no finance tools - nudge
+                # never fires for them) and re-ask on the paid floor model.
+                if should_money_nudge(
+                    premium,
+                    tool_calls,
+                    money_intent(job.user_message),
+                    job.money_nudged,
+                    job.current_model_index,
+                    len(job.chain),
+                ):
+                    job.money_nudged = True
+                    messages.append({"role": "system", "content": MONEY_NUDGE})
+                    job.current_model_index += 1
+                    await _safe_aclose(client)
+                    client = await _build_turn_client(job)
+                    continue
+
                 if not tool_calls:
                     break
 
@@ -249,6 +387,13 @@ async def _run_turn(job: TurnJob) -> None:
                 # and the model sees its own writes in the following rounds.
                 await _commit()
                 await job.events.put(("tool_results", [r["content"] for r in tool_results]))
+                # Record what actually happened so a dropped final stream can
+                # still summarize the committed work instead of a cold apology.
+                for line in _extract_applied_actions(tool_results):
+                    if line not in job.applied_actions:
+                        job.applied_actions.append(line)
+                if len(job.applied_actions) > _APPLIED_LINE_CAP:
+                    del job.applied_actions[: len(job.applied_actions) - _APPLIED_LINE_CAP]
 
                 if _round == MAX_TOOL_ROUNDS - 1:
                     fallback = await client.chat(messages, tools=None)
@@ -277,7 +422,9 @@ async def _run_turn(job: TurnJob) -> None:
                     await job.events.put(("token", chunk))
             except Exception as exc:
                 if not streamed.strip():
-                    streamed = _strip_text_tool_calls(content).strip() or "Interrupted."
+                    streamed = stream_fallback_reply(
+                        content, job.applied_actions, cold="Interrupted."
+                    )
                     for chunk in _chunk_text(streamed):
                         await job.events.put(("token", chunk))
                 placeholder.content = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
@@ -289,13 +436,9 @@ async def _run_turn(job: TurnJob) -> None:
                 return
 
             if not streamed.strip():
-                streamed = _strip_text_tool_calls(content).strip() or (
-                    "I couldn't get a response from the AI on that turn. "
-                    "Please try again or rephrase your request."
-                )
-                if streamed:
-                    for chunk in _chunk_text(streamed):
-                        await job.events.put(("token", chunk))
+                streamed = stream_fallback_reply(content, job.applied_actions)
+                for chunk in _chunk_text(streamed):
+                    await job.events.put(("token", chunk))
 
             streamed = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
             placeholder.content = streamed

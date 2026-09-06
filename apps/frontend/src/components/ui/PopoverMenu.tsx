@@ -70,7 +70,7 @@ export function PopoverMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: MouseEvent | PointerEvent) => {
       if (
         menuRef.current &&
         !menuRef.current.contains(e.target as Node) &&
@@ -81,9 +81,13 @@ export function PopoverMenu({
       }
     };
     document.addEventListener("keydown", onKey);
+    // pointerdown covers touch (some Android WebViews skip synthesized mousedown);
+    // mousedown is kept so older desktop browsers dismiss identically.
+    document.addEventListener("pointerdown", onDown);
     document.addEventListener("mousedown", onDown);
     return () => {
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDown);
       document.removeEventListener("mousedown", onDown);
     };
   }, [open, onClose, triggerRef]);

@@ -61,6 +61,8 @@ def _serialize_task(task: Task, tags: list[dict] | None = None) -> dict:
         "priority": task.priority,
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "due_date": task.due_date.isoformat() if task.due_date else None,
+        "start_time": task.start_time.strftime("%H:%M") if task.start_time else None,
+        "end_time": task.end_time.strftime("%H:%M") if task.end_time else None,
         "is_all_day": task.is_all_day,
         "estimated_minutes": task.estimated_minutes,
         "recurrence_rule": task.recurrence_rule,
@@ -149,6 +151,8 @@ class CreateTaskRequest(BaseModel):
     priority: int = 3
     start_date: str | None = None
     due_date: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
     recurrence_rule: str | None = None
     recurrence_end_date: str | None = None
     estimated_minutes: int | None = None
@@ -194,6 +198,15 @@ class CreateTaskRequest(BaseModel):
                 raise ValueError("Date must be in YYYY-MM-DD format")
         return v
 
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def validate_time(cls, v: str | None) -> str | None:
+        if v is not None:
+            import re
+            if not re.match(r"^\d{2}:\d{2}$", v):
+                raise ValueError("Time must be in HH:MM format")
+        return v
+
 
 class UpdateTaskRequest(BaseModel):
     title: str | None = None
@@ -202,6 +215,8 @@ class UpdateTaskRequest(BaseModel):
     priority: int | None = None
     start_date: str | None = None
     due_date: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
     is_all_day: bool | None = None
     estimated_minutes: int | None = None
     recurrence_rule: str | None = None
@@ -247,6 +262,15 @@ class UpdateTaskRequest(BaseModel):
                 raise ValueError("Date must be in YYYY-MM-DD format")
         return v
 
+    @field_validator("start_time", "end_time")
+    @classmethod
+    def validate_time(cls, v: str | None) -> str | None:
+        if v is not None:
+            import re
+            if not re.match(r"^\d{2}:\d{2}$", v):
+                raise ValueError("Time must be in HH:MM format")
+        return v
+
     @field_validator("description")
     @classmethod
     def validate_description(cls, v: str | None) -> str | None:
@@ -255,7 +279,14 @@ class UpdateTaskRequest(BaseModel):
         return v
 
     def to_fields_dict(self) -> dict:
-        return {k: v for k, v in self.model_dump(exclude_none=True).items()}
+        # start_time/end_time are ALWAYS sent (even null) so a caller can clear
+        # a slot; the rest nulls are treated as "not provided".
+        data = self.model_dump(exclude_none=True)
+        for key in ("start_time", "end_time"):
+            value = getattr(self, key)
+            if value is None:
+                data[key] = None
+        return data
 
 
 class CreateSubtaskRequest(BaseModel):
@@ -385,6 +416,8 @@ async def create_task_route(
         priority=request.priority,
         start_date=request.start_date,
         due_date=request.due_date,
+        start_time=request.start_time,
+        end_time=request.end_time,
         recurrence_rule=request.recurrence_rule,
         recurrence_end_date=request.recurrence_end_date,
     )
@@ -800,6 +833,8 @@ async def batch_create_tasks(
             title=task_req.title,
             start_date=task_req.start_date,
             due_date=task_req.due_date,
+            start_time=task_req.start_time,
+            end_time=task_req.end_time,
             priority=task_req.priority,
             recurrence_rule=task_req.recurrence_rule,
             recurrence_end_date=task_req.recurrence_end_date,

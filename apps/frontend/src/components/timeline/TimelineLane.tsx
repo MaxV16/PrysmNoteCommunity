@@ -5,18 +5,21 @@ import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
 import { TaskBar } from "./TaskBar";
 import { parseLocalDate } from "@/lib/utils";
-import { DAY_WIDTH, BAR_HEIGHT, BAR_GAP, TOP_PADDING } from "./constants";
+import { BAR_HEIGHT, BAR_GAP, TOP_PADDING } from "./constants";
 
 interface TimelineLaneProps {
   tasks: Task[];
   days: Date[];
+  dayWidth?: number;
   onTaskClick?: (id: string) => void;
   onDayDoubleClick?: (day: Date) => void;
+  onDayAdd?: (day: Date) => void;
   onTaskContextMenu?: (e: React.MouseEvent, task: Task) => void;
   onDayContextMenu?: (e: React.MouseEvent, day: Date) => void;
   rowLabel?: React.ReactNode;
   rowHeight?: number;
   dragDisabled?: boolean;
+  selectMode?: boolean;
 }
 
 interface PositionedTask {
@@ -77,7 +80,7 @@ function todayIndex(days: Date[]): number {
   return -1;
 }
 
-export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, onTaskContextMenu, onDayContextMenu, rowHeight, dragDisabled }: TimelineLaneProps) {
+export function TimelineLane({ tasks, days, dayWidth = 120, onTaskClick, onDayDoubleClick, onDayAdd, onTaskContextMenu, onDayContextMenu, rowHeight, dragDisabled, selectMode }: TimelineLaneProps) {
   const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
   const { positioned, maxStack } = useMemo(() => {
     // Day column index for "today", used to place undated (inbox) tasks so they
@@ -104,7 +107,23 @@ export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, onTas
     const occupiedByRow: Record<number, number[]> = {}; // row -> occupied day indices
     const assigned: { task: Task; info: { index: number; endIndex: number }; row: number }[] = [];
 
-    for (const c of candidates) {
+    // Same-day order is deterministic: span start first, then timed tasks
+    // earlier in the day sit above later ones, untimed after, then priority and
+    // title so first-fit rows follow a stable, useful order.
+    const sortedCandidates = [...candidates].sort((a, b) => {
+      const d = a.info.index - b.info.index;
+      if (d !== 0) return d;
+      const at = a.task.start_time ?? "";
+      const bt = b.task.start_time ?? "";
+      if (at && !bt) return -1;
+      if (!at && bt) return 1;
+      if (at && bt && at !== bt) return at < bt ? -1 : 1;
+      const p = a.task.priority - b.task.priority;
+      if (p !== 0) return p;
+      return a.task.title.localeCompare(b.task.title);
+    });
+
+    for (const c of sortedCandidates) {
       let row = 0;
       for (;; row++) {
         const occ = occupiedByRow[row] || [];
@@ -142,20 +161,35 @@ export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, onTas
       className="relative border-b border-border/30 hover:bg-hover/10 transition-colors"
       style={{ minHeight: 48, height: laneHeight }}
     >
-      {onDayDoubleClick && (
+      {(onDayDoubleClick || onDayAdd) && (
         <div className="absolute inset-0 flex pointer-events-none z-0">
           {days.map((day) => (
             <div
               key={day.toISOString()}
-              className="pointer-events-auto cursor-pointer"
-              style={{ width: DAY_WIDTH, minWidth: DAY_WIDTH, flex: `0 0 ${DAY_WIDTH}px` }}
-              onDoubleClick={() => onDayDoubleClick(day)}
+              className="group pointer-events-auto relative cursor-pointer"
+              style={{ width: dayWidth, minWidth: dayWidth, flex: `0 0 ${dayWidth}px` }}
+              onDoubleClick={() => onDayDoubleClick?.(day)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 onDayContextMenu?.(e, day);
               }}
-            />
+            >
+              {onDayAdd && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDayAdd(day);
+                  }}
+                  aria-label={`Add task on ${day.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
+                  className="pointer-coarse:opacity-100 absolute left-1/2 top-1.5 z-30 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-elevated text-secondary opacity-0 transition-opacity hover:bg-hover hover:text-primary group-hover:opacity-100"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -169,6 +203,7 @@ export function TimelineLane({ tasks, days, onTaskClick, onDayDoubleClick, onTas
             onContextMenu={onTaskContextMenu}
             dragDisabled={dragDisabled}
             selected={selectedTaskIds.includes(task.id)}
+            selectMode={selectMode}
           />
         ))}
       </div>

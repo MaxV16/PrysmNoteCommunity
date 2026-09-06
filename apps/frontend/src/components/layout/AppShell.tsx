@@ -50,16 +50,33 @@ export function AppShell() {
   // dismissible banner until the user installs or dismisses it.
   const { canInstall, promptInstall } = usePwaInstall();
   const [installBannerDismissed, setInstallBannerDismissed] = useState(false);
-  const showInstallBanner = smallScreen && canInstall && !installBannerDismissed;
+  const showInstallBanner = canInstall && !installBannerDismissed;
 
   const handleSelectView = (v: WorkspaceView) => {
     setView(v);
     if (smallScreen) setSidebarOpen(false);
   };
 
+  // Mobile drawers: opening one closes the other so the overlays never collide.
+  const openSidebar = () => {
+    setAiOpen(false);
+    setSidebarOpen(true);
+  };
+  const openAi = () => {
+    setSidebarOpen(false);
+    setAiOpen(true);
+  };
+  const toggleAi = () => {
+    setAiOpen((v) => {
+      const next = !v;
+      if (next) setSidebarOpen(false);
+      return next;
+    });
+  };
+
   useGlobalShortcuts({
     onToggleSidebar: () => setSidebarCollapsedState(!isSidebarCollapsed),
-    onToggleAiPanel: () => setAiOpen((v) => !v),
+    onToggleAiPanel: toggleAi,
     onToggleTheme: toggleTheme,
     onNewTask: () => {
       if (typeof window !== "undefined") {
@@ -113,11 +130,13 @@ export function AppShell() {
   }, []);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-base">
+    <div className="flex h-dvh w-screen flex-col overflow-hidden bg-base">
       {showInstallBanner && (
         <div className="flex shrink-0 items-center gap-3 border-b border-border bg-elevated px-4 py-2">
           <p className="min-w-0 flex-1 truncate text-xs text-secondary">
-            Install Prysm Note for quick access and voice capture.
+            {smallScreen
+              ? "Install Prysm Note for quick access and voice capture."
+              : "Install Prysm Note on this device for quick access."}
           </p>
           <button
             onClick={() => { void promptInstall(); setInstallBannerDismissed(true); }}
@@ -128,7 +147,7 @@ export function AppShell() {
           <button
             onClick={() => setInstallBannerDismissed(true)}
             aria-label="Dismiss install prompt"
-            className="text-xs text-muted hover:text-primary"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs text-muted hover:bg-hover hover:text-primary"
           >
             ✕
           </button>
@@ -172,13 +191,13 @@ export function AppShell() {
           data-app-workspace
         >
           {view === "finance" && financeOn ? (
-            <FinancialWorkspace onOpenAi={() => setAiOpen(true)} />
+            <FinancialWorkspace onOpenAi={openAi} />
           ) : view === "watchlist" && watchlistOn ? (
-            <WatchlistView onOpenAi={() => setAiOpen(true)} />
+            <WatchlistView onOpenAi={openAi} />
           ) : (
             <TimelineView
-              onToggleRight={() => setAiOpen((v) => !v)}
-              onOpenSidebar={smallScreen ? () => setSidebarOpen(true) : undefined}
+              onToggleRight={toggleAi}
+              onOpenSidebar={smallScreen ? openSidebar : undefined}
               viewMode={viewMode}
               onViewModeChange={setViewMode}
             />
@@ -207,7 +226,7 @@ export function AppShell() {
         <MobileTabBar
           view={view}
           onSelectView={handleSelectView}
-          onOpenAi={() => setAiOpen(true)}
+          onOpenAi={openAi}
           showFinance={financeOn}
           showWatchlist={watchlistOn}
         />

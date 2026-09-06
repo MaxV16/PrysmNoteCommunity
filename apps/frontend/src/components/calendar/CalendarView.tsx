@@ -8,13 +8,157 @@ import { TaskForm } from "@/components/tasks/TaskForm";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 import { useTasks } from "@/hooks/useTasks";
+import { useLongPress } from "@/lib/use-long-press";
 import { api } from "@/lib/api";
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
+import { taskTimeLabel } from "@/lib/task-time";
 import { calendarOffset, weekdayHeaders } from "@/lib/dates";
 
 const PRIORITY_COLORS = TIER_COLORS;
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** Minimal pointer shape shared by right-click MouseEvents and long-press points. */
+type MenuPoint = { clientX: number; clientY: number };
+
+interface CalendarDayCellProps {
+  d: number;
+  ds: string;
+  isToday: boolean;
+  dayTasks: Task[];
+  selectedTaskIds: string[];
+  onDayNewTask: (d: number) => void;
+  onOpenCardMenu: (e: MenuPoint, task: Task) => void;
+  onOpenDayMenu: (e: MenuPoint, ds: string) => void;
+  onToggleSelect: (id: string) => void;
+  onOpenTask: (id: string) => void;
+}
+
+function CalendarDayCell({
+  d,
+  ds,
+  isToday,
+  dayTasks,
+  selectedTaskIds,
+  onDayNewTask,
+  onOpenCardMenu,
+  onOpenDayMenu,
+  onToggleSelect,
+  onOpenTask,
+}: CalendarDayCellProps) {
+  const maxShown = 3;
+  const cardLongPress = useLongPress(
+    (p) => {
+      const el = (p.target as HTMLElement | null)?.closest?.("[data-cal-task]");
+      const id = el?.getAttribute("data-task-id");
+      const task = dayTasks.find((t) => t.id === id);
+      if (task) onOpenCardMenu(p, task);
+    },
+    {}
+  );
+  const dayLongPress = useLongPress(
+    (p) => onOpenDayMenu(p, ds),
+    {}
+  );
+
+  return (
+    <div
+      className="group relative border-r border-b border-border/20 p-1 overflow-hidden hover:bg-hover/20 transition-colors cursor-pointer"
+      onDoubleClick={() => onDayNewTask(d)}
+      onPointerDown={(e) => {
+        // Prevent the day-level long-press when pressing directly on a chip.
+        if ((e.target as HTMLElement).closest?.("[data-cal-task]")) return;
+        dayLongPress.onPointerDown(e);
+      }}
+      onPointerMove={dayLongPress.onPointerMove}
+      onPointerUp={dayLongPress.onPointerUp}
+      onPointerCancel={dayLongPress.onPointerCancel}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpenDayMenu(e, ds);
+      }}
+    >
+      <span
+        className={`inline-flex items-center justify-center text-xs font-medium w-6 h-6 rounded-full mb-0.5 ${
+          isToday ? "gradient-bg text-[var(--on-gradient)] shadow-glow" : "text-secondary"
+        }`}
+      >
+        {d}
+      </span>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onDayNewTask(d);
+        }}
+        aria-label={`Add task on ${ds}`}
+        className="pointer-coarse:opacity-100 absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-elevated text-secondary opacity-0 transition-opacity hover:bg-hover hover:text-primary group-hover:opacity-100"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      </button>
+      <div className="space-y-0.5">
+        {dayTasks.slice(0, maxShown).map((task) => (
+          <div
+            key={task.id}
+            data-cal-task
+            data-task-id={task.id}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (e.metaKey || e.ctrlKey) {
+                e.preventDefault();
+                onToggleSelect(task.id);
+                return;
+              }
+              onOpenTask(task.id);
+            }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              // Keep the chip's own drag-free pointer semantics for long-press.
+              if (e.target === e.currentTarget) cardLongPress.onPointerDown(e);
+            }}
+            onPointerMove={cardLongPress.onPointerMove}
+            onPointerUp={cardLongPress.onPointerUp}
+            onPointerCancel={cardLongPress.onPointerCancel}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onOpenCardMenu(e, task);
+            }}
+            className={`truncate text-[10px] rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110 ${
+              selectedTaskIds.includes(task.id) ? "ring-1 ring-accent" : ""
+            }`}
+            style={{
+              backgroundColor: (PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E") + "22",
+              borderLeft: `2px solid ${PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E"}`,
+              color: "var(--text-primary)",
+            }}
+          >
+            {task.start_time ? (
+              <span className="font-semibold text-[var(--text-muted)] mr-0.5">
+                {taskTimeLabel(task)?.split(" - ")[0]} ·
+              </span>
+            ) : null}
+            {task.title}
+          </div>
+        ))}
+        {dayTasks.length > maxShown && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDayMenu(e, ds);
+            }}
+            className="pointer-coarse:min-h-0 block max-w-full truncate rounded px-1 text-left text-[9px] text-muted hover:text-primary"
+            aria-label={`${dayTasks.length} tasks on ${ds}`}
+          >
+            +{dayTasks.length - maxShown} more
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function CalendarView() {
   const tasks = useAppStore((s) => s.tasks);
@@ -82,6 +226,20 @@ export function CalendarView() {
         map[ds].push(task);
       }
     }
+    // Timed tasks sort earlier in the day, untimed after them (then priority)
+    // so the day cell reads like a schedule rather than insertion order.
+    for (const ds of Object.keys(map)) {
+      map[ds].sort((a, b) => {
+        const at = a.start_time ?? "";
+        const bt = b.start_time ?? "";
+        if (at && !bt) return -1;
+        if (!at && bt) return 1;
+        if (at && bt && at !== bt) return at < bt ? -1 : 1;
+        const p = a.priority - b.priority;
+        if (p !== 0) return p;
+        return a.title.localeCompare(b.title);
+      });
+    }
     return map;
   }, [tasks]);
 
@@ -102,11 +260,11 @@ export function CalendarView() {
     setFormDefaultDate(null);
   };
 
-  const openCardMenu = useCallback((e: React.MouseEvent, task: Task) => {
+  const openCardMenu = useCallback((e: MenuPoint, task: Task) => {
     setMenu({ state: { kind: "task", task }, x: e.clientX, y: e.clientY });
   }, []);
 
-  const openDayMenu = useCallback((e: React.MouseEvent, ds: string) => {
+  const openDayMenu = useCallback((e: MenuPoint, ds: string) => {
     setMenu({ state: { kind: "empty", day: ds }, x: e.clientX, y: e.clientY });
   }, []);
 
@@ -221,61 +379,24 @@ export function CalendarView() {
           const ds = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
           const isToday = ds === todayStr;
           const dayTasks = tasksByDate[ds] || [];
-          const maxShown = 3;
 
           return (
-            <div
+            <CalendarDayCell
               key={d}
-              className="border-r border-b border-border/20 p-1 overflow-hidden hover:bg-hover/20 transition-colors cursor-pointer"
-              onDoubleClick={() => handleDayDoubleClick(d)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                openDayMenu(e, ds);
+              d={d}
+              ds={ds}
+              isToday={isToday}
+              dayTasks={dayTasks}
+              selectedTaskIds={selectedTaskIds}
+              onDayNewTask={handleDayDoubleClick}
+              onOpenCardMenu={openCardMenu}
+              onOpenDayMenu={openDayMenu}
+              onToggleSelect={toggleTaskSelected}
+              onOpenTask={(id) => {
+                clearTaskSelection();
+                setSelectedTaskId(id);
               }}
-            >
-              <span
-                className={`inline-flex items-center justify-center text-xs font-medium w-6 h-6 rounded-full mb-0.5 ${
-                  isToday ? "gradient-bg text-[var(--on-gradient)] shadow-glow" : "text-secondary"
-                }`}
-              >
-                {d}
-              </span>
-              <div className="space-y-0.5">
-                {dayTasks.slice(0, maxShown).map((task) => (
-                  <div
-                    key={task.id}
-                    data-cal-task
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (e.metaKey || e.ctrlKey) {
-                        e.preventDefault();
-                        toggleTaskSelected(task.id);
-                        return;
-                      }
-                      clearTaskSelection();
-                      setSelectedTaskId(task.id);
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      openCardMenu(e, task);
-                    }}
-                    className={`truncate text-[10px] rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110 ${selectedTaskIds.includes(task.id) ? "ring-1 ring-accent" : ""}`}
-                    style={{
-                      backgroundColor: (PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E") + "22",
-                      borderLeft: `2px solid ${PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E"}`,
-                      color: "var(--text-primary)",
-                    }}
-                  >
-                    {task.title}
-                  </div>
-                ))}
-                {dayTasks.length > maxShown && (
-                  <span className="text-[9px] text-muted px-1">+{dayTasks.length - maxShown} more</span>
-                )}
-              </div>
-            </div>
+            />
           );
         })}
       </div>

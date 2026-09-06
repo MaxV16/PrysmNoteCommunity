@@ -30,7 +30,7 @@ export function KanbanToolbar({
   };
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-1.5">
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface px-3 py-1.5">
       <div className="flex items-center gap-0.5 rounded-full bg-elevated p-0.5">
         <button
           onClick={() => onScrollDirectionChange("horizontal")}

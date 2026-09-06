@@ -8,22 +8,35 @@ Flow:
   GET /api/auth/oauth/{provider}/start   -> 307 redirect to the provider
   GET /api/auth/oauth/{provider}/callback -> exchange code, create/log in,
                                              set session cookies, redirect to the app
+
+Mobile (Capacitor) flow: the WebView cannot run OAuth provider flows directly
+(Google blocks embedded webviews), so `GET ?redirect=mobile` on start opens the
+provider in the system browser via @capacitor/browser. The callback then issues
+a short-lived, single-use one-time code and 307s to the app's custom deep link
+`com.prysmnote.app://oauth/client?code=...`; the native side catches `appUrlOpen`
+and loads `GET /api/auth/mobile/exchange?code=...` inside the WebView, where the
+code is validated, the session cookies are set, and the app reloads at `/`.
 """
 import logging
 import re
 import secrets
+from datetime import datetime, timedelta, timezone
+from uuid import UUID, uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
+from jose import jwt, JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.models.token_blacklist import TokenBlacklist
 from app.models.user import User
 from app.services.auth_service import create_access_token, create_refresh_token
 from app.utils.auth_cookies import set_auth_cookies, OAUTH_REDIRECT_URI
+from app.utils.ratelimit import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +52,24 @@ GITHUB_CODE_RE = re.compile(r"^[0-9a-f]{20}$")
 # Google verify_id_token needs the client id to enforce audience; pass it through.
 # GitHub needs user read scopes to retrieve a verified primary email.
 GITHUB_SCOPES = "read:user user:email"
+
+# Mobile (Capacitor) SSO: the WebView cannot run OAuth provider flows directly
+# (Google blocks embedded webviews), so the provider opens in the system browser
+# via @capacitor/browser. The callback footer carries this marker in the state
+# cookie so it survives the provider round-trip without extra OAuth console
+# registrations: we keep the web OAUTH_REDIRECT_URI and only change the
+# POST-consent destination. The one-time code is a JWT (type=mobile_oauth,
+# exp ~2 min) consumed exactly once at /api/auth/mobile/exchange (its jti is
+# blacklisted on use, mirroring the password-reset token pattern).
+MOBILE_REDIRECT_PARAM = "mobile"
+MOBILE_STATE_PREFIX = "mobile:"
+MOBILE_CODE_TTL_MINUTES = 2
+MOBILE_EXCHANGE_LIMIT = 20  # per IP, per window of 10 minutes
+MOBILE_EXCHANGE_WINDOW = 10 * 60
+
+mobile_router = APIRouter(prefix="/api/auth/mobile", tags=["oauth"])
+
+_mobile_exchange_limiter = RateLimiter("rl:mobile_oauth")
 
 
 def _provider_authorize_url(provider: str, state: str) -> str:
@@ -75,15 +106,20 @@ def _app_url(path: str) -> str:
 
 
 @router.get("/{provider}/start")
-async def oauth_start(provider: str, request: Request):
+async def oauth_start(provider: str, request: Request, redirect: str | None = None):
     if provider not in _PROVIDERS:
         return RedirectResponse(url=_app_url("/login?error=unsupported_provider"), status_code=302)
     if not _configured(provider):
         return RedirectResponse(url=_app_url("/login?error=sso_not_configured"), status_code=302)
     state = secrets.token_urlsafe(24)
     # Persist the state so the callback can validate it (store in a signed cookie).
+    # For the mobile flow the state string is prefixed with a marker so the
+    # callback knows to send the session to the app's custom deep link instead of
+    # setting cookies in the system browser (where they would be useless).
+    mobile = redirect == MOBILE_REDIRECT_PARAM
+    cookie_value = f"{MOBILE_STATE_PREFIX}{state}" if mobile else state
     response = RedirectResponse(url=_provider_authorize_url(provider, state), status_code=302)
-    response.set_cookie("oauth_state", state, httponly=True, samesite="lax",
+    response.set_cookie("oauth_state", cookie_value, httponly=True, samesite="lax",
                         secure=request.url.scheme == "https", path="/")
     return response
 
@@ -115,6 +151,10 @@ async def oauth_callback(
         provider = "github"
 
     expected_state = request.cookies.get("oauth_state") if request else None
+    mobile_flow = False
+    if expected_state and expected_state.startswith(MOBILE_STATE_PREFIX):
+        expected_state = expected_state[len(MOBILE_STATE_PREFIX):]
+        mobile_flow = True
     if not expected_state or not secrets.compare_digest(expected_state, state or ""):
         return RedirectResponse(url=_app_url("/login?error=sso_invalid_state"), status_code=307)
 
@@ -136,9 +176,20 @@ async def oauth_callback(
     user = await _getorcreate_user(session, email, identity, provider)
 
     response = RedirectResponse(url=_app_url(return_url), status_code=307)
-    set_auth_cookies(response, str(user.id), request, user.token_version)
-    # Clear the state cookie now that it's consumed.
+    # Clear the state cookie now that it's consumed (landing in the system
+    # browser whether the flow was mobile or web).
     response.delete_cookie("oauth_state", path="/")
+
+    if mobile_flow:
+        # Mobile: the provider ran in the system browser, so cookies set here
+        # would never reach the WebView. Issue a short-lived one-time code and
+        # bounce to the app's custom deep link instead; the native side loads
+        # GET /api/auth/mobile/exchange?code=... inside the WebView where the
+        # session cookies finally land.
+        code = _create_mobile_code(user)
+        return RedirectResponse(url=f"com.prysmnote.app://oauth/client?code={code}", status_code=307)
+
+    set_auth_cookies(response, str(user.id), request, user.token_version)
     return response
 
 
@@ -243,3 +294,66 @@ async def _getorcreate_user(session: AsyncSession, email: str, identity: dict, p
     session.add(user)
     await session.flush()
     return user
+
+
+def _create_mobile_code(user: User) -> str:
+    """Short-lived, single-use JWT carrying only the user id.
+
+    Expiry is enforced by the JWT ``exp`` (checked at exchange); single use by
+    blacklisting the ``jti`` in ``token_blacklist`` at exchange time. The code
+    never carries user data beyond the id and is useless outside the ~2 min
+    window, so it can travel through the app's custom deep link.
+    """
+    expires = datetime.now(timezone.utc) + timedelta(minutes=MOBILE_CODE_TTL_MINUTES)
+    return jwt.encode(
+        {"sub": str(user.id), "exp": expires, "type": "mobile_oauth", "jti": str(uuid4())},
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+@mobile_router.get("/exchange")
+async def mobile_exchange(
+    code: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """Validate a mobile one-time code and set the session cookies.
+
+    Called from inside the Capacitor WebView after the native side catches the
+    ``com.prysmnote.app://oauth/client?code=...`` deep link. Cookies set here
+    land in the WebView's cookie store, so the app is authenticated immediately.
+    The code is single-use (jti blacklisted) and both expired and replayed codes
+    are rejected identically.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    if _mobile_exchange_limiter.count(f"exchange:{client_ip}", MOBILE_EXCHANGE_WINDOW) > MOBILE_EXCHANGE_LIMIT:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many attempts")
+
+    try:
+        payload = jwt.decode(code, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        if payload.get("type") != "mobile_oauth":
+            raise ValueError("wrong token type")
+        user_id, jti = payload.get("sub"), payload.get("jti")
+        if not user_id or not jti:
+            raise ValueError("missing claims")
+    except (JWTError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
+
+    # Single-use: a jti already in the blacklist means the code was consumed.
+    used = (await session.execute(select(TokenBlacklist).where(TokenBlacklist.jti == jti))).scalar_one_or_none()
+    if used:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
+
+    result = await session.execute(select(User).where(User.id == UUID(user_id)))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
+
+    exp = payload.get("exp")
+    expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else datetime.now(timezone.utc)
+    session.add(TokenBlacklist(jti=jti, user_id=user.id, expires_at=expires_at))
+
+    response = RedirectResponse(url=_app_url("/"), status_code=307)
+    set_auth_cookies(response, str(user.id), request, user.token_version)
+    return response

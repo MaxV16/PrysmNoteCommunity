@@ -25,7 +25,7 @@ import { useLocalBool } from "@/lib/use-local-bool";
 import { useRouter } from "next/navigation";
 import { parseLocalDate, toLocalDateString } from "@/lib/utils";
 import type { Task } from "@/types/task";
-import { DAY_WIDTH } from "@/components/timeline/constants";
+import { useResponsiveDayWidth } from "@/components/timeline/constants";
 import { PREF_DEFAULT_VIEW } from "@/lib/preferences";
 import { usePreferencesStore } from "@/stores/preferences-store";
 import { openNotesWindow } from "@/lib/notes";
@@ -76,7 +76,7 @@ interface TimelineViewProps {
 }
 
 export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewModeChange }: TimelineViewProps) {
-  const { tasks, selectedTaskId, setSelectedTaskId, navFilter, setNavFilter, selectedTagId, searchQuery, setSearchQuery } = useAppStore();
+  const { tasks, selectedTaskId, setSelectedTaskId, selectedTaskIds, navFilter, setNavFilter, selectedTagId, searchQuery, setSearchQuery } = useAppStore();
   const { visibleRange, viewDays, setScrollOffset, expandBackward, expandForward } = useTimeline(20, 10);
   const { createTask, updateTask, fetchRange } = useTasks();
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -100,10 +100,14 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   const boardOn = useUiModule("viewBoard");
   const stickyOn = useUiModule("stickyNotes");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
 
   // Mobile: drag-to-reschedule and drag-to-pan fight the touch scroll gesture,
   // so both are disabled on small screens (tap-to-open + check-off still work).
   const smallScreen = useMediaQuery("(max-width: 767px)");
+
+  // Responsive column width: ~5-6 days visible on phones (clamp 56..120px).
+  const dayWidth = useResponsiveDayWidth();
 
   const defaultView = usePreferencesStore(
     (s) => (s.prefs[PREF_DEFAULT_VIEW] as TimelineViewMode) || "timeline"
@@ -185,23 +189,23 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     const step = Math.max(7, viewDays);
     if (dir === "prev") {
       setScrollOffset((s) => s - step);
-      if (body) body.scrollLeft += step * DAY_WIDTH;
+      if (body) body.scrollLeft += step * dayWidth;
     } else if (dir === "next") {
       setScrollOffset((s) => s + step);
-      if (body) body.scrollLeft -= step * DAY_WIDTH;
+      if (body) body.scrollLeft -= step * dayWidth;
     } else {
       setScrollOffset(-10);
-      if (body) body.scrollLeft = 10 * DAY_WIDTH;
+      if (body) body.scrollLeft = 10 * dayWidth;
     }
-  }, [setScrollOffset, viewDays]);
+  }, [setScrollOffset, viewDays, dayWidth]);
 
   useEffect(() => {
     const body = bodyRef.current;
     if (!body || safeMode !== "timeline") return;
     // Position "today" (column baseLeftOffset) at the left edge, leaving room to
     // browse backwards before expansion kicks in.
-    body.scrollLeft = 10 * DAY_WIDTH;
-  }, [viewMode]);
+    body.scrollLeft = 10 * dayWidth;
+  }, [viewMode, dayWidth]);
 
   useEffect(() => {
     const body = bodyRef.current;
@@ -210,11 +214,11 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     const handleScroll = () => {
       if (scrollTimer) clearTimeout(scrollTimer);
       scrollTimer = setTimeout(() => {
-        const threshold = DAY_WIDTH * 1.5;
+        const threshold = dayWidth * 1.5;
         if (body.scrollLeft < threshold) {
           // Prepend days on the left; the viewport must shift right by exactly the
           // number of added columns to stay visually anchored (no jump).
-          body.scrollLeft += EXPAND_STEP * DAY_WIDTH;
+          body.scrollLeft += EXPAND_STEP * dayWidth;
           expandBackward(EXPAND_STEP);
         }
         if (body.scrollLeft + body.clientWidth > body.scrollWidth - threshold) {
@@ -227,7 +231,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       body.removeEventListener("scroll", handleScroll);
       if (scrollTimer) clearTimeout(scrollTimer);
     };
-  }, [expandBackward, expandForward, viewMode]);
+  }, [expandBackward, expandForward, viewMode, dayWidth]);
 
   // Keep the timeline canvas at least as wide as its container so there is no
   // dead/empty region on the right of the last rendered day. Grows forward to
@@ -236,7 +240,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     const body = bodyRef.current;
     if (!body || safeMode !== "timeline") return;
     const fill = () => {
-      const need = Math.ceil(body.clientWidth / DAY_WIDTH) + 2;
+      const need = Math.ceil(body.clientWidth / dayWidth) + 2;
       const has = days.length;
       if (has < need) {
         expandForward(need - has);
@@ -246,7 +250,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     const ro = new ResizeObserver(() => fill());
     ro.observe(body);
     return () => ro.disconnect();
-  }, [days.length, expandForward, viewMode]);
+  }, [days.length, expandForward, viewMode, dayWidth]);
 
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -255,7 +259,6 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       const dragId = active.id as string;
       // Each day column is a fixed width in the infinite timeline. A tiny drag
       // still counts as at least one day so it never feels like a dead snap-back.
-      const dayWidth = DAY_WIDTH;
       const whole = Math.round(delta.x / dayWidth);
       const daysShifted = delta.x === 0 ? 0 : (whole === 0 ? Math.sign(delta.x) : whole);
       if (daysShifted === 0) return;
@@ -370,7 +373,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       );
       await updateTask(taskId, fields);
     },
-    [tasks, updateTask]
+    [tasks, updateTask, dayWidth]
   );
 
   // Expand the timeline forward/backward while dragging a task near the left or
@@ -379,7 +382,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     (event: DragMoveEvent) => {
       const body = bodyRef.current;
       if (!body) return;
-      const edgeZone = DAY_WIDTH * 1.5;
+      const edgeZone = dayWidth * 1.5;
       const dragX = body.clientWidth / 2 + event.delta.x;
 
       // Near the right edge → grow forward and scroll right to reveal the new days.
@@ -387,17 +390,17 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         const remaining = body.scrollWidth - (body.scrollLeft + body.clientWidth);
         if (remaining < edgeZone) {
           expandForward(EXPAND_STEP);
-          body.scrollLeft += EXPAND_STEP * DAY_WIDTH;
+          body.scrollLeft += EXPAND_STEP * dayWidth;
         }
       }
 
       // Near the left edge → grow backward and keep the view anchored.
-      if (dragX < edgeZone && body.scrollLeft <= EXPAND_STEP * DAY_WIDTH) {
+      if (dragX < edgeZone && body.scrollLeft <= EXPAND_STEP * dayWidth) {
         expandBackward(EXPAND_STEP);
-        body.scrollLeft = Math.max(0, body.scrollLeft + EXPAND_STEP * DAY_WIDTH);
+        body.scrollLeft = Math.max(0, body.scrollLeft + EXPAND_STEP * dayWidth);
       }
     },
-    [expandBackward, expandForward]
+    [expandBackward, expandForward, dayWidth]
   );
 
   // Drag-to-pan the timeline: grabbing empty space and dragging scrolls the
@@ -442,6 +445,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   const handleCreateTask = useCallback(
     async (data: {
       title: string; description?: string; start_date?: string; due_date?: string;
+      start_time?: string; end_time?: string;
       status?: string; priority?: number;
       tag_ids?: string[]; recurrence_rule?: string; recurrence_end_date?: string; estimated_minutes?: number;
     }) => {
@@ -490,6 +494,26 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     },
     []
   );
+
+  // Mobile select mode: a floating bar offers batch delete; clearing resets it.
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const handleBatchDelete = useCallback(async () => {
+    const ids = useAppStore.getState().selectedTaskIds;
+    if (ids.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      await api.post("/tasks/batch-delete", { task_ids: ids });
+      const store = useAppStore.getState();
+      store.setTasks(store.tasks.filter((t) => !ids.includes(t.id)));
+      store.clearTaskSelection();
+      setSelectionMode(false);
+    } catch {
+      // keep the selection so the user can retry
+    } finally {
+      setBatchDeleting(false);
+    }
+  }, []);
+  const selectedCount = selectedTaskIds.length;
 
   const filterBadge = navFilter
     ? navFilter === "inbox" ? "Inbox" : navFilter === "today" ? "Today" : "Next 7 Days"
@@ -565,7 +589,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         {onOpenSidebar && (
           <button
             onClick={onOpenSidebar}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-secondary transition-colors hover:bg-hover hover:text-primary md:hidden"
+            className="pointer-coarse:h-11 pointer-coarse:w-11 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-secondary transition-colors hover:bg-hover hover:text-primary md:hidden"
             aria-label="Open sidebar"
             title="Menu"
           >
@@ -593,7 +617,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
               setSearchOpen(true);
               requestAnimationFrame(() => document.getElementById("global-search")?.focus());
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-secondary transition-colors hover:bg-hover hover:text-primary"
+            className="pointer-coarse:h-11 pointer-coarse:w-11 flex h-8 w-8 items-center justify-center rounded-full text-secondary transition-colors hover:bg-hover hover:text-primary"
             title="Search (⌘F)"
             aria-label="Search"
           >
@@ -620,12 +644,26 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
 
         <div className="flex-1 min-w-0" />
 
+        {smallScreen && safeMode === "timeline" && (
+          <button
+            onClick={() => setSelectionMode((v) => !v)}
+            className={`btn rounded-full border px-3 py-1.5 text-xs shrink-0 transition-colors ${
+              selectionMode
+                ? "bg-accent text-[var(--on-gradient)] border-transparent"
+                : "bg-elevated border-border text-secondary hover:text-primary"
+            }`}
+            aria-pressed={selectionMode}
+          >
+            {selectionMode ? "Done" : "Select"}
+          </button>
+        )}
+
         {safeMode === "timeline" && (
           <div className="flex shrink-0 items-center gap-0.5 rounded-full bg-elevated p-0.5">
             <button
               onClick={() => navigatePeriod("prev")}
               aria-label="Previous period"
-              className="flex h-6 w-6 items-center justify-center rounded-full text-secondary hover:bg-hover hover:text-primary"
+              className="pointer-coarse:h-10 pointer-coarse:w-10 flex h-6 w-6 items-center justify-center rounded-full text-secondary hover:bg-hover hover:text-primary"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
@@ -639,7 +677,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
             <button
               onClick={() => navigatePeriod("next")}
               aria-label="Next period"
-              className="flex h-6 w-6 items-center justify-center rounded-full text-secondary hover:bg-hover hover:text-primary"
+              className="pointer-coarse:h-10 pointer-coarse:w-10 flex h-6 w-6 items-center justify-center rounded-full text-secondary hover:bg-hover hover:text-primary"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
@@ -747,7 +785,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           </button>
         )}
 
-        <button onClick={() => onToggleRight?.()} className="gradient-bg flex h-8 w-8 shrink-0 min-w-8 items-center justify-center rounded-full text-[var(--on-gradient)] shadow-glow hover:brightness-110" title="AI" data-tour="ai-panel">
+        <button onClick={() => onToggleRight?.()} className="pointer-coarse:h-11 pointer-coarse:w-11 gradient-bg flex h-8 w-8 shrink-0 min-w-8 items-center justify-center rounded-full text-[var(--on-gradient)] shadow-glow hover:brightness-110" title="AI" data-tour="ai-panel">
           ⚡
         </button>
       </div>
@@ -797,17 +835,20 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
             onContextMenu={openCanvasMenu}
           >
             <DndContext sensors={sensors} onDragEnd={handleDragEnd} onDragMove={handleDragMove}>
-              <div className="relative" style={{ minHeight: "100%", width: days.length * DAY_WIDTH }}>
-                <TimelineHeader days={days} />
-                <TimelineGrid days={days} />
+              <div className="relative" style={{ minHeight: "100%", width: days.length * dayWidth }}>
+                <TimelineHeader days={days} dayWidth={dayWidth} />
+                <TimelineGrid days={days} dayWidth={dayWidth} />
                 <TimelineLane
                   tasks={visibleTasks}
                   days={days}
+                  dayWidth={dayWidth}
                   onTaskClick={(id) => setSelectedTaskId(id)}
                   onDayDoubleClick={handleDayDoubleClick}
+                  onDayAdd={handleDayDoubleClick}
                   onTaskContextMenu={openTaskMenu}
                   onDayContextMenu={openDayMenu}
                   dragDisabled={smallScreen}
+                  selectMode={selectionMode}
                 />
               </div>
             </DndContext>
@@ -834,6 +875,28 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           )}
         </div>
       </div>
+      )}
+
+      {/* Mobile batch action bar (select mode on the timeline) */}
+      {selectionMode && selectedCount > 0 && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-16 z-40 flex justify-center px-4">
+          <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 shadow-lg">
+            <span className="text-xs font-medium text-secondary">{selectedCount} selected</span>
+            <button
+              onClick={() => void handleBatchDelete()}
+              disabled={batchDeleting}
+              className="btn bg-elevated border border-danger/30 px-3 py-1 text-xs text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
+            >
+              {batchDeleting ? "Deleting…" : "Delete"}
+            </button>
+            <button
+              onClick={() => useAppStore.getState().clearTaskSelection()}
+              className="btn bg-elevated border border-border px-3 py-1 text-xs text-secondary hover:text-primary"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Task detail drawer */}
