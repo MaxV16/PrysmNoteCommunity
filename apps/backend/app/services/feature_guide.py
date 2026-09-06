@@ -7,7 +7,8 @@ import-free so it can never create a circular import with ai_service).
 
 Constraint: this module ships in the community build, so it must stay 100%
 open-core. Never add premium/EE identifiers, pairing tokens, MCP or OpenClaw
-identifiers, infra details or founder names here. ``test_pyrsm_feature_guide_is_community_safe``
+identifiers, infra details or founder names here. The community-safety
+regression test in the EE suite (``test_core_feature_guide_is_community_safe``)
 locks this in. New user-facing features must be documented here (same rule as
 the changelog).
 """
@@ -36,8 +37,8 @@ PYRSM_FEATURE_GUIDE = (
     "related tasks, the filter bar narrows what you see (status, priority, date, "
     "assignee), and tags label tasks across projects. Click a tag or project in "
     "the sidebar to focus it.\n\n"
-    "SEARCH: Use the search box in the top bar to find tasks and notes by title "
-    "or description. You can also just ask the AI, for example \"find my tasks "
+    "SEARCH: Use the search box in the top bar to find tasks by title or "
+    "description. You can also just ask the AI, for example \"find my tasks "
     "for next week\".\n\n"
     "SHOWS AND MOVIES: The Shows & Movies section in the sidebar is a personal "
     "watchlist. Search a title to add it, mark items as watching or watched, rate "
