@@ -554,6 +554,14 @@ async def chat(
 ):
     _check_ai_rate_limit(str(user.id))
 
+    # Only one turn per account: a background turn (or another non-streaming
+    # request) in flight must 409 rather than run two tool loops side by side.
+    if get_active_turn(str(user.id)) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Prysm AI is still working on your previous request. Please wait a moment.",
+        )
+
     provider, api_key, chain = await resolve_llm_key(session, user, request.provider, http_request)
 
     session_id = request.session_id or str(uuid4())
@@ -707,7 +715,7 @@ async def chat_stream(
 
     chain_list: list[str] = [chain[0], *chain[1]] if chain else []
 
-    job = start_turn(
+    job = await start_turn(
         user_id=str(user.id),
         session_id=session_id,
         provider=provider,
@@ -717,6 +725,12 @@ async def chat_stream(
         user_message=req.message,
         context=req.context,
     )
+    if job is None:
+        # Lost the race: another request for this user registered first.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Prysm AI is still working on your previous request. Please wait a moment.",
+        )
 
     async def event_generator():
         try:

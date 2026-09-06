@@ -126,6 +126,130 @@ async def test_execute_tool_calls_recovers_session_after_flush_failure(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_start_turn_rejects_when_a_turn_is_active():
+    """*A* turn already registered for the user: start_turn must return None.
+
+    The router replies 409 in that case; without the guard, two concurrent
+    chat requests could start two background turns for one user (double tool
+    execution, double billing).
+    """
+    from unittest.mock import patch
+
+    from app.services import ai_turn_runner as tr
+
+    async def _noop(job):
+        await asyncio.sleep(0)
+
+    user_id = str(uuid4())
+    with patch.object(tr, "_run_turn", _noop):
+        try:
+            first = await tr.start_turn(
+                user_id, str(uuid4()), "openai", "sk-test", [], [], "hello"
+            )
+            assert first is not None
+            second = await tr.start_turn(
+                user_id, str(uuid4()), "openai", "sk-test", [], [], "hello again"
+            )
+            assert second is None
+        finally:
+            tr._turns.pop(user_id, None)
+
+
+@pytest.mark.asyncio
+async def test_start_turn_atomic_under_concurrency():
+    """Two simultaneous start_turn calls for one user: exactly one wins."""
+    from unittest.mock import patch
+
+    from app.services import ai_turn_runner as tr
+
+    async def _noop(job):
+        await asyncio.sleep(0)
+
+    user_id = str(uuid4())
+    with patch.object(tr, "_run_turn", _noop):
+        try:
+            r1, r2 = await asyncio.gather(
+                tr.start_turn(user_id, str(uuid4()), "openai", "sk-test", [], [], "a"),
+                tr.start_turn(user_id, str(uuid4()), "openai", "sk-test", [], [], "b"),
+            )
+            registered = sum(1 for j in tr._turns.values() if j.user_id == user_id)
+            assert (r1 is not None) != (r2 is not None)
+            assert registered == 1
+        finally:
+            tr._turns.pop(user_id, None)
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_calls_recovery_reapplies_rls(db_session, ai_user):
+    """Regression (Postgres): a failed tool's recovery rollback must re-apply
+    the transaction-scoped RLS context.
+
+    Before the fix, execute_tool_calls rolled back with a bare
+    ``session.rollback()``, silently dropping ``app.user_id``. The next
+    autoflush in the same session (an ``ai_cache`` write from the next cache
+    round, or pending task writes) then died with "new row violates row-level
+    security policy for table ..." - exactly the production symptom. The
+    recovery rollback now re-applies the user context via
+    ``rollback_and_reapply_rls`` before the session is reused.
+    """
+    import os
+
+    if not os.getenv("TEST_DATABASE_URL", "").startswith("postgresql"):
+        pytest.skip("RLS re-application is PostgreSQL-only")
+
+    from unittest.mock import patch
+    from uuid import UUID
+
+    from app.models.task import Task
+    from app.services import ai_service as ai_mod
+    from app.services.ai_service import execute_tool_calls
+    from sqlalchemy import select
+    from sqlalchemy.exc import SQLAlchemyError
+
+    user_id = str(ai_user)
+
+    # Force the broken-session state a failed flush leaves behind.
+    bad = Task(user_id=UUID(user_id), title=None)
+    db_session.add(bad)
+    try:
+        await db_session.execute(select(Task).limit(1))
+        await db_session.rollback()
+    except SQLAlchemyError:
+        assert not db_session.is_active
+
+    real_rollback_reapply = ai_mod.rollback_and_reapply_rls
+    applied: list[str] = []
+
+    async def _record_reapply(session, uid):
+        applied.append(str(uid))
+        await real_rollback_reapply(session, uid)
+
+    tool_calls = [
+        {
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "list_tags", "arguments": "{}"},
+        },
+        {
+            "id": "call-2",
+            "type": "function",
+            "function": {"name": "list_tags", "arguments": "{}"},
+        },
+    ]
+
+    with patch.object(ai_mod, "rollback_and_reapply_rls", _record_reapply):
+        results = await execute_tool_calls(tool_calls, user_id, db_session)
+
+    # The recovery path re-applied the user context at least once.
+    assert applied, "recovery rollback did not re-apply the RLS user context"
+    assert all(a == user_id for a in applied)
+    # The session is usable afterwards (second tool ran, commit works).
+    assert any('"count"' in (r.get("content") or "") for r in results)
+    await db_session.rollback()
+    assert db_session.is_active
+
+
+@pytest.mark.asyncio
 async def test_commit_and_reapply_rls_reapplies_after_commit(db_session, ai_user):
     """Regression (Postgres): committing must re-apply the RLS user context.
 

@@ -67,13 +67,17 @@ class TurnJob:
 
 
 _turns: dict[str, TurnJob] = {}
+# Guards the check-and-register inside start_turn: two concurrent chat
+# requests for the same user must never both register (the router's pre-check
+# is not atomic across an await, and a second turn would double-run tools).
+_start_lock = asyncio.Lock()
 
 
 def get_active_turn(user_id: str) -> TurnJob | None:
     return _turns.get(user_id)
 
 
-def start_turn(
+async def start_turn(
     user_id: str,
     session_id: str,
     provider: str,
@@ -82,18 +86,24 @@ def start_turn(
     sanitized_history: list[dict],
     user_message: str,
     context: dict | None = None,
-) -> TurnJob:
-    job = TurnJob(
-        user_id=user_id,
-        session_id=session_id,
-        provider=provider,
-        api_key=api_key,
-        chain=chain,
-        sanitized_history=sanitized_history,
-        user_message=user_message,
-        context=context,
-    )
-    _turns[user_id] = job
+) -> TurnJob | None:
+    """Register and launch a background turn, or return ``None`` when the user
+    already has an active turn (the caller must reply 409 then)."""
+    async with _start_lock:
+        existing = _turns.get(user_id)
+        if existing is not None:
+            return None
+        job = TurnJob(
+            user_id=user_id,
+            session_id=session_id,
+            provider=provider,
+            api_key=api_key,
+            chain=chain,
+            sanitized_history=sanitized_history,
+            user_message=user_message,
+            context=context,
+        )
+        _turns[user_id] = job
     asyncio.create_task(_run_turn(job))
     return job
 
@@ -140,9 +150,14 @@ async def _run_turn(job: TurnJob) -> None:
             is_pg = dialect == "postgresql"
 
             async def _commit():
-                # Every commit ends the transaction and hands the pooled
-                # connection back. The transaction-scoped app.user_id is then
-                # gone, so re-apply it or the next write violates RLS.
+                # A tool handler may have rolled the session back internally
+                # (dropping the transaction-scoped RLS context) even when it
+                # reported success. Re-apply BEFORE the commit so the pending
+                # flush can never execute with app.user_id unset, then
+                # commit_and_reapply_rls re-applies it again for the next
+                # transaction.
+                if is_pg:
+                    await set_rls_user_id(session, UUID(job.user_id))
                 await commit_and_reapply_rls(session, UUID(job.user_id))
 
             async def _rollback():
@@ -228,6 +243,11 @@ async def _run_turn(job: TurnJob) -> None:
                     await _rollback()
                     tool_results = [{"tool_call_id": tc.get("id"), "role": "tool", "content": json.dumps({"error": f"Tool execution failed: {tee}"})} for tc in tool_calls]
                 messages.extend(tool_results)
+                # Commit this round's tool side-effects BEFORE the next provider
+                # call: a later-round failure (provider error, model refusal)
+                # must not silently roll back tasks this round already created,
+                # and the model sees its own writes in the following rounds.
+                await _commit()
                 await job.events.put(("tool_results", [r["content"] for r in tool_results]))
 
                 if _round == MAX_TOOL_ROUNDS - 1:
@@ -328,7 +348,10 @@ async def _run_turn(job: TurnJob) -> None:
         if client is not None:
             await _safe_aclose(client)
         job.phase = "done"
-        job.status = "done"
+        # Preserve the explicit terminal states (cancelled after a cancel,
+        # error after the recovery-persist path) instead of blanket-overwriting.
+        if job.status == "running":
+            job.status = "done"
         await job.events.put(("done", ""))
         job.done_event.set()
         _turns.pop(job.user_id, None)

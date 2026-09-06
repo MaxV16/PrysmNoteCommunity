@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from app.models.watchlist import WatchlistItem
 from app.services import tmdb_service, watchlist_service
+from app.utils.rls import rollback_and_reapply_rls
 from app.utils.uuid_helpers import parse_uuid
 
 VALID_STATUSES = {"plan_to_watch", "watching", "watched"}
@@ -228,7 +229,9 @@ async def _add_watchlist_item(args: dict, user_id: str, session) -> dict:
     await session.flush()
     await watchlist_service.fetch_and_store_metadata(session, item)
     if not item.title.strip():
-        await session.rollback()
+        # RLS context is transaction-scoped: re-apply app.user_id after the
+        # rollback or the next tool write on this session violates RLS.
+        await rollback_and_reapply_rls(session, UUID(user_id))
         return {"error": "Title is required (TMDB lookup unavailable)"}
     await session.flush()
     return {"created": True, "item": watchlist_service.serialize(item)}

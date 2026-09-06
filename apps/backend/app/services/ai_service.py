@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.llm.base import first_choice, get_provider
 from app.services.feature_guide import PYRSM_FEATURE_GUIDE
 from app.utils.priority import normalize_priority
+from app.utils.rls import rollback_and_reapply_rls
 
 
 # Max number of raw past turns injected into the LLM prompt. Durable memory
@@ -1596,7 +1597,10 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     try:
                         await session.flush()
                     except IntegrityError:
-                        await session.rollback()
+                        # rollback_and_reapply_rls: RLS context is transaction-
+                        # scoped, so a bare rollback here drops app.user_id and
+                        # the NEXT write on this session violates RLS.
+                        await rollback_and_reapply_rls(session, UUID(user_id))
                         tag = (await session.execute(
                             select(Tag).where(Tag.user_id == UUID(user_id), Tag.name == tag_name)
                         )).scalar_one()
@@ -2146,10 +2150,15 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             # Roll back so later tool calls in the same round, the caller's
             # next provider round, and the final session.commit() can all
             # still run - otherwise the whole turn dies with a confusing
-            # "transaction has been rolled back" error.
+            # "transaction has been rolled back" error. Only a genuinely
+            # broken transaction needs the rollback (a plain handler
+            # exception leaves the session healthy and its same-round pending
+            # writes must survive to the caller's commit). The rollback must
+            # also re-apply the transaction-scoped RLS user context, or the
+            # next autoflush (ai_cache writes, task writes) violates RLS.
             try:
                 if not session.is_active:
-                    await session.rollback()
+                    await rollback_and_reapply_rls(session, UUID(user_id))
             except Exception:
                 pass
             results.append({

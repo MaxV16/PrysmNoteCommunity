@@ -561,8 +561,12 @@ export function useAIChat() {
         // calls auto-refresh via the api wrapper, but this raw stream fetch does
         // not - so refresh once and retry rather than surfacing "Not authenticated".
         if (res.status === 409) {
-          removeAssistantPlaceholder();
-          setAssistant("Prysm AI is still working on your previous request. Wait a moment, then try again.");
+          // A turn is already running for this account (race, another tab, or
+          // a turn started since the last poll). Keep the placeholder, show a
+          // note, and start polling so the panel reloads the real answer as
+          // soon as the background turn finishes.
+          setAssistant("Prysm AI is still working on your previous request. The answer will appear here when it's ready.");
+          startBackgroundPoll();
           return;
         }
         if (res.status === 401) {
