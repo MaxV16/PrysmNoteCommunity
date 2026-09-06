@@ -215,6 +215,73 @@ function rejoinWordFragments(line: string): string {
   return out.join("");
 }
 
+const NO_BREAK_HYPHEN = "\u2011";
+
+// Repair a date that a model wrapped mid-value, e.g. "Due Date : 2026 -\n
+// 09 - 05". The per-line pass already collapses "09 - 05" -> "09-05", but a
+// year stranded at the end of a line ("2026 -") can never meet its month on
+// the same line. When a line ends with a 4-digit year followed by a dash and
+// the next line starts with a two-digit month, rejoin them as a single
+// ISO date. Fenced code blocks are skipped so literal code never changes.
+function repairLineBrokenDates(text: string): string {
+  if (!text) return text;
+  const lines = text.split("\n");
+  const skipped = new Set<number>();
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const stripped = lines[i].trim();
+    if (stripped.startsWith("```") || stripped.startsWith("~~~")) {
+      inFence = !inFence;
+      skipped.add(i);
+    } else if (inFence) {
+      skipped.add(i);
+    }
+  }
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const next = lines[i + 1];
+    if (next !== undefined && !skipped.has(i) && !skipped.has(i + 1)) {
+      const head = /([0-9]{4})[ \t]*-[ \t]*$/.exec(line);
+      const tail = /^[ \t]*-?[ \t]*([0-9]{2})(?=[-\s]|$)/.exec(next);
+      if (head && tail) {
+        const joined = head[1] + "-" + tail[1];
+        out.push(line.slice(0, head.index) + joined + next.slice(tail[0].length));
+        i += 2;
+        continue;
+      }
+    }
+    out.push(line);
+    i += 1;
+  }
+  return out.join("\n");
+}
+
+// Render-time guard against a date wrapping mid-value: replaces the hyphens in
+// "YYYY-MM-DD" with non-breaking hyphens so CSS can never break the date into
+// "2026-" / "09-" / "05". Display-only - the persisted message keeps plain
+// hyphens (which the backend parses), and genuinely separate lines stay lines.
+export function protectDateLineBreaks(text: string): string {
+  if (!text) return text;
+  let inFence = false;
+  return text
+    .split("\n")
+    .map((line) => {
+      const stripped = line.trim();
+      if (stripped.startsWith("```") || stripped.startsWith("~~~")) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      return line.replace(
+        /\b([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})\b/g,
+        (_m, y: string, mo: string, d: string) => `${y}${NO_BREAK_HYPHEN}${mo}${NO_BREAK_HYPHEN}${d}`
+      );
+    })
+    .join("\n");
+}
+
 // Dictionary-based repair for words merged by a dropped space ("Trackand
 // Manage"). Only unknown 6+ letter tokens are candidates, and the split point
 // must leave two dictionary-word halves on both sides, so known words like
@@ -245,7 +312,7 @@ function splitMergedWord(line: string): string {
 export function normalizeAssistantMarkdown(text: string): string {
   if (!text) return text;
   let inFence = false;
-  return text
+  const cleaned = text
     .split("\n")
     .map((line) => {
       const stripped = line.trim();
@@ -312,4 +379,7 @@ export function normalizeAssistantMarkdown(text: string): string {
       return s;
     })
     .join("\n");
+  // A date split across a line break ("... 2026 -\n09 - 05") is repaired after
+  // the per-line pass so the year and month can finally meet.
+  return repairLineBrokenDates(cleaned);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeAssistantMarkdown, stripTextToolCalls } from "./ai-format";
+import { normalizeAssistantMarkdown, protectDateLineBreaks, stripTextToolCalls } from "./ai-format";
 
 describe("normalizeAssistantMarkdown", () => {
   it("fixes emphasis written with stray spaces so bold actually renders", () => {
@@ -123,6 +123,43 @@ describe("user QA corpus (fragmented streaming artifacts)", () => {
     ]) {
       expect(normalizeAssistantMarkdown(clean)).toBe(clean);
     }
+  });
+
+  it("collapses stray whitespace between chars, digits, and punctuation (user spec)", () => {
+    expect(normalizeAssistantMarkdown("2 5 th")).toBe("25th");
+    expect(normalizeAssistantMarkdown("I 've finished the setup .")).toBe(
+      "I've finished the setup."
+    );
+    expect(normalizeAssistantMarkdown("due next month .")).toBe("due next month.");
+    expect(normalizeAssistantMarkdown("Due Date : 2026-09-05")).toBe("Due Date: 2026-09-05");
+  });
+
+  it("rejoins ISO dates split across a line break", () => {
+    expect(normalizeAssistantMarkdown("Due Date : 2026 -\n09 - 05")).toBe(
+      "Due Date: 2026-09-05"
+    );
+    expect(normalizeAssistantMarkdown("1 . Start : 2026-\n09-05\n2 . Buy supplies")).toBe(
+      "1. Start: 2026-09-05\n2. Buy supplies"
+    );
+    // Line-broken dates inside fenced code blocks stay untouched.
+    expect(normalizeAssistantMarkdown("```\n2026 -\n09 - 05\n```")).toBe(
+      "```\n2026 -\n09 - 05\n```"
+    );
+  });
+});
+
+describe("protectDateLineBreaks", () => {
+  it("swaps ISO date hyphens for non-breaking hyphens so dates never wrap", () => {
+    expect(protectDateLineBreaks("Due Date: 2026-09-05")).toBe(
+      "Due Date: 2026\u201109\u201105"
+    );
+    expect(protectDateLineBreaks("No dates here")).toBe("No dates here");
+  });
+
+  it("skips fenced code blocks", () => {
+    expect(protectDateLineBreaks("```\n2026-09-05\n```\nDue: 2026-01-02")).toBe(
+      "```\n2026-09-05\n```\nDue: 2026\u201101\u201102"
+    );
   });
 });
 

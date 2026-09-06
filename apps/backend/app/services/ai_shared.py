@@ -111,10 +111,51 @@ def _normalize_reply_markdown(text: str) -> str:
             out.append(line)
             continue
         out.append(line if in_fence else _clean(line))
-    return "\n".join(out)
+    # A date split across a line break ("... 2026 -\n09 - 05") is repaired after
+    # the per-line pass so the year and month can finally meet.
+    return _repair_line_broken_dates("\n".join(out))
 
 
 _FRAGMENT_RE = re.compile(r"[A-Za-z]+")
+
+
+def _repair_line_broken_dates(text: str) -> str:
+    """Rejoin an ISO date a model wrapped mid-value ("Due Date: 2026 -\n
+    09 - 05"). The per-line pass collapses "09 - 05" -> "09-05", but a year
+    stranded at a line end ("2026 -") never meets its month on the same line.
+    When a line ends with a 4-digit year plus a dash and the next line starts
+    with a two-digit month, join them into one ISO date. Fenced code blocks are
+    skipped so literal code never changes. Mirrors repairLineBrokenDates in
+    apps/frontend/src/lib/ai-format.ts.
+    """
+    if not text:
+        return text
+    lines = text.split("\n")
+    skipped: set[int] = set()
+    in_fence = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            skipped.add(i)
+        elif in_fence:
+            skipped.add(i)
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        nxt = lines[i + 1] if i + 1 < len(lines) else None
+        if nxt is not None and i not in skipped and (i + 1) not in skipped:
+            head = re.search(r"([0-9]{4})[ \t]*-[ \t]*$", line)
+            tail = re.match(r"[ \t]*-?[ \t]*([0-9]{2})(?=[-\s]|$)", nxt)
+            if head and tail:
+                joined = head.group(1) + "-" + tail.group(1)
+                out.append(line[: head.start()] + joined + nxt[tail.end():])
+                i += 2
+                continue
+        out.append(line)
+        i += 1
+    return "\n".join(out)
 
 
 def _rejoin_fragmented_words(line: str) -> str:

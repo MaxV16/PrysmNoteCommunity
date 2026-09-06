@@ -1581,6 +1581,29 @@ def test_normalize_reply_markdown_user_qa_corpus():
     ]:
         assert _normalize_reply_markdown(clean) == clean
 
+    # Stray whitespace between chars, digits and punctuation never survives.
+    assert _normalize_reply_markdown("2 5 th") == "25th"
+    assert _normalize_reply_markdown("I 've finished the setup .") == "I've finished the setup."
+    assert _normalize_reply_markdown("due next month .") == "due next month."
+    assert _normalize_reply_markdown("Due Date : 2026-09-05") == "Due Date: 2026-09-05"
+
+
+def test_normalize_reply_markdown_rejoins_line_broken_dates():
+    """A date a model wrapped mid-value (year stranded at a line end) is rejoined
+    into one ISO date after the per-line pass, so replies never show a broken
+    '2026 -\n09 - 05'. Fenced code blocks stay untouched."""
+    from app.routers.ai import _normalize_reply_markdown
+
+    assert _normalize_reply_markdown("Due Date : 2026 -\n09 - 05") == "Due Date: 2026-09-05"
+    assert (
+        _normalize_reply_markdown("1 . Start : 2026-\n09-05\n2 . Buy supplies")
+        == "1. Start: 2026-09-05\n2. Buy supplies"
+    )
+    assert (
+        _normalize_reply_markdown("```\n2026 -\n09 - 05\n```")
+        == "```\n2026 -\n09 - 05\n```"
+    )
+
 
 def test_clean_text_tool_json_feed_through_word_repairs():
     """The text-tool-call cleaner (used for '[TOOL_CALLS]' JSON payloads) runs

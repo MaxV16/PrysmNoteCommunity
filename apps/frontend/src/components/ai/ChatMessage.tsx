@@ -54,7 +54,7 @@ export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
             className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
               isUser
                 ? "gradient-bg text-[var(--on-gradient)] rounded-br-md shadow-glow"
-                : "bg-elevated text-primary rounded-bl-md border border-border/50"
+                : "bg-elevated text-primary rounded-bl-md"
             }`}
           >
             {showTyping ? (
