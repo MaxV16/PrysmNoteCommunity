@@ -20,11 +20,7 @@ export interface ThemeColors {
   "shadow-md": string;
   "shadow-lg": string;
   "accent-glow": string;
-  "grad-from"?: string;
-  "grad-via"?: string;
-  "grad-to"?: string;
   "on-gradient"?: string;
-  "shadow-glow-strong"?: string;
 }
 
 export interface Theme {

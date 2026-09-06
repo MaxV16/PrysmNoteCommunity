@@ -64,13 +64,7 @@ const COLOR_KEYS = new Set([
 
 const SHADOW_KEYS = new Set(["shadow-sm", "shadow-md", "shadow-lg", "accent-glow"] as const);
 
-const OPTIONAL_KEYS = new Set([
-  "grad-from",
-  "grad-via",
-  "grad-to",
-  "on-gradient",
-  "shadow-glow-strong",
-] as const);
+const OPTIONAL_KEYS = new Set(["on-gradient"] as const);
 
 const REQUIRED_KEYS: string[] = [...COLOR_KEYS, ...SHADOW_KEYS];
 
@@ -117,8 +111,7 @@ export function validateCustomThemeError(raw: unknown): string | null {
       return `Import failed: field "${key}" is missing or empty`;
     }
     const trimmed = v.trim();
-    const ok =
-      key === "shadow-glow-strong" ? SAFE_CSS_RE.test(trimmed) : COLOR_RE.test(trimmed);
+    const ok = COLOR_RE.test(trimmed);
     if (!ok) {
       return `Import failed: field "${key}" is not a valid color or shadow`;
     }

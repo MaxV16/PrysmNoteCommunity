@@ -267,7 +267,10 @@ export default function SettingsPage() {
   const [editingCustomTheme, setEditingCustomTheme] = useState(false);
   const [customThemeColors, setCustomThemeColors] = useState<ThemeColors>(() => {
     const base = THEMES[themeName] || THEMES.dark;
-    return customTheme ? { ...base.colors, ...Object.fromEntries(Object.entries(customTheme)) } as unknown as ThemeColors : { ...base.colors };
+    const knownKeys = new Set(Object.keys(base.colors));
+    return customTheme
+      ? Object.fromEntries(Object.entries(customTheme).filter(([k]) => knownKeys.has(k))) as unknown as ThemeColors
+      : { ...base.colors };
   });
   const [customFontInput, setCustomFontInput] = useState("");
   const [fontInputOpen, setFontInputOpen] = useState(false);

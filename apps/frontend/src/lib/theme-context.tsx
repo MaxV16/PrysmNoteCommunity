@@ -54,21 +54,9 @@ function applyThemeColors(colors: ThemeColors, extra?: Record<string, string>) {
   root.style.setProperty("--shadow-md", colors["shadow-md"]);
   root.style.setProperty("--shadow-lg", colors["shadow-lg"]);
   root.style.setProperty("--accent-glow", colors["accent-glow"]);
-  // Primary gradient + glow (pricing-page design language). Custom themes derive
-  // these from the accent so gradient CTAs stay cohesive without extra fields.
-  root.style.setProperty("--grad-from", colors["grad-from"] ?? colors.accent);
-  root.style.setProperty("--grad-via", colors["grad-via"] ?? colors.accent);
-  root.style.setProperty(
-    "--grad-to",
-    colors["grad-to"] ?? colors["accent-hover"] ?? colors.accent,
-  );
   root.style.setProperty(
     "--on-gradient",
     colors["on-gradient"] ?? (luminance(colors.accent) > 0.35 ? "#1a1a2e" : "#ffffff"),
-  );
-  root.style.setProperty(
-    "--shadow-glow-strong",
-    colors["shadow-glow-strong"] ?? `0 0 24px ${colors["accent-glow"]}`,
   );
   if (extra) {
     for (const [name, value] of Object.entries(extra)) {

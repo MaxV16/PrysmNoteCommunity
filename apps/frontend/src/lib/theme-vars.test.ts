@@ -110,8 +110,17 @@ describe("validateCustomTheme", () => {
   });
 
   it("accepts optional derived keys and rejects bad ones", () => {
-    const withGrad = { ...validTheme, "grad-from": "#4c7eff", "grad-via": "#7c5cff", "grad-to": "#a855f7", "on-gradient": "#ffffff", "shadow-glow-strong": "0 0 24px rgba(108,92,231,0.45)" };
+    const withGrad = { ...validTheme, "on-gradient": "#ffffff" };
     expect(validateCustomTheme(withGrad)).not.toBeNull();
-    expect(validateCustomThemeError({ ...validTheme, "grad-from": "0 2px" })).toContain("grad-from");
+    expect(validateCustomThemeError({ ...validTheme, "on-gradient": "0 2px" })).toContain("on-gradient");
+  });
+
+  it("ignores legacy gradient keys from old exported themes", () => {
+    const legacy = { ...validTheme, "grad-from": "#4c7eff", "grad-via": "#7c5cff", "grad-to": "#a855f7", "shadow-glow-strong": "0 0 24px rgba(108,92,231,0.45)" };
+    expect(validateCustomThemeError(legacy)).toBeNull();
+    const theme = validateCustomTheme(legacy);
+    expect(theme).not.toBeNull();
+    expect(theme).not.toHaveProperty("grad-from");
+    expect(theme).not.toHaveProperty("shadow-glow-strong");
   });
 });

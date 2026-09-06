@@ -14,8 +14,7 @@ export function Button({
 }: ButtonProps) {
   const base = "rounded font-semibold transition-all outline-none";
   const variants: Record<string, string> = {
-    primary:
-      "rounded-xl bg-gradient-to-r from-[var(--grad-from)] via-[var(--grad-via)] to-[var(--grad-to)] text-[var(--on-gradient)] shadow-glow hover:brightness-110 hover:shadow-glow-lg",
+    primary: "rounded-xl bg-accent text-[var(--on-gradient)] hover:bg-accent-hover",
     secondary: "bg-elevated text-primary hover:bg-hover border border-border",
     danger: "bg-danger text-white hover:opacity-90",
   };
