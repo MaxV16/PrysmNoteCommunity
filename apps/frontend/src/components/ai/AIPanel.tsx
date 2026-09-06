@@ -69,7 +69,7 @@ function activeSessionId(): string | null {
 }
 
 export function AIPanel({ onClose, view }: ChatPanelProps) {
-  const { chatMessages, sendMessage, isLoading, abort, undoLastAction, hasUndo, loadSession, newChat, clearActiveSession, fetchSessions, usageTokens } = useAIChat();
+  const { chatMessages, sendMessage, isLoading, backgroundWorking, turnPhase, abort, undoLastAction, hasUndo, loadSession, newChat, clearActiveSession, fetchSessions, usageTokens } = useAIChat();
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [serverSessions, setServerSessions] = useState<HistoryServerSession[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -145,12 +145,6 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
       saveMessages(chatMessages.filter((m) => m.content));
     }
   }, [chatMessages, hasLoaded]);
-
-  // Closing the panel must cancel any in-flight stream so it cannot leak a
-  // fetch (or leave an empty placeholder behind) after the panel unmounts.
-  useEffect(() => {
-    return () => abort();
-  }, [abort]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -354,13 +348,21 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
 
           <AIComposer
             onSend={handleSend}
-            disabled={isLoading}
+            disabled={isLoading || backgroundWorking}
             isLoading={isLoading}
             hasUndo={hasUndo}
             onAbort={abort}
             onUndo={undoLastAction}
             onRegisterInsert={(insert) => { insertRef.current = insert; }}
           />
+          {backgroundWorking && (
+            <div className="flex items-center justify-center gap-2 px-4 pb-2">
+              <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></div>
+              <span className="text-[11px] text-muted">
+                Working in the background{turnPhase === "final" ? " (generating reply)" : " (using tools)"}...
+              </span>
+            </div>
+          )}
           <p className="px-4 pb-2.5 text-center text-[10px] leading-relaxed text-muted">
             PrysmAI is an AI assistant; check important details. Hosted models vary by region and are selected for efficiency and accuracy, with zero data retention. Replies are not retained.
           </p>

@@ -43,8 +43,12 @@ def test_cache_key_is_deterministic_and_order_sensitive():
     k1 = ai_cache.make_cache_key(user, "prysmai", messages, None)
     k2 = ai_cache.make_cache_key(user, "prysmai", messages, None)
     k3 = ai_cache.make_cache_key(user, "prysmai", [{"role": "user", "content": "bye"}], None)
+    k4 = ai_cache.make_cache_key(user, "prysmai", messages, None, model="model-a")
+    k5 = ai_cache.make_cache_key(user, "prysmai", messages, None, model="model-b")
     assert k1 == k2
     assert k1 != k3
+    assert k1 != k4
+    assert k4 != k5
     assert len(k1) == 64
 
 
@@ -61,6 +65,21 @@ async def test_cache_round_trip(session):
     cached = await ai_cache.get_cached_response(session, user, "prysmai", messages, None)
     assert cached is not None
     assert cached == response
+
+
+@pytest.mark.asyncio
+async def test_cache_scoped_by_model(session):
+    user = uuid4()
+    messages = [{"role": "user", "content": "hello"}]
+    response_a = {"choices": [{"message": {"content": "from model A"}}]}
+    response_b = {"choices": [{"message": {"content": "from model B"}}]}
+    await ai_cache.cache_response(session, user, "prysmai", messages, None, response_a, model="model-a")
+    await session.commit()
+    assert await ai_cache.get_cached_response(session, user, "prysmai", messages, None, model="model-a") == response_a
+    assert await ai_cache.get_cached_response(session, user, "prysmai", messages, None, model="model-b") is None
+    await ai_cache.cache_response(session, user, "prysmai", messages, None, response_b, model="model-b")
+    await session.commit()
+    assert await ai_cache.get_cached_response(session, user, "prysmai", messages, None, model="model-b") == response_b
 
 
 @pytest.mark.asyncio

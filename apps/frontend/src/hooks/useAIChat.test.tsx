@@ -40,7 +40,7 @@ describe("useAIChat refresh-on-abort", () => {
   });
 
   it("refreshes tasks from the server even when the stream errors", async () => {
-    global.fetch = vi.fn().mockResolvedValue(streamResponse(true));
+    global.fetch = vi.fn().mockImplementation(() => streamResponse(true));
     apiGet.mockResolvedValue([{ id: "1", title: "T1", status: "todo" }]);
 
     const { result } = renderHook(() => useAIChat());
@@ -59,7 +59,8 @@ describe("useAIChat refresh-on-abort", () => {
         controller.error(new DOMException("aborted", "AbortError"));
       },
     });
-    global.fetch = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
+    global.fetch = vi.fn().mockImplementation(() => new Promise(() => {})); // never resolves for status check
+    global.fetch = vi.fn().mockImplementation(() => new Response(body, { status: 200 }));
 
     const { result } = renderHook(() => useAIChat());
     await act(async () => {
@@ -88,6 +89,8 @@ describe("useAIChat refresh-on-abort", () => {
     await act(async () => {
       await tasksHook.current.fetchRange("2026-01-01", "2026-01-07");
     });
+
+    global.fetch = vi.fn().mockImplementation(() => streamResponse(true));
 
     const { result } = renderHook(() => useAIChat());
     // The refresh's /tasks/ snapshot has NO far task; a merge must keep it.

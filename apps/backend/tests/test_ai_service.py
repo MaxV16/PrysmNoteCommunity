@@ -13,7 +13,55 @@ from app.services.ai_service import (
     TOOL_DEFINITIONS,
     _FINANCE_TOOL_DEFINITIONS,
     _OPENCLAW_TOOL_DEFINITIONS,
+    _needs_tool_retry,
 )
+
+
+class TestNeedsToolRetry:
+    def test_refusal_detected(self):
+        assert _needs_tool_retry(
+            "I'm sorry, but I currently don't have the necessary tools to assist with that request.",
+            "delete all tasks called work",
+        )
+
+    def test_refusal_no_tools(self):
+        assert _needs_tool_retry(
+            "I don't have access to tools that can help with that.",
+            "create a task for tomorrow",
+        )
+
+    def test_hallucinated_completion(self):
+        assert _needs_tool_retry(
+            "I've found 25 tasks matching your query. Let me know which ones to delete.",
+            "find all tasks named work",
+        )
+
+    def test_clean_qa_no_retry(self):
+        assert not _needs_tool_retry(
+            "Your schedule for today has 3 tasks: Buy groceries at 10am, meeting at 2pm, and gym at 5pm.",
+            "what's my schedule today",
+        )
+
+    def test_action_y_message_no_tool_call(self):
+        assert _needs_tool_retry(
+            "That sounds like a good idea.",
+            "delete everything",
+        )
+
+    def test_empty_content_is_retry(self):
+        assert _needs_tool_retry("", "create a task")
+
+    def test_as_an_ai_refusal(self):
+        assert _needs_tool_retry(
+            "As an AI language model, I cannot execute tasks for you.",
+            "schedule a dentist appointment",
+        )
+
+    def test_no_tools_available_refusal(self):
+        assert _needs_tool_retry(
+            "I don't see any tools available to handle that request.",
+            "add a reminder",
+        )
 
 
 @pytest.mark.asyncio

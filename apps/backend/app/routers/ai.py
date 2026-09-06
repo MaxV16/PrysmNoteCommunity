@@ -25,6 +25,13 @@ from app.services.ai_entitlement import (
     parse_usage,
     record_ai_usage,
 )
+from app.services.ai_shared import (
+    _chunk_text,
+    _normalize_reply_markdown,
+    _parse_text_tool_calls,
+    _safe_aclose,
+    _strip_text_tool_calls,
+)
 from app.services.ai_cache import (
     cache_response,
     get_cached_response,
@@ -36,7 +43,13 @@ from app.services.ai_service import (
     execute_tool_calls,
     get_llm_client,
     is_premium,
+    _needs_tool_retry,
     tools_for_user,
+)
+from app.services.ai_turn_runner import (
+    cancel_turn,
+    get_active_turn,
+    start_turn,
 )
 from app.services.memory_service import (
     extract_memories,
@@ -165,299 +178,6 @@ def _friendly_llm_error(exc: Exception, provider: str | None = None) -> str:
 
 MAX_CHAT_HISTORY = 20
 MAX_MESSAGE_LENGTH = 4000
-
-
-def _normalize_reply_markdown(text: str) -> str:
-    """Clean up sloppy model output before it is persisted or displayed.
-
-    Some providers write emphasis with stray spaces ("** what should the task
-    be ?**" or "* x *") which never renders as markdown, and insert spaces
-    around punctuation ("e .g .", "daily ,", "I 'll"). This fixes those
-    artifacts line by line so replies render as real markdown. Fenced code
-    blocks are left untouched (their whitespace is significant) and start-of-line
-    "* "/"- " list markers are preserved (they are never emphasis closers).
-    """
-    if not text:
-        return text
-
-    def _strip_delimiter_spacing(line: str, marker: str) -> str:
-        """Remove one stray-space run around paired emphasis/code delimiters.
-
-        Pairs delimiters sequentially ("** a **" -> "**a**", "* x *" -> "*x*",
-        "` x `" -> "`x`"). A start-of-line "* "/"- " is a list marker, never an
-        opener, and clean text (no space right after the opener or before the
-        closer) is left untouched.
-        """
-        positions = []
-        i = 0
-        while True:
-            idx = line.find(marker, i)
-            if idx == -1:
-                break
-            positions.append(idx)
-            i = idx + len(marker)
-        for p in range(0, len(positions) - 1, 2):
-            open_idx = positions[p]
-            close_idx = positions[p + 1]
-            if marker in ("*", "-") and not line[:open_idx].strip():
-                continue
-            after_open = open_idx + len(marker)
-            if after_open < len(line) and line[after_open].isspace():
-                line = line[:after_open] + line[after_open:].lstrip()
-                close_idx = line.find(marker, after_open)
-                if close_idx == -1:
-                    break
-            before_close = close_idx
-            k = before_close - 1
-            while k >= 0 and line[k].isspace():
-                k -= 1
-            if k != before_close - 1:
-                line = line[: k + 1] + line[before_close:]
-        return line
-
-    def _join_split_hex_run(line: str) -> str:
-        """Rejoin streaming artifacts like "3 5 8 b 2 5 0 b" (single hex chars
-        separated by spaces) into "358b250b", and "4 0 d 8 -b 9 5 0" -> "40d8-b950".
-
-        Only runs of 6+ single-character hex tokens (dash-prefixed tokens allowed
-        so UUID dashes survive) are touched, and only when the run also contains a
-        digit - so ordinary words can never be collapsed ("a b c" stays intact).
-        """
-        def _repl(m: re.Match) -> str:
-            tokens = m.group(0).split()
-            if not any(c.isdigit() for t in tokens for c in t):
-                return m.group(0)
-            return "".join(tokens)
-
-        return re.sub(r"\b-?[0-9a-fA-F](?: -?[0-9a-fA-F]){5,}\b", _repl, line)
-
-    _QUOTE_CHARS = '"\u201c\u201d'
-
-    def _strip_quote_padding(line: str) -> str:
-        """Collapse padding inside quoted spans: ``" Work "`` -> ``"Work"`` and
-        ``"Work "`` -> ``"Work"``. Works on matched quote pairs on one line, so
-        quotes around a future word are never glued to it.
-        """
-        return re.sub(
-            rf'(?<![0-9A-Za-z])([{_QUOTE_CHARS}])[ \t]+(?=\S)([^\s{_QUOTE_CHARS}][^{_QUOTE_CHARS}\n]*?)[ \t]+([{_QUOTE_CHARS}])(?=\s|[",.;:!?)\]%>]|$)',
-            lambda m: f"{m.group(1)}{m.group(2).rstrip()}{m.group(3)}",
-            line,
-        )
-
-    def _clean(line: str) -> str:
-        # Space before punctuation: "e .g ." -> "e.g.", "daily ," -> "daily,".
-        # "]" and "}" are excluded so GFM checkboxes "[ ]" stay intact.
-        line = re.sub(r"[ \t]+([,.;:?!>)])", r"\1", line)
-        # Space after an opening bracket/paren: "( e" -> "(e". An empty-bracket
-        # checkbox "[ ]" is left alone (valid GFM task-list syntax).
-        line = re.sub(r"([(\[{<])[ \t]+(?![\]}])", r"\1", line)
-        # Contractions with a stray space: "I 'll" -> "I'll", "can 't" -> "can't",
-        # "don ’t" -> "don’t", "I ’ ll" -> "I’ll". This runs on the word END
-        # before the apostrophe (no \\b anchor bug): the suffix must be 1-3
-        # letters, so quoted words like "said 'hello'" are never collapsed.
-        line = re.sub(
-            r"(\w+)[ \t]+([\u2018\u2019'])[ \t]*(\w{1,3})\b",
-            lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}",
-            line,
-        )
-        # Spaces hugging quotes: " Work " -> "Work" (one side or both).
-        line = _strip_quote_padding(line)
-        # UUID/hex artifacts from sloppy model streaming, before the digit-join
-        # below (which would first merge "3 5 8" and break the hex run).
-        line = _join_split_hex_run(line)
-        # Number/time artifacts from sloppy model streaming: stray spaces split
-        # digits, ordinals, ranges and clock times ("4 - 12", "May 29th, 2027",
-        # "4pm"). Handles en/em dash spacing too.
-        # Number ranges: "4 - 12" / "4- 12" / "4\u201312" -> "4-12".
-        line = re.sub(r"(\d)[ \t]*[\u2013\u2014-][ \t]*(\d)", r"\1-\2", line)
-        # Split digits: "2 0 2 7" -> "2027", "May 2 9 th" -> "May 29 th".
-        line = re.sub(r"(\d)[ \t]+(?=\d)", r"\1", line)
-        # Ordinal suffixes: "2 9 th" -> "29th" (after the digit join above).
-        line = re.sub(r"(?i)(\d)[ \t]+(?=(?:st|nd|rd|th)\b)", r"\1", line)
-        # 12-hour clock: "4 pm" -> "4pm".
-        line = re.sub(r"(?i)(\d)[ \t]+(?=(?:am|pm)\b)", r"\1", line)
-        # Emphasis/code delimiters written with stray spaces around the inner text.
-        for marker in ("**", "__", "*", "_", "`"):
-            line = _strip_delimiter_spacing(line, marker)
-        return line
-
-    out: list[str] = []
-    in_fence = False
-    for line in text.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            in_fence = not in_fence
-            out.append(line)
-            continue
-        out.append(line if in_fence else _clean(line))
-    return "\n".join(out)
-
-
-_TEXT_TOOL_CALL_MARKER = "[TOOL_CALLS]"
-
-
-def _extract_text_tool_calls(text: str) -> list[tuple[str, str]]:
-    """Pull ``[TOOL_CALLS] <name> {json}`` blocks out of raw model text.
-
-    Some models cannot emit structured ``tool_calls`` and instead write them as
-    literal text (often carrying the same stray-spacing artifact that splits
-    digits and punctuation). Each block yields ``(name, json_text)``. Braces
-    inside JSON string values are ignored so nested objects survive.
-    """
-    if not text or _TEXT_TOOL_CALL_MARKER not in text:
-        return []
-    calls: list[tuple[str, str]] = []
-    rest = text
-    while True:
-        idx = rest.find(_TEXT_TOOL_CALL_MARKER)
-        if idx == -1:
-            break
-        rest = rest[idx + len(_TEXT_TOOL_CALL_MARKER):]
-        m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*", rest)
-        if not m:
-            continue
-        name = m.group(1)
-        rest = rest[m.end():]
-        ob = rest.find("{")
-        if ob == -1:
-            break
-        rest = rest[ob:]
-        depth = 0
-        in_str = False
-        esc = False
-        close = -1
-        for i, ch in enumerate(rest):
-            if in_str:
-                if esc:
-                    esc = False
-                elif ch == "\\":
-                    esc = True
-                elif ch == '"':
-                    in_str = False
-                continue
-            if ch == '"':
-                in_str = True
-            elif ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    close = i
-                    break
-        if close == -1:
-            break  # incomplete block (mid-stream) - keep everything after it
-        calls.append((name, rest[: close + 1]))
-        rest = rest[close + 1:]
-    return calls
-
-
-def _strip_text_tool_calls(text: str) -> str:
-    """Remove ``[TOOL_CALLS] ...`` blocks so raw JSON never reaches the user."""
-    if not text or _TEXT_TOOL_CALL_MARKER not in text:
-        return text
-    out: list[str] = []
-    rest = text
-    while True:
-        idx = rest.find(_TEXT_TOOL_CALL_MARKER)
-        if idx == -1:
-            out.append(rest)
-            break
-        out.append(rest[:idx])
-        rest = rest[idx + len(_TEXT_TOOL_CALL_MARKER):]
-        m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*", rest)
-        if not m:
-            out.append(_TEXT_TOOL_CALL_MARKER)
-            continue
-        name = m.group(1)
-        rest = rest[m.end():]
-        ob = rest.find("{")
-        if ob == -1:
-            out.append(_TEXT_TOOL_CALL_MARKER + m.group(0) + rest)
-            break
-        rest = rest[ob:]
-        depth = 0
-        in_str = False
-        esc = False
-        close = -1
-        for i, ch in enumerate(rest):
-            if in_str:
-                if esc:
-                    esc = False
-                elif ch == "\\":
-                    esc = True
-                elif ch == '"':
-                    in_str = False
-                continue
-            if ch == '"':
-                in_str = True
-            elif ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    close = i
-                    break
-        if close == -1:
-            # Incomplete block: keep it whole so a mid-stream partial never
-            # corrupts the running text (the closing brace may arrive later).
-            out.append(_TEXT_TOOL_CALL_MARKER + m.group(0) + rest)
-            break
-        rest = rest[close + 1:]
-    return "".join(out)
-
-
-def _clean_text_tool_json(text: str) -> str:
-    """Normalize a model-written JSON tool payload so json.loads can read it.
-
-    Reuses the reply normalizer (quote padding, digit runs, punctuation) and
-    collapses leftover newlines/spacing inside the JSON structure.
-    """
-    return re.sub(r"\s+", " ", _normalize_reply_markdown(text)).strip()
-
-
-def _parse_text_tool_calls(content: str) -> list[dict] | None:
-    """Convert ``[TOOL_CALLS] <name> {json}`` text blocks into tool_call dicts.
-
-    Returns None when the content carries no usable text tool calls, so callers
-    fall back to the normal "no tools this round" behavior.
-    """
-    calls = _extract_text_tool_calls(content or "")
-    if not calls:
-        return None
-    parsed: list[dict] = []
-    for name, json_text in calls:
-        try:
-            args = json.loads(_clean_text_tool_json(json_text))
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(args, dict):
-            continue
-        parsed.append({
-            "id": f"text-call-{uuid4().hex[:16]}",
-            "type": "function",
-            "function": {"name": name, "arguments": json.dumps(args)},
-        })
-    return parsed or None
-
-
-def _chunk_text(text: str, size: int = 400) -> list[str]:
-    """Split already-computed final answer text into token-like chunks so the
-    frontend can render it incrementally without a second model call."""
-    text = text or ""
-    if len(text) <= size:
-        return [text]
-    words = text.split(" ")
-    chunks: list[str] = []
-    cur = ""
-    for w in words:
-        if cur and len(cur) + len(w) + 1 > size:
-            chunks.append(cur)
-            cur = w
-        else:
-            cur = f"{cur} {w}".strip() if cur else w
-    if cur:
-        chunks.append(cur)
-    return chunks
 
 
 # Rough heuristic: ~4 chars per token, close enough for cost-usage visibility.
@@ -632,7 +352,7 @@ _in_flight: dict[str, asyncio.Future] = {}
 
 
 async def chat_with_cache(
-    session: AsyncSession, user_id, provider: str, client, messages: list[dict], tools: list[dict] | None
+    session: AsyncSession, user_id, provider: str, client, messages: list[dict], tools: list[dict] | None, model: str | None = None
 ) -> dict:
     """Run a tool-round provider call, served from the response cache when the
     exact request was answered recently (saves provider spend - the point of the
@@ -641,11 +361,12 @@ async def chat_with_cache(
     """
     from app.services.ai_cache import make_cache_key
 
-    cached = await get_cached_response(session, user_id, provider, messages, tools)
+    model = model or getattr(client, "model", None)
+    cached = await get_cached_response(session, user_id, provider, messages, tools, model)
     if cached is not None:
         return cached
 
-    key = make_cache_key(user_id, provider, messages, tools)
+    key = make_cache_key(user_id, provider, messages, tools, model)
     fut = _in_flight.get(key)
     if fut is not None:
         # Another request is already running this exact call; await its result.
@@ -655,7 +376,7 @@ async def chat_with_cache(
     _in_flight[key] = fut
     try:
         response = await client.chat(messages, tools=tools)
-        await cache_response(session, user_id, provider, messages, tools, response)
+        await cache_response(session, user_id, provider, messages, tools, response, model)
         await record_response_usage(session, user_id, provider, response)
         if not fut.done():
             fut.set_result(response)
@@ -845,12 +566,19 @@ async def chat(
     messages = build_messages(sanitized_history, request.message, request.context, current_summary, memories, include_finance=premium)
 
     MAX_TOOL_ROUNDS = 4
+    MAX_RETRY_BUMPS = 2
+    chain_list: list[str] = [chain[0], *chain[1]] if chain else []
+    current_model_index = 0
     content = ""
     tool_calls = None
     try:
         try:
             for _round in range(MAX_TOOL_ROUNDS):
-                response = await chat_with_cache(session, user.id, provider, client, messages, tools)
+                model_for_round = chain_list[current_model_index] if chain_list else None
+                response = await chat_with_cache(
+                    session, user.id, provider, client, messages, tools,
+                    model=model_for_round,
+                )
                 choice = first_choice(response)
                 assistant_message = choice.get("message", {})
                 content = assistant_message.get("content", "") or ""
@@ -860,6 +588,14 @@ async def chat(
                     tool_calls = _parse_text_tool_calls(content)
                     if tool_calls:
                         content = _strip_text_tool_calls(content)
+
+                if not tool_calls and _needs_tool_retry(content, request.message):
+                    if current_model_index < min(len(chain_list) - 1, MAX_RETRY_BUMPS):
+                        current_model_index += 1
+                        model = chain_list[current_model_index]
+                        fallbacks = chain_list[current_model_index + 1:]
+                        client = await get_llm_client(provider, api_key, model=model, fallbacks=fallbacks, zdr=settings.prysm_ai_zdr)
+                        continue
 
                 if not tool_calls:
                     break
@@ -898,14 +634,6 @@ async def chat(
         }
     finally:
         await _safe_aclose(client)
-
-
-async def _safe_aclose(client) -> None:
-    """Close a per-request provider client, swallowing any teardown error."""
-    try:
-        await client.aclose()
-    except Exception:
-        pass
 
 
 async def _distill_after_answer(
@@ -959,192 +687,81 @@ async def chat_stream(
 ):
     _check_ai_rate_limit(str(user.id))
 
+    existing = get_active_turn(str(user.id))
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Prysm AI is still working on your previous request. Please wait a moment.",
+        )
+
     provider, api_key, chain = await resolve_llm_key(session, user, req.provider, http_request)
-
     session_id = req.session_id or str(uuid4())
-    client = await _build_llm_client(provider, api_key, chain)
     sanitized_history = _sanitize_chat_history(req.chat_history)
-    ai_session = await load_session_summary(session, user.id, session_id)
-    current_summary = ai_session.summary if ai_session else None
-    memories = await retrieve_relevant_memories(session, str(user.id), req.message)
-    premium = await is_premium(str(user.id), session)
-    tools = tools_for_user(premium)
-    messages = build_messages(sanitized_history, req.message, req.context, current_summary, memories, include_finance=premium)
 
-    await persist_conversation(session, user.id, session_id, "user", req.message)
+    chain_list: list[str] = [chain[0], *chain[1]] if chain else []
+
+    job = start_turn(
+        user_id=str(user.id),
+        session_id=session_id,
+        provider=provider,
+        api_key=api_key,
+        chain=chain_list,
+        sanitized_history=sanitized_history,
+        user_message=req.message,
+        context=req.context,
+    )
 
     async def event_generator():
-        import json
-
-        MAX_TOOL_ROUNDS = 4
-        tool_calls = None
-        content = ""
-        placeholder = None
-        bg_task = None
-
         try:
-            try:
-                for _round in range(MAX_TOOL_ROUNDS):
-                    if await http_request.is_disconnected():
-                        raise asyncio.CancelledError()
-                    # Run the provider round as a task so we can heartbeat the
-                    # connection every ~15s and abort when the client disconnects,
-                    # instead of letting a gone client eat up to 90s of work.
-                    round_task = asyncio.create_task(
-                        chat_with_cache(session, user.id, provider, client, messages, tools)
-                    )
-                    try:
-                        while not round_task.done():
-                            if await http_request.is_disconnected():
-                                round_task.cancel()
-                                raise asyncio.CancelledError()
-                            done_now, _ = await asyncio.wait({round_task}, timeout=15.0)
-                            if done_now:
-                                break
-                            yield {"comment": "ping"}
-                        response = await round_task
-                    except asyncio.CancelledError:
-                        round_task.cancel()
-                        raise
-                    choice = first_choice(response)
-                    assistant_message = choice.get("message", {})
-                    content = assistant_message.get("content", "") or ""
-                    tool_calls = assistant_message.get("tool_calls")
-
-                    if not tool_calls:
-                        # Some models cannot emit structured tool_calls and
-                        # instead write "[TOOL_CALLS] name {json}" as literal
-                        # text. Parse and execute those so the turn still
-                        # completes, and keep the prose (minus the block).
-                        tool_calls = _parse_text_tool_calls(content)
-                        if tool_calls:
-                            content = _strip_text_tool_calls(content)
-
-                    if not tool_calls:
-                        break
-
-                    # Run tool calls, feed their outputs back, and continue the loop so a
-                    # search → create → conflict-check sequence can complete in one turn.
-                    messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+            while True:
+                event_type, data = await job.events.get()
+                if event_type == "token":
+                    yield {"event": "token", "data": data}
+                elif event_type == "tool_start":
                     yield {
                         "event": "tool_start",
-                        "data": json.dumps([tc.get("function", {}).get("name") for tc in tool_calls]),
+                        "data": json.dumps(data),
                     }
-                    tool_results = await execute_tool_calls(tool_calls, user.id, session, client)
-                    messages.extend(tool_results)
-                    yield {"event": "tool_results", "data": json.dumps([r["content"] for r in tool_results])}
-            except Exception as exc:  # provider/auth/credit errors should be visible, not a dead stream
-                yield {"event": "error", "data": _friendly_llm_error(exc, provider)}
-                return
-
-            # Commit tool side-effects, the user message (persisted at request time)
-            # AND an assistant placeholder BEFORE streaming the final answer.
-            # Persisting the assistant turn here - instead of after the tokens stream
-            # - means a client abort/cancel mid-answer can never drop the reply: once
-            # we reach this point the whole turn is durable. Tool-created tasks are
-            # flushed in execute_tool_calls but not committed; this commit makes them
-            # durable too.
-            placeholder = await persist_conversation(session, user.id, session_id, "assistant", "", tool_calls)
-            await session.commit()
-
-            # Stream the final natural-language answer for real. The tool loop's
-            # completed content is only a fallback; the final round re-invokes the
-            # provider in streaming mode so tokens arrive incrementally (the cost of
-            # one extra model call per turn is accepted).
-            streamed = ""
-            try:
-                async for chunk in client.stream_chat(messages, tools=None):
-                    streamed += chunk
-                    yield {"event": "token", "data": chunk}
-            except Exception as exc:
-                # Fall back to the non-streaming loop output rather than an empty
-                # answer, then surface the error so the client can show it. The
-                # placeholder ALWAYS receives real content (partial stream or the
-                # tool-loop fallback) so an interrupted turn never leaves an empty
-                # bubble in history.
-                if not streamed.strip():
-                    streamed = _strip_text_tool_calls(content).strip() or "Interrupted."
-                    for chunk in _chunk_text(streamed):
-                        yield {"event": "token", "data": chunk}
-                placeholder.content = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
-                try:
-                    await session.commit()
-                except Exception:
-                    pass
-                yield {"event": "error", "data": _friendly_llm_error(exc, provider)}
-                return
-
-            if not streamed.strip():
-                # The streaming call produced nothing real (empty iterator or
-                # whitespace-only tokens). Prefer the non-streaming tool-loop
-                # output; as a last resort emit a human fallback instead of a
-                # blank " " bubble that renders as an empty message in history.
-                streamed = _strip_text_tool_calls(content).strip() or (
-                    "I couldn't get a response from the AI on that turn. "
-                    "Please try again or rephrase your request."
-                )
-                if streamed:
-                    for chunk in _chunk_text(streamed):
-                        yield {"event": "token", "data": chunk}
-
-            # Normalize sloppy model formatting (stray-space emphasis/punctuation)
-            # so the persisted reply renders as real markdown on reload. Any
-            # literal [TOOL_CALLS] blocks the model wrote into its answer are
-            # removed first so raw JSON never reaches the chat history.
-            streamed = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
-
-            # Persist the streamed answer over the placeholder row FIRST: once the
-            # reply is committed, a later bookkeeping failure (usage recording, SSE
-            # teardown) can never leave an empty assistant row in history.
-            placeholder.content = streamed
-            try:
-                await session.commit()
-            except Exception:
-                pass
-
-            # Record the streamed hosted answer's (estimated) usage best-effort. A
-            # usage failure must never drop or change the already-persisted reply.
-            try:
-                await record_estimated_usage(session, user.id, provider, messages, streamed)
-                try:
-                    await session.commit()
-                except Exception:
-                    pass
-            except Exception:
-                pass
-
-            estimated_tokens = _estimate_tokens(messages, streamed)
-            yield {"event": "usage", "data": json.dumps({"estimated_tokens": estimated_tokens})}
-
-            # Summary/memory distillation are best-effort and slow, so they move OFF
-            # the done path: the client sees "done" immediately and the distillation
-            # runs as a background task with its own session (the background task
-            # owns the provider client and closes it when finished).
-            bg_task = asyncio.create_task(
-                _distill_after_answer(
-                    user.id, session_id, client, sanitized_history, req.message, streamed, current_summary
-                )
-            )
-            yield {"event": "done", "data": ""}
+                elif event_type == "tool_results":
+                    yield {
+                        "event": "tool_results",
+                        "data": json.dumps(data),
+                    }
+                elif event_type == "usage":
+                    yield {"event": "usage", "data": json.dumps(data)}
+                elif event_type == "error":
+                    yield {"event": "error", "data": data}
+                    return
+                elif event_type == "done":
+                    yield {"event": "done", "data": ""}
+                    return
         except asyncio.CancelledError:
-            # Client disconnected: never leave an empty turn behind. The committed
-            # placeholder gets marked interrupted so history shows a real row.
-            if placeholder is not None and not placeholder.content:
-                placeholder.content = "Interrupted."
-                try:
-                    await session.commit()
-                except Exception:
-                    pass
-            if bg_task is not None:
-                bg_task.cancel()
+            # Client disconnected - relay stops but background turn continues.
             raise
-        finally:
-            # Close the per-request provider client (httpx/AsyncOpenAI pool). When a
-            # background distillation was scheduled it owns the client and closes it.
-            if bg_task is None:
-                await _safe_aclose(client)
 
     return EventSourceResponse(event_generator())
+
+
+@router.get("/turn/status")
+async def turn_status(
+    user: User = Depends(get_current_user),
+):
+    job = get_active_turn(str(user.id))
+    if job is None:
+        return {"running": False, "session_id": None, "phase": None}
+    return {
+        "running": True,
+        "session_id": job.session_id,
+        "phase": job.phase,
+    }
+
+
+@router.post("/turn/cancel")
+async def turn_cancel(
+    user: User = Depends(get_current_user),
+):
+    cancelled = cancel_turn(str(user.id))
+    return {"cancelled": cancelled}
 
 
 @router.get("/sessions")

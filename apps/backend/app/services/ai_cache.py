@@ -17,16 +17,16 @@ from app.models.ai_cache import AiCache
 CACHE_TTL_SECONDS = 300
 
 
-def make_cache_key(user_id, provider: str, messages: list[dict], tools: list[dict] | None) -> str:
+def make_cache_key(user_id, provider: str, messages: list[dict], tools: list[dict] | None, model: str | None = None) -> str:
     payload = json.dumps(
-        [str(user_id), provider, messages, tools], sort_keys=True, default=str
+        [str(user_id), provider, model, messages, tools], sort_keys=True, default=str
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
-async def get_cached_response(session: AsyncSession, user_id, provider: str, messages: list[dict], tools: list[dict] | None):
+async def get_cached_response(session: AsyncSession, user_id, provider: str, messages: list[dict], tools: list[dict] | None, model: str | None = None):
     """Return a cached response dict for the exact request, or None."""
-    key = make_cache_key(user_id, provider, messages, tools)
+    key = make_cache_key(user_id, provider, messages, tools, model)
     now = datetime.now(timezone.utc)
     result = await session.execute(
         select(AiCache).where(
@@ -45,10 +45,10 @@ async def get_cached_response(session: AsyncSession, user_id, provider: str, mes
         return None
 
 
-async def cache_response(session: AsyncSession, user_id, provider: str, messages: list[dict], tools: list[dict] | None, response: dict) -> None:
+async def cache_response(session: AsyncSession, user_id, provider: str, messages: list[dict], tools: list[dict] | None, response: dict, model: str | None = None) -> None:
     """Store an exact-match cache entry (best-effort, never raises)."""
     try:
-        key = make_cache_key(user_id, provider, messages, tools)
+        key = make_cache_key(user_id, provider, messages, tools, model)
         now = datetime.now(timezone.utc)
         session.add(
             AiCache(

@@ -219,18 +219,61 @@ async function executeToolOnBackend(
 
 export function useAIChat() {
   const [isLoading, setIsLoading] = useState(false);
+  const [backgroundWorking, setBackgroundWorking] = useState(false);
+  const [turnPhase, setTurnPhase] = useState<string | null>(null);
   const { chatMessages, addChatMessage, setChatMessages } = useAppStore();
   const sessionIdRef = useRef<string>(getStoredSessionId());
   const abortRef = useRef<AbortController | null>(null);
   const undoStackRef = useRef<Array<{ type: string; data: unknown }>>([]);
   const [hasUndo, setHasUndo] = useState(false);
   const [usageTokens, setUsageTokens] = useState<number | null>(null);
+  const backgroundPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadSessionRef = useRef<typeof loadSession>(async () => {});
+
+  const stopBackgroundPoll = useCallback(() => {
+    if (backgroundPollRef.current !== null) {
+      clearInterval(backgroundPollRef.current);
+      backgroundPollRef.current = null;
+    }
+    setBackgroundWorking(false);
+    setTurnPhase(null);
+  }, []);
+
+  const startBackgroundPoll = useCallback(() => {
+    setBackgroundWorking(true);
+    backgroundPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL}/ai/turn/status`, { credentials: "include" });
+        if (!res.ok) {
+          stopBackgroundPoll();
+          return;
+        }
+        const data = await res.json();
+        if (data.running) {
+          setTurnPhase(data.phase);
+        } else {
+          stopBackgroundPoll();
+          if (data.session_id) {
+            const sid = getStoredSessionId();
+            if (sid) await loadSessionRef.current(sid);
+          }
+        }
+      } catch {
+        stopBackgroundPoll();
+      }
+    }, 2500);
+  }, [stopBackgroundPoll]);
 
   const abort = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     setIsLoading(false);
-  }, []);
+    // Also cancel server-side background turn
+    fetch(`${API_URL}/ai/turn/cancel`, {
+      method: "POST", credentials: "include",
+    }).catch(() => {});
+    stopBackgroundPoll();
+  }, [stopBackgroundPoll]);
 
   const undoLastAction = useCallback(() => {
     const entry = undoStackRef.current.pop();
@@ -287,6 +330,7 @@ export function useAIChat() {
     },
     [setChatMessages]
   );
+  loadSessionRef.current = loadSession;
 
   // Resume the last conversation on page refresh / AI-panel reopen instead of
   // starting fresh: the backend persists every turn (user AND assistant), so
@@ -305,11 +349,24 @@ export function useAIChat() {
       setStoredSessionId(sessionIdRef.current);
       setChatMessages([]);
     }
+    // Check if there's a running background turn for the active session.
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/ai/turn/status`, { credentials: "include" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.running && data.session_id === getStoredSessionId()) {
+            startBackgroundPoll();
+          }
+        }
+      } catch {}
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const newChat = useCallback(
     async () => {
+      stopBackgroundPoll();
       // Start a brand-new session. Prior server sessions (and their history)
       // are left intact so they stay listed in the history panel.
       sessionIdRef.current = crypto.randomUUID();
@@ -351,6 +408,24 @@ export function useAIChat() {
 
   const sendMessage = useCallback(
     async (content: string, provider = "openai", context?: Record<string, unknown>) => {
+      // If a background turn is still running, show a note and skip.
+      if (backgroundWorking) {
+        const store = useAppStore.getState();
+        store.addChatMessage({
+          id: "bg-working-" + crypto.randomUUID(),
+          role: "user",
+          content,
+          created_at: new Date().toISOString(),
+        });
+        store.addChatMessage({
+          id: "bg-working-reply-" + crypto.randomUUID(),
+          role: "assistant",
+          content: "Prysm AI is still working on your previous request. Wait a moment, then try again.",
+          created_at: new Date().toISOString(),
+        });
+        return;
+      }
+
       setIsLoading(true);
       setUsageTokens(null);
       // Account change guard: on login/register/logout clearUserData() wipes the
@@ -391,7 +466,7 @@ export function useAIChat() {
         abortRef.current = null;
       }
     },
-    [addChatMessage]
+    [addChatMessage, backgroundWorking]
   );
   const sendViaBackend = useCallback(
     async (
@@ -476,6 +551,11 @@ export function useAIChat() {
         // The access token is short-lived (15 min). When it expires, other API
         // calls auto-refresh via the api wrapper, but this raw stream fetch does
         // not - so refresh once and retry rather than surfacing "Not authenticated".
+        if (res.status === 409) {
+          removeAssistantPlaceholder();
+          setAssistant("Prysm AI is still working on your previous request. Wait a moment, then try again.");
+          return;
+        }
         if (res.status === 401) {
           const refreshed = await doRefreshToken();
           if (refreshed) {
@@ -641,6 +721,8 @@ export function useAIChat() {
     chatMessages,
     sendMessage,
     isLoading,
+    backgroundWorking,
+    turnPhase,
     abort,
     undoLastAction,
     hasUndo,
@@ -649,5 +731,6 @@ export function useAIChat() {
     clearActiveSession,
     fetchSessions,
     usageTokens,
+    stopBackgroundPoll,
   };
 }
