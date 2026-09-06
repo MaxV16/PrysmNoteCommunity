@@ -121,6 +121,86 @@ TODOIST_LOWERCASE_CSV = (
     ",Lowercase todoist,4,1,me,2022-03-14,web,Website\n"
 ).encode("utf-8")
 
+TICKTICK_NO_IDS_HEADER = (
+    "Folder Name,List Name,Title,Tags,Content,Is Check list,Start Date,Due Date,"
+    "Reminder,Repeat,Priority,Status,Created Time,Completed Time,Order,Timezone,"
+    "Is All Day,Is Floating,Column Name,Column Order,View Mode"
+)
+
+
+def build_ticktick_no_ids() -> bytes:
+    # The taskId/parentId columns are absent entirely (real backups omit them).
+    return (
+        TICKTICK_NO_IDS_HEADER
+        + "\n"
+        + 'Work,Work,Kitchen setup,,"▫ Buy coffee\n▪ Install grinder\n[x] Clean counter",'
+        "Y,2022-03-14,,,,2,0,2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1\n"
+    ).encode("utf-8")
+
+
+def build_ticktick_empty_ids() -> bytes:
+    # taskId/parentId columns exist but every cell is empty.
+    return (
+        TICKTICK_HEADER
+        + "\n"
+        + 'Work,Work,Prep event,,"▫ Setup\n▪ Run",Y,2022-03-15,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,,\n"
+    ).encode("utf-8")
+
+
+def build_ticktick_concatenated() -> bytes:
+    # Items jammed onto a single line with no line breaks.
+    return (
+        TICKTICK_HEADER
+        + "\n"
+        + 'Work,Work,Jammed checklist,,"▫ A▪ B▫ C",Y,2022-03-16,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-jam-1,\n"
+    ).encode("utf-8")
+
+
+def build_ticktick_grandchild() -> bytes:
+    header = TICKTICK_HEADER + "\n"
+    parent = (
+        'Work,Work,Grandparent,,,N,2022-03-14,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-g1,\n"
+    )
+    child = (
+        'Work,Work,Child,,,N,2022-03-15,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-g2,tt-g1\n"
+    )
+    grandchild = (
+        'Work,Work,Grandchild,,,N,2022-03-16,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-g3,tt-g2\n"
+    )
+    return (header + parent + child + grandchild).encode("utf-8")
+
+
+def build_ticktick_checklist_plus_real_child() -> bytes:
+    # The parent has a checklist flag AND real child rows reference it by id.
+    header = TICKTICK_HEADER + "\n"
+    parent = (
+        'Work,Work,List task,,"▫ Marker item",Y,2022-03-14,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-l1,\n"
+    )
+    child = (
+        'Work,Work,Real child,,,N,2022-03-14,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,2,tt-c1,tt-l1\n"
+    )
+    return (header + parent + child).encode("utf-8")
+
+
+GENERIC_TEXT_PRIORITY_CSV = (
+    "title,start date,priority\n"
+    "High priority task,2022-03-14,high\n"
+    "Low priority task,2022-03-15,low\n"
+).encode("utf-8")
+
+TODOIST_PROJECT_NAME_CSV = (
+    "TYPE,CONTENT,PRIORITY,INDENT,DATE,LABELS,PROJECT_NAME,DESCRIPTION\n"
+    ",Project task,4,1,2022-03-14,web,Website,Some details\n"
+    "note,A sticky idea,1,1,,,,\n"
+).encode("utf-8")
+
 
 async def get_task_by_title(
     db_session: AsyncSession, title: str, top_level_only: bool = True
@@ -380,7 +460,7 @@ async def test_import_ticktick_case_insensitive_headers_and_timezone_alias(
 
     task = await get_task_by_title(db_session, "Case insensitive task")
     assert task is not None
-    assert task.priority == 1  # TickTick 4 -> tier 1
+    assert task.priority == 2  # TickTick 4 -> tier 2 (medium)
     assert task.status.value == "done"
     assert task.start_date == date(2022, 3, 14)
 
@@ -590,3 +670,203 @@ async def test_import_rejects_invalid_format(client: AsyncClient):
         data={"format": "nope", "notes_as_notes": "false"},
     )
     assert response.status_code == 422
+
+
+async def _subtask_titles(db_session: AsyncSession, parent_id) -> set[str]:
+    result = await db_session.execute(
+        select(Task).where(Task.parent_task_id == parent_id)
+    )
+    return {t.title for t in result.scalars().all()}
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_checklist_without_id_columns_creates_subtasks(
+    client: AsyncClient, db_session: AsyncSession
+):
+    # The reported bug: exports lacking taskId/parentId columns used to import
+    # checklist items as top-level tasks (empty source key -> no parent link).
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("ticktick.csv", build_ticktick_no_ids(), "text/csv")},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 4
+    assert body["failed"] == 0
+
+    parent = await get_task_by_title(db_session, "Kitchen setup")
+    assert parent is not None
+    assert await _subtask_titles(db_session, parent.id) == {
+        "Buy coffee", "Install grinder", "Clean counter",
+    }
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_checklist_with_empty_id_cells_creates_subtasks(
+    client: AsyncClient, db_session: AsyncSession
+):
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("ticktick.csv", build_ticktick_empty_ids(), "text/csv")},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 3
+
+    parent = await get_task_by_title(db_session, "Prep event")
+    assert parent is not None
+    assert await _subtask_titles(db_session, parent.id) == {"Setup", "Run"}
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_concatenated_checklist_splits_items(
+    client: AsyncClient, db_session: AsyncSession
+):
+    # TickTick sometimes concatenates items on one line without line breaks.
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("ticktick.csv", build_ticktick_concatenated(), "text/csv")},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 4
+    assert body["failed"] == 0
+
+    parent = await get_task_by_title(db_session, "Jammed checklist")
+    assert parent is not None
+    assert parent.description is None
+    assert await _subtask_titles(db_session, parent.id) == {"A", "B", "C"}
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_grandchild_resolves_via_parent_id(
+    client: AsyncClient, db_session: AsyncSession
+):
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("ticktick.csv", build_ticktick_grandchild(), "text/csv")},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 3
+    assert body["failed"] == 0
+    assert body["errors"] == []
+
+    parent = await get_task_by_title(db_session, "Grandparent")
+    child = await get_task_by_title(db_session, "Child", top_level_only=False)
+    grandchild = await get_task_by_title(db_session, "Grandchild", top_level_only=False)
+    assert parent is not None and child is not None and grandchild is not None
+    assert child.parent_task_id == parent.id
+    assert grandchild.parent_task_id == child.id
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_checklist_skips_when_real_children_exist(
+    client: AsyncClient, db_session: AsyncSession
+):
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": (
+            "ticktick.csv",
+            build_ticktick_checklist_plus_real_child(),
+            "text/csv",
+        )},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 2
+    assert body["failed"] == 0
+
+    parent = await get_task_by_title(db_session, "List task")
+    assert parent is not None
+    # The checklist marker item is NOT duplicated as a subtask.
+    assert await get_task_by_title(db_session, "Marker item", top_level_only=False) is None
+    child = await get_task_by_title(db_session, "Real child", top_level_only=False)
+    assert child is not None
+    assert child.parent_task_id == parent.id
+
+
+def test_map_ticktick_priority_scale_and_text():
+    from app.routers.imports import _map_ticktick_priority
+
+    assert _map_ticktick_priority("") == 2
+    assert _map_ticktick_priority("0") == 2
+    assert _map_ticktick_priority("1") == 3  # TickTick low
+    assert _map_ticktick_priority("2") == 3
+    assert _map_ticktick_priority("3") == 2  # TickTick medium
+    assert _map_ticktick_priority("4") == 2
+    assert _map_ticktick_priority("5") == 1  # TickTick high
+    assert _map_ticktick_priority("high") == 1
+    assert _map_ticktick_priority("URGENT") == 1
+    assert _map_ticktick_priority("medium") == 2
+    assert _map_ticktick_priority("low") == 3
+    assert _map_ticktick_priority("none") == 3
+    assert _map_ticktick_priority("garbage") == 2
+
+
+def test_map_generic_priority_text_labels():
+    from app.routers.imports import _map_generic_priority
+
+    assert _map_generic_priority("high") == 1
+    assert _map_generic_priority("medium") == 2
+    assert _map_generic_priority("low") == 3
+    assert _map_generic_priority("1") == 1
+    assert _map_generic_priority("2") == 2
+    assert _map_generic_priority("5") == 3
+
+
+@pytest.mark.asyncio
+async def test_import_generic_text_priority(client: AsyncClient, db_session: AsyncSession):
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("backup.csv", GENERIC_TEXT_PRIORITY_CSV, "text/csv")},
+        data={"format": "generic", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 2
+    assert body["failed"] == 0
+
+    high = await get_task_by_title(db_session, "High priority task")
+    assert high is not None
+    assert high.priority == 1
+    low = await get_task_by_title(db_session, "Low priority task")
+    assert low is not None
+    assert low.priority == 3
+
+
+@pytest.mark.asyncio
+async def test_import_todoist_project_name_variant_tag_description_and_note(
+    client: AsyncClient, db_session: AsyncSession
+):
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("todoist.csv", TODOIST_PROJECT_NAME_CSV, "text/csv")},
+        data={"format": "todoist", "notes_as_notes": "true"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 1
+    assert body["notes_imported"] == 1
+    assert body["failed"] == 0
+
+    task = await get_task_by_title(db_session, "Project task")
+    assert task is not None
+    assert task.description == "Some details"
+    assert task.priority == 1
+    tag_result = await db_session.execute(
+        select(Tag).where(Tag.name == "Project: Website")
+    )
+    assert tag_result.scalar_one_or_none() is not None
+
+    note_result = await db_session.execute(
+        select(Note).where(Note.title == "A sticky idea")
+    )
+    note = note_result.scalar_one_or_none()
+    assert note is not None
+    assert note.content == "A sticky idea"

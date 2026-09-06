@@ -53,6 +53,9 @@ COMMIT_EVERY = 200
 
 CHECKLIST_MARKER_RE = re.compile(r"^[▫▪\-*•]\s*(?:\[([ xX])\]\s*)?(.*)$")
 CHECKBOX_RE = re.compile(r"^\[([ xX])\]\s*(.*)$")
+CONCAT_CHECKLIST_RE = re.compile(
+    r"[▫▪•*\-](?:\s*\[([ xX])\]\s*)?([^▫▪•*\n]+)"
+)
 TITLE_SYNONYMS = {"title", "name", "subject", "task", "task title", "taskname", "task_name"}
 DUE_SYNONYMS = {"due", "due date", "due_date", "duedate", "deadline"}
 START_SYNONYMS = {"start", "start date", "start_date", "startdate", "begin"}
@@ -63,6 +66,10 @@ STATUS_SYNONYMS = {"status", "state"}
 RECURRENCE_SYNONYMS = {"repeat", "recurrence", "rrule", "recurrence_rule", "recurrence rule"}
 COMPLETED_SYNONYMS = {"completed", "completed at", "completed_at", "done", "date completed"}
 ARCHIVED_SYNONYMS = {"archived", "is_archived", "archived at"}
+PARENT_SYNONYMS = {
+    "parent", "parent id", "parent_id", "parent title", "parent_title",
+    "subtask of", "sub task",
+}
 
 
 # --------------------------------------------------------------------------
@@ -190,68 +197,76 @@ def _valid_rrule(rule: str | None) -> str | None:
 # normalize_priority would otherwise fold source high values into low=3).
 # --------------------------------------------------------------------------
 
-def _map_ticktick_priority(value: str | None) -> int:
-    v = (value or "").strip()
+_TEXT_HIGH = {"urgent", "high", "p1", "p2"}
+_TEXT_MEDIUM = {"medium", "normal", "p3"}
+_TEXT_LOW = {"low", "p4", "p5", "none", ""}
+
+
+def _map_priority(value: str | None, scale: str) -> int:
+    """Map a source priority (numeric per-source scale or free text) to Prysm's
+    tiers 1=high, 2=medium, 3=low. Empty and unknown values land on neutral.
+    """
+    v = (value or "").strip().lower()
     if not v:
         return 2
-    try:
-        p = int(v)
-    except ValueError:
-        return 2
-    if p >= 4:
+    if v in _TEXT_HIGH:
         return 1
-    if p in (2, 3):
+    if v in _TEXT_MEDIUM:
         return 2
-    return 3
-
-
-def _map_todoist_priority(value: str | None) -> int:
-    v = (value or "").strip()
-    if not v:
-        return 2
+    if v in _TEXT_LOW:
+        return 3
     try:
         p = int(v)
     except ValueError:
         return 2
-    if p >= 4:
+    if scale == "ticktick":
+        # TickTick canonical export scale: 0=none, 1=low, 3=medium, 5=high
+        # (2/4 are legacy values in the same scale).
+        if p <= 0:
+            return 2
+        if p <= 2:
+            return 3
+        if p <= 4:
+            return 2
         return 1
-    if p == 3:
-        return 2
-    if p == 2:
-        return 2
-    return 3
-
-
-def _map_ics_priority(value: str | None) -> int:
-    v = (value or "").strip()
-    if not v:
-        return 2
-    try:
-        p = int(v)
-    except ValueError:
-        return 2
-    if p == 0:
-        return 2
-    if p <= 2:
+    if scale == "todoist":
+        # Todoist: 4=urgent, 3=high, 2=medium, 1=low.
+        if p <= 1:
+            return 3
+        if p <= 3:
+            return 2
         return 1
-    if p <= 6:
-        return 2
-    return 3
-
-
-def _map_generic_priority(value: str | None) -> int:
-    v = (value or "").strip()
-    if not v:
-        return 2
-    try:
-        p = int(v)
-    except ValueError:
-        return 2
+    if scale == "ics":
+        # RFC 5545: 1=highest ... 9=lowest, 0 = undefined.
+        if p == 0:
+            return 2
+        if p <= 2:
+            return 1
+        if p <= 6:
+            return 2
+        return 3
+    # generic: 1=high, 2=medium, anything higher folds to low.
     if p <= 1:
         return 1
     if p == 2:
         return 2
     return 3
+
+
+def _map_ticktick_priority(value: str | None) -> int:
+    return _map_priority(value, "ticktick")
+
+
+def _map_todoist_priority(value: str | None) -> int:
+    return _map_priority(value, "todoist")
+
+
+def _map_ics_priority(value: str | None) -> int:
+    return _map_priority(value, "ics")
+
+
+def _map_generic_priority(value: str | None) -> int:
+    return _map_priority(value, "generic")
 
 
 def _normalize_status(value: str | None) -> tuple[str, bool]:
@@ -374,7 +389,8 @@ TODOIST_FIELDS: dict[str, tuple[str, ...]] = {
     "indent": ("indent",),
     "date": ("date",),
     "labels": ("labels",),
-    "project": ("project",),
+    "project": ("project_name", "project_id", "project name", "project id", "project"),
+    "description": ("description", "desc"),
 }
 
 
@@ -384,10 +400,21 @@ TODOIST_FIELDS: dict[str, tuple[str, ...]] = {
 
 def _is_ticktick_header(row: list[str]) -> bool:
     lower = [(c or "").strip().lower() for c in row]
-    has_task = any("task" in c and "id" in c for c in lower)
-    has_parent = any("parent" in c and "id" in c for c in lower)
     has_title = any("title" in c for c in lower)
-    return has_task and has_parent and has_title
+    score = 0
+    if any("task" in c and "id" in c for c in lower):
+        score += 1
+    if any("parent" in c and "id" in c for c in lower):
+        score += 1
+    if any("check list" in c or "checklist" in c for c in lower):
+        score += 1
+    if any("folder" in c for c in lower):
+        score += 1
+    if any("list" in c for c in lower):
+        score += 1
+    # Some backups omit the taskId/parentId columns entirely, so a title kit
+    # plus any two other TickTick markers is enough to recognize the header.
+    return has_title and score >= 2
 
 
 def _parse_ticktick(content: bytes) -> list[dict]:
@@ -401,8 +428,20 @@ def _parse_ticktick(content: bytes) -> list[dict]:
     if header_idx < 0:
         return []
     header = all_rows[header_idx]
+    data_rows = _csv_dicts(header, all_rows[header_idx + 1:])
+
+    # Real child rows reference their parent by the parentId cell. When real
+    # children exist for a checklist parent, prefer them over the checklist
+    # markers so the same subtask is not imported twice (TickTick can store
+    # both forms for one task).
+    referenced_parent_keys: set[str] = set()
+    for raw_row in data_rows:
+        pk = _pick(_row_map(raw_row), *TICKTICK_FIELDS["parentid"]).strip()
+        if pk:
+            referenced_parent_keys.add(pk)
+
     rows: list[dict] = []
-    for raw_row in _csv_dicts(header, all_rows[header_idx + 1:]):
+    for ordinal, raw_row in enumerate(data_rows):
         row = _row_map(raw_row)
         list_name = _pick(row, *TICKTICK_FIELDS["list"]).strip()
         folder_name = _pick(row, *TICKTICK_FIELDS["folder"]).strip()
@@ -441,7 +480,10 @@ def _parse_ticktick(content: bytes) -> list[dict]:
         if folder_name:
             tags.append(f"Folder: {folder_name}")
 
-        source_key = _pick(row, *TICKTICK_FIELDS["taskid"]).strip() or None
+        # Backups often leave the id columns empty. Fall back to a stable
+        # ordinal key so checklist items (and dedupe on re-import) still work.
+        taskid_cell = _pick(row, *TICKTICK_FIELDS["taskid"]).strip()
+        source_key = taskid_cell or f"row-{ordinal}"
         parent_key = _pick(row, *TICKTICK_FIELDS["parentid"]).strip() or None
         repeat_raw = _pick(row, *TICKTICK_FIELDS["repeat"])
 
@@ -466,8 +508,10 @@ def _parse_ticktick(content: bytes) -> list[dict]:
         if entry["recurrence_rule"] is None and repeat_raw.strip():
             entry["warning"] = "Invalid recurrence rule dropped"
         rows.append(entry)
-        if is_checklist:
-            for item, done in _parse_checklist_items(content_value):
+        if is_checklist and source_key not in referenced_parent_keys:
+            for item_idx, (item, done) in enumerate(
+                _parse_checklist_items(content_value)
+            ):
                 rows.append({
                     "title": item,
                     "description": None,
@@ -480,7 +524,7 @@ def _parse_ticktick(content: bytes) -> list[dict]:
                     "completed_at": completed_at if done else None,
                     "created_at": created_at,
                     "tags": list(tags),
-                    "source_key": f"{source_key}-{len(rows)}",
+                    "source_key": f"{source_key}#{item_idx}",
                     "parent_key": source_key,
                     "is_note": False,
                     "note_content": None,
@@ -528,8 +572,22 @@ def _checklist_stripped(content: str) -> str | None:
 
 
 def _parse_checklist_items(content: str) -> list[tuple[str, bool]]:
+    content = content or ""
+    lines = content.splitlines()
+    # TickTick sometimes concatenates checklist items onto one line with no
+    # line breaks (e.g. "▫ A▪ B▫ C"). A single line never needs newline
+    # splitting, so scan it for consecutive marker runs directly.
+    if len(lines) <= 1:
+        items = []
+        for m in CONCAT_CHECKLIST_RE.finditer(content):
+            done = bool(m.group(1) and m.group(1).lower() == "x")
+            label = m.group(2).strip()
+            if label:
+                items.append((label, done))
+        if items:
+            return items
     items = []
-    for line in (content or "").splitlines():
+    for line in lines:
         s = line.strip()
         if not s:
             continue
@@ -578,15 +636,17 @@ def _parse_todoist(content: bytes) -> list[dict]:
 
         row_type = _pick(row, *TODOIST_FIELDS["type"]).strip().lower()
         is_done = bool(row_type) and "completed" in row_type
+        is_note = row_type == "note"
         due = _parse_date_value(_pick(row, *TODOIST_FIELDS["date"]))
         project = _pick(row, *TODOIST_FIELDS["project"]).strip()
         tags = _split_tags(_pick(row, *TODOIST_FIELDS["labels"]))
         if project:
             tags.append(f"Project: {project}")
+        desc = _pick(row, *TODOIST_FIELDS["description"]).strip() or None
 
         rows.append({
             "title": title,
-            "description": None,
+            "description": desc,
             "start_date": due,
             "due_date": due,
             "recurrence_rule": None,
@@ -598,8 +658,8 @@ def _parse_todoist(content: bytes) -> list[dict]:
             "tags": tags,
             "source_key": source_key,
             "parent_key": parent_key,
-            "is_note": False,
-            "note_content": None,
+            "is_note": is_note,
+            "note_content": title if is_note else None,
             "timezone": None,
         })
     return rows
@@ -624,6 +684,8 @@ def _parse_generic(content: bytes) -> list[dict]:
             field_map.setdefault("desc", f)
         elif key in TAGS_SYNONYMS:
             field_map.setdefault("tags", f)
+        elif key in PARENT_SYNONYMS:
+            field_map.setdefault("parent", f)
         elif key in PRIORITY_SYNONYMS:
             field_map.setdefault("priority", f)
         elif key in STATUS_SYNONYMS:
@@ -649,6 +711,9 @@ def _parse_generic(content: bytes) -> list[dict]:
             row.get(field_map.get("status", ""))
             or ("done" if completed is not None else None)
         )
+        parent_title = (
+            row.get(field_map.get("parent", "")) or ""
+        ).strip() or None
         rows.append({
             "title": title,
             "description": desc,
@@ -663,7 +728,7 @@ def _parse_generic(content: bytes) -> list[dict]:
             "created_at": None,
             "tags": _split_tags(row.get(field_map.get("tags", ""))),
             "source_key": None,
-            "parent_key": None,
+            "parent_key": parent_title,
             "is_note": False,
             "note_content": None,
             "timezone": None,
@@ -960,6 +1025,7 @@ async def _run_import(
     stats = {"imported": 0, "skipped": 0, "failed": 0, "notes_imported": 0}
     errors: list[dict] = []
     parent_ids: dict[str, Any] = {}
+    title_ids: dict[str, Any] = {}
     children: list[tuple[int, dict]] = []
     tag_cache = await _load_tag_cache(session, user_id)
 
@@ -978,6 +1044,7 @@ async def _run_import(
             for idx, row, task in pending:
                 if row.get("source_key"):
                     parent_ids[row["source_key"]] = task.id
+                title_ids.setdefault((row.get("title") or ""), task.id)
                 await _attach_tags(
                     session, task.id, user_id, row.get("tags") or [], tag_cache
                 )
@@ -1033,6 +1100,7 @@ async def _run_import(
                     existing.add(_dedupe_key(row))
                     if row.get("source_key"):
                         parent_ids[row["source_key"]] = task.id
+                    title_ids.setdefault((row.get("title") or ""), task.id)
                     stats["imported"] += 1
                     if row.get("warning"):
                         errors.append({"row": idx + 1, "reason": row["warning"]})
@@ -1056,40 +1124,113 @@ async def _run_import(
     # available before the children pass reads it (children may be batched too).
     await _flush_pending()
 
-    # Pass 2: subtasks (parent id from the mapping; orphans promote to top level).
-    for idx, row in children:
-        if _dedupe_key(row) in existing:
-            stats["skipped"] += 1
+    # Pass 2: subtasks. Children resolve against the source_key -> id (and
+    # batch title -> id) maps that grow as rows flush. Deep or out-of-order
+    # nesting needs multiple rounds: each round builds every child whose parent
+    # is now known, flushes so those ids become resolvable, then retries the
+    # remainder. Children whose parent never resolves are promoted to top level
+    # so no row is lost, with a warning for the result card.
+    worklist: list[tuple[int, dict]] = children
+    while worklist:
+        remaining: list[tuple[int, dict]] = []
+        made_progress = False
+        for idx, row in worklist:
+            if _dedupe_key(row) in existing:
+                stats["skipped"] += 1
+                processed += 1
+                await _maybe_commit(processed)
+                continue
+            parent_id = None
+            parent_key = row.get("parent_key")
+            if parent_key:
+                parent_id = parent_ids.get(parent_key)
+                if parent_id is None:
+                    parent_id = title_ids.get(parent_key)
+            if parent_id is None:
+                remaining.append((idx, row))
+                continue
+            made_progress = True
+            try:
+                if row.get("recurrence_rule"):
+                    task = await _create_task_from_row(
+                        session, user_id, row, tag_cache,
+                        parent_task_id=parent_id, batch_id=batch_id,
+                    )
+                    if task is None:
+                        stats["skipped"] += 1
+                    else:
+                        existing.add(_dedupe_key(row))
+                        if row.get("source_key"):
+                            parent_ids[row["source_key"]] = task.id
+                        title_ids.setdefault((row.get("title") or ""), task.id)
+                        stats["imported"] += 1
+                else:
+                    task = _build_task(
+                        user_id, row, parent_task_id=parent_id, batch_id=batch_id
+                    )
+                    if task is None:
+                        stats["skipped"] += 1
+                    else:
+                        existing.add(_dedupe_key(row))
+                        pending.append((idx, row, task))
+                        stats["imported"] += 1
+            except Exception as e:
+                stats["failed"] += 1
+                errors.append({"row": idx + 1, "reason": str(e)})
             processed += 1
+            if len(pending) >= COMMIT_EVERY:
+                await _flush_pending()
             await _maybe_commit(processed)
-            continue
-        try:
-            parent_id = parent_ids.get(row["parent_key"])
-            if row.get("recurrence_rule"):
-                task = await _create_task_from_row(
-                    session, user_id, row, tag_cache,
-                    parent_task_id=parent_id, batch_id=batch_id,
-                )
-                if task is None:
+        await _flush_pending()
+        if not remaining:
+            break
+        if not made_progress:
+            # Orphans: no parent surfaced in any round - import as top level.
+            for idx, row in remaining:
+                if _dedupe_key(row) in existing:
                     stats["skipped"] += 1
-                else:
-                    existing.add(_dedupe_key(row))
-                    stats["imported"] += 1
-            else:
-                task = _build_task(user_id, row, parent_task_id=parent_id, batch_id=batch_id)
-                if task is None:
-                    stats["skipped"] += 1
-                else:
-                    existing.add(_dedupe_key(row))
-                    pending.append((idx, row, task))
-                    stats["imported"] += 1
-        except Exception as e:
-            stats["failed"] += 1
-            errors.append({"row": idx + 1, "reason": str(e)})
-        processed += 1
-        if len(pending) >= COMMIT_EVERY:
+                    processed += 1
+                    await _maybe_commit(processed)
+                    continue
+                try:
+                    if row.get("recurrence_rule"):
+                        task = await _create_task_from_row(
+                            session, user_id, row, tag_cache, batch_id=batch_id
+                        )
+                        if task is None:
+                            stats["skipped"] += 1
+                            processed += 1
+                            await _maybe_commit(processed)
+                            continue
+                        existing.add(_dedupe_key(row))
+                        if row.get("source_key"):
+                            parent_ids[row["source_key"]] = task.id
+                        title_ids.setdefault((row.get("title") or ""), task.id)
+                        stats["imported"] += 1
+                    else:
+                        task = _build_task(user_id, row, batch_id=batch_id)
+                        if task is None:
+                            stats["skipped"] += 1
+                            processed += 1
+                            await _maybe_commit(processed)
+                            continue
+                        existing.add(_dedupe_key(row))
+                        pending.append((idx, row, task))
+                        stats["imported"] += 1
+                    errors.append({
+                        "row": idx + 1,
+                        "reason": "Parent task not found; imported as a top-level task",
+                    })
+                except Exception as e:
+                    stats["failed"] += 1
+                    errors.append({"row": idx + 1, "reason": str(e)})
+                processed += 1
+                if len(pending) >= COMMIT_EVERY:
+                    await _flush_pending()
+                await _maybe_commit(processed)
             await _flush_pending()
-        await _maybe_commit(processed)
+            break
+        worklist = remaining
 
     await _flush_pending()
     await session.commit()
