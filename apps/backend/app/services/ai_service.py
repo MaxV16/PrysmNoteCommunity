@@ -1,4 +1,5 @@
 import json
+import re
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -798,10 +799,25 @@ async def execute_tool_calls(
     from app.services.task_service import create_task, search_tasks, get_task
 
     def _safe_uuid(value):
+        """Tolerantly parse a task id the model handed over.
+
+        Streaming artifacts sometimes space out the hex chars ("3 5 8 b 2 5 0 b
+        -9 b 4 4 ..."), split the id across lines, or drop the dashes entirely.
+        Accept the id when its characters (minus whitespace/hyphens) form a
+        valid 32-hex UUID; reject anything else so a wrong id is never deleted.
+        """
         if not value:
             return None
+        if isinstance(value, UUID):
+            return value
         try:
-            return UUID(value)
+            compact = re.sub(r"[\s\-]+", "", str(value))
+        except (ValueError, TypeError, AttributeError):
+            return None
+        if len(compact) != 32:
+            return None
+        try:
+            return UUID(compact)
         except (ValueError, TypeError, AttributeError):
             return None
 

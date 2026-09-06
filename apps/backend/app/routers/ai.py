@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 from uuid import uuid4
@@ -290,6 +291,153 @@ def _normalize_reply_markdown(text: str) -> str:
             continue
         out.append(line if in_fence else _clean(line))
     return "\n".join(out)
+
+
+_TEXT_TOOL_CALL_MARKER = "[TOOL_CALLS]"
+
+
+def _extract_text_tool_calls(text: str) -> list[tuple[str, str]]:
+    """Pull ``[TOOL_CALLS] <name> {json}`` blocks out of raw model text.
+
+    Some models cannot emit structured ``tool_calls`` and instead write them as
+    literal text (often carrying the same stray-spacing artifact that splits
+    digits and punctuation). Each block yields ``(name, json_text)``. Braces
+    inside JSON string values are ignored so nested objects survive.
+    """
+    if not text or _TEXT_TOOL_CALL_MARKER not in text:
+        return []
+    calls: list[tuple[str, str]] = []
+    rest = text
+    while True:
+        idx = rest.find(_TEXT_TOOL_CALL_MARKER)
+        if idx == -1:
+            break
+        rest = rest[idx + len(_TEXT_TOOL_CALL_MARKER):]
+        m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*", rest)
+        if not m:
+            continue
+        name = m.group(1)
+        rest = rest[m.end():]
+        ob = rest.find("{")
+        if ob == -1:
+            break
+        rest = rest[ob:]
+        depth = 0
+        in_str = False
+        esc = False
+        close = -1
+        for i, ch in enumerate(rest):
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    close = i
+                    break
+        if close == -1:
+            break  # incomplete block (mid-stream) - keep everything after it
+        calls.append((name, rest[: close + 1]))
+        rest = rest[close + 1:]
+    return calls
+
+
+def _strip_text_tool_calls(text: str) -> str:
+    """Remove ``[TOOL_CALLS] ...`` blocks so raw JSON never reaches the user."""
+    if not text or _TEXT_TOOL_CALL_MARKER not in text:
+        return text
+    out: list[str] = []
+    rest = text
+    while True:
+        idx = rest.find(_TEXT_TOOL_CALL_MARKER)
+        if idx == -1:
+            out.append(rest)
+            break
+        out.append(rest[:idx])
+        rest = rest[idx + len(_TEXT_TOOL_CALL_MARKER):]
+        m = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*", rest)
+        if not m:
+            out.append(_TEXT_TOOL_CALL_MARKER)
+            continue
+        name = m.group(1)
+        rest = rest[m.end():]
+        ob = rest.find("{")
+        if ob == -1:
+            out.append(_TEXT_TOOL_CALL_MARKER + m.group(0) + rest)
+            break
+        rest = rest[ob:]
+        depth = 0
+        in_str = False
+        esc = False
+        close = -1
+        for i, ch in enumerate(rest):
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    close = i
+                    break
+        if close == -1:
+            # Incomplete block: keep it whole so a mid-stream partial never
+            # corrupts the running text (the closing brace may arrive later).
+            out.append(_TEXT_TOOL_CALL_MARKER + m.group(0) + rest)
+            break
+        rest = rest[close + 1:]
+    return "".join(out)
+
+
+def _clean_text_tool_json(text: str) -> str:
+    """Normalize a model-written JSON tool payload so json.loads can read it.
+
+    Reuses the reply normalizer (quote padding, digit runs, punctuation) and
+    collapses leftover newlines/spacing inside the JSON structure.
+    """
+    return re.sub(r"\s+", " ", _normalize_reply_markdown(text)).strip()
+
+
+def _parse_text_tool_calls(content: str) -> list[dict] | None:
+    """Convert ``[TOOL_CALLS] <name> {json}`` text blocks into tool_call dicts.
+
+    Returns None when the content carries no usable text tool calls, so callers
+    fall back to the normal "no tools this round" behavior.
+    """
+    calls = _extract_text_tool_calls(content or "")
+    if not calls:
+        return None
+    parsed: list[dict] = []
+    for name, json_text in calls:
+        try:
+            args = json.loads(_clean_text_tool_json(json_text))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(args, dict):
+            continue
+        parsed.append({
+            "id": f"text-call-{uuid4().hex[:16]}",
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps(args)},
+        })
+    return parsed or None
 
 
 def _chunk_text(text: str, size: int = 400) -> list[str]:
@@ -709,6 +857,11 @@ async def chat(
                 tool_calls = assistant_message.get("tool_calls")
 
                 if not tool_calls:
+                    tool_calls = _parse_text_tool_calls(content)
+                    if tool_calls:
+                        content = _strip_text_tool_calls(content)
+
+                if not tool_calls:
                     break
 
                 messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
@@ -727,6 +880,7 @@ async def chat(
         # tasks so a disconnect after the response can't roll them back.
         await session.commit()
 
+        content = _strip_text_tool_calls(content)
         await persist_conversation(session, user.id, session_id, "user", request.message)
         await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
         # The client must STILL be open here: summary + memory extraction make
@@ -858,6 +1012,15 @@ async def chat_stream(
                     tool_calls = assistant_message.get("tool_calls")
 
                     if not tool_calls:
+                        # Some models cannot emit structured tool_calls and
+                        # instead write "[TOOL_CALLS] name {json}" as literal
+                        # text. Parse and execute those so the turn still
+                        # completes, and keep the prose (minus the block).
+                        tool_calls = _parse_text_tool_calls(content)
+                        if tool_calls:
+                            content = _strip_text_tool_calls(content)
+
+                    if not tool_calls:
                         break
 
                     # Run tool calls, feed their outputs back, and continue the loop so a
@@ -900,10 +1063,10 @@ async def chat_stream(
                 # tool-loop fallback) so an interrupted turn never leaves an empty
                 # bubble in history.
                 if not streamed.strip():
-                    streamed = content.strip() or "Interrupted."
+                    streamed = _strip_text_tool_calls(content).strip() or "Interrupted."
                     for chunk in _chunk_text(streamed):
                         yield {"event": "token", "data": chunk}
-                placeholder.content = _normalize_reply_markdown(streamed)
+                placeholder.content = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
                 try:
                     await session.commit()
                 except Exception:
@@ -916,7 +1079,7 @@ async def chat_stream(
                 # whitespace-only tokens). Prefer the non-streaming tool-loop
                 # output; as a last resort emit a human fallback instead of a
                 # blank " " bubble that renders as an empty message in history.
-                streamed = content.strip() or (
+                streamed = _strip_text_tool_calls(content).strip() or (
                     "I couldn't get a response from the AI on that turn. "
                     "Please try again or rephrase your request."
                 )
@@ -925,8 +1088,10 @@ async def chat_stream(
                         yield {"event": "token", "data": chunk}
 
             # Normalize sloppy model formatting (stray-space emphasis/punctuation)
-            # so the persisted reply renders as real markdown on reload.
-            streamed = _normalize_reply_markdown(streamed)
+            # so the persisted reply renders as real markdown on reload. Any
+            # literal [TOOL_CALLS] blocks the model wrote into its answer are
+            # removed first so raw JSON never reaches the chat history.
+            streamed = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
 
             # Persist the streamed answer over the placeholder row FIRST: once the
             # reply is committed, a later bookkeeping failure (usage recording, SSE

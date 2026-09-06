@@ -1478,6 +1478,163 @@ def test_normalize_reply_markdown_fixes_stray_space_emphasis_and_punctuation():
     assert _normalize_reply_markdown("4 pm to 1 2 am") == "4pm to 12am"
 
 
+def test_text_tool_call_helpers_parse_strip_and_clean():
+    """Some models cannot emit structured tool_calls and instead write them as
+    literal text: `[TOOL_CALLS] <name> {json}`, often carrying the same
+    stray-space artifact that splits digits and punctuation (the exact prod
+    artifact: `{" query ": " work ", " limit ":\n\n2 5 0 }`). The helpers must
+    extract + parse those blocks and strip them so raw JSON never reaches the
+    user."""
+    from app.routers.ai import (
+        _clean_text_tool_json,
+        _extract_text_tool_calls,
+        _parse_text_tool_calls,
+        _strip_text_tool_calls,
+    )
+
+    # The artifact-laden payload parses after cleaning.
+    assert json.loads(_clean_text_tool_json('{" query ": " work ", " limit ":\n\n2 5 0 }')) == {
+        "query": "work",
+        "limit": 250,
+    }
+
+    # Extraction: prose + one block.
+    calls = _extract_text_tool_calls(
+        'I \'ll search again . [TOOL_CALLS] search_tasks {" query ": " work ", " limit ":\n\n2 5 0 }'
+    )
+    assert len(calls) == 1
+    name, json_text = calls[0]
+    assert name == "search_tasks"
+    assert json.loads(_clean_text_tool_json(json_text)) == {"query": "work", "limit": 250}
+
+    # Nested braces inside the JSON survive the brace scan.
+    nested = _extract_text_tool_calls(
+        '[TOOL_CALLS] update_task {"task_id": "x", "fields": {"status": "done"}}'
+    )
+    assert len(nested) == 1
+    assert json.loads(_clean_text_tool_json(nested[0][1])) == {
+        "task_id": "x",
+        "fields": {"status": "done"},
+    }
+
+    # Multiple calls in one reply.
+    multi = _extract_text_tool_calls(
+        '[TOOL_CALLS] create_task {"title": "A"}\n[TOOL_CALLS] create_task {"title": "B"}'
+    )
+    assert len(multi) == 2
+    assert json.loads(_clean_text_tool_json(multi[1][1])) == {"title": "B"}
+
+    # Stripping removes blocks but keeps the surrounding prose.
+    assert (
+        _strip_text_tool_calls(
+            'I \'ll search again . [TOOL_CALLS] search_tasks {" query ": " work ", " limit ":\n\n2 5 0 }'
+        )
+        == "I 'll search again . "
+    )
+    # Clean text and lone markers (or incomplete blocks) are untouched.
+    assert _strip_text_tool_calls("no tools here") == "no tools here"
+    assert _strip_text_tool_calls("text [TOOL_CALLS] search_tasks") == "text [TOOL_CALLS] search_tasks"
+    assert _strip_text_tool_calls('text [TOOL_CALLS] search_tasks {"query": "wo') == 'text [TOOL_CALLS] search_tasks {"query": "wo'
+
+    # _parse_text_tool_calls returns OpenAI-style dicts (or None).
+    parsed = _parse_text_tool_calls(
+        'prose [TOOL_CALLS] search_tasks {" query ": " work ", " limit ":\n\n2 5 0 }'
+    )
+    assert parsed and len(parsed) == 1
+    assert parsed[0]["function"]["name"] == "search_tasks"
+    assert json.loads(parsed[0]["function"]["arguments"]) == {"query": "work", "limit": 250}
+    assert _parse_text_tool_calls("no calls here") is None
+    assert _parse_text_tool_calls("[TOOL_CALLS] search_tasks {") is None
+
+
+@pytest.mark.asyncio
+async def test_delete_accepts_spaced_and_dashless_hex_task_ids(db_session: AsyncSession, ai_user):
+    """Streaming artifacts space out UUID hex chars ("3 5 8 b 2 5 0 b -9 b 4 4
+    ...") or drop dashes. delete_task must tolerate that instead of reporting
+    "Task not found" - the exact way bulk deletes silently failed."""
+    from app.services.ai_service import execute_tool_calls
+
+    created = await execute_tool_calls([{
+        "id": "c1",
+        "function": {"name": "create_task", "arguments": json.dumps({"title": "Work"})},
+    }], str(ai_user), db_session)
+    task_id = json.loads(created[0]["content"])["task"]["id"]
+
+    # Space every character, the worst-case streaming artifact.
+    spaced = " ".join(task_id)
+    deleted = await execute_tool_calls([{
+        "id": "d1",
+        "function": {"name": "delete_task", "arguments": json.dumps({"task_id": spaced})},
+    }], str(ai_user), db_session)
+    assert json.loads(deleted[0]["content"])["deleted"] is True, deleted
+
+    created2 = await execute_tool_calls([{
+        "id": "c2",
+        "function": {"name": "create_task", "arguments": json.dumps({"title": "Work 2"})},
+    }], str(ai_user), db_session)
+    task_id2 = json.loads(created2[0]["content"])["task"]["id"]
+
+    # Dashes dropped entirely (32 hex chars, no hyphens).
+    dashless = task_id2.replace("-", "")
+    deleted2 = await execute_tool_calls([{
+        "id": "d2",
+        "function": {"name": "delete_task", "arguments": json.dumps({"task_id": dashless})},
+    }], str(ai_user), db_session)
+    assert json.loads(deleted2[0]["content"])["deleted"] is True, deleted2
+
+    # Genuinely malformed ids are still rejected (never delete the wrong task).
+    rejected = await execute_tool_calls([{
+        "id": "d3",
+        "function": {"name": "delete_task", "arguments": json.dumps({"task_id": "not-an-id"})},
+    }], str(ai_user), db_session)
+    assert json.loads(rejected[0]["content"])["error"] == "Invalid task_id format"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_executes_text_tool_calls_and_strips_blocks(client, ai_user, monkeypatch):
+    """A model that cannot emit structured tool_calls writes "[TOOL_CALLS] name
+    {json}" as literal text. The stream must parse + execute those (tool_start
+    fires with the real name) and never surface raw JSON in the streamed reply."""
+    class _TextToolAgent:
+        attempts = 0
+
+        async def chat(self, messages, tools=None):
+            type(self).attempts += 1
+            if type(self).attempts == 1:
+                return {
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": 'I \'ll search again . [TOOL_CALLS] create_task {" title ": " From Text Call "}',
+                        }
+                    }]
+                }
+            return {"choices": [{"message": {"role": "assistant", "content": "Done."}}]}
+
+        async def stream_chat(self, messages, tools=None):
+            for piece in ["Created ", "it ", "for you."]:
+                yield piece
+
+        async def embed(self, text):
+            return [0.0] * 8
+
+    agent = _TextToolAgent()
+
+    async def _fake_get_client(provider, api_key):
+        return agent
+
+    monkeypatch.setattr("app.routers.ai.get_llm_client", _fake_get_client)
+    monkeypatch.setattr("app.routers.ai.get_user_api_key", _dummy_key)
+
+    response = await client.post("/api/ai/chat/stream", json={"message": "create a task", "provider": "openai"})
+    assert response.status_code == 200, response.text
+    # The text tool call executed: tool_start fired with the parsed name.
+    assert "tool_start" in response.text
+    assert "create_task" in response.text
+    # Raw [TOOL_CALLS] blocks never reach the streamed reply.
+    assert "[TOOL_CALLS]" not in response.text
+
+
 @pytest.mark.asyncio
 async def test_store_and_retrieve_memories(db_session: AsyncSession, ai_user):
     """WS6: stored memories are retrieved by keyword relevance; near-duplicate

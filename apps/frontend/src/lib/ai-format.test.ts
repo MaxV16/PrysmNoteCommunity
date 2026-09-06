@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeAssistantMarkdown } from "./ai-format";
+import { normalizeAssistantMarkdown, stripTextToolCalls } from "./ai-format";
 
 describe("normalizeAssistantMarkdown", () => {
   it("fixes emphasis written with stray spaces so bold actually renders", () => {
@@ -71,6 +71,54 @@ describe("normalizeAssistantMarkdown", () => {
     const code = "```python\nx = [1 , 2]\n```\n** summary **";
     expect(normalizeAssistantMarkdown(code)).toBe(
       "```python\nx = [1 , 2]\n```\n**summary**"
+    );
+  });
+});
+
+describe("stripTextToolCalls", () => {
+  it("removes [TOOL_CALLS] name {json} blocks but keeps surrounding prose", () => {
+    expect(
+      stripTextToolCalls(
+        'I tried to delete them . [TOOL_CALLS] search_tasks {" query ": " work ", " limit ":\n\n2 5 0 }'
+      )
+    ).toBe("I tried to delete them . ");
+  });
+
+  it("handles nested braces inside the JSON", () => {
+    expect(
+      stripTextToolCalls(
+        '[TOOL_CALLS] update_task {"task_id": "x", "fields": {"status": "done"}}'
+      )
+    ).toBe("");
+  });
+
+  it("strips multiple blocks in one reply", () => {
+    expect(
+      stripTextToolCalls(
+        '[TOOL_CALLS] create_task {"title": "A"}\n[TOOL_CALLS] create_task {"title": "B"}'
+      )
+    ).toBe("\n");
+  });
+
+  it("keeps incomplete blocks so a mid-stream partial never corrupts text", () => {
+    expect(stripTextToolCalls('text [TOOL_CALLS] search_tasks {"query": "wo')).toBe(
+      'text [TOOL_CALLS] search_tasks {"query": "wo'
+    );
+    expect(stripTextToolCalls("text [TOOL_CALLS] search_tasks")).toBe(
+      "text [TOOL_CALLS] search_tasks"
+    );
+  });
+
+  it("leaves clean text untouched", () => {
+    expect(stripTextToolCalls("no tools here")).toBe("no tools here");
+    expect(stripTextToolCalls("")).toBe("");
+  });
+
+  it("composes with the markdown normalizer for the exact prod artifact", () => {
+    const raw =
+      'I tried to delete the\n\n2 work tasks , but both failed because they were not found . I \'ll search again to find the correct tasks to delete . [TOOL_CALLS] search_tasks {" query ": " work ", " limit ":\n\n2 5 0 }';
+    expect(normalizeAssistantMarkdown(stripTextToolCalls(raw))).toBe(
+      "I tried to delete the\n\n2 work tasks, but both failed because they were not found. I'll search again to find the correct tasks to delete. "
     );
   });
 });

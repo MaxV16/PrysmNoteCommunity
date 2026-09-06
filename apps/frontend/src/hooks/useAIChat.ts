@@ -5,6 +5,7 @@ import { useAppStore } from "@/stores/app-store";
 import { api } from "@/lib/api";
 import { ensureCsrf, getCsrfToken, CSRF_HEADER } from "@/lib/csrf";
 import { track } from "@/lib/track";
+import { stripTextToolCalls } from "@/lib/ai-format";
 import { refreshTasksPreservingWindow } from "@/hooks/useTasks";
 import type { ChatMessage, AiSessionListItem } from "@/types/ai";
 
@@ -558,7 +559,10 @@ export function useAIChat() {
                 removeToolBubble();
                 const store = useAppStore.getState();
                 const existing = store.chatMessages.find((m) => m.id === assistantId);
-                setAssistant((existing?.content || "") + data);
+                // Strip literal "[TOOL_CALLS] name {json}" blocks the model may
+                // write so raw JSON never flickers into the live reply (the
+                // backend also strips before persisting).
+                setAssistant(stripTextToolCalls((existing?.content || "") + data));
               } else if (currentEvent === "tool_start") {
                 receivedTool = true;
                 const names = (() => {

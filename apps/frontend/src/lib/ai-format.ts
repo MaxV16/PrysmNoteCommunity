@@ -6,6 +6,75 @@
 // _normalize_reply_markdown (app/routers/ai.py) so the live stream and the
 // persisted history both display cleanly.
 
+const TOOL_CALL_MARKER = "[TOOL_CALLS]";
+
+// Finds the matching close for the first JSON object in `rest` (which must
+// start at the opening brace). Braces inside JSON string values are ignored so
+// nested objects survive. Returns the index of the closing brace or -1 when
+// the block is incomplete (mid-stream).
+function findJsonClose(rest: string): number {
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+// Removes "[TOOL_CALLS] name {json}" blocks so raw tool-call JSON never
+// reaches the user. Incomplete blocks (the closing brace has not streamed yet)
+// are kept as-is so a partial never corrupts the running text. Mirrors the
+// backend _strip_text_tool_calls.
+export function stripTextToolCalls(text: string): string {
+  if (!text || !text.includes(TOOL_CALL_MARKER)) return text;
+  const out: string[] = [];
+  let rest = text;
+  while (true) {
+    const idx = rest.indexOf(TOOL_CALL_MARKER);
+    if (idx === -1) {
+      out.push(rest);
+      break;
+    }
+    out.push(rest.slice(0, idx));
+    rest = rest.slice(idx + TOOL_CALL_MARKER.length);
+    const nameMatch = /^(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*)/.exec(rest);
+    if (!nameMatch) {
+      out.push(TOOL_CALL_MARKER);
+      continue;
+    }
+    const name = nameMatch[2];
+    rest = rest.slice(nameMatch[0].length);
+    const ob = rest.indexOf("{");
+    if (ob === -1) {
+      out.push(TOOL_CALL_MARKER + nameMatch[0] + rest);
+      break;
+    }
+    rest = rest.slice(ob);
+    const close = findJsonClose(rest);
+    if (close === -1) {
+      // Incomplete block: keep it whole so a mid-stream partial never corrupts
+      // the running text (the closing brace may arrive in the next chunk).
+      out.push(TOOL_CALL_MARKER + nameMatch[0] + rest);
+      break;
+    }
+    rest = rest.slice(close + 1);
+  }
+  return out.join("");
+}
+
 function stripDelimiterSpacing(line: string, marker: string): string {
   const positions: number[] = [];
   let i = 0;
