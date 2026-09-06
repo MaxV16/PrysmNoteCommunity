@@ -268,10 +268,19 @@ export function useAIChat() {
     abortRef.current?.abort();
     abortRef.current = null;
     setIsLoading(false);
-    // Also cancel server-side background turn
-    fetch(`${API_URL}/ai/turn/cancel`, {
-      method: "POST", credentials: "include",
-    }).catch(() => {});
+    // Also cancel server-side background turn (the relay abort alone does not
+    // stop the background job - it reads from the queue, not the connection).
+    (async () => {
+      await ensureCsrf();
+      const csrf = getCsrfToken();
+      try {
+        await fetch(`${API_URL}/ai/turn/cancel`, {
+          method: "POST",
+          credentials: "include",
+          headers: csrf ? { [CSRF_HEADER]: csrf } : {},
+        });
+      } catch {}
+    })();
     stopBackgroundPoll();
   }, [stopBackgroundPoll]);
 

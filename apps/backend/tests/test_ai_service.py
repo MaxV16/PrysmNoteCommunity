@@ -148,6 +148,17 @@ async def test_build_messages_limits_chat_history(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_build_messages_includes_feature_guide():
+    """How-to answers come from the injected feature guide for every user,
+    premium or not (premium-only steps land via the EE guide separately)."""
+    for include_finance in (True, False):
+        messages = build_messages([], "how do I use the calendar", include_finance=include_finance)
+        system = messages[0]["content"]
+        assert "FEATURE GUIDE" in system
+        assert "SPEECH TO TEXT" in system
+
+
+@pytest.mark.asyncio
 async def test_execute_create_task(db_session: AsyncSession, ai_user):
     user_id = ai_user
     tool_calls = [{

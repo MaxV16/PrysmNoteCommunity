@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session_factory, get_db
+from app.utils.rls import rls_session, set_rls_user_id
 from app.dependencies import get_current_user
 from app.models.ai_conversation import AiConversation
 from app.models.ai_session import AiSession
@@ -616,6 +617,12 @@ async def chat(
         # tasks so a disconnect after the response can't roll them back.
         await session.commit()
 
+        # The commit above ended the transaction, dropping the transaction-scoped
+        # RLS user context. Re-apply it before writing conversation/summary rows
+        # on the next transaction.
+        if session.get_bind().dialect.name == "postgresql":
+            await set_rls_user_id(session, user.id)
+
         content = _strip_text_tool_calls(content)
         await persist_conversation(session, user.id, session_id, "user", request.message)
         await persist_conversation(session, user.id, session_id, "assistant", content, tool_calls)
@@ -653,7 +660,7 @@ async def _distill_after_answer(
     other's work.
     """
     try:
-        async with async_session_factory() as bg_session:
+        async with rls_session(user_id) as bg_session:
             try:
                 await _maybe_update_summary(
                     bg_session, user_id, session_id, client, sanitized_history,

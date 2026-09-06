@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import async_session_factory
@@ -33,7 +32,7 @@ from app.services.ai_service import (
     tools_for_user,
 )
 from app.services.memory_service import retrieve_relevant_memories
-from app.utils.rls import set_rls_user_id
+from app.utils.rls import rls_session, set_rls_user_id
 
 logger = logging.getLogger("app.ai_turn_runner")
 
@@ -120,17 +119,6 @@ async def _run_turn(job: TurnJob) -> None:
     async def _reu(session, user_id, provider, messages, streamed):
         return await _record_estimated_usage(session, user_id, provider, messages, streamed)
 
-    async def _cancel_job_finish(session, job):
-        """Finish cancelled turn."""
-        job.status = "cancelled"
-        job.phase = "done"
-        job.content = "Interrupted."
-        await _pc(session, job.user_id, job.session_id, "assistant", "Interrupted.")
-        try:
-            await session.commit()
-        except Exception:
-            pass
-
     # Local aliases for imported functions
     _lss = _load_session_summary
     _cwc = _chat_with_cache
@@ -144,7 +132,33 @@ async def _run_turn(job: TurnJob) -> None:
         async with async_session_factory() as session:
             # RLS requires Postgres; guard for SQLite (CI/tests).
             dialect = session.bind.dialect.name if session.bind else "sqlite"
-            if dialect == "postgresql":
+            is_pg = dialect == "postgresql"
+
+            async def _commit():
+                # Every commit ends the transaction and hands the pooled
+                # connection back. The transaction-scoped app.user_id is then
+                # gone, so re-apply it or the next write violates RLS.
+                await session.commit()
+                if is_pg:
+                    await set_rls_user_id(session, UUID(job.user_id))
+
+            async def _rollback():
+                await session.rollback()
+                if is_pg:
+                    await set_rls_user_id(session, UUID(job.user_id))
+
+            async def _cancel_job_finish():
+                """Finish cancelled turn."""
+                job.status = "cancelled"
+                job.phase = "done"
+                job.content = "Interrupted."
+                await _pc(session, job.user_id, job.session_id, "assistant", "Interrupted.")
+                try:
+                    await _commit()
+                except Exception:
+                    pass
+
+            if is_pg:
                 await set_rls_user_id(session, UUID(job.user_id))
 
             ai_session = await _lss(session, job.user_id, job.session_id)
@@ -163,7 +177,7 @@ async def _run_turn(job: TurnJob) -> None:
             )
 
             await _pc(session, job.user_id, job.session_id, "user", job.user_message)
-            await session.commit()
+            await _commit()
 
             client = await _build_turn_client(job)
             content = ""
@@ -171,12 +185,12 @@ async def _run_turn(job: TurnJob) -> None:
 
             for _round in range(MAX_TOOL_ROUNDS):
                 if job.cancel_requested:
-                    return await _cancel_job_finish(session, job)
+                    return await _cancel_job_finish()
 
                 # Recover the session if tool execution or retry logic left it stale.
                 try:
                     if not session.is_active:
-                        await session.rollback()
+                        await _rollback()
                 except Exception:
                     pass
 
@@ -210,7 +224,7 @@ async def _run_turn(job: TurnJob) -> None:
                     tool_results = await execute_tool_calls(tool_calls, job.user_id, session, client)
                 except Exception as tee:
                     logger.warning("tool execution failed round=%d user=%s: %s", _round, job.user_id, tee)
-                    await session.rollback()
+                    await _rollback()
                     tool_results = [{"tool_call_id": tc.get("id"), "role": "tool", "content": json.dumps({"error": f"Tool execution failed: {tee}"})} for tc in tool_calls]
                 messages.extend(tool_results)
                 await job.events.put(("tool_results", [r["content"] for r in tool_results]))
@@ -226,14 +240,14 @@ async def _run_turn(job: TurnJob) -> None:
             # back and start a fresh transaction so the turn can still finish.
             try:
                 if not session.is_active:
-                    await session.rollback()
+                    await _rollback()
             except Exception:
                 pass
-            await session.commit()
+            await _commit()
 
             job.phase = "final"
             placeholder = await _pc(session, job.user_id, job.session_id, "assistant", "", tool_calls)
-            await session.commit()
+            await _commit()
 
             streamed = ""
             try:
@@ -247,7 +261,7 @@ async def _run_turn(job: TurnJob) -> None:
                         await job.events.put(("token", chunk))
                 placeholder.content = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
                 try:
-                    await session.commit()
+                    await _commit()
                 except Exception:
                     pass
                 await job.events.put(("error", _fle(exc, job.provider)))
@@ -265,14 +279,14 @@ async def _run_turn(job: TurnJob) -> None:
             streamed = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
             placeholder.content = streamed
             try:
-                await session.commit()
+                await _commit()
             except Exception:
                 pass
 
             try:
                 await _reu_fn(session, job.user_id, job.provider, messages, streamed)
                 try:
-                    await session.commit()
+                    await _commit()
                 except Exception:
                     pass
             except Exception:
@@ -291,14 +305,14 @@ async def _run_turn(job: TurnJob) -> None:
                 job.sanitized_history, job.user_message, streamed,
             )
             try:
-                await session.commit()
+                await _commit()
             except Exception:
                 pass
 
     except Exception as exc:
         logger.warning("turn runner error user=%s: %s", job.user_id, exc)
         try:
-            async with async_session_factory() as session:
+            async with rls_session(job.user_id) as session:
                 _ai_mod = _import_ai()
                 error_text = _ai_mod._friendly_llm_error(exc, job.provider)
                 await _ai_mod.persist_conversation(session, job.user_id, job.session_id, "assistant", error_text)
@@ -324,18 +338,6 @@ def _import_ai():
     import importlib
     mod = importlib.import_module("app.routers.ai")
     return mod
-
-
-async def _finish_cancelled(session: AsyncSession, job: TurnJob) -> None:
-    ai = _import_ai()
-    job.status = "cancelled"
-    job.phase = "done"
-    job.content = "Interrupted."
-    await ai.persist_conversation(session, job.user_id, job.session_id, "assistant", "Interrupted.")
-    try:
-        await session.commit()
-    except Exception:
-        pass
 
 
 async def _build_turn_client(job: TurnJob):

@@ -1,0 +1,73 @@
+"""Community feature guide injected into the AI system prompt.
+
+Plain-text, user-facing "how do I use X" documentation for every open-core
+feature. The model answers how-to questions from this guide instead of
+hallucinating steps. Pure constants, no imports from ``app.services`` (kept
+import-free so it can never create a circular import with ai_service).
+
+Constraint: this module ships in the community build, so it must stay 100%
+open-core. Never add premium/EE identifiers, pairing tokens, MCP or OpenClaw
+identifiers, infra details or founder names here. ``test_pyrsm_feature_guide_is_community_safe``
+locks this in. New user-facing features must be documented here (same rule as
+the changelog).
+"""
+
+PYRSM_FEATURE_GUIDE = (
+    "FEATURE GUIDE. When the user asks HOW to do something in Prysm Note, how a "
+    "feature works, or what is possible, answer from the guide below with concrete "
+    "steps. Base answers only on what is documented here. If a topic is not "
+    "covered, or is a Premium-only area you have no docs for, say you do not have "
+    "documentation for it and never invent steps or endpoints.\n\n"
+    "TASKS: Create tasks with the quick-add box or the + button, and edit or "
+    "complete them from the timeline or the task detail. Dates, due dates, "
+    "priority (1 high, 2 medium, 3 low) and descriptions are set when creating or "
+    "editing. Repeating tasks use a recurrence rule and the copies expand "
+    "automatically. Add subtasks or checklists inside a task, attach tags, and "
+    "link related tasks. Duplicate a task to copy it; reschedule by dragging or "
+    "by editing its date. Tasks live in statuses (backlog, todo, in progress, "
+    "done, cancelled); kanban columns and board sections are just different views "
+    "of that status. Deleting is permanent and always asks for confirmation. The "
+    "AI can do all of this directly: just ask.\n\n"
+    "VIEWS: Timeline is the default view (day, week or month). Switch views from "
+    "the top toolbar: Kanban (columns by status), Calendar (month grid), List "
+    "(table with inline editing) and Board (sticky notes grouping tasks). The "
+    "default view is stored in Settings, and each view can be toggled on or off.\n\n"
+    "PROJECTS, FILTERS AND TAGS: The sidebar organizes everything. Projects group "
+    "related tasks, the filter bar narrows what you see (status, priority, date, "
+    "assignee), and tags label tasks across projects. Click a tag or project in "
+    "the sidebar to focus it.\n\n"
+    "SEARCH: Use the search box in the top bar to find tasks and notes by title "
+    "or description. You can also just ask the AI, for example \"find my tasks "
+    "for next week\".\n\n"
+    "SHOWS AND MOVIES: The Shows & Movies section in the sidebar is a personal "
+    "watchlist. Search a title to add it, mark items as watching or watched, rate "
+    "them 1-10, and remove ones you no longer care about (removal asks for "
+    "confirmation). The AI can search and manage this list too.\n\n"
+    "HABITS: The Habits section tracks daily and weekly habits. Create a tracker "
+    "for a habit you want to build, then log each day (or week) you complete it. "
+    "Missed days are fine: the tracker keeps going.\n\n"
+    "TEAMS: The Collaborate area lets you invite other people by email. Teams "
+    "turn a task list into a shared workspace: members can be assigned tasks, and "
+    "the whole team sees the same projects and tasks. Leave a team or remove a "
+    "member from the team settings.\n\n"
+    "CALENDAR SYNC: Connect a Google account under Settings, then Integrations: "
+    "Prysm Note imports your Google Calendar events so they appear in the "
+    "timeline and calendar views, and tasks can be pushed back. New events are "
+    "pulled automatically in the background.\n\n"
+    "IMPORTS: Import tasks from a CSV file and calendar events from an ICS file "
+    "(Settings, then Import). Export all data as JSON anytime. Imported tasks "
+    "arrive with their titles, dates and priorities.\n\n"
+    "NOTIFICATIONS: Settings, then Notifications, controls alert preferences. You "
+    "can get due-date reminders and a daily digest summarizing what is coming up, "
+    "delivered on your schedule.\n\n"
+    "SPEECH TO TEXT: The mic button lets you add tasks by talking (a quick voice "
+    "note becomes a task). It works free on Chrome and Safari using the "
+    "browser's built-in speech recognition. If your browser or network cannot "
+    "reach that service (Firefox, Brave, VPNs, ad-blockers), server transcription "
+    "may be needed on the Premium plan.\n\n"
+    "AI CHAT: The AI panel is a full assistant: create, schedule, search, "
+    "reschedule and analyze tasks, plus summarize your day or week. Hosted "
+    "PrysmAI is on by default; bring your own keys (OpenAI, Gemini, DeepSeek, "
+    "OpenRouter) under Settings, then AI Keys. Chat history resumes after a "
+    "refresh, and you can start a fresh conversation anytime."
+)

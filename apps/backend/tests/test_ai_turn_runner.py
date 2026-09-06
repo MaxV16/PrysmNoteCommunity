@@ -67,23 +67,18 @@ async def test_execute_tool_calls_recovers_session_after_flush_failure(db_sessio
     back". The fix rolls back inside execute_tool_calls so the session stays
     usable for later tool calls and the final commit.
     """
-    import importlib
+    from uuid import UUID
 
-    from app import services
-    from app.services import ai_service as ai_svc
-    from app.services.ai_service import execute_tool_calls, TOOL_DEFINITIONS
+    from app.models.task import Task
+    from app.services.ai_service import execute_tool_calls
+    from sqlalchemy import select
+    from sqlalchemy.exc import SQLAlchemyError
 
     user_id = ai_user
 
     # Force a genuine broken-session state the way any failed flush leaves it:
     # pending object whose NOT NULL constraint fails on autoflush. The next
     # query then raises ProgrammingError and requires rollback before reuse.
-    from uuid import UUID
-
-    from app.models.task import Task
-    from sqlalchemy import select
-    from sqlalchemy.exc import SQLAlchemyError
-
     bad = Task(user_id=UUID(str(user_id)), title=None)
     db_session.add(bad)
     try:
@@ -128,3 +123,55 @@ async def test_execute_tool_calls_recovers_session_after_flush_failure(db_sessio
     assert '"count"' in (second.get("content") or "")
     await db_session.rollback()
     assert db_session.is_active
+
+
+@pytest.mark.asyncio
+async def test_turn_runner_reapplies_rls_after_commit():
+    """Regression (Postgres): the turn runner's commits must preserve RLS.
+
+    The RLS context (``app.user_id``) is transaction-scoped. The background
+    turn commits several times (user message, tool side-effects, assistant
+    reply, usage, summary); if the context is not re-applied after EVERY
+    commit, the next write on the fresh pooled connection violates RLS and the
+    chat never persists (empty history on reload + "new row violates row-level
+    security policy" errors).
+
+    Assert the commit helper re-issues set_config after commit by monkeypatching
+    set_rls_user_id and running the internal commit wrapper.
+    """
+    import os
+
+    if not os.getenv("TEST_DATABASE_URL", "").startswith("postgresql"):
+        pytest.skip("RLS re-application is PostgreSQL-only")
+
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.ai_turn_runner import _run_turn
+
+    calls: list = []
+    async def _fake_set_rls(session, user_id):
+        calls.append(str(user_id))
+        from app.utils.rls import set_rls_user_id as real
+        await real(session, user_id)
+
+    with patch("app.services.ai_turn_runner.set_rls_user_id", _fake_set_rls):
+        await _run_turn(_make_job())
+
+    # At least the first apply AND the re-apply after the first commit must
+    # have happened (i.e. more than one call).
+    assert len(calls) >= 2
+
+
+def _make_job():
+    from app.services.ai_turn_runner import TurnJob
+
+    return TurnJob(
+        user_id=str(uuid4()),
+        session_id=str(uuid4()),
+        provider="openai",
+        api_key="sk-test",
+        chain=[],
+        sanitized_history=[],
+        user_message="hi",
+        context=None,
+    )

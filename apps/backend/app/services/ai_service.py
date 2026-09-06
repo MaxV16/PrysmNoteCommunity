@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.llm.base import first_choice, get_provider
+from app.services.feature_guide import PYRSM_FEATURE_GUIDE
 from app.utils.priority import normalize_priority
 
 
@@ -522,6 +523,12 @@ _OPENCLAW_TOOL_DEFINITIONS: list = []
 _OPENCLAW_TOOL_HANDLERS: dict = {}
 _OPENCLAW_SYSTEM_NOTE: str = ""
 
+# Private build only: append the premium "how to use" feature guide (finance,
+# idea engine + OpenClaw setup, AI Connect/MCP, server voice) to the system
+# prompt. Same guarded pattern as the finance/OpenClaw blocks above: the
+# default stays defined so the community build has a safe no-op.
+_PREMIUM_GUIDE_TEXT: str = ""
+
 # Core watchlist tools (Shows & Movies) are available to every AI user, so they
 # are imported unconditionally alongside the inline core tools (see the feature
 # matrix in AGENTS.md - this module is the reference pattern for core feature
@@ -813,6 +820,9 @@ ALWAYS:
     if include_finance and _OPENCLAW_SYSTEM_NOTE:
         system_content += "\n\n" + _OPENCLAW_SYSTEM_NOTE
     system_content += "\n\n" + _WATCHLIST_SYSTEM_NOTE
+    system_content += "\n\n" + PYRSM_FEATURE_GUIDE
+    if include_finance and _PREMIUM_GUIDE_TEXT:
+        system_content += "\n\n" + _PREMIUM_GUIDE_TEXT
     messages = [{"role": "system", "content": system_content}]
     messages.extend(chat_history[-CONTEXT_MAX_MESSAGES:])
     messages.append({"role": "user", "content": user_message})
