@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { ensureCsrf, getCsrfToken, CSRF_HEADER } from "@/lib/csrf";
 import { track } from "@/lib/track";
 import { normalizeAssistantMarkdown, stripTextToolCalls } from "@/lib/ai-format";
+import { createSSEParser } from "@/lib/sse";
 import { refreshTasksPreservingWindow } from "@/hooks/useTasks";
 import type { ChatMessage, AiSessionListItem } from "@/types/ai";
 
@@ -227,6 +228,7 @@ export function useAIChat() {
   const undoStackRef = useRef<Array<{ type: string; data: unknown }>>([]);
   const [hasUndo, setHasUndo] = useState(false);
   const [usageTokens, setUsageTokens] = useState<number | null>(null);
+  const rawRef = useRef("");
   const backgroundPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadSessionRef = useRef<typeof loadSession>(async () => {});
 
@@ -486,6 +488,10 @@ export function useAIChat() {
       context?: Record<string, unknown>,
       signal?: AbortSignal
     ) => {
+      // Reset once per send. The 401 retry below reuses the same fetch body
+      // and keeps accumulating into this same raw accumulator, so one reset
+      // here (not per fetch attempt) is correct.
+      rawRef.current = "";
       const setAssistant = (text: string) => {
         const store = useAppStore.getState();
         store.setChatMessages(
@@ -620,76 +626,67 @@ export function useAIChat() {
       }
 
       const decoder = new TextDecoder();
-      let buf = "";
-      let currentEvent = "";
       let receivedToken = false;
       let receivedTool = false;
       let errorMessage = "";
+
+      // Spec-compliant SSE parsing: sse-starlette writes "\r\n" line endings
+      // and splits any "\n" inside a data payload into consecutive "data:"
+      // lines, so the raw token stream must be recomposed (consecutive data
+      // lines joined with "\n") before it is normalized - otherwise words the
+      // model streams one token per line arrive glued and the live bubble
+      // diverges from the persisted reply (which the backend normalizes on the
+      // full raw string). The parser also resets the event name on real blank
+      // lines, so tool_start/usage events are never mislabeled as tokens.
+      const parser = createSSEParser(({ event, data }) => {
+        if (event === "error") {
+          // The backend surfaces a friendly, actionable provider error (e.g.
+          // "out of credits") as an SSE error event instead of a dead stream.
+          errorMessage = data;
+          receivedToken = true;
+        } else if (event === "token") {
+          receivedToken = true;
+          removeToolBubble();
+          rawRef.current += data;
+          // Strip literal "[TOOL_CALLS] name {json}" blocks the model may
+          // write so raw JSON never flickers into the live reply, then run
+          // the same markdown cleanup the backend applies before persisting.
+          // Normalizing the full raw accumulator (newlines preserved by the
+          // parser) keeps the live bubble byte-identical to the stored reply.
+          setAssistant(
+            normalizeAssistantMarkdown(stripTextToolCalls(rawRef.current))
+          );
+        } else if (event === "tool_start") {
+          receivedTool = true;
+          const names = (() => {
+            try {
+              const raw = JSON.parse(data);
+              if (Array.isArray(raw)) return raw;
+            } catch {}
+            return [];
+          })();
+          const label = names.length
+            ? names.map(prettyToolName).join(" · ")
+            : "using tools…";
+          addToolBubble(label);
+        } else if (event === "usage") {
+          try {
+            const u = JSON.parse(data);
+            if (typeof u?.estimated_tokens === "number") {
+              setUsageTokens(u.estimated_tokens);
+            }
+          } catch {
+            // Non-fatal: usage is informational only.
+          }
+        }
+      });
 
       let streamOk = true;
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split("\n");
-          buf = lines.pop() || "";
-
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              currentEvent = line.slice(7).trim();
-            } else if (line.startsWith("data: ")) {
-              const data = line.slice(6);
-              if (currentEvent === "error") {
-                // The backend surfaces a friendly, actionable provider error (e.g.
-                // "out of credits") as an SSE error event instead of a dead stream.
-                errorMessage = data;
-                receivedToken = true;
-                break;
-              } else if (currentEvent === "token") {
-                receivedToken = true;
-                removeToolBubble();
-                const store = useAppStore.getState();
-                const existing = store.chatMessages.find((m) => m.id === assistantId);
-                // Strip literal "[TOOL_CALLS] name {json}" blocks the model may
-                // write so raw JSON never flickers into the live reply, then run
-                // the same markdown cleanup the backend applies before persisting
-                // (one-token-per-line streaming artifacts, split words, stray
-                // punctuation). Re-normalizing the whole accumulated stream keeps
-                // the live bubble equal to the stored reply.
-                setAssistant(
-                  normalizeAssistantMarkdown(
-                    stripTextToolCalls((existing?.content || "") + data)
-                  )
-                );
-              } else if (currentEvent === "tool_start") {
-                receivedTool = true;
-                const names = (() => {
-                  try {
-                    const raw = JSON.parse(data);
-                    if (Array.isArray(raw)) return raw;
-                  } catch {}
-                  return [];
-                })();
-                const label = names.length
-                  ? names.map(prettyToolName).join(" · ")
-                  : "using tools…";
-                addToolBubble(label);
-              } else if (currentEvent === "usage") {
-                try {
-                  const u = JSON.parse(data);
-                  if (typeof u?.estimated_tokens === "number") {
-                    setUsageTokens(u.estimated_tokens);
-                  }
-                } catch {
-                  // Non-fatal: usage is informational only.
-                }
-              }
-            } else if (line === "") {
-              currentEvent = "";
-            }
-          }
+          parser.feed(decoder.decode(value, { stream: true }));
         }
       } catch (err: unknown) {
         streamOk = false;
@@ -701,6 +698,9 @@ export function useAIChat() {
           setAssistant("Sorry, I encountered an error while reading the response. Please try again.");
         }
       } finally {
+        // sse-starlette may not emit a trailing blank line for the last event,
+        // so flush any buffered/partial event at end-of-stream.
+        parser.flush();
         // The backend may have created, updated, or deleted tasks via tool calls
         // (create_task, reschedule_task, batch_create_tasks). Refresh the task
         // store so the timeline/kanban/calendar/list reflect the changes - even
