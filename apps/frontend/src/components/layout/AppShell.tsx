@@ -11,6 +11,7 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { getNotes, minimizeNote, syncNotesFromServer, openNotesWindow } from "@/lib/notes";
 import { FinancialWorkspace } from "@/components/finance/FinancialWorkspace";
 import { HabitsWorkspace } from "@/components/habits/HabitsWorkspace";
+import { QuadrantWorkspace } from "@/components/quadrant/QuadrantWorkspace";
 import { WatchlistView } from "@/components/watchlist/WatchlistView";
 import { PREF_DEFAULT_VIEW, getPrefSync } from "@/lib/preferences";
 import { usePreferencesStore } from "@/stores/preferences-store";
@@ -19,7 +20,7 @@ import { initErrorTracking } from "@/lib/error-track";
 import { MobileTabBar } from "@/components/layout/MobileTabBar";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
 
-export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits";
+export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits" | "quadrant";
 
 const VIEW_MODES: TimelineViewMode[] = ["timeline", "kanban", "calendar", "list", "board"];
 
@@ -41,6 +42,7 @@ export function AppShell() {
   const financeOn = false;
   const watchlistOn = useUiModule("watchlist");
   const habitsOn = useUiModule("habits");
+  const quadrantOn = false;
 
   const smallScreen = useMediaQuery("(max-width: 767px)");
   const isSidebarCollapsed = smallScreen ? true : sidebarCollapsed;
@@ -196,6 +198,8 @@ export function AppShell() {
             <FinancialWorkspace onOpenAi={openAi} />
           ) : view === "watchlist" && watchlistOn ? (
             <WatchlistView onOpenAi={openAi} />
+          ) : view === "quadrant" && quadrantOn ? (
+            <QuadrantWorkspace onOpenAi={openAi} />
           ) : view === "habits" && habitsOn ? (
             <HabitsWorkspace onOpenAi={openAi} />
           ) : (
@@ -234,6 +238,7 @@ export function AppShell() {
           showFinance={financeOn}
           showWatchlist={watchlistOn}
           showHabits={habitsOn}
+          showQuadrant={quadrantOn}
         />
       )}
     </div>

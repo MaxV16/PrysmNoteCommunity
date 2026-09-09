@@ -10,6 +10,7 @@ interface MobileTabBarProps {
   showFinance: boolean;
   showWatchlist: boolean;
   showHabits: boolean;
+  showQuadrant: boolean;
 }
 
 const ACTIVE = "bg-accent font-semibold text-[var(--on-gradient)]";
@@ -43,7 +44,7 @@ function TabButton({
  * when their modules are enabled AND they render in this build. The center
  * Capture tab is the prominent mic entry to the voice diary.
  */
-export function MobileTabBar({ view, onSelectView, onOpenAi, showFinance, showWatchlist, showHabits }: MobileTabBarProps) {
+export function MobileTabBar({ view, onSelectView, onOpenAi, showFinance, showWatchlist, showHabits, showQuadrant }: MobileTabBarProps) {
   const router = useRouter();
 
   return (
