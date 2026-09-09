@@ -1049,6 +1049,10 @@ async def test_create_task_in_foreign_list_404(client: AsyncClient, db_session: 
     other = uuid4()
     from app.models.user import User
     db_session.add(User(id=other, email=f"{other}@other.test", password_hash="x", display_name="Other"))
+    # Flush the user first: SQLAlchemy's unit-of-work orders inserts by mapper
+    # relationships, and User has no relationship to TaskList, so a shared commit
+    # would sort `lists` before `users` and trip the FK check on Postgres.
+    await db_session.flush()
     foreign = TaskList(user_id=other, name="Foreign", position=0)
     db_session.add(foreign)
     await db_session.commit()
