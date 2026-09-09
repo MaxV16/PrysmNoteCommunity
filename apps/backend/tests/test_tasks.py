@@ -321,10 +321,18 @@ async def test_recurring_weekday_expands_full_week(client: AsyncClient):
         assert expected in child_dates, f"missing child occurrence {expected}"
     # No duplicate child is ever created on the template's own date.
     assert "2026-08-03" not in child_dates
-    # And it must not have created a whole-year flood: the pre-roll is bounded by
-    # the initial horizon (a daily template would fill it; weekdays never exceed it).
+    # And it must not have created a whole-year flood: the pre-roll stops at the
+    # initial horizon anchored at today (INITIAL_HORIZON_DAYS past today), so no
+    # child may be scheduled past that bound even when the template itself starts
+    # weeks ago. (A flat weekday-count cap is date-dependent: a template started
+    # just before today already holds ~90 weekdays, and today+1 can add one more.)
     from app.services.recurring_task_service import INITIAL_HORIZON_DAYS
-    assert len(child_dates) <= INITIAL_HORIZON_DAYS
+    from datetime import date as _date
+
+    horizon = _date.today() + timedelta(days=INITIAL_HORIZON_DAYS)
+    assert max(child_dates) <= horizon.isoformat()
+    # Sanity: the batch is bounded, far below a whole-year daily pre-roll.
+    assert len(child_dates) <= 104
 
 
 @pytest.mark.asyncio
