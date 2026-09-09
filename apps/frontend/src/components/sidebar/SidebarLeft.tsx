@@ -27,6 +27,7 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
   const watchlistOn = useUiModule("watchlist");
   const habitsOn = useUiModule("habits");
   const quadrantOn = false;
+  const focusOn = false;
   const notesOn = useUiModule("stickyNotes");
   const router = useRouter();
 
@@ -96,6 +97,16 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
             </button>
           )}
+          {focusOn && (
+            <button
+              onClick={() => onSelectView("focus")}
+              aria-label="Focus Timer"
+              className={`icon-btn ${view === "focus" ? "bg-accent/15 text-accent" : ""}`}
+              title="Focus Timer"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+            </button>
+          )}
           {notesOn && (
             <button
               onClick={() => { track("feature_used", { feature: "notes" }); openNotesWindow(); }}
@@ -142,7 +153,7 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
 
       {/* Navigation */}
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3">
-        <SidebarNav view={view} onSelectView={onSelectView} financeOn={financeOn} watchlistOn={watchlistOn} habitsOn={habitsOn} quadrantOn={quadrantOn} />
+        <SidebarNav view={view} onSelectView={onSelectView} financeOn={financeOn} watchlistOn={watchlistOn} habitsOn={habitsOn} quadrantOn={quadrantOn} focusOn={focusOn} />
         {tagsOn && (
           <div className="mt-6">
             <TagList />

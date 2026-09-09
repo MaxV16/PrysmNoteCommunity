@@ -14,6 +14,7 @@ import { openNotesWindow } from "@/lib/notes";
 import { ContextMenuItem, ContextMenuDivider } from "@/components/ui/ContextMenu";
 import { buildDuplicatePayload } from "./task-duplicate";
 
+
 export type ContextMenuState =
   | { kind: "task"; task: Task }
   | { kind: "empty"; day?: string; section?: { id: string | null; title: string } };

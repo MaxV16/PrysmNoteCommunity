@@ -29,6 +29,7 @@ interface SidebarNavProps {
   watchlistOn: boolean;
   habitsOn: boolean;
   quadrantOn: boolean;
+  focusOn: boolean;
 }
 
 interface FilterItem {
@@ -88,6 +89,11 @@ const VIEWS: { label: string; view: WorkspaceView; icon: JSX.Element }[] = [
     icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>,
   },
   {
+    label: "Focus Timer",
+    view: "focus",
+    icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>,
+  },
+  {
     label: "Finance",
     view: "finance",
     icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>,
@@ -99,7 +105,7 @@ const VIEWS: { label: string; view: WorkspaceView; icon: JSX.Element }[] = [
   },
 ];
 
-export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsOn, quadrantOn }: SidebarNavProps) {
+export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsOn, quadrantOn, focusOn }: SidebarNavProps) {
   const tasks = useAppStore((s) => s.tasks);
   const navFilter = useAppStore((s) => s.navFilter);
   const setNavFilter = useAppStore((s) => s.setNavFilter);
@@ -180,6 +186,7 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsO
           if (item.view === "watchlist" && !watchlistOn) return null;
           if (item.view === "habits" && !habitsOn) return null;
           if (item.view === "quadrant" && !quadrantOn) return null;
+          if (item.view === "focus" && !focusOn) return null;
           return (
             <button
               key={item.view}

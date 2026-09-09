@@ -11,6 +11,7 @@ interface MobileTabBarProps {
   showWatchlist: boolean;
   showHabits: boolean;
   showQuadrant: boolean;
+  showFocus: boolean;
 }
 
 const ACTIVE = "bg-accent font-semibold text-[var(--on-gradient)]";
@@ -44,7 +45,7 @@ function TabButton({
  * when their modules are enabled AND they render in this build. The center
  * Capture tab is the prominent mic entry to the voice diary.
  */
-export function MobileTabBar({ view, onSelectView, onOpenAi, showFinance, showWatchlist, showHabits, showQuadrant }: MobileTabBarProps) {
+export function MobileTabBar({ view, onSelectView, onOpenAi, showFinance, showWatchlist, showHabits, showQuadrant, showFocus }: MobileTabBarProps) {
   const router = useRouter();
 
   return (
@@ -94,6 +95,19 @@ export function MobileTabBar({ view, onSelectView, onOpenAi, showFinance, showWa
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
               <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+          }
+        />
+      )}
+      {showFocus && (
+        <TabButton
+          label="Focus"
+          active={view === "focus"}
+          onClick={() => onSelectView("focus")}
+          icon={
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="9"/>
+              <polyline points="12 7 12 12 15 14"/>
             </svg>
           }
         />

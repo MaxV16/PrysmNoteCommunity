@@ -12,6 +12,7 @@ import { getNotes, minimizeNote, syncNotesFromServer, openNotesWindow } from "@/
 import { FinancialWorkspace } from "@/components/finance/FinancialWorkspace";
 import { HabitsWorkspace } from "@/components/habits/HabitsWorkspace";
 import { QuadrantWorkspace } from "@/components/quadrant/QuadrantWorkspace";
+import { FocusWorkspace } from "@/components/focus/FocusWorkspace";
 import { WatchlistView } from "@/components/watchlist/WatchlistView";
 import { PREF_DEFAULT_VIEW, getPrefSync } from "@/lib/preferences";
 import { usePreferencesStore } from "@/stores/preferences-store";
@@ -20,7 +21,7 @@ import { initErrorTracking } from "@/lib/error-track";
 import { MobileTabBar } from "@/components/layout/MobileTabBar";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
 
-export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits" | "quadrant";
+export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits" | "quadrant" | "focus";
 
 const VIEW_MODES: TimelineViewMode[] = ["timeline", "kanban", "calendar", "list", "board"];
 
@@ -43,6 +44,7 @@ export function AppShell() {
   const watchlistOn = useUiModule("watchlist");
   const habitsOn = useUiModule("habits");
   const quadrantOn = false;
+  const focusOn = false;
 
   const smallScreen = useMediaQuery("(max-width: 767px)");
   const isSidebarCollapsed = smallScreen ? true : sidebarCollapsed;
@@ -106,6 +108,21 @@ export function AppShell() {
     window.addEventListener("prysm-open-ai", openAi);
     return () => window.removeEventListener("prysm-open-ai", openAi);
   }, []);
+
+  // EE features (e.g. Start Focus from a task menu) can request a workspace
+  // switch over a window event instead of coupling to AppShell state directly.
+  useEffect(() => {
+    const onOpenWorkspace = (e: Event) => {
+      const detail = (e as CustomEvent<{ view?: WorkspaceView }>).detail;
+      if (detail?.view) {
+        setView(detail.view);
+        if (smallScreen) setSidebarOpen(false);
+        setAiOpen(false);
+      }
+    };
+    window.addEventListener("prysm-open-workspace", onOpenWorkspace);
+    return () => window.removeEventListener("prysm-open-workspace", onOpenWorkspace);
+  }, [smallScreen]);
 
   // "Auto-show notes on launch": notes that were open persist their open state.
   // If the setting is off, tuck them away so nothing pops up unexpectedly.
@@ -200,6 +217,8 @@ export function AppShell() {
             <WatchlistView onOpenAi={openAi} />
           ) : view === "quadrant" && quadrantOn ? (
             <QuadrantWorkspace onOpenAi={openAi} />
+          ) : view === "focus" && focusOn ? (
+            <FocusWorkspace onOpenAi={openAi} />
           ) : view === "habits" && habitsOn ? (
             <HabitsWorkspace onOpenAi={openAi} />
           ) : (
@@ -239,6 +258,7 @@ export function AppShell() {
           showWatchlist={watchlistOn}
           showHabits={habitsOn}
           showQuadrant={quadrantOn}
+          showFocus={focusOn}
         />
       )}
     </div>
