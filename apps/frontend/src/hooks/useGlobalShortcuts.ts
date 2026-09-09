@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import { useAppStore } from "@/stores/app-store";
-import { useToast } from "@/lib/toast-context";
-import { api } from "@/lib/api";
+import { useBatchDelete } from "@/hooks/useBatchDelete";
 
 interface ShortcutHandlers {
   onToggleSidebar?: () => void;
@@ -28,7 +27,7 @@ export function useGlobalShortcuts({
   onToggleTheme,
   onNewTask,
 }: ShortcutHandlers) {
-  const { showToast } = useToast();
+  const { softDeleteWithUndo } = useBatchDelete();
 
   const deleteSelectedWithUndo = useCallback(() => {
     const store = useAppStore.getState();
@@ -36,28 +35,12 @@ export function useGlobalShortcuts({
     if (ids.length === 0) return;
 
     void (async () => {
-      try {
-        await api.post("/tasks/batch-delete", { task_ids: ids });
-      } catch {
-        return; // keep the selection so the user can retry
+      const ok = await softDeleteWithUndo(ids);
+      if (ok) {
+        useAppStore.getState().clearTaskSelection();
       }
-      const removed = new Set(ids);
-      store.setTasks(store.tasks.filter((t) => !removed.has(t.id)));
-      store.clearTaskSelection();
-      showToast(
-        ids.length === 1 ? "Task moved to Trash" : `${ids.length} tasks moved to Trash`,
-        "info",
-        {
-          label: "Undo",
-          onClick: () => {
-            void api.post("/tasks/batch-restore", { task_ids: ids }).catch(() => {
-              showToast("Could not restore tasks", "error");
-            });
-          },
-        }
-      );
     })();
-  }, [showToast]);
+  }, [softDeleteWithUndo]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

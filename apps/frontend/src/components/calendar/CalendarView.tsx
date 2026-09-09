@@ -8,6 +8,7 @@ import { TaskForm } from "@/components/tasks/TaskForm";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 import { useTasks } from "@/hooks/useTasks";
+import { useToast } from "@/lib/toast-context";
 import { useLongPress } from "@/lib/use-long-press";
 import { api } from "@/lib/api";
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
@@ -168,6 +169,7 @@ export function CalendarView() {
   const toggleTaskSelected = useAppStore((s) => s.toggleTaskSelected);
   const clearTaskSelection = useAppStore((s) => s.clearTaskSelection);
   const { createTask, fetchTasks } = useTasks();
+  const { showToast } = useToast();
   const [viewDate, setViewDate] = useState(() => new Date());
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
@@ -257,12 +259,17 @@ export function CalendarView() {
   };
 
   const handleCreateTask = async (data: Record<string, unknown>) => {
-    await createTask({
-      ...data,
-      list_id: (data.list_id as string | undefined) ?? activeListId ?? undefined,
-    });
-    setShowTaskForm(false);
-    setFormDefaultDate(null);
+    try {
+      await createTask({
+        ...data,
+        list_id: (data.list_id as string | undefined) ?? activeListId ?? undefined,
+      });
+      setShowTaskForm(false);
+      setFormDefaultDate(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not create the task. Try again.";
+      showToast(message, "error");
+    }
   };
 
   const openCardMenu = useCallback((e: MenuPoint, task: Task) => {

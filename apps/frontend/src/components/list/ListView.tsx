@@ -7,10 +7,12 @@ import type { TaskStatus } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
 import { useToast } from "@/lib/toast-context";
 import { useBoardSections } from "@/hooks/useBoardSections";
+import { useBatchDelete } from "@/hooks/useBatchDelete";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
+import { SelectionActionBar } from "@/components/tasks/SelectionActionBar";
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { formatDate } from "@/lib/dates";
@@ -38,7 +40,8 @@ export function ListView() {
   const searchQuery = useAppStore((s) => s.searchQuery);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
   const activeListId = useAppStore((s) => s.activeListId);
-  const { updateTask, createTask, fetchTasks, deleteTasksBatch, restoreTasksBatch } = useTasks();
+  const { updateTask, createTask, fetchTasks } = useTasks();
+  const { busy: batchDeleting, softDeleteWithUndo } = useBatchDelete();
   const { showToast } = useToast();
   const { sections: boardSections } = useBoardSections("board");
   const { sections: kanbanSections } = useBoardSections("kanban");
@@ -104,11 +107,16 @@ export function ListView() {
   };
 
   const handleCreateTask = async (data: Record<string, unknown>) => {
-    await createTask({
-      ...data,
-      list_id: (data.list_id as string | undefined) ?? activeListId ?? undefined,
-    });
-    setShowTaskForm(false);
+    try {
+      await createTask({
+        ...data,
+        list_id: (data.list_id as string | undefined) ?? activeListId ?? undefined,
+      });
+      setShowTaskForm(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not create the task. Try again.";
+      showToast(message, "error");
+    }
   };
 
   const handleToggleStatus = async (task: Task) => {
@@ -169,20 +177,9 @@ export function ListView() {
   const handleDelete = async () => {
     const ids = [...selectedTaskIds];
     if (ids.length === 0) return;
-    const ok = await runBatch(() => deleteTasksBatch(ids));
+    const ok = await softDeleteWithUndo(ids);
     if (ok) {
-      showToast(
-        ids.length === 1 ? "Task moved to Trash" : `${ids.length} tasks moved to Trash`,
-        "info",
-        {
-          label: "Undo",
-          onClick: () => {
-            void restoreTasksBatch(ids).catch(() => {
-              showToast("Could not restore tasks", "error");
-            });
-          },
-        }
-      );
+      clearTaskSelection();
     }
   };
 
@@ -240,37 +237,31 @@ export function ListView() {
       </div>
 
       {selectedTaskIds.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-elevated/60 px-4 py-2 shrink-0">
-          <span className="text-[11px] font-semibold text-primary">{selectedTaskIds.length} selected</span>
-          <button
-            onClick={() => setShowMoveModal(true)}
-            disabled={busy}
-            className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
-          >
-            Move to…
-          </button>
-          <button
-            onClick={() => setShowDateModal(true)}
-            disabled={busy}
-            className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
-          >
-            Set date
-          </button>
-          <button
-            onClick={() => void handleDelete()}
-            disabled={busy}
-            className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-danger hover:brightness-125 rounded-full"
-          >
-            Delete
-          </button>
-          <button
-            onClick={clearTaskSelection}
-            className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
-          >
-            Clear
-          </button>
-          {actionError && <span className="text-[11px] text-danger">{actionError}</span>}
-        </div>
+        <SelectionActionBar
+          count={selectedTaskIds.length}
+          busy={busy || batchDeleting}
+          onDelete={() => void handleDelete()}
+          onClear={clearTaskSelection}
+          actionError={actionError}
+          extra={
+            <>
+              <button
+                onClick={() => setShowMoveModal(true)}
+                disabled={busy}
+                className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
+              >
+                Move to…
+              </button>
+              <button
+                onClick={() => setShowDateModal(true)}
+                disabled={busy}
+                className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
+              >
+                Set date
+              </button>
+            </>
+          }
+        />
       )}
 
       <div

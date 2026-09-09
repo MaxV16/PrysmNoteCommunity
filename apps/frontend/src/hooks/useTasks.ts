@@ -89,10 +89,14 @@ export function useTasks() {
     async (task: Record<string, unknown>) => {
       const data = await api.post<Task>("/tasks/", task);
       track("task_created", { source: task.source === "quick" ? "quick" : "other" });
-      await fetchTasks();
+      // Fast path: merge the created task into the store immediately so the
+      // form can close after a single round trip. The background refresh then
+      // reconciles ordering/derived state without blocking the UI.
+      useAppStore.getState().mergeTasks([data]);
+      void refreshTasksPreservingWindow();
       return data;
     },
-    [fetchTasks]
+    []
   );
 
   const updateTask = useCallback(
@@ -117,14 +121,16 @@ export function useTasks() {
   );
 
   // Soft delete (moves to Trash) a batch; the store drops them immediately so a
-  // refresh in-flight can never bring them back.
+  // refresh in-flight can never bring them back. Returns {deleted: number}.
   const deleteTasksBatch = useCallback(
-    async (ids: string[]) => {
-      if (ids.length === 0) return;
-      await api.post("/tasks/batch-delete", { task_ids: ids });
+    async (ids: string[]): Promise<{ deleted: number }> => {
+      if (ids.length === 0) return { deleted: 0 };
+      const body = await api.post<{ deleted: number }>("/tasks/batch-delete", { task_ids: ids });
+      const deleted = body?.deleted ?? 0;
       const keep = new Set(ids);
       setTasks(useAppStore.getState().tasks.filter((t) => !keep.has(t.id)));
       await fetchTasks();
+      return { deleted };
     },
     [setTasks, fetchTasks]
   );
@@ -137,11 +143,13 @@ export function useTasks() {
     [fetchTasks]
   );
 
+  // Returns {restored: number}.
   const restoreTasksBatch = useCallback(
-    async (ids: string[]) => {
-      if (ids.length === 0) return;
-      await api.post("/tasks/batch-restore", { task_ids: ids });
+    async (ids: string[]): Promise<{ restored: number }> => {
+      if (ids.length === 0) return { restored: 0 };
+      const body = await api.post<{ restored: number }>("/tasks/batch-restore", { task_ids: ids });
       await fetchTasks();
+      return { restored: body?.restored ?? 0 };
     },
     [fetchTasks]
   );

@@ -19,6 +19,7 @@ import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 import { useTasks } from "@/hooks/useTasks";
+import { useBatchDelete } from "@/hooks/useBatchDelete";
 import { api } from "@/lib/api";
 import { useUiModule } from "@/lib/ui-module-registry";
 import { useLocalBool } from "@/lib/use-local-bool";
@@ -32,6 +33,7 @@ import { openNotesWindow } from "@/lib/notes";
 import { matchesSearchQuery } from "@/lib/task-search";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useToast } from "@/lib/toast-context";
+import { SelectionActionBar } from "@/components/tasks/SelectionActionBar";
 
 // How many days to prepend/append per expansion step.
 const EXPAND_STEP = 7;
@@ -79,7 +81,8 @@ interface TimelineViewProps {
 export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewModeChange }: TimelineViewProps) {
   const { tasks, selectedTaskId, setSelectedTaskId, selectedTaskIds, navFilter, setNavFilter, selectedTagId, searchQuery, setSearchQuery, activeListId, lists } = useAppStore();
   const { visibleRange, viewDays, setScrollOffset, expandBackward, expandForward } = useTimeline(20, 10);
-  const { createTask, updateTask, fetchRange, deleteTasksBatch, restoreTasksBatch } = useTasks();
+  const { createTask, updateTask, fetchRange } = useTasks();
+  const { busy: batchDeleting, softDeleteWithUndo } = useBatchDelete();
   const { showToast } = useToast();
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
@@ -458,14 +461,19 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       // New tasks from a list-filtered view land in that list, unless the form
       // explicitly picked a different list (the dropdown choice always wins).
       // Otherwise the backend assigns the default "My Tasks" list.
-      await createTask({
-        ...data,
-        list_id: data.list_id ?? useAppStore.getState().activeListId ?? undefined,
-      });
-      setShowTaskForm(false);
-      setFormDefaultDate(null);
+      try {
+        await createTask({
+          ...data,
+          list_id: data.list_id ?? useAppStore.getState().activeListId ?? undefined,
+        });
+        setShowTaskForm(false);
+        setFormDefaultDate(null);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not create the task. Try again.";
+        showToast(message, "error");
+      }
     },
-    [createTask]
+    [createTask, showToast]
   );
 
   const handleDayDoubleClick = useCallback((day: Date) => {
@@ -507,34 +515,17 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     []
   );
 
-  // Mobile select mode: a floating bar offers batch delete; clearing resets it.
-  const [batchDeleting, setBatchDeleting] = useState(false);
+  // Mobile select mode + desktop floating bar share one batch delete flow.
   const handleBatchDelete = useCallback(async () => {
     const ids = useAppStore.getState().selectedTaskIds;
     if (ids.length === 0) return;
-    setBatchDeleting(true);
-    try {
-      await deleteTasksBatch(ids);
+    const ok = await softDeleteWithUndo(ids);
+    if (ok) {
       useAppStore.getState().clearTaskSelection();
       setSelectionMode(false);
-      showToast(
-        ids.length === 1 ? "Task moved to Trash" : `${ids.length} tasks moved to Trash`,
-        "info",
-        {
-          label: "Undo",
-          onClick: () => {
-            void restoreTasksBatch(ids).catch(() => {
-              showToast("Could not restore tasks", "error");
-            });
-          },
-        }
-      );
-    } catch {
-      // keep the selection so the user can retry
-    } finally {
-      setBatchDeleting(false);
     }
-  }, [deleteTasksBatch, restoreTasksBatch, showToast]);
+    // On failure keep the selection so the user can retry.
+  }, [softDeleteWithUndo]);
   const selectedCount = selectedTaskIds.length;
 
   const filterBadge = navFilter
@@ -901,7 +892,20 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       </div>
       )}
 
-      {/* Mobile batch action bar (select mode on the timeline) */}
+      {/* Desktop floating batch-action bar covers the timeline/kanban/board/calendar
+          modes (list has its own inline toolbar). Always visible while a selection
+          exists so Delete is never keyboard-only on desktop. */}
+      {safeMode !== "list" && selectedTaskIds.length > 0 && (
+        <SelectionActionBar
+          floating
+          count={selectedTaskIds.length}
+          busy={batchDeleting}
+          onDelete={() => void handleBatchDelete()}
+          onClear={() => useAppStore.getState().clearTaskSelection()}
+        />
+      )}
+
+  {/* Mobile batch action bar (select mode on the timeline) */}
       {selectionMode && selectedCount > 0 && (
         <div className="pointer-events-none fixed inset-x-0 bottom-16 z-40 flex justify-center px-4">
           <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 shadow-lg">

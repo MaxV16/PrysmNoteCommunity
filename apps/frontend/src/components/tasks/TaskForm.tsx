@@ -197,13 +197,34 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
     }
   };
 
+  // Client-side scheduling sanity checks (the server 422 remains the backstop).
+  // Same-day end time must follow the start time; the due date cannot precede
+  // the start date. Both are ISO strings, so plain string comparison works.
+  // New tasks without explicit dates land on today (the same treatment
+  // handleSubmit applies), so inverted times still warn before submit.
+  const today = toLocalDateString();
+  const effStartDate = startDate || (isEdit ? "" : today);
+  const effDueDate = dueDate || (isEdit ? "" : today);
+  const dateError =
+    effStartDate && effDueDate && effDueDate < effStartDate
+      ? "Due date cannot be before the start date"
+      : null;
+  // Mirrors the backend rule: inverted times only matter on a single-day span
+  // (no dates, one date, or equal dates).
+  const sameDay = effStartDate && effDueDate ? effStartDate === effDueDate : true;
+  const timeError =
+    startTime && endTime && startTime >= endTime && sameDay
+      ? "End time must be after the start time"
+      : null;
+  const validationError = dateError ?? timeError;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    if (validationError) return;
     // Ensure undated tasks land on the user's local date so they appear on the
     // timeline. Using the local date (not UTC) keeps the day aligned across
     // timezones.
-    const today = toLocalDateString();
     const start = startDate || (isEdit ? "" : today);
     const due = dueDate || (isEdit ? "" : today);
     // Single encoding point for the end condition: date ends go to the
@@ -262,6 +283,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           <CalendarPicker value={dueDate} onChange={setDueDate} placeholder="Not set" />
         </div>
       </div>
+      {dateError && <p className="-mt-2 text-xs text-danger">{dateError}</p>}
       <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
         <div className="flex-1">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Start Time</label>
@@ -282,6 +304,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           />
         </div>
       </div>
+      {timeError && <p className="-mt-2 text-xs text-danger">{timeError}</p>}
       <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
         <div className="flex-1">
           <label className="text-xs font-medium text-secondary mb-1.5 block">List</label>
@@ -433,7 +456,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
         <button type="button" onClick={onCancel} className="btn bg-elevated border border-border px-4 py-2 text-sm text-secondary hover:bg-hover hover:text-primary">
           Cancel
         </button>
-        <button type="submit" className="btn btn-primary px-6 py-2 text-sm">
+        <button type="submit" disabled={!!validationError} className="btn btn-primary px-6 py-2 text-sm disabled:opacity-50">
           {isEdit ? "Update Task" : "Create Task"}
         </button>
       </div>

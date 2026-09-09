@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { ListView } from "./ListView";
 import type { Task } from "@/types/task";
 
@@ -138,5 +138,61 @@ describe("ListView multi-select", () => {
     fireEvent.click(screen.getAllByText("Alpha")[0], { metaKey: true });
     expect(h.toggleTaskSelected).toHaveBeenCalledWith("t1");
     expect(h.setSelectedTaskId).not.toHaveBeenCalled();
+  });
+
+  it("delete moves tasks to Trash and toasts the server-reported count", async () => {
+    h.selectedTaskIds = ["t1", "t2"];
+    h.deleteTasksBatch.mockResolvedValueOnce({ deleted: 2 });
+    render(<ListView />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
+
+    await waitFor(() => expect(h.deleteTasksBatch).toHaveBeenCalledWith(["t1", "t2"]));
+    await waitFor(() =>
+      expect(h.showToast).toHaveBeenCalledWith(
+        "2 tasks moved to Trash",
+        "info",
+        expect.objectContaining({ label: "Undo" })
+      )
+    );
+    expect(h.clearTaskSelection).toHaveBeenCalled();
+  });
+
+  it("undo restores the batch and toasts the restored count", async () => {
+    h.selectedTaskIds = ["t1", "t2"];
+    h.deleteTasksBatch.mockResolvedValueOnce({ deleted: 2 });
+    h.restoreTasksBatch.mockResolvedValueOnce({ restored: 2 });
+    h.showToast.mockClear();
+
+    render(<ListView />);
+    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
+    await waitFor(() => expect(h.deleteTasksBatch).toHaveBeenCalled());
+
+    const toastCall = h.showToast.mock.calls.find(
+      (c) => c[0] === "2 tasks moved to Trash"
+    );
+    expect(toastCall).toBeTruthy();
+    await act(async () => {
+      toastCall![2].onClick();
+    });
+
+    expect(h.restoreTasksBatch).toHaveBeenCalledWith(["t1", "t2"]);
+    await waitFor(() =>
+      expect(h.showToast).toHaveBeenCalledWith("2 tasks restored", "success")
+    );
+  });
+
+  it("shows a no-op toast when nothing was deleted and keeps the selection", async () => {
+    h.selectedTaskIds = ["t1"];
+    h.deleteTasksBatch.mockResolvedValueOnce({ deleted: 0 });
+    h.showToast.mockClear();
+
+    render(<ListView />);
+    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
+
+    await waitFor(() =>
+      expect(h.showToast).toHaveBeenCalledWith("Nothing moved to Trash", "info")
+    );
+    expect(h.clearTaskSelection).not.toHaveBeenCalled();
   });
 });

@@ -139,4 +139,56 @@ describe("TaskForm", () => {
       expect.objectContaining({ tag_ids: ["tag-1", "tag-2"] })
     );
   });
+
+  it("blocks submit with an inline warning when end time is before start time", () => {
+    const onSubmit = vi.fn();
+    const { container } = render(<TaskForm onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Task" },
+    });
+    const timeInputs = container.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: "10:00" } });
+    fireEvent.change(timeInputs[1], { target: { value: "09:00" } });
+
+    expect(screen.getByText("End time must be after the start time")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create task/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("submits when the same-day end time follows the start time", () => {
+    const onSubmit = vi.fn();
+    const { container } = render(<TaskForm onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Task" },
+    });
+    const timeInputs = container.querySelectorAll('input[type="time"]');
+    fireEvent.change(timeInputs[0], { target: { value: "09:00" } });
+    fireEvent.change(timeInputs[1], { target: { value: "10:00" } });
+
+    expect(screen.queryByText("End time must be after the start time")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create task/i }));
+    expect(onSubmit).toHaveBeenCalled();
+  });
+
+  it("blocks submit with an inline warning when the due date precedes the start date", () => {
+    const onSubmit = vi.fn();
+    render(<TaskForm onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Task" },
+    });
+    // Open the Start Date picker and pick day 10 of the current month.
+    fireEvent.click(screen.getAllByText("Not set")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "10" }));
+    // The start button now shows its date; open the Due Date picker and pick
+    // day 5, which precedes the start date.
+    fireEvent.click(screen.getByText("Not set"));
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+
+    expect(screen.getByText("Due date cannot be before the start date")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create task/i }));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 });
