@@ -4,7 +4,7 @@ import asyncio
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,9 +12,10 @@ from app.database import async_session_factory, get_db
 from app.dependencies import get_current_user
 from app.models.task import Task, TaskStatus
 from app.models.board_section import BoardSection
+from app.models.task_list import TaskList
 from app.models.user import User
 from app.services.embedding_service import generate_and_store_embedding
-from app.services.task_service import create_task, delete_task, get_task, search_tasks, update_task, task_access_condition, delete_tasks_batch, reschedule_tasks_batch, move_tasks_to_section, set_task_dates_batch
+from app.services.task_service import create_task, delete_task, get_task, search_tasks, update_task, task_access_condition, active_condition, delete_tasks_batch, reschedule_tasks_batch, move_tasks_to_section, set_task_dates_batch, restore_task, restore_tasks_batch, list_trashed, purge_trash, empty_trash
 from app.services import subtask_service
 from app.models.teams import TaskShare
 from app.utils.uuid_helpers import parse_uuid
@@ -69,6 +70,8 @@ def _serialize_task(task: Task, tags: list[dict] | None = None) -> dict:
         "recurrence_end_date": task.recurrence_end_date.isoformat() if task.recurrence_end_date else None,
         "sort_order": task.sort_order,
         "is_archived": task.is_archived,
+        "list_id": str(task.list_id) if task.list_id else None,
+        "deleted_at": task.deleted_at.isoformat() if task.deleted_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "updated_at": task.updated_at.isoformat() if task.updated_at else None,
@@ -157,6 +160,7 @@ class CreateTaskRequest(BaseModel):
     recurrence_end_date: str | None = None
     estimated_minutes: int | None = None
     tag_ids: list[str] | None = None
+    list_id: str | None = None
 
     @field_validator("title")
     @classmethod
@@ -207,6 +211,30 @@ class CreateTaskRequest(BaseModel):
                 raise ValueError("Time must be in HH:MM format")
         return v
 
+    @model_validator(mode="after")
+    def validate_ordering(self):
+        from datetime import date as date_type, time as time_type
+        from app.services.task_service import validate_task_order
+
+        def _d(v):
+            if not v:
+                return None
+            try:
+                return date_type.fromisoformat(v)
+            except (ValueError, TypeError):
+                return None
+
+        def _t(v):
+            if not v:
+                return None
+            try:
+                return time_type.fromisoformat(v)
+            except (ValueError, TypeError):
+                return None
+
+        validate_task_order(_d(self.start_date), _d(self.due_date), _t(self.start_time), _t(self.end_time))
+        return self
+
 
 class UpdateTaskRequest(BaseModel):
     title: str | None = None
@@ -227,6 +255,7 @@ class UpdateTaskRequest(BaseModel):
     tag_ids: list[str] | None = None
     board_section_id: str | None = None
     board_order: int | None = None
+    list_id: str | None = None
 
     @field_validator("title")
     @classmethod
@@ -278,6 +307,30 @@ class UpdateTaskRequest(BaseModel):
             raise ValueError("Description must be at most 10,000 characters")
         return v
 
+    @model_validator(mode="after")
+    def validate_ordering(self):
+        from datetime import date as date_type, time as time_type
+        from app.services.task_service import validate_task_order
+
+        def _d(v):
+            if not v:
+                return None
+            try:
+                return date_type.fromisoformat(v)
+            except (ValueError, TypeError):
+                return None
+
+        def _t(v):
+            if not v:
+                return None
+            try:
+                return time_type.fromisoformat(v)
+            except (ValueError, TypeError):
+                return None
+
+        validate_task_order(_d(self.start_date), _d(self.due_date), _t(self.start_time), _t(self.end_time))
+        return self
+
     def to_fields_dict(self) -> dict:
         # start_time/end_time are ALWAYS sent (even null) so a caller can clear
         # a slot; the rest nulls are treated as "not provided".
@@ -324,6 +377,7 @@ async def list_tasks(
     offset: int = 0,
     date_from: str | None = None,
     date_to: str | None = None,
+    list_id: str | None = None,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
@@ -331,7 +385,11 @@ async def list_tasks(
     offset = max(offset, 0)
     if query:
         results = await search_tasks(session, user.id, query)
-        return await serialize_tasks(session, [t for t, _rank in results])
+        tasks = [t for t, _rank in results]
+        if list_id:
+            list_uuid = _require_uuid(list_id)
+            tasks = [t for t in tasks if t.list_id and str(t.list_id) == str(list_uuid)]
+        return await serialize_tasks(session, tasks)
 
     from sqlalchemy import or_
 
@@ -362,6 +420,7 @@ async def list_tasks(
             select(Task)
             .where(
                 task_access_condition(user.id),
+                active_condition(),
                 or_(
                     (Task.start_date >= from_date) & (Task.start_date <= to_date),
                     (Task.due_date >= from_date) & (Task.due_date <= to_date),
@@ -372,9 +431,22 @@ async def list_tasks(
         )
         return await serialize_tasks(session, result.scalars().all())
 
-    result = await session.execute(
-        select(Task).where(task_access_condition(user.id)).order_by(Task.created_at.desc()).offset(offset).limit(limit)
+    stmt = (
+        select(Task)
+        .where(task_access_condition(user.id), active_condition())
+        .order_by(Task.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
+    if list_id:
+        list_uuid = _require_uuid(list_id)
+        owned_list = await session.execute(
+            select(TaskList.id).where(TaskList.id == list_uuid, TaskList.user_id == user.id)
+        )
+        if owned_list.scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
+        stmt = stmt.where(Task.list_id == list_uuid)
+    result = await session.execute(stmt)
     return await serialize_tasks(session, result.scalars().all())
 
 
@@ -405,6 +477,18 @@ async def create_task_route(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board section not found")
         board_section_uuid = _require_uuid(request.board_section_id)
 
+    list_uuid = None
+    if request.list_id:
+        result = await session.execute(
+            select(TaskList.id).where(
+                TaskList.id == _require_uuid(request.list_id),
+                TaskList.user_id == user.id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
+        list_uuid = _require_uuid(request.list_id)
+
     task = await create_task(
         session,
         user_id=user.id,
@@ -420,6 +504,7 @@ async def create_task_route(
         end_time=request.end_time,
         recurrence_rule=request.recurrence_rule,
         recurrence_end_date=request.recurrence_end_date,
+        list_id=list_uuid,
     )
 
     if request.estimated_minutes is not None:
@@ -472,6 +557,17 @@ async def update_task_route(
         if not parent:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent task not found")
 
+    # Authorization: the new list (if any) must belong to the caller.
+    if fields.get("list_id"):
+        result = await session.execute(
+            select(TaskList.id).where(
+                TaskList.id == _require_uuid(fields["list_id"]),
+                TaskList.user_id == user.id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
+
     if "title" in fields or "description" in fields:
         asyncio.create_task(
             _embed_task_background(task.id, user.id, task.title, task.description)
@@ -513,6 +609,75 @@ async def delete_task_route(
     return {"status": "deleted"}
 
 
+@router.delete("/{task_id}/permanent")
+async def permanent_delete_task_route(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    """Permanently remove a trashed task (skips the trash retention window)."""
+    from sqlalchemy import delete as sa_delete
+
+    result = await session.execute(
+        sa_delete(Task).where(
+            Task.id == _require_uuid(task_id),
+            task_access_condition(user.id),
+            Task.deleted_at.isnot(None),
+        )
+    )
+    await session.flush()
+    if (result.rowcount or 0) == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found in trash")
+    return {"status": "deleted"}
+
+
+@router.post("/{task_id}/restore")
+async def restore_task_route(
+    task_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    restored = await restore_task(session, _require_uuid(task_id), user.id)
+    if not restored:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found in trash")
+    return {"status": "restored"}
+
+
+@router.get("/trash")
+async def trash_route(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    tasks = await list_trashed(session, user.id)
+    return await serialize_tasks(session, tasks)
+
+
+@router.post("/batch-restore")
+async def batch_restore(
+    request: BatchDeleteRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    task_ids = [parse_uuid(uid) for uid in request.task_ids]
+    if any(uid is None for uid in task_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid id")
+    restored = await restore_tasks_batch(
+        session,
+        [uid for uid in task_ids if uid is not None],
+        user.id,
+    )
+    return {"restored": restored}
+
+
+@router.post("/trash/empty")
+async def empty_trash_route(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    deleted = await empty_trash(session, user.id)
+    return {"deleted": deleted}
+
+
 @router.get("/{task_id}/subtasks")
 async def list_subtasks(
     task_id: str,
@@ -523,7 +688,9 @@ async def list_subtasks(
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     result = await session.execute(
-        select(Task).where(Task.parent_task_id == _require_uuid(task_id)).where(task_access_condition(user.id))
+        select(Task)
+        .where(Task.parent_task_id == _require_uuid(task_id))
+        .where(task_access_condition(user.id), active_condition())
     )
     return [
         {"id": str(t.id), "title": t.title, "status": t.status.value, "priority": t.priority}
@@ -678,6 +845,7 @@ async def search_tasks_route(
 
     stmt = select(Task, rank_expr).where(
         task_access_condition(user.id),
+        active_condition(),
         or_(
             func.lower(Task.title) % q_lower,
             func.lower(func.coalesce(Task.description, "")) % q_lower,
@@ -743,6 +911,7 @@ async def list_tasks_by_date_range(
         select(Task)
         .where(
             task_access_condition(user.id),
+            active_condition(),
             Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
             or_(
                 (Task.start_date >= from_date) & (Task.start_date <= to_date),
@@ -782,6 +951,7 @@ async def get_upcoming_deadlines(
         select(Task)
         .where(
             task_access_condition(user.id),
+            active_condition(),
             Task.due_date.isnot(None),
             Task.due_date >= today,
             Task.due_date <= end,
@@ -989,7 +1159,7 @@ async def batch_board_move(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid id")
 
     result = await session.execute(
-        select(Task).where(task_access_condition(user.id), Task.id.in_([uid for uid in task_ids if uid is not None]))
+        select(Task).where(task_access_condition(user.id), Task.id.in_([uid for uid in task_ids if uid is not None]), active_condition())
     )
     owned_ids = {t.id for t in result.scalars().all()}
     for uid in task_ids:

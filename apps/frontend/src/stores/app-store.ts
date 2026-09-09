@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Task } from "@/types/task";
+import type { Task, TaskList } from "@/types/task";
 import type { ChatMessage } from "@/types/ai";
 
 interface Tag {
@@ -19,6 +19,8 @@ interface ChatSession {
 
 interface AppState {
   tasks: Task[];
+  lists: TaskList[];
+  activeListId: string | null;
   tags: Tag[];
   chatMessages: ChatMessage[];
   chatSessions: ChatSession[];
@@ -29,6 +31,8 @@ interface AppState {
   navFilter: NavFilter;
   setTasks: (tasks: Task[]) => void;
   mergeTasks: (tasks: Task[]) => void;
+  setLists: (lists: TaskList[]) => void;
+  setActiveListId: (id: string | null) => void;
   setTags: (tags: Tag[]) => void;
   addTag: (tag: Tag) => void;
   removeTag: (id: string) => void;
@@ -47,6 +51,8 @@ interface AppState {
 
 const initialState = {
   tasks: [],
+  lists: [],
+  activeListId: null,
   tags: [],
   chatMessages: [],
   chatSessions: [],
@@ -68,6 +74,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       for (const t of tasks) byId.set(t.id, t);
       return { tasks: Array.from(byId.values()) };
     }),
+  setLists: (lists) => set({ lists }),
+  setActiveListId: (id) => set({ activeListId: id }),
   setTags: (tags) => set({ tags }),
   addTag: (tag) => set((state) => ({ tags: [...state.tags, tag] })),
   removeTag: (id) => set((state) => ({ tags: state.tags.filter((t) => t.id !== id) })),

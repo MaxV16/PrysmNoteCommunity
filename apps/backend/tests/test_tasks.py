@@ -849,3 +849,201 @@ async def test_update_task_schedules_background_embedding(client: AsyncClient, m
     # create + update both scheduled; the update carried the new title.
     assert len(calls) == 2
     assert calls[1][2] == "After"
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_end_date_before_start_date(client: AsyncClient):
+    """A4: due_date < start_date must 422 on create."""
+    response = await client.post("/api/tasks/", json={
+        "title": "Inverted",
+        "start_date": "2026-09-10",
+        "due_date": "2026-09-08",
+    })
+    assert response.status_code == 422
+    assert "after the start date" in response.text
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_inverted_range(client: AsyncClient):
+    """A4: a PATCH that inverts the range must 422."""
+    created = (await client.post("/api/tasks/", json={
+        "title": "Range",
+        "start_date": "2026-09-08",
+        "due_date": "2026-09-10",
+    })).json()
+    response = await client.patch(f"/api/tasks/{created['id']}", json={"due_date": "2026-09-01"})
+    assert response.status_code == 422
+    assert "after the start date" in response.text
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_same_day_end_time_before_or_equal_start_time(client: AsyncClient):
+    """A4: same-day end_time <= start_time must 422."""
+    response = await client.post("/api/tasks/", json={
+        "title": "Bad time range",
+        "start_date": "2026-09-08",
+        "due_date": "2026-09-08",
+        "start_time": "14:00",
+        "end_time": "14:00",
+    })
+    assert response.status_code == 422
+    assert "after the start time" in response.text
+
+
+@pytest.mark.asyncio
+async def test_valid_edge_equal_dates_and_end_after_start_ok(client: AsyncClient):
+    """A4: equal start==due with a strictly increasing time range is accepted."""
+    response = await client.post("/api/tasks/", json={
+        "title": "Valid edge",
+        "start_date": "2026-09-08",
+        "due_date": "2026-09-08",
+        "start_time": "09:00",
+        "end_time": "10:00",
+    })
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_different_days_times_are_independent(client: AsyncClient):
+    """A4: multi-day tasks keep independent times (no same-day constraint)."""
+    response = await client.post("/api/tasks/", json={
+        "title": "Multi day",
+        "start_date": "2026-09-08",
+        "due_date": "2026-09-10",
+        "start_time": "14:00",
+        "end_time": "09:00",
+    })
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_delete_moves_to_trash_and_restore_brings_back(client: AsyncClient):
+    """B2: delete = soft delete; the task disappears from /tasks but shows in
+    the trash, and restore brings it back."""
+    created = (await client.post("/api/tasks/", json={"title": "Trash me"})).json()
+    tid = created["id"]
+
+    assert (await client.delete(f"/api/tasks/{tid}")).status_code == 200
+
+    listing = await client.get("/api/tasks/")
+    assert listing.status_code == 200
+    assert not any(t["id"] == tid for t in listing.json())
+
+    trash = await client.get("/api/tasks/trash")
+    assert trash.status_code == 200
+    trashed = trash.json()
+    assert any(t["id"] == tid for t in trashed)
+    assert trashed[0]["deleted_at"] is not None
+
+    restored = await client.post(f"/api/tasks/{tid}/restore")
+    assert restored.status_code == 200
+
+    after = await client.get(f"/api/tasks/{tid}")
+    assert after.status_code == 200
+    assert after.json()["deleted_at"] is None
+
+    trash_empty = await client.get("/api/tasks/trash")
+    assert not any(t["id"] == tid for t in trash_empty.json())
+
+
+@pytest.mark.asyncio
+async def test_batch_soft_delete_and_batch_restore(client: AsyncClient):
+    """B2/B4: batch-delete soft-deletes the selection; batch-restore undoes it."""
+    ids = []
+    for name in ("one", "two"):
+        created = (await client.post("/api/tasks/", json={"title": name})).json()
+        ids.append(created["id"])
+
+    deleted = await client.post("/api/tasks/batch-delete", json={"task_ids": ids})
+    assert deleted.status_code == 200
+    assert deleted.json()["deleted"] == 2
+
+    trash = (await client.get("/api/tasks/trash")).json()
+    assert {t["id"] for t in trash} == set(ids)
+
+    restored = await client.post("/api/tasks/batch-restore", json={"task_ids": ids})
+    assert restored.status_code == 200
+    assert restored.json()["restored"] == 2
+
+    trash_after = (await client.get("/api/tasks/trash")).json()
+    assert not any(t["id"] in ids for t in trash_after)
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_and_empty_trash(client: AsyncClient):
+    """B2: permanent delete removes a trashed task; empty trash clears all."""
+    async def _create(title):
+        return (await client.post("/api/tasks/", json={"title": title})).json()
+
+    perm = await _create("forever gone")
+    batch_ids = [(await _create("batch dead"))["id"], (await _create("batch dead 2"))["id"]]
+    assert (await client.delete(f"/api/tasks/{perm['id']}")).status_code == 200
+    assert (await client.post("/api/tasks/batch-delete", json={"task_ids": batch_ids})).status_code == 200
+
+    gone = await client.delete(f"/api/tasks/{perm['id']}/permanent")
+    assert gone.status_code == 200
+    assert not any(t["id"] == perm["id"] for t in (await client.get("/api/tasks/trash")).json())
+
+    emptied = await client.post("/api/tasks/trash/empty")
+    assert emptied.status_code == 200
+    assert emptied.json()["deleted"] == 2
+    assert (await client.get("/api/tasks/trash")).json() == []
+
+
+@pytest.mark.asyncio
+async def test_search_excludes_trashed_tasks(client: AsyncClient):
+    """B2: search_tasks must never surface soft-deleted tasks."""
+    created = (await client.post("/api/tasks/", json={"title": "UniquePhrase42"})).json()
+    assert (await client.delete(f"/api/tasks/{created['id']}")).status_code == 200
+
+    res = await client.get("/api/search/", params={"q": "UniquePhrase42"})
+    assert res.status_code == 200
+    assert not any(t["title"] == "UniquePhrase42" for t in res.json()["results"])
+
+
+@pytest.mark.asyncio
+async def test_lists_crud_and_default_backfill(client: AsyncClient):
+    """C2: lists CRUD; created tasks land in the default list; deleting a list
+    moves its tasks to the default list."""
+    lists = (await client.get("/api/lists/")).json()
+    assert isinstance(lists, list)
+    assert any(l["name"] == "My Tasks" for l in lists)
+
+    created = (await client.post("/api/lists/", json={"name": "Work"})).json()
+    lid = created["id"]
+
+    renamed = await client.patch(f"/api/lists/{lid}", json={"name": "Work Renamed"})
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Work Renamed"
+
+    task = (await client.post("/api/tasks/", json={"title": "In list", "list_id": lid})).json()
+    assert task["list_id"] == lid
+
+    default = next(l for l in (await client.get("/api/lists/")).json() if l["name"] == "My Tasks")
+    no_list = (await client.post("/api/tasks/", json={"title": "No list"})).json()
+    assert no_list["list_id"] == default["id"]
+
+    filtered = await client.get("/api/tasks/", params={"list_id": lid})
+    assert filtered.status_code == 200
+    assert [t["id"] for t in filtered.json()] == [task["id"]]
+
+    deleted = await client.delete(f"/api/lists/{lid}")
+    assert deleted.status_code == 200
+
+    moved = (await client.get(f"/api/tasks/{task['id']}")).json()
+    assert moved["list_id"] == default["id"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_in_foreign_list_404(client: AsyncClient, db_session: AsyncSession):
+    """C2: a list owned by another user must 404 on task create."""
+    from app.models.task_list import TaskList
+    other = uuid4()
+    from app.models.user import User
+    db_session.add(User(id=other, email=f"{other}@other.test", password_hash="x", display_name="Other"))
+    foreign = TaskList(user_id=other, name="Foreign", position=0)
+    db_session.add(foreign)
+    await db_session.commit()
+
+    response = await client.post("/api/tasks/", json={"title": "nope", "list_id": str(foreign.id)})
+    assert response.status_code == 404

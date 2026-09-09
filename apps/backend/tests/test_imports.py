@@ -604,8 +604,13 @@ async def test_import_undo_deletes_batch_descendants_and_notes(
     assert ubody["deleted_tasks"] == total_before
     assert ubody["deleted_notes"] == 0
 
-    assert await get_task_by_title(db_session, "Hire contractor") is None
-    assert await get_task_by_title(db_session, "Pay invoice", top_level_only=False) is None
+    # Undo soft-deletes (moves the imported tasks to Trash): the rows stay but
+    # are marked deleted so they are invisible to normal task reads and can be
+    # permanently removed by the trash retention window.
+    for title, top_level in (("Hire contractor", True), ("Pay invoice", False)):
+        task = await get_task_by_title(db_session, title, top_level_only=top_level)
+        assert task is not None
+        assert task.deleted_at is not None
 
 
 @pytest.mark.asyncio
@@ -631,8 +636,15 @@ async def test_import_undo_removes_recurrence_occurrences(
     assert undo.status_code == 200
     assert undo.json()["deleted_tasks"] == total_before
 
-    result = await db_session.execute(select(Task))
-    assert len(result.scalars().all()) == 0
+    # Soft-delete semantics: every row of the batch (template + occurrences +
+    # child) stays in the DB but flagged as trashed.
+    from uuid import UUID
+    result = await db_session.execute(
+        select(Task).where(Task.import_batch_id == UUID(batch_id))
+    )
+    trashed = result.scalars().all()
+    assert len([t for t in trashed if t.deleted_at is None]) == 0
+    assert all(t.deleted_at is not None for t in trashed)
 
 
 @pytest.mark.asyncio

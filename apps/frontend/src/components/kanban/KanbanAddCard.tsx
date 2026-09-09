@@ -5,11 +5,12 @@ import { useState, useRef, useEffect } from "react";
 interface KanbanAddCardProps {
   status: string;
   boardSectionId?: string | null;
+  listId?: string | null;
   onAdd: () => void;
   autoExpand?: boolean;
 }
 
-export function KanbanAddCard({ status, boardSectionId, onAdd, autoExpand = false }: KanbanAddCardProps) {
+export function KanbanAddCard({ status, boardSectionId, listId, onAdd, autoExpand = false }: KanbanAddCardProps) {
   const [expanded, setExpanded] = useState(autoExpand);
   const [title, setTitle] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,6 +30,7 @@ export function KanbanAddCard({ status, boardSectionId, onAdd, autoExpand = fals
       title: trimmed,
       status,
       board_section_id: boardSectionId ?? undefined,
+      list_id: listId ?? undefined,
     });
     onAdd();
     setTitle("");

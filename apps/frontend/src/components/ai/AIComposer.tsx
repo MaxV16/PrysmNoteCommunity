@@ -10,8 +10,9 @@ interface AIComposerProps {
   onAbort?: () => void;
   onUndo?: () => void;
   additionalAction?: ReactNode;
-  /** External components (e.g. speech-to-text) register an insert fn that replaces
-   *  the composer text with new text and focuses the textarea. */
+  /** External components (e.g. speech-to-text) register an insert fn that
+   *  APPENDS text to whatever is already in the composer (with spacing) and
+   *  focuses the textarea, so voice dictation keeps building on the draft. */
   onRegisterInsert?: (insert: (text: string) => void) => void;
 }
 
@@ -33,7 +34,10 @@ export function AIComposer({
   useEffect(() => {
     if (!onRegisterInsert) return;
     onRegisterInsert((text: string) => {
-      setInput(text.slice(0, MAX_LENGTH));
+      setInput((prev) => {
+        const sep = prev && !prev.endsWith(" ") && !prev.endsWith("\n") ? " " : "";
+        return (prev + sep + text).slice(0, MAX_LENGTH);
+      });
       textareaRef.current?.focus();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -221,6 +221,7 @@ async def expand_recurring_for_range(
     stmt = select(Task).where(
         Task.recurrence_rule.isnot(None),
         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+        Task.deleted_at.is_(None),
         or_(Task.recurrence_end_date.is_(None), Task.recurrence_end_date >= from_date),
     )
     if user_id:
@@ -255,6 +256,7 @@ async def expand_recurring_tasks(session: AsyncSession, user_id: UUID | None = N
     stmt = select(Task).where(
         Task.recurrence_rule.isnot(None),
         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+        Task.deleted_at.is_(None),
         or_(Task.recurrence_end_date.is_(None), Task.recurrence_end_date >= date.today()),
         or_(
             Task.recurrence_last_expanded_at.is_(None),

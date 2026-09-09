@@ -112,7 +112,9 @@ async def test_tool_definitions_have_all_tools():
         "complete_task", "duplicate_task", "list_tags", "add_tag_to_task",
         "get_task_stats",
         "batch_delete_tasks",
+        "restore_task",
         "add_event", "cancel_task_by_keywords",
+        "create_list", "list_lists", "rename_list", "delete_list",
         "search_titles", "list_watchlist", "add_watchlist_item",
         "update_watchlist_item", "remove_watchlist_item",
     }
@@ -479,14 +481,16 @@ async def test_execute_batch_delete_tasks(db_session: AsyncSession, ai_user):
     }]
     results = await execute_tool_calls(tool_calls, str(user_id), db_session)
     content = json.loads(results[0]["content"])
-    # Two valid tasks deleted, the malformed id reported as failed.
+    # Two valid tasks soft-deleted (moved to Trash), the malformed id reported
+    # as failed. The tasks themselves remain in the DB with deleted_at set.
     assert content["deleted_count"] == 2
     assert content["failed_count"] == 1
     assert content["requested"] == 3
     remaining = (await db_session.execute(
         select(Task).where(Task.user_id == user_id)
     )).scalars().all()
-    assert len(remaining) == 0
+    assert len(remaining) == 2  # soft delete keeps the rows
+    assert all(t.deleted_at is not None for t in remaining)
 
 
 @pytest.mark.asyncio

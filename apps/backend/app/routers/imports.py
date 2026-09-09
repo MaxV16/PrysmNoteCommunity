@@ -18,7 +18,7 @@ from typing import Any
 from dateutil.rrule import rrulestr
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -1014,7 +1014,9 @@ async def _run_import(
     batch_id,
 ) -> tuple[dict, list[dict]]:
     result = await session.execute(
-        select(Task.title, Task.start_date, Task.due_date).where(Task.user_id == user_id)
+        select(Task.title, Task.start_date, Task.due_date).where(
+            Task.user_id == user_id, Task.deleted_at.is_(None)
+        )
     )
     existing = {(str(t), s, d) for t, s, d in result.all()}
 
@@ -1369,7 +1371,11 @@ async def undo_import(
 
     deleted_tasks = 0
     if to_delete:
-        result = await session.execute(delete(Task).where(Task.id.in_(to_delete)))
+        # Soft delete (lands in the Trash view like every other task delete);
+        # the user can still undo it from the trash within the retention window.
+        result = await session.execute(
+            update(Task).where(Task.id.in_(to_delete)).values(deleted_at=func.now())
+        )
         deleted_tasks = result.rowcount or 0
 
     note_ids = list(

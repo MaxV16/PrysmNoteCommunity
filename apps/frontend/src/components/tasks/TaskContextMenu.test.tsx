@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TaskContextMenu } from "./TaskContextMenu";
 
 const mocks = vi.hoisted(() => {
@@ -14,7 +14,9 @@ const mocks = vi.hoisted(() => {
     createTask: vi.fn().mockResolvedValue({ id: "new" }),
     updateTask: vi.fn().mockResolvedValue({}),
     deleteTask: vi.fn().mockResolvedValue(undefined),
+    restoreTask: vi.fn().mockResolvedValue(undefined),
     fetchTasks: vi.fn().mockResolvedValue(undefined),
+    showToast: vi.fn(),
     addNoteWithContent: vi.fn(),
     openNotesWindow: vi.fn(),
     useUiModule: vi.fn(() => true),
@@ -29,7 +31,12 @@ vi.mock("@/hooks/useTasks", () => ({
     createTask: mocks.createTask,
     updateTask: mocks.updateTask,
     deleteTask: mocks.deleteTask,
+    restoreTask: mocks.restoreTask,
   }),
+}));
+
+vi.mock("@/lib/toast-context", () => ({
+  useToast: () => ({ showToast: mocks.showToast }),
 }));
 
 vi.mock("@/components/sticky/StickyNoteBoard", () => ({
@@ -107,14 +114,20 @@ describe("TaskContextMenu - task menu", () => {
     });
   });
 
-  it("delete requires a second confirm click before deleteTask fires", () => {
+  it("delete fires immediately and offers an Undo toast with restore", async () => {
     renderTaskMenu();
     fireEvent.click(screen.getByText("Delete task"));
-    expect(mocks.deleteTask).not.toHaveBeenCalled();
-    expect(screen.getByText("Confirm delete")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Confirm delete"));
     expect(mocks.deleteTask).toHaveBeenCalledWith("t1");
+    await waitFor(() =>
+      expect(mocks.showToast).toHaveBeenCalledWith(
+        "Task moved to Trash",
+        "info",
+        expect.objectContaining({ label: "Undo" })
+      )
+    );
+    const action = mocks.showToast.mock.calls[0][2];
+    action.onClick();
+    expect(mocks.restoreTask).toHaveBeenCalledWith("t1");
   });
 
   it("hides Add as sticky note when the stickyNotes module is off", () => {

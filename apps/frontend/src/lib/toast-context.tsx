@@ -4,34 +4,45 @@ import { createContext, useContext, useState, useCallback, type ReactNode } from
 
 type ToastType = "success" | "error" | "info" | "warning";
 
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface Toast {
   id: string;
   type: ToastType;
   message: string;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
   toasts: Toast[];
-  showToast: (message: string, type?: ToastType) => void;
+  showToast: (message: string, type?: ToastType, action?: ToastAction) => void;
   dismissToast: (id: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+const TOAST_DURATION = 4000;
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-
-  const showToast = useCallback((message: string, type: ToastType = "info") => {
-    const id = crypto.randomUUID();
-    setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  }, []);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const showToast = useCallback(
+    (message: string, type: ToastType = "info", action?: ToastAction) => {
+      const id = crypto.randomUUID();
+      setToasts((prev) => [...prev, { id, type, message, action }]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, TOAST_DURATION);
+    },
+    []
+  );
 
   return (
     <ToastContext.Provider value={{ toasts, showToast, dismissToast }}>
@@ -59,12 +70,25 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <div className="flex items-center gap-2">
                 <span>{icons[toast.type]}</span>
                 <span>{toast.message}</span>
-                <button
-                  onClick={() => dismissToast(toast.id)}
-                  className="ml-2 opacity-60 hover:opacity-100"
-                >
-                  \u2716
-                </button>
+                {toast.action && (
+                  <button
+                    onClick={() => {
+                      dismissToast(toast.id);
+                      toast.action?.onClick();
+                    }}
+                    className="ml-2 shrink-0 rounded-lg bg-accent/20 px-2 py-0.5 text-xs font-semibold text-accent transition-colors hover:bg-accent/30"
+                  >
+                    {toast.action.label}
+                  </button>
+                )}
+                {!toast.action && (
+                  <button
+                    onClick={() => dismissToast(toast.id)}
+                    className="ml-2 opacity-60 hover:opacity-100"
+                  >
+                    ✖
+                  </button>
+                )}
               </div>
             </div>
           );

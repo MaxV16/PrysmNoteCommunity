@@ -6,6 +6,7 @@ import type { WorkspaceView } from "@/components/layout/AppShell";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { todayISO } from "@/lib/dates";
 import { NotesSection } from "@/components/sidebar/NotesSection";
+import { SidebarLists } from "@/components/sidebar/SidebarLists";
 
 function isToday(dateStr: string | null): boolean {
   if (!dateStr) return false;
@@ -90,6 +91,7 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn }: Sideb
   const tasks = useAppStore((s) => s.tasks);
   const navFilter = useAppStore((s) => s.navFilter);
   const setNavFilter = useAppStore((s) => s.setNavFilter);
+  const setActiveListId = useAppStore((s) => s.setActiveListId);
 
   const smartPrefs = {
     inbox: useLocalBool("prysm_smartlist_inbox", true),
@@ -118,6 +120,9 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn }: Sideb
   const selectView = (v: WorkspaceView) => {
     onSelectView(v);
     if (v === "timeline") setNavFilter(null);
+    // Lists are task-scoped; leaving the workspace clears the active list so a
+    // Finance/Watchlist session doesn't leave a stale task filter on return.
+    if (v !== "timeline") setActiveListId(null);
   };
 
   return (
@@ -133,6 +138,7 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn }: Sideb
                 key={item.filter}
                 onClick={() => {
                   if (view !== "timeline") onSelectView("timeline");
+                  setActiveListId(null);
                   setNavFilter(isActive ? null : item.filter);
                 }}
                 className={`sidebar-item text-[13px] ${isActive ? "active" : ""}`}
@@ -152,6 +158,8 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn }: Sideb
       </div>
 
       <NotesSection />
+
+      <SidebarLists view={view} onSelectView={onSelectView} />
 
       <div className="space-y-0.5">
         {VIEWS.map((item) => {

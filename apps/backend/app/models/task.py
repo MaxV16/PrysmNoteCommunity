@@ -2,6 +2,7 @@ import enum
 from datetime import date, datetime, time
 
 from sqlalchemy import Boolean, Date, DateTime, Integer, SmallInteger, String, Text, ForeignKey, Enum, func, Uuid, Index, Time
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -26,6 +27,8 @@ class Task(Base):
         Index("idx_tasks_user_created", "user_id", "created_at"),
         Index("ix_tasks_board_section", "user_id", "board_section_id", "board_order"),
         Index("idx_tasks_user_import_batch", "user_id", "import_batch_id"),
+        Index("idx_tasks_user_deleted", "user_id", "deleted_at", postgresql_where=sa_text("deleted_at IS NOT NULL")),
+        Index("ix_tasks_list", "list_id"),
     )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -57,6 +60,14 @@ class Task(Base):
     import_batch_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Soft-delete: a non-NULL deleted_at moves the task into the Trash view.
+    # Rows are purged for real 14 days after being trashed by the background job
+    # (and opportunistically when the trash is listed). Trashed tasks are
+    # excluded from every normal task query via Task.deleted_at.is_(None).
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Optional list membership: NULL means "no explicit list" (shown in All Tasks).
+    # New tasks without a list are assigned the user's default "My Tasks" list.
+    list_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("lists.id", ondelete="SET NULL"), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

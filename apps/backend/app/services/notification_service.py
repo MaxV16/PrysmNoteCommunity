@@ -57,6 +57,7 @@ def _due_tasks_for_window(session: AsyncSession, start: date, end: date):
     return select(Task).where(
         Task.due_date >= start,
         Task.due_date <= end,
+        Task.deleted_at.is_(None),
         Task.status.notin_([TaskStatus.DONE.value, TaskStatus.CANCELLED.value]),
         Task.is_archived.is_(False),
     )
@@ -113,6 +114,7 @@ async def send_due_alerts(session: AsyncSession) -> int:
 def _due_today_tasks(session: AsyncSession, day: date):
     return select(Task).where(
         Task.due_date == day,
+        Task.deleted_at.is_(None),
         Task.status.notin_([TaskStatus.DONE.value, TaskStatus.CANCELLED.value]),
         Task.is_archived.is_(False),
     )

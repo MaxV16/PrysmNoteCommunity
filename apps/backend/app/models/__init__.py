@@ -20,6 +20,7 @@ from app.models.teams import Team, TeamMember, TeamInvite, TeamProject, TaskShar
 from app.models.note import Note
 from app.models.user_preference import UserPreference
 from app.models.board_section import BoardSection
+from app.models.task_list import TaskList
 from app.models.watchlist import WatchlistItem
 from app.models.analytics_event import AnalyticsEvent, AnalyticsDaily
 
@@ -52,6 +53,7 @@ __all__ = [
     "Note",
     "UserPreference",
     "BoardSection",
+    "TaskList",
     "WatchlistItem",
     "AnalyticsEvent",
     "AnalyticsDaily",

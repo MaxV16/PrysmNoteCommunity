@@ -33,10 +33,20 @@ export interface Task {
   recurrence_end_date: string | null;
   sort_order: number;
   is_archived: boolean;
+  list_id: string | null;
+  deleted_at: string | null;
   completed_at: string | null;
   created_at: string;
   updated_at: string;
   tags?: TaskTag[];
   links?: TaskLink[];
   subtasks?: Task[];
+}
+
+export interface TaskList {
+  id: string;
+  name: string;
+  position: number;
+  created_at: string | null;
+  updated_at: string | null;
 }

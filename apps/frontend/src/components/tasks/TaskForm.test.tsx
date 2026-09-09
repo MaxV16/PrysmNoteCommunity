@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TaskForm } from "./TaskForm";
 
-const useAppStore = vi.fn(() => ({ tags: [] }));
+const useAppStore = vi.fn(() => ({ tags: [], lists: [], activeListId: null }));
 
 // Mock app-store
 vi.mock("@/stores/app-store", () => ({
@@ -10,7 +10,7 @@ vi.mock("@/stores/app-store", () => ({
 }));
 
 beforeEach(() => {
-  useAppStore.mockReturnValue({ tags: [] });
+  useAppStore.mockReturnValue({ tags: [], lists: [], activeListId: null });
 });
 
 function makeTask(overrides: Record<string, unknown> = {}): any {
@@ -52,8 +52,8 @@ describe("TaskForm", () => {
   it("recurrence presets dropdown includes all options", () => {
     render(<TaskForm {...defaultProps} />);
     const selects = screen.getAllByRole("combobox");
-    // The 3rd select is the recurrence one (after status, priority)
-    const recurrenceSelect = selects[2];
+    // The 4th select is the recurrence one (after list, status, priority)
+    const recurrenceSelect = selects[3];
     expect(recurrenceSelect).toBeInTheDocument();
     const options = Array.from(recurrenceSelect.querySelectorAll("option"));
     const labels = options.map((o) => o.textContent);
@@ -117,6 +117,8 @@ describe("TaskForm", () => {
         { id: "tag-1", name: "urgent", color: "#ff0000" },
         { id: "tag-2", name: "later", color: "#00ff00" },
       ],
+      lists: [],
+      activeListId: null,
     });
     const onSubmit = vi.fn();
     render(

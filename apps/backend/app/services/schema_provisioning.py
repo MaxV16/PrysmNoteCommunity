@@ -206,6 +206,12 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         "DROP POLICY IF EXISTS user_isolation ON board_sections",
         "CREATE POLICY user_isolation ON board_sections "
         "USING (user_id = rls_user_id()) WITH CHECK (user_id = rls_user_id())",
+        # lists - user-scoped task collections
+        "ALTER TABLE lists ENABLE ROW LEVEL SECURITY",
+        "ALTER TABLE lists FORCE ROW LEVEL SECURITY",
+        "DROP POLICY IF EXISTS user_isolation ON lists",
+        "CREATE POLICY user_isolation ON lists "
+        "USING (user_id = rls_user_id()) WITH CHECK (user_id = rls_user_id())",
         # watchlist_items - user-scoped shows & movies tracking
         "ALTER TABLE watchlist_items ENABLE ROW LEVEL SECURITY",
         "ALTER TABLE watchlist_items FORCE ROW LEVEL SECURITY",
@@ -255,6 +261,7 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         "habit_logs",
         "user_preferences",
         "board_sections",
+        "lists",
         "watchlist_items",
         "analytics_events",
     )
@@ -302,6 +309,14 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         # alembic 0014). Null for everything created outside import.
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS import_batch_id UUID",
         "ALTER TABLE notes ADD COLUMN IF NOT EXISTS import_batch_id UUID",
+        # Task soft delete (create_all cannot alter; mirrored by alembic 0016).
+        # NULL = active task, non-NULL = sits in the Trash view until purge.
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ",
+        # Task list membership (create_all cannot alter; mirrored by alembic
+        # 0017). The FK makes deleting a list leave its tasks orphaned to their
+        # default list via ON DELETE SET NULL (the app moves them explicitly
+        # too, for databases where the FK was provisioned without the reference).
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS list_id UUID REFERENCES lists(id) ON DELETE SET NULL",
     ):
         try:
             async with engine.begin() as _conn:
@@ -333,6 +348,10 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         # own Index declarations so a fresh create_all DB matches exactly).
         "CREATE INDEX IF NOT EXISTS idx_tasks_user_import_batch ON tasks (user_id, import_batch_id)",
         "CREATE INDEX IF NOT EXISTS idx_notes_user_import_batch ON notes (user_id, import_batch_id)",
+        # Trash listing + purge lookups (partial: only trashed rows).
+        "CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted ON tasks (user_id, deleted_at) WHERE deleted_at IS NOT NULL",
+        # Task-list membership lookups.
+        "CREATE INDEX IF NOT EXISTS ix_tasks_list ON tasks (list_id)",
         # pgvector approximate nearest-neighbor search for semantic task search.
         "CREATE INDEX IF NOT EXISTS ix_task_embeddings_hnsw ON task_embeddings USING hnsw (embedding vector_cosine_ops)",
         "CREATE INDEX IF NOT EXISTS ix_ai_memories_hnsw ON ai_memories USING hnsw (embedding vector_cosine_ops)",
@@ -346,6 +365,33 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         except ProgrammingError as _err:
             if not _is_privilege_error(_err):
                 raise
+
+    # Default-list backfill: give every user that has list-less tasks a "My
+    # Tasks" list and move those tasks into it (idempotent, mirrors the alembic
+    # 0017 backfill). Must bypass RLS (lists is user-scoped and FORCE'd for the
+    # app role), so it runs through the BYPASSRLS system engine. New tasks are
+    # also assigned a default list lazily at create time, so users without any
+    # task get one when they create their first task.
+    if system_engine is not None and system_engine.dialect.name == "postgresql":
+        try:
+            async with system_engine.begin() as _conn:
+                await _conn.execute(
+                    text(
+                        "INSERT INTO lists (user_id, name, position) "
+                        "SELECT DISTINCT t.user_id, 'My Tasks', 0 "
+                        "FROM tasks t "
+                        "WHERE NOT EXISTS (SELECT 1 FROM lists l WHERE l.user_id = t.user_id)"
+                    )
+                )
+                await _conn.execute(
+                    text(
+                        "UPDATE tasks SET list_id = l.id "
+                        "FROM lists l "
+                        "WHERE tasks.user_id = l.user_id AND tasks.list_id IS NULL"
+                    )
+                )
+        except Exception:
+            logger.exception("default-list backfill failed (lists stay unmanaged)")
 
 
 def _is_privilege_error(err: ProgrammingError) -> bool:

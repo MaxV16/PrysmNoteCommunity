@@ -72,7 +72,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_tasks",
-            "description": "Search tasks by query string and optional date/priority filters. Returns every match (up to 250) with title, date, priority, status and description snippet. The user cannot see ids - identify tasks to the user by title + date + description, never by id. If the result has a \"truncated\": true field, only the first part of the matches was returned and \"omitted\" says how many more exist - re-run this same search after acting on the shown ones to fetch the rest (relevant for sweeping all matching tasks). To collect ALL tasks matching a query (e.g. 'delete all tasks called work'), call with the query and NO date filters.",
+            "description": "Search tasks by query string and optional date/priority/list filters. Returns every match (up to 250) with title, date, priority, status and description snippet. The user cannot see ids - identify tasks to the user by title + date + description, never by id. If the result has a \"truncated\": true field, only the first part of the matches was returned and \"omitted\" says how many more exist - re-run this same search after acting on the shown ones to fetch the rest (relevant for sweeping all matching tasks). To collect ALL tasks matching a query (e.g. 'delete all tasks called work'), call with the query and NO date filters.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -81,6 +81,7 @@ TOOL_DEFINITIONS = [
                     "date_to": {"type": "string", "description": "YYYY-MM-DD optional end date filter"},
                     "priority_min": {"type": "integer", "description": "minimum priority (1-5)"},
                     "priority_max": {"type": "integer", "description": "maximum priority (1-5)"},
+                    "list_id": {"type": "string", "description": "optional list id to filter by"},
                 },
                 "required": ["query"],
             },
@@ -104,6 +105,7 @@ TOOL_DEFINITIONS = [
                     "recurrence_end_date": {"type": "string", "description": "YYYY-MM-DD when this recurrence stops; omit for an endless repeat"},
                     "description": {"type": "string"},
                     "estimated_minutes": {"type": "integer", "description": "estimated time in minutes"},
+                    "list_id": {"type": "string", "description": "task list id to put the task in (optional; defaults to the current/default list)"},
                 },
                 "required": ["title"],
             },
@@ -113,7 +115,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "update_task",
-            "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} - do NOT delete the task. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date, start_time (HH:MM), end_time (HH:MM).",
+            "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} - do NOT delete the task. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date, start_time (HH:MM), end_time (HH:MM), list_id.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -128,7 +130,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "delete_task",
-            "description": "Delete a task. DANGER: this permanently removes the task. ONLY call this after the user has EXPLICITLY confirmed deletion (e.g. 'yes delete it', 'go ahead', 'delete them'). When the user first asks to delete, DO NOT call this - reply listing exactly what you will delete and ask for confirmation. If the user said a task is 'done'/'completed'/'finished', use update_task with status='done' instead (never delete).",
+            "description": "Move a task to the Trash (soft delete). Deleting is NOT permanent: the task sits in the Trash for 14 days (restore_task brings it back), then is purged automatically. ONLY call this after the user has EXPLICITLY confirmed deletion (e.g. 'yes delete it', 'go ahead', 'delete them'). When the user first asks to delete, DO NOT call this - reply listing exactly what you will delete and ask for confirmation. If the user said a task is 'done'/'completed'/'finished', use update_task with status='done' instead (never delete).",
             "parameters": {
                 "type": "object",
                 "properties": {"task_id": {"type": "string"}},
@@ -140,7 +142,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "batch_delete_tasks",
-            "description": "Delete MULTIPLE tasks at once (pass a list of task_ids). DANGER: permanently removes them. ONLY call after the user has EXPLICITLY confirmed deletion of all of them. It returns exact deleted_count and failed_count (with the ids that failed), so report the real numbers in your reply - never claim everything was deleted unless deleted_count equals the number you intended to delete. After a bulk delete, re-run search_tasks with the same query to catch any remaining matches and delete them too, so 'delete all X' really deletes all of them. If the user said the tasks are 'done'/'completed', mark them status='done' via update_task instead (never delete).",
+            "description": "Move MULTIPLE tasks to the Trash at once (pass a list of task_ids). SOFT delete: they sit in the Trash for 14 days and can be restored with restore_task. ONLY call after the user has EXPLICITLY confirmed deletion of all of them. It returns exact deleted_count and failed_count (with the ids that failed), so report the real numbers in your reply - never claim everything was deleted unless deleted_count equals the number you intended to delete. After a bulk delete, re-run search_tasks with the same query to catch any remaining matches and delete them too, so 'delete all X' really deletes all of them. If the user said the tasks are 'done'/'completed', mark them status='done' via update_task instead (never delete).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -301,6 +303,7 @@ TOOL_DEFINITIONS = [
                                 "description": {"type": "string", "description": "full detail/context/notes for the task"},
                                 "recurrence_rule": {"type": "string", "description": "RRULE string for recurring tasks, e.g. FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR. Occurrences are expanded automatically."},
                                 "recurrence_end_date": {"type": "string", "description": "YYYY-MM-DD when this recurrence stops; omit for an endless repeat"},
+                                "list_id": {"type": "string", "description": "task list id (optional; defaults to the current/default list)"},
                             },
                             "required": ["title"],
                         },
@@ -511,6 +514,69 @@ TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {},
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "restore_task",
+            "description": "Restore a deleted task from the Trash back into the normal views (undoes a delete). Use when the user says 'undo the delete', 'restore that task', or regrets deleting something. Task browsing is done in the trash view of the app; this tool restores by task id.",
+            "parameters": {
+                "type": "object",
+                "properties": {"task_id": {"type": "string"}},
+                "required": ["task_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_list",
+            "description": "Create a new task list (collection) for organizing tasks. Returns the new list id and name.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "short list name, e.g. 'Work', 'Groceries'"}},
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_lists",
+            "description": "List all the user's task lists with their id and name. Use before referencing a list by name so you can pass its id.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rename_list",
+            "description": "Rename a task list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "list_id": {"type": "string"},
+                    "name": {"type": "string"},
+                },
+                "required": ["list_id", "name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_list",
+            "description": "Delete a task list. Its tasks are NOT deleted: they move to the user's default 'My Tasks' list.",
+            "parameters": {
+                "type": "object",
+                "properties": {"list_id": {"type": "string"}},
+                "required": ["list_id"],
             },
         },
     },
@@ -742,8 +808,14 @@ DON'T FABRICATE SUCCESS: When the user asked you to CREATE or SCHEDULE a task (o
 
 COMPLETING VS DELETING:
 - If the user says a task is "done", "complete", "completed", "finished", "marked off", or asks to check it off, COMPLETE it - call update_task with fields status = "done". NEVER delete a task the user said is done.
-- Deleting a task is destructive and permanent. When the user asks you to delete, do NOT delete in that same turn. First reply listing the EXACT tasks you will delete (title + date), then ask them to confirm. Only call delete_task in a LATER turn once the user has explicitly confirmed (e.g. "yes delete it", "go ahead", "delete them").
+- Deleting a task moves it to the Trash, where it sits for 14 days and CAN be restored (restore_task). When the user asks you to delete, do NOT delete in that same turn. First reply listing the EXACT tasks you will delete (title + date), then ask them to confirm. Only call delete_task in a LATER turn once the user has explicitly confirmed (e.g. "yes delete it", "go ahead", "delete them").
+- If the user immediately regrets a deletion ("undo that delete", "restore it", "I deleted the wrong one"), call restore_task for that task.
 - NEVER claim a task was deleted unless delete_task returned `"deleted": true`, and NEVER claim a task was completed unless update_task returned `"updated": true`. If a tool returns an error (e.g. "Task not found", "Invalid task_id format"), do NOT pretend the delete/complete happened - report the failure and retry with the correct id.
+
+LISTS AND TRASH:
+- Lists are separate task collections (the sidebar "Lists" section). Manage them with create_list / list_lists / rename_list / delete_list, and pass list_id when creating or updating tasks the user wants in a specific list. If the user does not name a list, tasks go to their default "My Tasks" list.
+- Deleting a list does NOT delete its tasks - they move to the default "My Tasks" list.
+- Trash viewing and emptying are done in the app UI, not with AI tools; the AI can restore a wrongly-deleted task with restore_task.
 
 USER-FACING IDENTIFIERS (the user NEVER sees raw ids):
 - NEVER show, mention, or ask the user for a raw task id / UUID / hex code. The user does not know them and cannot type them.
@@ -1014,6 +1086,7 @@ async def execute_tool_calls(
                 date_to = args.get("date_to")
                 priority_min = args.get("priority_min")
                 priority_max = args.get("priority_max")
+                list_arg = args.get("list_id")
 
                 from sqlalchemy import or_
                 q_lower = (query or "").lower().strip()
@@ -1024,6 +1097,7 @@ async def execute_tool_calls(
                 try:
                     stmt = select(Task, rank_expr).where(
                         Task.user_id == UUID(user_id),
+                        Task.deleted_at.is_(None),
                         or_(
                             func.lower(Task.title) % q_lower,
                             func.lower(func.coalesce(Task.description, "")) % q_lower,
@@ -1037,12 +1111,17 @@ async def execute_tool_calls(
                         stmt = stmt.where(Task.priority >= priority_min)
                     if priority_max is not None:
                         stmt = stmt.where(Task.priority <= priority_max)
+                    if list_arg:
+                        list_uuid = _safe_uuid(list_arg)
+                        if list_uuid is not None:
+                            stmt = stmt.where(Task.list_id == list_uuid)
                     stmt = stmt.order_by(rank_expr.desc()).limit(TOOL_SEARCH_MAX)
                     task_rank_rows = (await session.execute(stmt)).all()
                     tasks = [t for t, _r in task_rank_rows]
                 except Exception:
                     stmt = select(Task).where(
                         Task.user_id == UUID(user_id),
+                        Task.deleted_at.is_(None),
                         or_(
                             Task.title.ilike(func.concat('%', query, '%')),
                             Task.description.ilike(func.concat('%', query, '%')),
@@ -1056,6 +1135,10 @@ async def execute_tool_calls(
                         stmt = stmt.where(Task.priority >= priority_min)
                     if priority_max is not None:
                         stmt = stmt.where(Task.priority <= priority_max)
+                    if list_arg:
+                        list_uuid = _safe_uuid(list_arg)
+                        if list_uuid is not None:
+                            stmt = stmt.where(Task.list_id == list_uuid)
                     stmt = stmt.limit(TOOL_SEARCH_MAX)
                     tasks = (await session.execute(stmt)).scalars().all()
                 found = [{"id": str(t.id), "title": t.title, "status": t.status.value if t.status else None,
@@ -1076,6 +1159,7 @@ async def execute_tool_calls(
                 similar = await session.execute(
                     select(Task).where(
                         Task.user_id == UUID(user_id),
+                        Task.deleted_at.is_(None),
                         Task.title.ilike(func.concat('%', title[:30], '%')),
                         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                     ).limit(3)
@@ -1108,6 +1192,7 @@ async def execute_tool_calls(
                     priority=args.get("priority", 2),
                     recurrence_rule=args.get("recurrence_rule"),
                     recurrence_end_date=args.get("recurrence_end_date"),
+                    list_id=_safe_uuid(args.get("list_id")),
                 )
 
                 # Conflict enrichment: after creating a dated task, surface any
@@ -1123,6 +1208,7 @@ async def execute_tool_calls(
                         select(Task).where(
                             Task.user_id == UUID(user_id),
                             Task.id != task.id,
+                            Task.deleted_at.is_(None),
                             Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                             or_(
                                 Task.start_date == ts,
@@ -1179,18 +1265,40 @@ async def execute_tool_calls(
                     continue
                 fields = args.get("fields", {})
                 result = await session.execute(
-                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
+                    select(Task).where(
+                        Task.id == task_uuid,
+                        Task.user_id == UUID(user_id),
+                        Task.deleted_at.is_(None),
+                    )
                 )
                 task = result.scalar_one_or_none()
                 if task:
                     for key, value in (fields or {}).items():
-                        if key in {"title", "description", "status", "priority", "start_date", "due_date", "start_time", "end_time"}:
+                        if key in {"title", "description", "status", "priority", "start_date", "due_date", "start_time", "end_time", "list_id"}:
                             if key == "priority":
                                 value = normalize_priority(value)
                             if key in ("start_date", "due_date"):
                                 value = _parse_date_arg(value)
                             if key in ("start_time", "end_time"):
                                 value = _parse_time_arg(value)
+                            if key == "list_id":
+                                from app.models.task_list import TaskList
+                                if value is not None:
+                                    list_uuid = _safe_uuid(value)
+                                    owned = await session.execute(
+                                        select(TaskList.id).where(
+                                            TaskList.id == list_uuid,
+                                            TaskList.user_id == UUID(user_id),
+                                        )
+                                    )
+                                    if owned.scalar_one_or_none() is None:
+                                        results.append({
+                                            "tool_call_id": tc.get("id"),
+                                            "role": "tool",
+                                            "content": json.dumps({"error": "List not found"}),
+                                        })
+                                        continue
+                                    value = list_uuid
                             setattr(task, key, value)
                     if (fields or {}).get("status") == "done" and task.status == TaskStatus.DONE:
                         task.completed_at = _datetime.utcnow()
@@ -1218,16 +1326,18 @@ async def execute_tool_calls(
                     })
                     continue
                 result = await session.execute(
-                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )
                 task = result.scalar_one_or_none()
                 if task:
-                    await session.delete(task)
-                    await session.flush()
+                    # Soft delete: the task lands in the Trash (14-day retention),
+                    # where it can be restored or purged. Descendants follow.
+                    from app.services.task_service import delete_tasks_batch
+                    await delete_tasks_batch(session, [task.id], UUID(user_id))
                     results.append({
                         "tool_call_id": tc.get("id"),
                         "role": "tool",
-                        "content": json.dumps({"deleted": True, "task_id": task_id}),
+                        "content": json.dumps({"deleted": True, "task_id": task_id, "note": "Moved to Trash (restorable for 14 days)"}),
                     })
                 else:
                     results.append({
@@ -1245,7 +1355,6 @@ async def execute_tool_calls(
                         "content": json.dumps({"error": "task_ids must be a non-empty list"}),
                     })
                     continue
-                from sqlalchemy import delete as sa_delete
                 valid_ids = []
                 invalid = []
                 for tid in task_ids:
@@ -1254,39 +1363,43 @@ async def execute_tool_calls(
                         invalid.append({"task_id": tid, "reason": "invalid_id"})
                     else:
                         valid_ids.append(task_uuid)
-                # One statement for the whole batch instead of a select/delete/flush
-                # per id.
-                if valid_ids:
-                    res = await session.execute(
-                        sa_delete(Task).where(
-                            Task.id.in_(valid_ids),
-                            Task.user_id == UUID(user_id),
+                owned = [
+                    t.id
+                    for t in (
+                        await session.execute(
+                            select(Task).where(
+                                Task.id.in_(valid_ids),
+                                Task.user_id == UUID(user_id),
+                                Task.deleted_at.is_(None),
+                            )
                         )
-                    )
-                    await session.flush()
-                    deleted = res.rowcount or 0
-                else:
-                    deleted = 0
-                deleted_ids = [str(tid) for tid in valid_ids[:deleted]]
+                    ).scalars().all()
+                ]
+                deleted = 0
+                if owned:
+                    from app.services.task_service import delete_tasks_batch as _soft_delete_batch
+                    deleted = await _soft_delete_batch(session, owned, UUID(user_id))
+                deleted_uuids = set(owned[:deleted])
                 results.append({
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
                     "content": json.dumps({
                         "requested": len(task_ids),
-                        "deleted_count": deleted,
-                        "failed_count": len(invalid) + (len(valid_ids) - deleted),
-                        "deleted_ids": deleted_ids,
+                        "deleted_count": len(deleted_uuids),
+                        "failed_count": len(invalid) + (len(valid_ids) - len(deleted_uuids)),
+                        "deleted_ids": [str(tid) for tid in valid_ids if tid in deleted_uuids],
                         "failed_ids": invalid + [
                             {"task_id": str(tid), "reason": "not_found"}
-                            for tid in valid_ids[deleted:]
+                            for tid in valid_ids if tid not in deleted_uuids
                         ],
+                        "note": "Tasks were moved to the Trash (restorable for 14 days).",
                     }),
                 })
 
             elif name == "get_task_details":
                 task_id = args.get("task_id")
                 result = await session.execute(
-                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )
                 task = result.scalar_one_or_none()
                 if task:
@@ -1339,10 +1452,10 @@ async def execute_tool_calls(
                 target_id = args.get("target_id")
                 link_type = args.get("link_type", "related")
                 source = await session.execute(
-                    select(Task).where(Task.id == UUID(source_id), Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == UUID(source_id), Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )
                 target = await session.execute(
-                    select(Task).where(Task.id == UUID(target_id), Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == UUID(target_id), Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )
                 if not source.scalar_one_or_none() or not target.scalar_one_or_none():
                     results.append({
@@ -1379,6 +1492,7 @@ async def execute_tool_calls(
                     )
                     .where(
                         Task.user_id == UUID(user_id),
+                        Task.deleted_at.is_(None),
                         Task.start_date.isnot(None),
                         Task.start_date >= date_from,
                         Task.start_date <= date_to,
@@ -1399,7 +1513,7 @@ async def execute_tool_calls(
             elif name == "suggest_subtasks":
                 task_id = args.get("task_id")
                 task_result = await session.execute(
-                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )
                 task = task_result.scalar_one_or_none()
                 if not task:
@@ -1490,7 +1604,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             elif name == "detect_conflicts":
                 task_id = args.get("task_id")
                 task_result = await session.execute(
-                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )
                 task = task_result.scalar_one_or_none()
                 if not task or not task.start_date or not task.due_date:
@@ -1507,6 +1621,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         .where(
                             Task.user_id == UUID(user_id),
                             Task.id != UUID(task_id),
+                            Task.deleted_at.is_(None),
                             Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                             or_(
                                 (Task.start_date <= task.due_date) & (Task.due_date >= task.start_date),
@@ -1583,7 +1698,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     })
                     continue
                 result = await session.execute(
-                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )
                 task = result.scalar_one_or_none()
                 if not task:
@@ -1613,7 +1728,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     })
                     continue
                 result = await session.execute(
-                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )
                 task = result.scalar_one_or_none()
                 if not task:
@@ -1640,6 +1755,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         recurrence_end_date=task.recurrence_end_date,
                         sort_order=task.sort_order,
                         is_archived=False,
+                        list_id=task.list_id,
                     )
                     session.add(copy)
                     await session.flush()
@@ -1686,7 +1802,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     })
                     continue
                 task = (await session.execute(
-                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == task_uuid, Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )).scalar_one_or_none()
                 if not task:
                     results.append({
@@ -1727,7 +1843,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 from sqlalchemy import func as sa_func
                 stat_rows = (await session.execute(
                     select(Task.status, sa_func.count(Task.id))
-                    .where(Task.user_id == UUID(user_id))
+                    .where(Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                     .group_by(Task.status)
                 )).all()
                 stats = {k.value if hasattr(k, "value") else k: int(v) for k, v in stat_rows}
@@ -1744,7 +1860,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 reason = args.get("reason", "")
 
                 result = await session.execute(
-                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id))
+                    select(Task).where(Task.id == UUID(task_id), Task.user_id == UUID(user_id), Task.deleted_at.is_(None))
                 )
                 task = result.scalar_one_or_none()
                 if not task:
@@ -1768,6 +1884,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                             select(Task).where(
                                 Task.user_id == UUID(user_id),
                                 Task.id != UUID(task_id),
+                                Task.deleted_at.is_(None),
                                 Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                                 or_(
                                     (Task.start_date <= task.due_date) & (Task.due_date >= task.start_date),
@@ -1797,23 +1914,26 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             elif name == "list_tasks_by_date_range":
                 date_from = _parse_date_arg(args.get("date_from"))
                 date_to = _parse_date_arg(args.get("date_to"))
+                list_arg = args.get("list_id")
 
                 from sqlalchemy import or_
 
-                result = await session.execute(
-                    select(Task)
-                    .where(
-                        Task.user_id == UUID(user_id),
-                        Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
-                        or_(
-                            (Task.start_date >= date_from) & (Task.start_date <= date_to),
-                            (Task.due_date >= date_from) & (Task.due_date <= date_to),
-                            (Task.start_date <= date_from) & (Task.due_date >= date_to),
-                        ),
-                    )
-                    .order_by(Task.start_date)
+                stmt = select(Task).where(
+                    Task.user_id == UUID(user_id),
+                    Task.deleted_at.is_(None),
+                    Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
+                    or_(
+                        (Task.start_date >= date_from) & (Task.start_date <= date_to),
+                        (Task.due_date >= date_from) & (Task.due_date <= date_to),
+                        (Task.start_date <= date_from) & (Task.due_date >= date_to),
+                    ),
                 )
-                tasks = result.scalars().all()
+                if list_arg:
+                    list_uuid = _safe_uuid(list_arg)
+                    if list_uuid is not None:
+                        stmt = stmt.where(Task.list_id == list_uuid)
+                stmt = stmt.order_by(Task.start_date)
+                tasks = (await session.execute(stmt)).scalars().all()
                 results.append({
                     "tool_call_id": tc.get("id"),
                     "role": "tool",
@@ -1843,6 +1963,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 result = await session.execute(
                     select(Task).where(
                         Task.user_id == UUID(user_id),
+                        Task.deleted_at.is_(None),
                         Task.start_date == desired_date,
                         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                         or_(*[Task.priority == t for t in [1, 2, 3] if t <= min_priority]),
@@ -1884,6 +2005,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     select(Task)
                     .where(
                         Task.user_id == UUID(user_id),
+                        Task.deleted_at.is_(None),
                         Task.due_date.isnot(None),
                         Task.due_date >= today,
                         Task.due_date <= end,
@@ -1931,6 +2053,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         priority=t_data.get("priority", 2),
                         recurrence_rule=t_data.get("recurrence_rule"),
                         recurrence_end_date=t_data.get("recurrence_end_date"),
+                        list_id=_safe_uuid(t_data.get("list_id")),
                     )
                     created.append({"id": str(task.id), "title": task.title})
 
@@ -2143,6 +2266,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     end_time=args.get("end_time"),
                     priority=normalize_priority(args.get("priority", 2)),
                     recurrence_rule=args.get("recurrence_rule"),
+                    list_id=_safe_uuid(args.get("list_id")),
                 )
                 conflicts = []
                 if task.start_date or task.due_date:
@@ -2152,6 +2276,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         select(Task).where(
                             Task.user_id == UUID(user_id),
                             Task.id != task.id,
+                            Task.deleted_at.is_(None),
                             Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                             or_(
                                 Task.start_date == ts,
@@ -2200,6 +2325,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                 if query:
                     conditions = [
                         Task.user_id == UUID(user_id),
+                        Task.deleted_at.is_(None),
                         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                         or_(
                             func.lower(Task.title).contains(query.lower()),
@@ -2228,6 +2354,161 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         "note": "Tasks were marked cancelled, not deleted. If cancelled_count == 0, no open task matched - ask the user which task they mean.",
                     }),
                 })
+
+            elif name == "restore_task":
+                task_id = args.get("task_id")
+                task_uuid = _safe_uuid(task_id)
+                if task_uuid is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Invalid task_id format", "task_id": task_id}),
+                    })
+                    continue
+                from app.services.task_service import restore_task as _restore_task
+                restored = await _restore_task(session, task_uuid, UUID(user_id))
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps(
+                        {"restored": True, "task_id": task_id}
+                        if restored
+                        else {"error": "Task not found in trash"}
+                    ),
+                })
+
+            elif name == "create_list":
+                from app.models.task_list import TaskList
+                name = (args.get("name") or "").strip()[:200]
+                if not name:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "List name is required"}),
+                    })
+                    continue
+                count = (
+                    await session.execute(
+                        select(func.count(TaskList.id)).where(TaskList.user_id == UUID(user_id))
+                    )
+                ).scalar() or 0
+                if count >= 200:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "List limit reached (200)"}),
+                    })
+                    continue
+                max_pos = (
+                    await session.execute(
+                        select(func.max(TaskList.position)).where(TaskList.user_id == UUID(user_id))
+                    )
+                ).scalar() or 0
+                lst = TaskList(user_id=UUID(user_id), name=name, position=max_pos + 1)
+                session.add(lst)
+                await session.flush()
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({
+                        "created": True,
+                        "list": {"id": str(lst.id), "name": lst.name},
+                    }),
+                })
+
+            elif name == "list_lists":
+                from app.models.task_list import TaskList
+                rows = (
+                    await session.execute(
+                        select(TaskList).where(TaskList.user_id == UUID(user_id)).order_by(TaskList.position, TaskList.created_at)
+                    )
+                ).scalars().all()
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps({
+                        "count": len(rows),
+                        "lists": [{"id": str(l.id), "name": l.name, "position": l.position} for l in rows],
+                    }),
+                })
+
+            elif name == "rename_list":
+                from app.models.task_list import TaskList
+                list_id = args.get("list_id")
+                name = (args.get("name") or "").strip()[:200]
+                if not name:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "List name is required"}),
+                    })
+                    continue
+                list_uuid = _safe_uuid(list_id)
+                if list_uuid is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Invalid list_id format", "list_id": list_id}),
+                    })
+                    continue
+                lst = (
+                    await session.execute(
+                        select(TaskList).where(TaskList.id == list_uuid, TaskList.user_id == UUID(user_id))
+                    )
+                ).scalar_one_or_none()
+                if lst is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "List not found"}),
+                    })
+                else:
+                    lst.name = name
+                    await session.flush()
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"renamed": True, "list": {"id": str(lst.id), "name": lst.name}}),
+                    })
+
+            elif name == "delete_list":
+                from app.models.task_list import TaskList
+                list_id = args.get("list_id")
+                list_uuid = _safe_uuid(list_id)
+                if list_uuid is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "Invalid list_id format", "list_id": list_id}),
+                    })
+                    continue
+                lst = (
+                    await session.execute(
+                        select(TaskList).where(TaskList.id == list_uuid, TaskList.user_id == UUID(user_id))
+                    )
+                ).scalar_one_or_none()
+                if lst is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "List not found"}),
+                    })
+                else:
+                    from app.services.task_service import default_list_id
+                    from sqlalchemy import update as _sa_update
+                    default_id = await default_list_id(session, UUID(user_id))
+                    await session.execute(
+                        _sa_update(Task)
+                        .where(Task.list_id == lst.id, Task.user_id == UUID(user_id))
+                        .values(list_id=default_id)
+                    )
+                    await session.delete(lst)
+                    await session.flush()
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"deleted": True, "list_id": list_id, "note": "Its tasks were moved to the default 'My Tasks' list."}),
+                    })
 
             else:
                 handler = _FINANCE_TOOL_HANDLERS.get(name)

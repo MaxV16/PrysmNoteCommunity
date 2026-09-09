@@ -18,6 +18,7 @@ interface TaskFormProps {
     status?: string;
     priority?: number;
     tag_ids?: string[];
+    list_id?: string;
     recurrence_rule?: string;
     recurrence_end_date?: string;
     estimated_minutes?: number;
@@ -157,7 +158,7 @@ function CalendarPicker({ value, onChange, placeholder }: { value: string; onCha
 }
 
 export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormProps) {
-  const { tags } = useAppStore();
+  const { tags, lists, activeListId } = useAppStore();
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || "");
@@ -167,6 +168,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
   const [status, setStatus] = useState<TaskStatus>(initial?.status || "todo");
   const [priority, setPriority] = useState<PriorityTier>(initial?.priority ? normalizePriority(initial.priority) : 2);
   const [selectedTags, setSelectedTags] = useState<string[]>(() => initial?.tags?.map((t) => t.id) ?? []);
+  const [listId, setListId] = useState<string>(initial?.list_id || activeListId || "");
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     initial?.estimated_minutes?.toString() || (initial ? "" : "30")
   );
@@ -220,6 +222,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
       status: isEdit ? status : undefined,
       priority: isEdit ? priority : undefined,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
+      list_id: listId || undefined,
       recurrence_rule: endApplied.recurrence_rule || undefined,
       recurrence_end_date: endApplied.recurrence_end_date || undefined,
       estimated_minutes: estimatedMinutes ? Number(estimatedMinutes) : undefined,
@@ -280,6 +283,19 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
         </div>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+        <div className="flex-1">
+          <label className="text-xs font-medium text-secondary mb-1.5 block">List</label>
+          <select
+            value={listId}
+            onChange={(e) => setListId(e.target.value)}
+            className="input-field text-xs h-10"
+          >
+            <option value="">My Tasks</option>
+            {lists.map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+        </div>
         <div className="flex-1">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Status</label>
           <select

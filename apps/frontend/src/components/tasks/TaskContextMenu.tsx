@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "@/lib/api";
 import type { Task } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
+import { useToast } from "@/lib/toast-context";
 import { useAppStore } from "@/stores/app-store";
 import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { useUiModule } from "@/lib/ui-module-registry";
@@ -32,17 +33,13 @@ export function TaskContextMenu({ menu, onClose, onNewTask }: TaskContextMenuPro
 }
 
 function TaskMenu({ task, onClose }: { task: Task; onClose: () => void }) {
-  const { updateTask, deleteTask, createTask, fetchTasks } = useTasks();
+  const { updateTask, deleteTask, restoreTask, createTask, fetchTasks } = useTasks();
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
   const { addNoteWithContent } = useStickyBoard();
   const stickyOn = useUiModule("stickyNotes");
   const soundOn = useLocalBool("prysm_notif_sound", true);
-  const [deleteState, setDeleteState] = useState<"idle" | "confirm">("idle");
+  const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    setDeleteState("idle");
-  }, [task.id]);
 
   const handleEdit = () => {
     setSelectedTaskId(task.id);
@@ -88,14 +85,20 @@ function TaskMenu({ task, onClose }: { task: Task; onClose: () => void }) {
     }
   };
 
+  // Deletion is a soft delete (moves the task to Trash) so it is instantly
+  // reversible: the toast offers an Undo that restores the task in place.
   const handleDelete = async () => {
-    if (deleteState === "idle") {
-      setDeleteState("confirm");
-      return;
-    }
     if (useAppStore.getState().selectedTaskId === task.id) setSelectedTaskId(null);
     await deleteTask(task.id);
     onClose();
+    showToast("Task moved to Trash", "info", {
+      label: "Undo",
+      onClick: () => {
+        void restoreTask(task.id).catch(() => {
+          showToast("Could not restore task", "error");
+        });
+      },
+    });
   };
 
   return (
@@ -113,7 +116,7 @@ function TaskMenu({ task, onClose }: { task: Task; onClose: () => void }) {
       </ContextMenuItem>
       <ContextMenuDivider />
       <ContextMenuItem danger onClick={() => void handleDelete()}>
-        {deleteState === "confirm" ? "Confirm delete" : "Delete task"}
+        Delete task
       </ContextMenuItem>
     </>
   );

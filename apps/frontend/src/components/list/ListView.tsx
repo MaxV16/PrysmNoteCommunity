@@ -5,6 +5,7 @@ import { useAppStore } from "@/stores/app-store";
 import type { Task } from "@/types/task";
 import type { TaskStatus } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
+import { useToast } from "@/lib/toast-context";
 import { useBoardSections } from "@/hooks/useBoardSections";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
@@ -36,7 +37,9 @@ export function ListView() {
   const setSelectedTaskIds = useAppStore((s) => s.setSelectedTaskIds);
   const searchQuery = useAppStore((s) => s.searchQuery);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
-  const { updateTask, createTask, fetchTasks } = useTasks();
+  const activeListId = useAppStore((s) => s.activeListId);
+  const { updateTask, createTask, fetchTasks, deleteTasksBatch, restoreTasksBatch } = useTasks();
+  const { showToast } = useToast();
   const { sections: boardSections } = useBoardSections("board");
   const { sections: kanbanSections } = useBoardSections("kanban");
   const soundOn = useLocalBool("prysm_notif_sound", true);
@@ -45,13 +48,15 @@ export function ListView() {
   const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [showDateModal, setShowDateModal] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [moveDate, setMoveDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const visibleTasks = useMemo(() => {
     let filtered = tasks.filter((t) => !t.is_archived);
+    if (activeListId) {
+      filtered = filtered.filter((t) => t.list_id === activeListId);
+    }
     if (searchQuery) {
       filtered = filtered.filter((t) => matchesSearchQuery(t, searchQuery));
     }
@@ -83,7 +88,7 @@ export function ListView() {
         break;
     }
     return filtered;
-  }, [tasks, searchQuery, sortBy]);
+  }, [tasks, searchQuery, activeListId, sortBy]);
 
   const allVisibleSelected = visibleTasks.length > 0 && visibleTasks.every((t) => selectedTaskIds.includes(t.id));
 
@@ -99,7 +104,9 @@ export function ListView() {
   };
 
   const handleCreateTask = async (data: Record<string, unknown>) => {
-    await createTask(data);
+    await createTask(
+      activeListId ? { ...data, list_id: activeListId } : data
+    );
     setShowTaskForm(false);
   };
 
@@ -159,10 +166,23 @@ export function ListView() {
   };
 
   const handleDelete = async () => {
-    const ok = await runBatch(() =>
-      api.post("/tasks/batch-delete", { task_ids: selectedTaskIds })
-    );
-    if (ok) setShowDeleteConfirm(false);
+    const ids = [...selectedTaskIds];
+    if (ids.length === 0) return;
+    const ok = await runBatch(() => deleteTasksBatch(ids));
+    if (ok) {
+      showToast(
+        ids.length === 1 ? "Task moved to Trash" : `${ids.length} tasks moved to Trash`,
+        "info",
+        {
+          label: "Undo",
+          onClick: () => {
+            void restoreTasksBatch(ids).catch(() => {
+              showToast("Could not restore tasks", "error");
+            });
+          },
+        }
+      );
+    }
   };
 
   const statusSections = kanbanSections.filter((s) => s.status);
@@ -236,7 +256,7 @@ export function ListView() {
             Set date
           </button>
           <button
-            onClick={() => setShowDeleteConfirm(true)}
+            onClick={() => void handleDelete()}
             disabled={busy}
             className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-danger hover:brightness-125 rounded-full"
           >
@@ -431,34 +451,6 @@ export function ListView() {
             </button>
             <button
               onClick={() => setShowDateModal(false)}
-              className="btn bg-elevated border border-border text-secondary px-4 py-2 text-sm rounded-xl"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        isOpen={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        title="Delete tasks"
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-secondary">
-            Delete {selectedTaskIds.length} task{selectedTaskIds.length === 1 ? "" : "s"}? This cannot be undone.
-          </p>
-          {actionError && <p className="text-xs text-danger">{actionError}</p>}
-          <div className="flex gap-2">
-            <button
-              onClick={() => void handleDelete()}
-              disabled={busy}
-              className="btn bg-danger/20 border border-danger/40 text-danger px-5 py-2 text-sm rounded-xl disabled:opacity-50"
-            >
-              Delete
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(false)}
               className="btn bg-elevated border border-border text-secondary px-4 py-2 text-sm rounded-xl"
             >
               Cancel

@@ -65,7 +65,7 @@ async def convert_subtasks_to_description(
     """Collapse a parent task's child tasks back into a markdown description."""
     result = await session.execute(
         select(Task)
-        .where(Task.parent_task_id == parent.id)
+        .where(Task.parent_task_id == parent.id, Task.deleted_at.is_(None))
         .order_by(Task.sort_order, Task.created_at)
     )
     children = list(result.scalars().all())
@@ -86,7 +86,7 @@ async def reorder_subtasks(
 ) -> list[dict]:
     """Persist the given child-task ordering using sort_order."""
     result = await session.execute(
-        select(Task).where(Task.parent_task_id == parent.id)
+        select(Task).where(Task.parent_task_id == parent.id, Task.deleted_at.is_(None))
     )
     children = {str(t.id): t for t in result.scalars().all()}
 

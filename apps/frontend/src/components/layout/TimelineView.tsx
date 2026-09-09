@@ -31,6 +31,7 @@ import { usePreferencesStore } from "@/stores/preferences-store";
 import { openNotesWindow } from "@/lib/notes";
 import { matchesSearchQuery } from "@/lib/task-search";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { useToast } from "@/lib/toast-context";
 
 // How many days to prepend/append per expansion step.
 const EXPAND_STEP = 7;
@@ -76,9 +77,10 @@ interface TimelineViewProps {
 }
 
 export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewModeChange }: TimelineViewProps) {
-  const { tasks, selectedTaskId, setSelectedTaskId, selectedTaskIds, navFilter, setNavFilter, selectedTagId, searchQuery, setSearchQuery } = useAppStore();
+  const { tasks, selectedTaskId, setSelectedTaskId, selectedTaskIds, navFilter, setNavFilter, selectedTagId, searchQuery, setSearchQuery, activeListId, lists } = useAppStore();
   const { visibleRange, viewDays, setScrollOffset, expandBackward, expandForward } = useTimeline(20, 10);
-  const { createTask, updateTask, fetchRange } = useTasks();
+  const { createTask, updateTask, fetchRange, deleteTasksBatch, restoreTasksBatch } = useTasks();
+  const { showToast } = useToast();
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
   const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
@@ -167,6 +169,9 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       tasks.filter((t) => t.status !== "cancelled" && !t.is_archived),
       navFilter
     );
+    if (activeListId) {
+      activeTasks = activeTasks.filter((t) => t.list_id === activeListId);
+    }
     if (searchQuery) {
       activeTasks = activeTasks.filter((t) => matchesSearchQuery(t, searchQuery));
     }
@@ -174,7 +179,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       activeTasks = activeTasks.filter((t) => t.tags?.some((tag) => tag.id === selectedTagId));
     }
     return activeTasks;
-  }, [tasks, navFilter, selectedTagId, searchQuery]);
+  }, [tasks, navFilter, activeListId, selectedTagId, searchQuery]);
 
   const monthLabel = useMemo(() => {
     const mid = new Date(visibleRange.start);
@@ -449,7 +454,13 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       status?: string; priority?: number;
       tag_ids?: string[]; recurrence_rule?: string; recurrence_end_date?: string; estimated_minutes?: number;
     }) => {
-      await createTask(data);
+      // New tasks from a list-filtered view land in that list; otherwise the
+      // backend assigns the default "My Tasks" list.
+      await createTask(
+        useAppStore.getState().activeListId
+          ? { ...data, list_id: useAppStore.getState().activeListId }
+          : data
+      );
       setShowTaskForm(false);
       setFormDefaultDate(null);
     },
@@ -502,22 +513,34 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     if (ids.length === 0) return;
     setBatchDeleting(true);
     try {
-      await api.post("/tasks/batch-delete", { task_ids: ids });
-      const store = useAppStore.getState();
-      store.setTasks(store.tasks.filter((t) => !ids.includes(t.id)));
-      store.clearTaskSelection();
+      await deleteTasksBatch(ids);
+      useAppStore.getState().clearTaskSelection();
       setSelectionMode(false);
+      showToast(
+        ids.length === 1 ? "Task moved to Trash" : `${ids.length} tasks moved to Trash`,
+        "info",
+        {
+          label: "Undo",
+          onClick: () => {
+            void restoreTasksBatch(ids).catch(() => {
+              showToast("Could not restore tasks", "error");
+            });
+          },
+        }
+      );
     } catch {
       // keep the selection so the user can retry
     } finally {
       setBatchDeleting(false);
     }
-  }, []);
+  }, [deleteTasksBatch, restoreTasksBatch, showToast]);
   const selectedCount = selectedTaskIds.length;
 
   const filterBadge = navFilter
     ? navFilter === "inbox" ? "Inbox" : navFilter === "today" ? "Today" : "Next 7 Days"
-    : null;
+    : activeListId
+      ? lists.find((l) => l.id === activeListId)?.name || null
+      : null;
 
   const hasTasks = visibleTasks.length > 0;
 

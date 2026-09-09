@@ -116,6 +116,48 @@ export function useTasks() {
     [setTasks, fetchTasks]
   );
 
+  // Soft delete (moves to Trash) a batch; the store drops them immediately so a
+  // refresh in-flight can never bring them back.
+  const deleteTasksBatch = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      await api.post("/tasks/batch-delete", { task_ids: ids });
+      const keep = new Set(ids);
+      setTasks(useAppStore.getState().tasks.filter((t) => !keep.has(t.id)));
+      await fetchTasks();
+    },
+    [setTasks, fetchTasks]
+  );
+
+  const restoreTask = useCallback(
+    async (id: string) => {
+      await api.post(`/tasks/${id}/restore`, {});
+      await fetchTasks();
+    },
+    [fetchTasks]
+  );
+
+  const restoreTasksBatch = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+      await api.post("/tasks/batch-restore", { task_ids: ids });
+      await fetchTasks();
+    },
+    [fetchTasks]
+  );
+
+  const listTrashed = useCallback(async () => {
+    return api.get<Task[]>("/tasks/trash");
+  }, []);
+
+  const permanentDelete = useCallback(async (id: string) => {
+    await api.delete(`/tasks/${id}/permanent`);
+  }, []);
+
+  const emptyTrash = useCallback(async () => {
+    await api.post("/tasks/trash/empty", {});
+  }, []);
+
   return {
     tasks,
     fetchTasks,
@@ -123,5 +165,11 @@ export function useTasks() {
     createTask,
     updateTask,
     deleteTask,
+    deleteTasksBatch,
+    restoreTask,
+    restoreTasksBatch,
+    listTrashed,
+    permanentDelete,
+    emptyTrash,
   };
 }

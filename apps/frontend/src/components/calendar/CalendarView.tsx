@@ -162,6 +162,7 @@ function CalendarDayCell({
 
 export function CalendarView() {
   const tasks = useAppStore((s) => s.tasks);
+  const activeListId = useAppStore((s) => s.activeListId);
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
   const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
   const toggleTaskSelected = useAppStore((s) => s.toggleTaskSelected);
@@ -218,6 +219,7 @@ export function CalendarView() {
     const map: Record<string, Task[]> = {};
     for (const task of tasks) {
       if (task.is_archived || task.status === "done" || task.status === "cancelled") continue;
+      if (activeListId && task.list_id !== activeListId) continue;
       const dates = new Set<string>();
       if (task.start_date) dates.add(task.start_date);
       if (task.due_date) dates.add(task.due_date);
@@ -241,7 +243,7 @@ export function CalendarView() {
       });
     }
     return map;
-  }, [tasks]);
+  }, [tasks, activeListId]);
 
   const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
   const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
@@ -255,7 +257,7 @@ export function CalendarView() {
   };
 
   const handleCreateTask = async (data: Record<string, unknown>) => {
-    await createTask(data);
+    await createTask(activeListId ? { ...data, list_id: activeListId } : data);
     setShowTaskForm(false);
     setFormDefaultDate(null);
   };

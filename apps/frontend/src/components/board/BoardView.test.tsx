@@ -96,6 +96,8 @@ function makeTask(id: string, overrides: Partial<Task> = {}): Task {
     recurrence_end_date: null,
     sort_order: 0,
     is_archived: false,
+    list_id: null,
+    deleted_at: null,
     completed_at: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

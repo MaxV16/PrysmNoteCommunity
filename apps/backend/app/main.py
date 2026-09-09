@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import async_session_factory, system_session_factory
 from app.models.token_blacklist import TokenBlacklist
 from app.models.user_token import UserToken
-from app.routers import auth, tasks, tags, search, ai, keys, calendar, task_links, habits, oauth, notifications, teams, notes, preferences, board_sections, imports, watchlist, analytics
+from app.routers import auth, tasks, tags, search, ai, keys, calendar, task_links, habits, oauth, notifications, teams, notes, preferences, board_sections, imports, watchlist, analytics, lists
 from app.routers.ai import start_rate_limit_pruner
 from app.services.calendar_service import pull_and_import_events
 from app.services.recurring_task_service import recurring_task_background_loop
@@ -150,6 +150,23 @@ async def lifespan(app: FastAPI):
     _cleanup_task = asyncio.create_task(blacklist_cleanup(system_session_factory))
     _background_tasks.append(_cleanup_task)
 
+    async def trash_purge_loop(session_factory):
+        from app.services.task_service import purge_trash
+
+        while True:
+            try:
+                async with session_factory() as session:
+                    purged = await purge_trash(session)
+                    await session.commit()
+                    if purged:
+                        print(f"[trash] Purged {purged} expired trashed task(s)")
+            except Exception:
+                pass
+            await asyncio.sleep(6 * 3600)  # every 6 hours
+
+    _trash_task = asyncio.create_task(trash_purge_loop(system_session_factory))
+    _background_tasks.append(_trash_task)
+
     async def gcal_pull_background_loop(session_factory):
         from datetime import datetime, timezone
 
@@ -234,6 +251,14 @@ app = FastAPI(
     openapi_url="/openapi.json" if not settings.is_production else None,
 )
 
+
+@app.exception_handler(ValueError)
+async def _value_error_handler(request: Request, exc: ValueError):
+    """Surface domain validation errors (task date/time ordering, foreign-list
+    assignment) raised by the service layer as 422s, matching the Pydantic
+    validation responses, instead of unhandled 500s."""
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins.split(","),
@@ -273,6 +298,7 @@ app.include_router(board_sections.router)
 app.include_router(imports.router)
 app.include_router(watchlist.router)
 app.include_router(analytics.router)
+app.include_router(lists.router)
 
 
 @app.get("/api/health")

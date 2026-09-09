@@ -12,6 +12,9 @@ const h = vi.hoisted(() => ({
   fetchTasks: vi.fn().mockResolvedValue(undefined),
   updateTask: vi.fn().mockResolvedValue(undefined),
   createTask: vi.fn(),
+  deleteTasksBatch: vi.fn().mockResolvedValue(undefined),
+  restoreTasksBatch: vi.fn().mockResolvedValue(undefined),
+  showToast: vi.fn(),
   tasks: [] as Task[],
 }));
 
@@ -26,6 +29,7 @@ vi.mock("@/stores/app-store", () => {
       clearTaskSelection: h.clearTaskSelection,
       searchQuery: "",
       setSearchQuery: vi.fn(),
+      activeListId: null,
     };
     return selector ? selector(state) : state;
   };
@@ -38,6 +42,7 @@ vi.mock("@/stores/app-store", () => {
     clearTaskSelection: h.clearTaskSelection,
     searchQuery: "",
     setSearchQuery: vi.fn(),
+    activeListId: null,
   });
   return { useAppStore: appStore };
 });
@@ -48,7 +53,13 @@ vi.mock("@/hooks/useTasks", () => ({
     createTask: h.createTask,
     fetchTasks: h.fetchTasks,
     deleteTask: vi.fn(),
+    deleteTasksBatch: h.deleteTasksBatch,
+    restoreTasksBatch: h.restoreTasksBatch,
   }),
+}));
+
+vi.mock("@/lib/toast-context", () => ({
+  useToast: () => ({ showToast: h.showToast }),
 }));
 
 vi.mock("@/hooks/useBoardSections", () => ({
@@ -82,6 +93,8 @@ function makeTask(id: string, title: string): Task {
     recurrence_end_date: null,
     sort_order: 0,
     is_archived: false,
+    list_id: null,
+    deleted_at: null,
     completed_at: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

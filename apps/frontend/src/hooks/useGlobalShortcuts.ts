@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useAppStore } from "@/stores/app-store";
+import { useToast } from "@/lib/toast-context";
+import { api } from "@/lib/api";
 
 interface ShortcutHandlers {
   onToggleSidebar?: () => void;
@@ -16,7 +18,9 @@ function isModifier(e: KeyboardEvent): boolean {
 
 /**
  * Global keyboard shortcuts for the app. Wired inside the three-pane layout so
- * they can toggle sidebar / AI panel, focus search, create a task, etc.
+ * they can toggle sidebar / AI panel, focus search, create a task, etc. Delete
+ * / Backspace with a multi-selection soft-deletes the selected tasks (moves
+ * them to Trash) and offers an Undo via the toast.
  */
 export function useGlobalShortcuts({
   onToggleSidebar,
@@ -24,6 +28,37 @@ export function useGlobalShortcuts({
   onToggleTheme,
   onNewTask,
 }: ShortcutHandlers) {
+  const { showToast } = useToast();
+
+  const deleteSelectedWithUndo = useCallback(() => {
+    const store = useAppStore.getState();
+    const ids = store.selectedTaskIds;
+    if (ids.length === 0) return;
+
+    void (async () => {
+      try {
+        await api.post("/tasks/batch-delete", { task_ids: ids });
+      } catch {
+        return; // keep the selection so the user can retry
+      }
+      const removed = new Set(ids);
+      store.setTasks(store.tasks.filter((t) => !removed.has(t.id)));
+      store.clearTaskSelection();
+      showToast(
+        ids.length === 1 ? "Task moved to Trash" : `${ids.length} tasks moved to Trash`,
+        "info",
+        {
+          label: "Undo",
+          onClick: () => {
+            void api.post("/tasks/batch-restore", { task_ids: ids }).catch(() => {
+              showToast("Could not restore tasks", "error");
+            });
+          },
+        }
+      );
+    })();
+  }, [showToast]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -50,6 +85,17 @@ export function useGlobalShortcuts({
           e.preventDefault();
         }
         return;
+      }
+
+      // Delete / Backspace with an active multi-selection soft-deletes it (with
+      // Undo). Never fires when typing or when nothing is selected.
+      if ((e.key === "Delete" || e.key === "Backspace") && !isModifier(e)) {
+        const selected = useAppStore.getState().selectedTaskIds;
+        if (selected.length > 0) {
+          e.preventDefault();
+          deleteSelectedWithUndo();
+          return;
+        }
       }
 
       if (isModifier(e)) {
@@ -85,5 +131,5 @@ export function useGlobalShortcuts({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onToggleSidebar, onToggleAiPanel, onToggleTheme, onNewTask]);
+  }, [onToggleSidebar, onToggleAiPanel, onToggleTheme, onNewTask, deleteSelectedWithUndo]);
 }

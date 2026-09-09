@@ -42,6 +42,7 @@ import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskC
 export function KanbanBoard() {
   const tasks = useAppStore((s) => s.tasks);
   const setTasks = useAppStore((s) => s.setTasks);
+  const activeListId = useAppStore((s) => s.activeListId);
   const { fetchTasks } = useTasks();
   const { sections, addSection, renameSection, removeSection } =
     useBoardSections("kanban");
@@ -69,11 +70,12 @@ export function KanbanBoard() {
         section.id,
         sectionTasks(tasks, section)
           .filter((t) => !t.is_archived)
+          .filter((t) => !activeListId || t.list_id === activeListId)
           .sort(byBoardOrder)
       );
     }
     return map;
-  }, [tasks, sections]);
+  }, [tasks, sections, activeListId]);
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
@@ -246,6 +248,7 @@ export function KanbanBoard() {
           autoExpand
           status={scopedCreate?.status || "backlog"}
           boardSectionId={scopedCreate?.status ? null : scopedCreate?.id}
+          listId={activeListId}
           onAdd={() => {
             setScopedCreate(null);
             refetchTasks();

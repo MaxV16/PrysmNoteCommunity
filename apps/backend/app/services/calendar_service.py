@@ -300,6 +300,7 @@ async def sync_all_tasks(
         select(Task).where(
             Task.user_id == user_id,
             Task.start_date.isnot(None),
+            Task.deleted_at.is_(None),
             Task.status.notin_(["cancelled"]),
         )
     )
