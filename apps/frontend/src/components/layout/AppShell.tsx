@@ -10,6 +10,7 @@ import { useTheme } from "@/lib/theme-context";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { getNotes, minimizeNote, syncNotesFromServer, openNotesWindow } from "@/lib/notes";
 import { FinancialWorkspace } from "@/components/finance/FinancialWorkspace";
+import { HabitsWorkspace } from "@/components/habits/HabitsWorkspace";
 import { WatchlistView } from "@/components/watchlist/WatchlistView";
 import { PREF_DEFAULT_VIEW, getPrefSync } from "@/lib/preferences";
 import { usePreferencesStore } from "@/stores/preferences-store";
@@ -18,7 +19,7 @@ import { initErrorTracking } from "@/lib/error-track";
 import { MobileTabBar } from "@/components/layout/MobileTabBar";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
 
-export type WorkspaceView = "timeline" | "finance" | "watchlist";
+export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits";
 
 const VIEW_MODES: TimelineViewMode[] = ["timeline", "kanban", "calendar", "list", "board"];
 
@@ -39,6 +40,7 @@ export function AppShell() {
   const aiOn = useUiModule("aiPanel");
   const financeOn = false;
   const watchlistOn = useUiModule("watchlist");
+  const habitsOn = useUiModule("habits");
 
   const smallScreen = useMediaQuery("(max-width: 767px)");
   const isSidebarCollapsed = smallScreen ? true : sidebarCollapsed;
@@ -194,6 +196,8 @@ export function AppShell() {
             <FinancialWorkspace onOpenAi={openAi} />
           ) : view === "watchlist" && watchlistOn ? (
             <WatchlistView onOpenAi={openAi} />
+          ) : view === "habits" && habitsOn ? (
+            <HabitsWorkspace onOpenAi={openAi} />
           ) : (
             <TimelineView
               onToggleRight={toggleAi}
@@ -229,6 +233,7 @@ export function AppShell() {
           onOpenAi={openAi}
           showFinance={financeOn}
           showWatchlist={watchlistOn}
+          showHabits={habitsOn}
         />
       )}
     </div>
