@@ -13,6 +13,7 @@ import { FinancialWorkspace } from "@/components/finance/FinancialWorkspace";
 import { HabitsWorkspace } from "@/components/habits/HabitsWorkspace";
 import { QuadrantWorkspace } from "@/components/quadrant/QuadrantWorkspace";
 import { FocusWorkspace } from "@/components/focus/FocusWorkspace";
+import { CountdownWorkspace } from "@/components/countdown/CountdownWorkspace";
 import { WatchlistView } from "@/components/watchlist/WatchlistView";
 import { PREF_DEFAULT_VIEW, getPrefSync } from "@/lib/preferences";
 import { usePreferencesStore } from "@/stores/preferences-store";
@@ -21,7 +22,7 @@ import { initErrorTracking } from "@/lib/error-track";
 import { MobileTabBar } from "@/components/layout/MobileTabBar";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
 
-export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits" | "quadrant" | "focus";
+export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits" | "quadrant" | "focus" | "countdown";
 
 const VIEW_MODES: TimelineViewMode[] = ["timeline", "kanban", "calendar", "list", "board"];
 
@@ -45,6 +46,7 @@ export function AppShell() {
   const habitsOn = useUiModule("habits");
   const quadrantOn = false;
   const focusOn = false;
+  const countdownOn = false;
 
   const smallScreen = useMediaQuery("(max-width: 767px)");
   const isSidebarCollapsed = smallScreen ? true : sidebarCollapsed;
@@ -219,6 +221,8 @@ export function AppShell() {
             <QuadrantWorkspace onOpenAi={openAi} />
           ) : view === "focus" && focusOn ? (
             <FocusWorkspace onOpenAi={openAi} />
+          ) : view === "countdown" && countdownOn ? (
+            <CountdownWorkspace onOpenAi={openAi} />
           ) : view === "habits" && habitsOn ? (
             <HabitsWorkspace onOpenAi={openAi} />
           ) : (
@@ -259,6 +263,7 @@ export function AppShell() {
           showHabits={habitsOn}
           showQuadrant={quadrantOn}
           showFocus={focusOn}
+          showCountdown={countdownOn}
         />
       )}
     </div>

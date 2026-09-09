@@ -28,6 +28,7 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
   const habitsOn = useUiModule("habits");
   const quadrantOn = false;
   const focusOn = false;
+  const countdownOn = false;
   const notesOn = useUiModule("stickyNotes");
   const router = useRouter();
 
@@ -107,6 +108,16 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
             </button>
           )}
+          {countdownOn && (
+            <button
+              onClick={() => onSelectView("countdown")}
+              aria-label="Countdown"
+              className={`icon-btn ${view === "countdown" ? "bg-accent/15 text-accent" : ""}`}
+              title="Countdown"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 14.5 13.5"/></svg>
+            </button>
+          )}
           {notesOn && (
             <button
               onClick={() => { track("feature_used", { feature: "notes" }); openNotesWindow(); }}
@@ -153,7 +164,7 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
 
       {/* Navigation */}
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3">
-        <SidebarNav view={view} onSelectView={onSelectView} financeOn={financeOn} watchlistOn={watchlistOn} habitsOn={habitsOn} quadrantOn={quadrantOn} focusOn={focusOn} />
+        <SidebarNav view={view} onSelectView={onSelectView} financeOn={financeOn} watchlistOn={watchlistOn} habitsOn={habitsOn} quadrantOn={quadrantOn} focusOn={focusOn} countdownOn={countdownOn} />
         {tagsOn && (
           <div className="mt-6">
             <TagList />
