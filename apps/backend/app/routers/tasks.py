@@ -652,6 +652,24 @@ async def trash_route(
     return await serialize_tasks(session, tasks)
 
 
+def validate_task_id_batch(v: list) -> list:
+    # Bounded batch so a single request can never touch an unbounded task set.
+    if not v:
+        raise ValueError("Batch must contain at least one task id")
+    if len(v) > 100:
+        raise ValueError("Batch must contain at most 100 task ids")
+    return v
+
+
+class BatchDeleteRequest(BaseModel):
+    task_ids: list[str]
+
+    @field_validator("task_ids")
+    @classmethod
+    def validate_task_ids(cls, v: list) -> list:
+        return validate_task_id_batch(v)
+
+
 @router.post("/batch-restore")
 async def batch_restore(
     request: BatchDeleteRequest,
@@ -1067,15 +1085,6 @@ async def board_move_task(
     return (await serialize_tasks(session, [task]))[0]
 
 
-def validate_task_id_batch(v: list) -> list:
-    # Bounded batch so a single request can never touch an unbounded task set.
-    if not v:
-        raise ValueError("Batch must contain at least one task id")
-    if len(v) > 100:
-        raise ValueError("Batch must contain at most 100 task ids")
-    return v
-
-
 class BatchRescheduleRequest(BaseModel):
     task_ids: list[str]
     delta_days: int
@@ -1097,15 +1106,6 @@ class BatchBoardMoveRequest(BaseModel):
     task_ids: list[str]
     section_id: str | None = None
     index: int = 0
-
-    @field_validator("task_ids")
-    @classmethod
-    def validate_task_ids(cls, v: list) -> list:
-        return validate_task_id_batch(v)
-
-
-class BatchDeleteRequest(BaseModel):
-    task_ids: list[str]
 
     @field_validator("task_ids")
     @classmethod
