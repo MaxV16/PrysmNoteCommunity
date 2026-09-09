@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { TimelineView, type TimelineViewMode } from "./TimelineView";
 import { ToastProvider } from "@/lib/toast-context";
 
@@ -127,6 +128,20 @@ vi.mock("@/components/timeline/TimelineGrid", () => ({
 vi.mock("@/components/timeline/TimelineLane", () => ({
   TimelineLane: () => <div />,
 }));
+vi.mock("@/components/timeline/TimelineSectionsLayer", () => ({
+  TimelineSectionsLayer: () => <div data-testid="timeline-sections-layer" />,
+  SECTION_DROPPABLE_PREFIX: "section:",
+}));
+
+vi.mock("@/hooks/useTimelineSections", () => ({
+  useTimelineSections: () => ({
+    sections: [],
+    loading: false,
+    addSection: vi.fn().mockResolvedValue({ id: "s1" }),
+    renameSection: vi.fn(),
+    removeSection: vi.fn(),
+  }),
+}));
 
 function renderTimeline(mode: TimelineViewMode = "timeline") {
   return render(
@@ -162,5 +177,27 @@ describe("TimelineView selection action bar", () => {
   it("does not render the floating bar when nothing is selected", () => {
     renderTimeline("timeline");
     expect(screen.queryByTestId("selection-action-bar")).not.toBeInTheDocument();
+  });
+});
+
+describe("TimelineView sections toggle", () => {
+  beforeEach(() => {
+    h.selectedTaskIds = [];
+    (globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  });
+
+  it("renders the sections layer when the toolbar toggle is on", async () => {
+    const user = userEvent.setup();
+    renderTimeline("timeline");
+    expect(screen.queryByTestId("timeline-sections-layer")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("sections-toggle"));
+    // The dropdown opens; click the Show sections option.
+    const show = await screen.findByText("Show sections");
+    await user.click(show);
+    expect(screen.getByTestId("timeline-sections-layer")).toBeInTheDocument();
   });
 });

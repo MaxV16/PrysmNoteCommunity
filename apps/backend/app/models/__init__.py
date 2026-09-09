@@ -23,6 +23,7 @@ from app.models.board_section import BoardSection
 from app.models.task_list import TaskList
 from app.models.watchlist import WatchlistItem
 from app.models.analytics_event import AnalyticsEvent, AnalyticsDaily
+from app.models.timeline_section import TimelineSection
 
 from app.models.token_blacklist import TokenBlacklist
 
@@ -57,4 +58,5 @@ __all__ = [
     "WatchlistItem",
     "AnalyticsEvent",
     "AnalyticsDaily",
+    "TimelineSection",
 ]

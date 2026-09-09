@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import async_session_factory, system_session_factory
 from app.models.token_blacklist import TokenBlacklist
 from app.models.user_token import UserToken
-from app.routers import auth, tasks, tags, search, ai, keys, calendar, task_links, habits, oauth, notifications, teams, notes, preferences, board_sections, imports, watchlist, analytics, lists
+from app.routers import auth, tasks, tags, search, ai, keys, calendar, task_links, habits, oauth, notifications, teams, notes, preferences, board_sections, imports, watchlist, analytics, lists, timeline_sections
 from app.routers.ai import start_rate_limit_pruner
 from app.services.calendar_service import pull_and_import_events
 from app.services.recurring_task_service import recurring_task_background_loop
@@ -299,6 +299,7 @@ app.include_router(imports.router)
 app.include_router(watchlist.router)
 app.include_router(analytics.router)
 app.include_router(lists.router)
+app.include_router(timeline_sections.router)
 
 
 @app.get("/api/health")

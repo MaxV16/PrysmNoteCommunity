@@ -70,7 +70,7 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
                         "user_notification_prefs, push_subscriptions, notification_logs, "
                         "notes, teams, team_members, team_invites, team_projects, task_shares, "
                         "user_preferences, board_sections, watchlist_items, "
-                        "analytics_events, analytics_daily TO prysm_system"
+                        "analytics_events, analytics_daily, timeline_sections TO prysm_system"
                     )
                 )
                 # analytics_events uses a bigint identity PK; the BYPASSRLS
@@ -227,6 +227,12 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         "DROP POLICY IF EXISTS user_isolation ON analytics_events",
         "CREATE POLICY user_isolation ON analytics_events "
         "USING (user_id = rls_user_id()) WITH CHECK (user_id = rls_user_id())",
+        # timeline_sections - user-scoped display-layer bands on the timeline.
+        "ALTER TABLE timeline_sections ENABLE ROW LEVEL SECURITY",
+        "ALTER TABLE timeline_sections FORCE ROW LEVEL SECURITY",
+        "DROP POLICY IF EXISTS user_isolation ON timeline_sections",
+        "CREATE POLICY user_isolation ON timeline_sections "
+        "USING (user_id = rls_user_id()) WITH CHECK (user_id = rls_user_id())",
     )
 
     # FORCE row-level security on every user-scoped core table so the table
@@ -264,6 +270,7 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         "lists",
         "watchlist_items",
         "analytics_events",
+        "timeline_sections",
     )
     # ENABLE + FORCE as a pair: FORCE alone does not enable RLS on a table that
     # was created by create_all without an init.sql baseline (e.g. the test
