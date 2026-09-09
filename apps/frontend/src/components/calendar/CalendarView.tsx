@@ -257,7 +257,10 @@ export function CalendarView() {
   };
 
   const handleCreateTask = async (data: Record<string, unknown>) => {
-    await createTask(activeListId ? { ...data, list_id: activeListId } : data);
+    await createTask({
+      ...data,
+      list_id: (data.list_id as string | undefined) ?? activeListId ?? undefined,
+    });
     setShowTaskForm(false);
     setFormDefaultDate(null);
   };

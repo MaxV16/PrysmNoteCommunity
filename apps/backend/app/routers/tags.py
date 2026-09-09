@@ -131,7 +131,11 @@ async def assign_tag_to_task(
     session: AsyncSession = Depends(get_db),
 ):
     task_result = await session.execute(
-        select(Task).where(Task.id == require_uuid(task_id), Task.user_id == user.id)
+        select(Task).where(
+            Task.id == require_uuid(task_id),
+            Task.user_id == user.id,
+            Task.deleted_at.is_(None),
+        )
     )
     task = task_result.scalar_one_or_none()
     if not task:
@@ -184,7 +188,11 @@ async def get_task_tags(
     session: AsyncSession = Depends(get_db),
 ):
     task_result = await session.execute(
-        select(Task).where(Task.id == require_uuid(task_id), Task.user_id == user.id)
+        select(Task).where(
+            Task.id == require_uuid(task_id),
+            Task.user_id == user.id,
+            Task.deleted_at.is_(None),
+        )
     )
     if not task_result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")

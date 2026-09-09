@@ -80,7 +80,7 @@ async def search_similar(
             TaskEmbedding.embedding.cosine_distance(embedding).label("distance"),
         )
         .join(Task, TaskEmbedding.task_id == Task.id)
-        .where(Task.user_id == user_id)
+        .where(Task.user_id == user_id, Task.deleted_at.is_(None))
         .order_by(text("distance"))
         .limit(limit)
     )

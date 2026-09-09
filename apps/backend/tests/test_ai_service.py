@@ -142,6 +142,23 @@ async def test_build_messages_with_context(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_build_messages_injects_active_list(db_session: AsyncSession):
+    """An active list from the UI context tells the model which list_id to pass
+    when creating tasks, so AI-created tasks land in the user's active list."""
+    messages = build_messages(
+        [],
+        "create a task",
+        context={"active_list": {"id": "list-123", "name": "Work"}},
+    )
+    system = messages[0]["content"]
+    assert "ACTIVE LIST" in system
+    assert 'list_id="list-123"' in system
+    assert "Work" in system
+    # Untrusted injection must be fenced, like view_filter contexts.
+    assert "[UNTRUSTED DATA START]" in system
+
+
+@pytest.mark.asyncio
 async def test_build_messages_limits_chat_history(db_session: AsyncSession):
     long_history = [{"role": "user", "content": f"msg {i}"} for i in range(50)]
     messages = build_messages(long_history, "final")

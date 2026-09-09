@@ -453,14 +453,15 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       start_time?: string; end_time?: string;
       status?: string; priority?: number;
       tag_ids?: string[]; recurrence_rule?: string; recurrence_end_date?: string; estimated_minutes?: number;
+      list_id?: string;
     }) => {
-      // New tasks from a list-filtered view land in that list; otherwise the
-      // backend assigns the default "My Tasks" list.
-      await createTask(
-        useAppStore.getState().activeListId
-          ? { ...data, list_id: useAppStore.getState().activeListId }
-          : data
-      );
+      // New tasks from a list-filtered view land in that list, unless the form
+      // explicitly picked a different list (the dropdown choice always wins).
+      // Otherwise the backend assigns the default "My Tasks" list.
+      await createTask({
+        ...data,
+        list_id: data.list_id ?? useAppStore.getState().activeListId ?? undefined,
+      });
       setShowTaskForm(false);
       setFormDefaultDate(null);
     },

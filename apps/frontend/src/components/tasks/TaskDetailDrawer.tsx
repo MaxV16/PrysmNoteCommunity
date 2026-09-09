@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import type { Task, TaskTag } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
+import { useToast } from "@/lib/toast-context";
 import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { TaskForm } from "./TaskForm";
 import { TaskChecklist } from "./TaskChecklist";
@@ -122,7 +123,8 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const priorityRef = useRef<HTMLButtonElement | null>(null);
   const statusRef = useRef<HTMLButtonElement | null>(null);
   const [optionsTrigger, setOptionsTrigger] = useState<HTMLButtonElement | null>(null);
-  const { updateTask, deleteTask, fetchTasks } = useTasks();
+  const { updateTask, deleteTask, restoreTask, fetchTasks } = useTasks();
+  const { showToast } = useToast();
   const { addNoteWithContent } = useStickyBoard();
 
   const isNote = !task.start_date && !task.due_date;
@@ -183,6 +185,16 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const handleDelete = async () => {
     await deleteTask(task.id);
     onClose();
+    // Soft delete + Undo, same as the context menu: the task sits in the Trash
+    // and can be brought back without leaving the drawer.
+    showToast("Task moved to Trash", "info", {
+      label: "Undo",
+      onClick: () => {
+        void restoreTask(task.id).catch(() => {
+          showToast("Could not restore task", "error");
+        });
+      },
+    });
   };
 
   const handleStatusChange = async (status: string) => {

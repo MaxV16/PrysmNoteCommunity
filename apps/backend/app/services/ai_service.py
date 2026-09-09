@@ -916,6 +916,18 @@ REPLY FORMATTING (always follow):
                 "[UNTRUSTED DATA END]"
             )
 
+        if context.get("active_list"):
+            al = context["active_list"]
+            al_id = al.get("id")
+            al_name = al.get("name") or "a list"
+            system_content += (
+                "\n\n[UNTRUSTED DATA START] ACTIVE LIST: The user currently has the list "
+                f'"{al_name}" (id {al_id}) active in the sidebar. When creating tasks and '
+                "the user expects them to land in that list, pass "
+                f'list_id="{al_id}" to create_task / batch_create_tasks. If the user names '
+                "a different list, use the one they named instead. [UNTRUSTED DATA END]"
+            )
+
         if context.get("calendar_density"):
             cd = context["calendar_density"]
             if isinstance(cd, list):

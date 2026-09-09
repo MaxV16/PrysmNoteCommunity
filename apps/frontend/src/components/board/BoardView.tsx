@@ -176,6 +176,7 @@ export function BoardView({ tasks }: BoardViewProps) {
   const allTasks = useAppStore((s) => s.tasks);
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
   const setTasks = useAppStore((s) => s.setTasks);
+  const activeListId = useAppStore((s) => s.activeListId);
   const { fetchTasks, updateTask } = useTasks();
   const { sections, addSection } = useBoardSections("board");
 
@@ -497,6 +498,7 @@ export function BoardView({ tasks }: BoardViewProps) {
           autoExpand
           status="backlog"
           boardSectionId={scopedCreate?.id && scopedCreate.id !== UNSORTED_ID ? scopedCreate.id : null}
+          listId={activeListId}
           onAdd={() => {
             setScopedCreate(null);
             void fetchTasks();

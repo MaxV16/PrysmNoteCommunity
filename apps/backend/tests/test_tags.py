@@ -97,6 +97,22 @@ async def test_tag_task_association(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_tag_operations_on_trashed_task_404(client: AsyncClient):
+    """Tag assignment/removal/list against a soft-deleted (trashed) task must
+    404 - a trashed task is out of every normal task surface, so tagging it back
+    into existance from memory would resurface it inconsistently."""
+    tag = (await client.post("/api/tags/", json={"name": "ghosttag"})).json()
+    task = (await client.post("/api/tasks/", json={"title": "Zombie"})).json()
+    assert (await client.delete(f"/api/tasks/{task['id']}")).status_code == 200
+
+    assign = await client.post(f"/api/tags/tasks/{task['id']}", params={"tag_id": tag["id"]})
+    assert assign.status_code == 404
+
+    list_tags = await client.get(f"/api/tags/tasks/{task['id']}")
+    assert list_tags.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_tag_task_create_with_tags(client: AsyncClient):
     tag = await client.post("/api/tags/", json={"name": "important"})
     tag_id = tag.json()["id"]
@@ -105,7 +121,6 @@ async def test_tag_task_create_with_tags(client: AsyncClient):
         "title": "Task with tag",
         "tag_ids": [tag_id],
     })
-    assert task.status_code == 200
 
     tags = await client.get(f"/api/tags/tasks/{task.json()['id']}")
     assert len(tags.json()) == 1

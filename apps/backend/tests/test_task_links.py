@@ -44,6 +44,34 @@ async def test_create_task_link_invalid_type(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_create_task_link_rejects_trashed_task(client: AsyncClient):
+    """A trashed task is invisible to the link endpoints: it must not be usable
+    as a source or target, and links into it must not silently vanish into the
+    trash view (soft-deleted tasks are out of every normal task surface)."""
+    t1 = (await client.post("/api/tasks/", json={"title": "Alive"})).json()
+    t2 = (await client.post("/api/tasks/", json={"title": "Doomed"})).json()
+
+    # Soft-delete t2 into the trash.
+    assert (await client.delete(f"/api/tasks/{t2['id']}")).status_code == 200
+
+    # Linking an alive task to a trashed one must 404 (target not found).
+    resp = await client.post("/api/task-links/", json={
+        "source_task_id": t1["id"],
+        "target_task_id": t2["id"],
+        "link_type": "related",
+    })
+    assert resp.status_code == 404
+
+    # And a trashed task can't be the source either.
+    resp = await client.post("/api/task-links/", json={
+        "source_task_id": t2["id"],
+        "target_task_id": t1["id"],
+        "link_type": "related",
+    })
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_create_task_link_self_ref(client: AsyncClient):
     t = await client.post("/api/tasks/", json={"title": "Self"})
     tid = t.json()["id"]

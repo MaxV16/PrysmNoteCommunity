@@ -229,6 +229,10 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
     const context: Record<string, unknown> = {};
     if (store.navFilter) context.view_filter = store.navFilter;
     if (view === "finance") context.active_view = "finance";
+    if (store.activeListId && store.lists.length > 0) {
+      const activeList = store.lists.find((l) => l.id === store.activeListId);
+      if (activeList) context.active_list = { id: activeList.id, name: activeList.name };
+    }
     sendMessage(message, provider, Object.keys(context).length > 0 ? context : undefined);
   }, [sendMessage, provider, view]);
 

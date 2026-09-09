@@ -1,5 +1,9 @@
+import os
+
 import pytest
 from httpx import AsyncClient
+
+IS_PG = os.getenv("TEST_DATABASE_URL", "").startswith("postgresql")
 
 
 @pytest.mark.asyncio
@@ -110,3 +114,35 @@ async def test_search_semantic_fallback(client: AsyncClient):
     assert data["mode"] == "semantic"
     # Should have either results, an error field, or empty results
     assert "results" in data
+
+
+@pytest.mark.skipif(not IS_PG, reason="semantic search needs pgvector (PostgreSQL)")
+@pytest.mark.asyncio
+async def test_semantic_search_excludes_trashed_tasks(client, test_user, db_session):
+    """Semantic search must not surface trashed tasks: the embedding join walks
+    the tasks table, so it has to apply the same deleted_at filter as every
+    other task query (regression for trash leaking into /api/search)."""
+    from datetime import datetime, timezone
+
+    from app.models.embedding import TaskEmbedding
+    from app.models.task import Task
+    from app.services.embedding_service import search_similar
+
+    vec = [0.1] * 1536
+    alive = Task(user_id=test_user.id, title="Semantic alive", status="todo")
+    alive.embedding = TaskEmbedding(embedding=vec)
+    db_session.add(alive)
+    trashed = Task(
+        user_id=test_user.id,
+        title="Semantic ghost",
+        status="todo",
+        deleted_at=datetime.now(timezone.utc),
+    )
+    trashed.embedding = TaskEmbedding(embedding=vec)
+    db_session.add(trashed)
+    await db_session.flush()
+
+    hits = await search_similar(db_session, vec, test_user.id, limit=10)
+    titles = {t.title for t, _score in hits}
+    assert "Semantic alive" in titles
+    assert "Semantic ghost" not in titles

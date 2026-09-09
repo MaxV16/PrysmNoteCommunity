@@ -111,6 +111,7 @@ describe("TaskContextMenu - task menu", () => {
       priority: 2,
       estimated_minutes: null,
       tag_ids: ["tag1"],
+      list_id: undefined,
     });
   });
 

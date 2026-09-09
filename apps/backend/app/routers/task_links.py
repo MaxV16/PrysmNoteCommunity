@@ -50,13 +50,21 @@ async def create_link_route(
     session: AsyncSession = Depends(get_db),
 ):
     source = await session.execute(
-        select(Task).where(Task.id == require_uuid(request.source_task_id), Task.user_id == user.id)
+        select(Task).where(
+            Task.id == require_uuid(request.source_task_id),
+            Task.user_id == user.id,
+            Task.deleted_at.is_(None),
+        )
     )
     if not source.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source task not found")
 
     target = await session.execute(
-        select(Task).where(Task.id == require_uuid(request.target_task_id), Task.user_id == user.id)
+        select(Task).where(
+            Task.id == require_uuid(request.target_task_id),
+            Task.user_id == user.id,
+            Task.deleted_at.is_(None),
+        )
     )
     if not target.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target task not found")

@@ -15,5 +15,6 @@ export function buildDuplicatePayload(task: Task) {
     priority: task.priority,
     estimated_minutes: task.estimated_minutes,
     tag_ids: (task.tags ?? []).map((t) => t.id),
+    list_id: task.list_id ?? undefined,
   };
 }

@@ -482,5 +482,7 @@ async def team_tasks(
     team = await _get_team(session, _require_uuid(team_id))
     await _require_membership(session, team.id, user, {"owner", "admin", "member"})
     shared_ids = select(TaskShare.task_id).where(TaskShare.team_id == team.id)
-    result = await session.execute(select(Task).where(Task.id.in_(shared_ids)).order_by(Task.created_at.desc()))
+    result = await session.execute(
+        select(Task).where(Task.id.in_(shared_ids), Task.deleted_at.is_(None)).order_by(Task.created_at.desc())
+    )
     return [_serialize_task(t) for t in result.scalars().all()]

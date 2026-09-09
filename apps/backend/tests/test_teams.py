@@ -73,6 +73,27 @@ async def test_share_task_and_list_team_tasks(client, test_user):
 
 
 @pytest.mark.asyncio
+async def test_team_tasks_exclude_trashed(client, test_user):
+    """A task shared to a team but soft-deleted by the owner must disappear from
+    the team's shared task list - the trash hides it from every surface, team
+    views included (and restore brings it back)."""
+    team = (await client.post("/api/teams/", json={"name": "Epsilon"})).json()
+    task = (await client.post("/api/tasks/", json={"title": "Team zombie", "status": "todo"})).json()
+    assert (await client.post(f"/api/teams/{team['id']}/share-task", json={"task_id": task["id"]})).status_code == 200
+
+    assert (await client.delete(f"/api/tasks/{task['id']}")).status_code == 200
+
+    res = await client.get(f"/api/teams/{team['id']}/tasks")
+    assert res.status_code == 200
+    assert all(t["title"] != "Team zombie" for t in res.json())
+
+    # Undo brings it back to the team surface too.
+    assert (await client.post(f"/api/tasks/{task['id']}/restore", json={})).status_code == 200
+    res = await client.get(f"/api/teams/{team['id']}/tasks")
+    assert any(t["title"] == "Team zombie" for t in res.json())
+
+
+@pytest.mark.asyncio
 async def test_notes_crud(client):
     res = await client.post(
         "/api/notes/",

@@ -25,6 +25,7 @@ const baseTask = {
   tags: [{ id: "tag1", name: "work", color: "#f00" }],
   links: [],
   subtasks: [{ id: "sub1", title: "child", status: "todo" }],
+  list_id: "list-1",
 } as const;
 
 describe("buildDuplicatePayload", () => {
@@ -37,6 +38,7 @@ describe("buildDuplicatePayload", () => {
       priority: 1,
       estimated_minutes: 90,
       tag_ids: ["tag1"],
+      list_id: "list-1",
     });
   });
 
@@ -61,6 +63,7 @@ describe("buildDuplicatePayload", () => {
       priority: 1,
       estimated_minutes: 90,
       tag_ids: [],
+      list_id: "list-1",
     });
   });
 });
