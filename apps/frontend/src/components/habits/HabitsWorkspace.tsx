@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { HabitTracker } from "@/components/habits/HabitTracker";
 import { HabitForm } from "@/components/habits/HabitForm";
+import { useHabits } from "@/hooks/useHabits";
 
 interface HabitsWorkspaceProps {
   onOpenAi?: () => void;
@@ -10,6 +11,7 @@ interface HabitsWorkspaceProps {
 
 export function HabitsWorkspace(_props: HabitsWorkspaceProps) {
   const [showForm, setShowForm] = useState(false);
+  const { habits, loading, fetchHabits, createHabit, toggleLog, deleteHabit } = useHabits();
 
   return (
     <div className="flex flex-col bg-base" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
@@ -30,10 +32,10 @@ export function HabitsWorkspace(_props: HabitsWorkspaceProps) {
       <div className="flex-1 overflow-y-auto p-4">
         {showForm && (
           <div className="mb-4 max-w-md">
-            <HabitForm onCreated={() => setShowForm(false)} />
+            <HabitForm createHabit={createHabit} onCreated={() => setShowForm(false)} />
           </div>
         )}
-        <HabitTracker />
+        <HabitTracker habits={habits} loading={loading} toggleLog={toggleLog} deleteHabit={deleteHabit} fetchHabits={fetchHabits} />
       </div>
     </div>
   );

@@ -1,16 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { useHabits } from "@/hooks/useHabits";
 
 const COLORS = ["#4C7EFF", "#22C55E", "#FF9500", "#EF4444", "#EC4899", "#A855F7"];
 
 export function HabitForm({
+  createHabit,
   onCreated,
 }: {
+  createHabit: (input: { title: string; frequency: string; target_count?: number; color?: string }) => Promise<unknown>;
   onCreated: () => void;
 }) {
-  const { createHabit } = useHabits();
   const [title, setTitle] = useState("");
   const [frequency, setFrequency] = useState("daily");
   const [color, setColor] = useState(COLORS[0]);

@@ -556,6 +556,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   // Right-click on the plain timeline canvas (not a task bar, day cell or
   // interactive element) opens a bare new-task/new-note menu.
   const openCanvasMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
     const target = e.target as HTMLElement;
     if (
       target.closest(
@@ -991,22 +992,22 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
                   dragDisabled={smallScreen}
                   selectMode={selectionMode}
                 />
-                {sectionsOn && (
-                  <TimelineSectionsLayer
-                    sections={sections}
-                    tasks={visibleTasks}
-                    days={days}
-                    dayWidth={dayWidth}
-                    bodyRef={bodyRef}
-                    lists={lists}
-                    tags={tags}
-                    onSplit={() => void handleSplit()}
-                    onRename={(id, name) => void renameSection(id, { name })}
-                    onSetRule={(id, kind, value) => void renameSection(id, { rule_kind: kind, rule_value: value })}
-                    onDelete={(id) => void removeSection(id)}
-                  />
-                )}
               </div>
+              {sectionsOn && (
+                <TimelineSectionsLayer
+                  sections={sections}
+                  tasks={visibleTasks}
+                  days={days}
+                  dayWidth={dayWidth}
+                  bodyRef={bodyRef}
+                  lists={lists}
+                  tags={tags}
+                  onSplit={() => void handleSplit()}
+                  onRename={(id, name) => void renameSection(id, { name })}
+                  onSetRule={(id, kind, value) => void renameSection(id, { rule_kind: kind, rule_value: value })}
+                  onDelete={(id) => void removeSection(id)}
+                />
+              )}
             </DndContext>
           </div>
 

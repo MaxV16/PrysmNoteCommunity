@@ -13,6 +13,8 @@ from app.services.ai_service import (
     TOOL_DEFINITIONS,
     _FINANCE_TOOL_DEFINITIONS,
     _OPENCLAW_TOOL_DEFINITIONS,
+    _QUADRANT_TOOL_DEFINITIONS,
+    _FOCUS_TOOL_DEFINITIONS,
     _needs_tool_retry,
 )
 
@@ -117,12 +119,18 @@ async def test_tool_definitions_have_all_tools():
         "create_list", "list_lists", "rename_list", "delete_list",
         "search_titles", "list_watchlist", "add_watchlist_item",
         "update_watchlist_item", "remove_watchlist_item",
+        "list_habits", "create_habit", "update_habit", "delete_habit",
+        "toggle_habit_log", "get_habit_logs",
+        "list_countdowns", "create_countdown", "update_countdown",
+        "complete_countdown", "delete_countdown",
     }
     # Private-build finance + OpenClaw tools are appended when the EE package is
     # present (private repo); the community build strips them, so the expected
     # set is built from whatever the module actually loaded.
     expected |= {t["function"]["name"] for t in _FINANCE_TOOL_DEFINITIONS}
     expected |= {t["function"]["name"] for t in _OPENCLAW_TOOL_DEFINITIONS}
+    expected |= {t["function"]["name"] for t in _QUADRANT_TOOL_DEFINITIONS}
+    expected |= {t["function"]["name"] for t in _FOCUS_TOOL_DEFINITIONS}
     assert tool_names == expected, f"Missing tools: {expected - tool_names}"
 
 
@@ -2453,5 +2461,35 @@ async def test_first_choice_in_stream_clients_skips_empty_choice_chunks(monkeypa
         await client.aclose()
 
     assert pieces == ["ok"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_calls_hard_caps_per_round(db_session: AsyncSession, ai_user):
+    """A turn with too many tool calls must stop instead of running a runaway
+    duplicate loop (the finance 31k-delete incident)."""
+    from app.services.ai_service import _MAX_TOOL_CALLS_PER_ROUND
+
+    calls = [
+        {"id": f"c{i}", "function": {"name": "list_accounts", "arguments": "{}"}}
+        for i in range(_MAX_TOOL_CALLS_PER_ROUND + 5)
+    ]
+    results = await execute_tool_calls(calls, str(ai_user), db_session)
+    assert len(results) == 1
+    content = json.loads(results[0]["content"])
+    assert content["retryable"] is False
+    assert "Too many tool calls" in content["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_tool_calls_error_includes_tool_name(db_session: AsyncSession, ai_user):
+    """A failing handler must surface which tool failed, so the model can stop
+    instead of blindly retrying the same call."""
+    # update_financial_item coerces item_id with uuid.UUID(); a malformed id
+    # raises inside the handler, which must be reported with the tool name.
+    bad = await execute_tool_calls([
+        {"id": "c1", "function": {"name": "update_financial_item", "arguments": json.dumps({"item_id": "not-a-uuid"})}},
+    ], str(ai_user), db_session)
+    content = json.loads(bad[0]["content"])
+    assert "update_financial_item" in content["error"] or "update_financial_item" in content.get("message", "")
 
 

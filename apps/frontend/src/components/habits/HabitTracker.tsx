@@ -1,7 +1,5 @@
 "use client";
 
-import { useHabits } from "@/hooks/useHabits";
-
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function getLast7Days(): Date[] {
@@ -18,8 +16,23 @@ function dateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-export function HabitTracker() {
-  const { habits, loading, toggleLog, deleteHabit } = useHabits();
+interface HabitTrackerProps {
+  habits: Array<{
+    id: string;
+    title: string;
+    frequency: string;
+    target_count: number;
+    color: string | null;
+    streak: number;
+    created_at: string;
+  }>;
+  loading: boolean;
+  toggleLog: (habitId: string) => Promise<unknown>;
+  deleteHabit: (habitId: string) => Promise<unknown>;
+  fetchHabits: () => Promise<void>;
+}
+
+export function HabitTracker({ habits, loading, toggleLog, deleteHabit }: HabitTrackerProps) {
   const weekDays = getLast7Days();
   const today = dateStr(new Date());
 
@@ -58,14 +71,8 @@ export function HabitTracker() {
         </div>
 
         {habits.map((habit) => (
-          <div key={habit.id} className="flex items-center gap-1 group">
+          <div key={habit.id} className="flex items-center gap-1">
             <div className="w-[100px] flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => deleteHabit(habit.id)}
-                className="opacity-0 group-hover:opacity-100 text-[10px] text-muted hover:text-danger transition-all"
-              >
-                ×
-              </button>
               <span className="text-xs text-secondary truncate flex-1">{habit.title}</span>
             </div>
             <div className="flex gap-1 flex-1">
@@ -83,6 +90,14 @@ export function HabitTracker() {
               ))}
             </div>
             <span className="text-[10px] text-muted w-8 text-right">{habit.streak}d</span>
+            <button
+              onClick={() => deleteHabit(habit.id)}
+              className="text-[10px] text-muted transition-colors hover:text-danger"
+              aria-label={`Delete ${habit.title}`}
+              title="Delete habit"
+            >
+              ×
+            </button>
           </div>
         ))}
       </div>

@@ -13,7 +13,7 @@ const baseSection: TimelineSection = {
   start_pct: 50,
   end_pct: 100,
   rule_kind: "priority",
-  rule_value: "4,5",
+  rule_value: "1",
   position: 0,
 };
 
@@ -27,7 +27,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     title: "Task A",
     description: null,
     status: "todo",
-    priority: 4,
+    priority: 1,
     // Day index 5 in the 7-day window falls inside the 50..100% band when the
     // virtual viewport is 1000px wide (band covers days 4..6).
     start_date: "2026-09-14",
@@ -97,7 +97,7 @@ describe("TimelineSectionsLayer", () => {
   });
 
   it("shows matching tasks inside the band", () => {
-    renderLayer({ tasks: [makeTask(), makeTask({ id: "t2", title: "Other", priority: 1 })] });
+    renderLayer({ tasks: [makeTask(), makeTask({ id: "t2", title: "Other", priority: 2 })] });
     expect(screen.getByText("Task A")).toBeInTheDocument();
     expect(screen.queryByText("Other")).not.toBeInTheDocument();
   });

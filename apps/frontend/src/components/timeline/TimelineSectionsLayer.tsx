@@ -91,6 +91,8 @@ function ruleSummary(section: TimelineSection, lists: TaskList[], tags: { id: st
   if (!kind || kind === "all" || !value) return null;
   switch (kind) {
     case "priority":
+      if (value === "1") return "High";
+      if (value === "3") return "Low";
       return `Priority ${value}`;
     case "status":
       return `Status: ${value.replace(/_/g, " ")}`;
@@ -327,16 +329,16 @@ function SectionBand({
             All tasks
           </button>
           <button
-            onClick={() => onSetRule(section.id, "priority", "4,5")}
-            className={`block w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-hover ${section.rule_kind === "priority" ? "text-accent font-semibold" : "text-secondary"}`}
+            onClick={() => onSetRule(section.id, "priority", "1")}
+            className={`block w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-hover ${section.rule_kind === "priority" && section.rule_value === "1" ? "text-accent font-semibold" : "text-secondary"}`}
           >
-            Priority 4-5
+            Priority: High
           </button>
           <button
-            onClick={() => onSetRule(section.id, "priority", "1,2")}
-            className={`block w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-hover ${section.rule_kind === "priority" && section.rule_value === "1,2" ? "text-accent font-semibold" : "text-secondary"}`}
+            onClick={() => onSetRule(section.id, "priority", "3")}
+            className={`block w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-hover ${section.rule_kind === "priority" && section.rule_value === "3" ? "text-accent font-semibold" : "text-secondary"}`}
           >
-            Priority 1-2
+            Priority: Low
           </button>
           <button
             onClick={() => onSetRule(section.id, "status", "done")}

@@ -596,6 +596,28 @@ _OPENCLAW_TOOL_DEFINITIONS: list = []
 _OPENCLAW_TOOL_HANDLERS: dict = {}
 _OPENCLAW_SYSTEM_NOTE: str = ""
 
+# Private build only: append countdown tools (free-capped cards) to the agent's
+# toolset when the EE package is present. Same guarded pattern as finance, but
+# countdown tools are NOT premium-gated: free users keep them (see
+# tools_for_user / ee_tool_names - countdowns stay OUT of the premium set).
+_COUNTDOWN_TOOL_DEFINITIONS: list = []
+_COUNTDOWN_TOOL_HANDLERS: dict = {}
+_COUNTDOWN_SYSTEM_NOTE: str = ""
+
+# Private build only: append quadrant AI tools (premium-gated Eisenhower
+# matrix). Same guarded pattern as finance/OpenClaw: defaults stay defined so the
+# community build has safe no-ops, and the tools join ee_tool_names() so
+# tools_for_user strips them for free users.
+_QUADRANT_TOOL_DEFINITIONS: list = []
+_QUADRANT_TOOL_HANDLERS: dict = {}
+_QUADRANT_SYSTEM_NOTE: str = ""
+
+# Private build only: append Focus Timer AI tools (premium-gated). Same guarded
+# premium pattern as finance/OpenClaw; joined into ee_tool_names().
+_FOCUS_TOOL_DEFINITIONS: list = []
+_FOCUS_TOOL_HANDLERS: dict = {}
+_FOCUS_SYSTEM_NOTE: str = ""
+
 # Private build only: append the premium "how to use" feature guide (finance,
 # idea engine + OpenClaw setup, AI Connect/MCP, server voice) to the system
 # prompt. Same guarded pattern as the finance/OpenClaw blocks above: the
@@ -613,6 +635,17 @@ from app.services.watchlist_ai_tools import (  # noqa: E402
 )
 
 TOOL_DEFINITIONS.extend(_WATCHLIST_TOOL_DEFINITIONS)
+
+# Core habit tools (daily/weekly/monthly trackers) are available to every AI
+# user, imported unconditionally alongside watchlist (same reference pattern -
+# see the feature matrix in AGENTS.md).
+from app.services.habit_ai_tools import (  # noqa: E402
+    HABIT_TOOL_DEFINITIONS as _HABIT_TOOL_DEFINITIONS,
+    HABIT_TOOL_HANDLERS as _HABIT_TOOL_HANDLERS,
+    HABIT_SYSTEM_NOTE as _HABIT_SYSTEM_NOTE,
+)
+
+TOOL_DEFINITIONS.extend(_HABIT_TOOL_DEFINITIONS)
 
 # Premium gating for EE tools (finance AI tools). The EE build registers a
 # per-user check via register_premium_check(); the community build registers
@@ -641,8 +674,23 @@ def openclaw_tool_names() -> set[str]:
     return {t.get("function", {}).get("name") for t in _OPENCLAW_TOOL_DEFINITIONS if t.get("function", {}).get("name")}
 
 
+def quadrant_tool_names() -> set[str]:
+    return {t.get("function", {}).get("name") for t in _QUADRANT_TOOL_DEFINITIONS if t.get("function", {}).get("name")}
+
+
+def focus_tool_names() -> set[str]:
+    return {t.get("function", {}).get("name") for t in _FOCUS_TOOL_DEFINITIONS if t.get("function", {}).get("name")}
+
+
 def ee_tool_names() -> set[str]:
-    return finance_tool_names() | openclaw_tool_names()
+    # Countdown tools are deliberately absent: countdowns are free-capped, so
+    # free users keep those definitions (see tools_for_user).
+    return (
+        finance_tool_names()
+        | openclaw_tool_names()
+        | quadrant_tool_names()
+        | focus_tool_names()
+    )
 
 
 def tools_for_user(premium: bool) -> list:
@@ -970,6 +1018,13 @@ REPLY FORMATTING (always follow):
     if include_finance and _OPENCLAW_SYSTEM_NOTE:
         system_content += "\n\n" + _OPENCLAW_SYSTEM_NOTE
     system_content += "\n\n" + _WATCHLIST_SYSTEM_NOTE
+    system_content += "\n\n" + _HABIT_SYSTEM_NOTE
+    if _COUNTDOWN_SYSTEM_NOTE:
+        system_content += "\n\n" + _COUNTDOWN_SYSTEM_NOTE
+    if include_finance and _QUADRANT_SYSTEM_NOTE:
+        system_content += "\n\n" + _QUADRANT_SYSTEM_NOTE
+    if include_finance and _FOCUS_SYSTEM_NOTE:
+        system_content += "\n\n" + _FOCUS_SYSTEM_NOTE
     system_content += "\n\n" + PYRSM_FEATURE_GUIDE
     if include_finance and _PREMIUM_GUIDE_TEXT:
         system_content += "\n\n" + _PREMIUM_GUIDE_TEXT
@@ -998,6 +1053,8 @@ async def get_llm_client(
         return get_provider(provider, api_key, model=model, fallbacks=fallbacks, zdr=zdr)
     return get_provider(provider, api_key)
 
+
+_MAX_TOOL_CALLS_PER_ROUND = 20
 
 async def execute_tool_calls(
     tool_calls: list[dict],
@@ -1081,6 +1138,20 @@ async def execute_tool_calls(
             return None
 
     results = []
+
+    # Hard cap on tool calls per round: prevent runaway duplicate loops (e.g.
+    # the AI calling delete one-at-a-time 31k times). When exceeded, append a
+    # final assistant note telling the model to stop and summarize.
+    if len(tool_calls) > _MAX_TOOL_CALLS_PER_ROUND:
+        results.append({
+            "tool_call_id": tool_calls[0].get("id"),
+            "role": "tool",
+            "content": json.dumps({
+                "error": f"Too many tool calls ({len(tool_calls)}). Stopped after {_MAX_TOOL_CALLS_PER_ROUND}.",
+                "retryable": False,
+            }),
+        })
+        return results
 
     for tc in tool_calls:
         fn = tc.get("function", {})
@@ -2528,6 +2599,14 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     handler = _OPENCLAW_TOOL_HANDLERS.get(name)
                 if handler is None:
                     handler = _WATCHLIST_TOOL_HANDLERS.get(name)
+                if handler is None:
+                    handler = _HABIT_TOOL_HANDLERS.get(name)
+                if handler is None:
+                    handler = _COUNTDOWN_TOOL_HANDLERS.get(name)
+                if handler is None:
+                    handler = _QUADRANT_TOOL_HANDLERS.get(name)
+                if handler is None:
+                    handler = _FOCUS_TOOL_HANDLERS.get(name)
                 if handler is not None:
                     payload = await handler(args, user_id, session)
                     results.append({
@@ -2568,7 +2647,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
             results.append({
                 "tool_call_id": tc.get("id"),
                 "role": "tool",
-                "content": json.dumps({"error": "The operation failed - please try again"}),
+                "content": json.dumps({"error": f"The operation failed (tool: {name})", "retryable": False}),
             })
 
     # Bound token usage: don't feed huge serialized tool outputs back to the
