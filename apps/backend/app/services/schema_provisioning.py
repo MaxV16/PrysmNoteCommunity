@@ -54,6 +54,18 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
     async with engine.begin() as conn:
         await conn.run_sync(lambda sync_conn: app.models.Base.metadata.create_all(sync_conn))
 
+    # Timeline sections were removed from the product; converge existing databases
+    # (fresh ones never create the table since the model is gone). Runs right
+    # after create_all, unconditionally, so it executes even when the team RLS
+    # helper below fails and ensure_schema returns early. CASCADE also drops any
+    # FK still referencing the table.
+    try:
+        async with engine.begin() as conn:
+            if conn.dialect.name == "postgresql":
+                await conn.execute(text("DROP TABLE IF EXISTS timeline_sections CASCADE"))
+    except ProgrammingError:
+        pass
+
     # Grant the BYPASSRLS system role access to tables create_all creates after
     # initial provisioning. The init script (zz-init-roles.sh) only runs
     # GRANT ... ON ALL TABLES once, so tables added later (e.g. the notification
@@ -70,7 +82,7 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
                         "user_notification_prefs, push_subscriptions, notification_logs, "
                         "notes, teams, team_members, team_invites, team_projects, task_shares, "
                         "user_preferences, board_sections, watchlist_items, "
-                        "analytics_events, analytics_daily, timeline_sections TO prysm_system"
+                        "analytics_events, analytics_daily TO prysm_system"
                     )
                 )
                 # analytics_events uses a bigint identity PK; the BYPASSRLS
@@ -227,12 +239,6 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         "DROP POLICY IF EXISTS user_isolation ON analytics_events",
         "CREATE POLICY user_isolation ON analytics_events "
         "USING (user_id = rls_user_id()) WITH CHECK (user_id = rls_user_id())",
-        # timeline_sections - user-scoped display-layer bands on the timeline.
-        "ALTER TABLE timeline_sections ENABLE ROW LEVEL SECURITY",
-        "ALTER TABLE timeline_sections FORCE ROW LEVEL SECURITY",
-        "DROP POLICY IF EXISTS user_isolation ON timeline_sections",
-        "CREATE POLICY user_isolation ON timeline_sections "
-        "USING (user_id = rls_user_id()) WITH CHECK (user_id = rls_user_id())",
     )
 
     # FORCE row-level security on every user-scoped core table so the table
@@ -270,7 +276,6 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         "lists",
         "watchlist_items",
         "analytics_events",
-        "timeline_sections",
     )
     # ENABLE + FORCE as a pair: FORCE alone does not enable RLS on a table that
     # was created by create_all without an init.sql baseline (e.g. the test

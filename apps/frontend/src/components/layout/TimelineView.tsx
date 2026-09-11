@@ -34,8 +34,6 @@ import { matchesSearchQuery } from "@/lib/task-search";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useToast } from "@/lib/toast-context";
 import { SelectionActionBar } from "@/components/tasks/SelectionActionBar";
-import { useSections } from "@/hooks/useSections";
-import { SectionsPanel } from "@/components/timeline/SectionsPanel";
 
 // How many days to prepend/append per expansion step.
 const EXPAND_STEP = 7;
@@ -108,8 +106,6 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   const stickyOn = useUiModule("stickyNotes");
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
-  const [sectionsOn, setSectionsOn] = useState(false);
-  const { sections, renameSection, removeSection } = useSections();
   const tags = useAppStore((s) => s.tags);
 
   // Mobile: drag-to-reschedule and drag-to-pan fight the touch scroll gesture,
@@ -271,9 +267,6 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     ro.observe(body);
     return () => ro.disconnect();
   }, [days.length, expandForward, viewMode, dayWidth]);
-
-  // Timeline sections: horizontal pill rows live in SectionsPanel (rendered
-  // above the grid when toggled on). The old overlay bands are gone.
 
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -808,24 +801,6 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           </PopoverMenu>
         </div>
 
-        {safeMode === "timeline" && (
-          <div className="shrink-0">
-            <button
-              onClick={() => setSectionsOn((v) => !v)}
-              className={`btn border text-xs px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 transition-colors ${
-                sectionsOn
-                  ? "bg-accent text-[var(--on-gradient)] border-transparent"
-                  : "bg-elevated border-border text-secondary hover:text-primary"
-              }`}
-              aria-pressed={sectionsOn}
-              data-testid="sections-toggle"
-              data-tour="timeline-sections"
-            >
-              Sections
-            </button>
-          </div>
-        )}
-
         <button
           onClick={() => { setFormDefaultDate(null); setShowTaskForm(true); }}
           className="btn btn-primary px-4 py-1.5 text-xs shrink-0"
@@ -897,19 +872,6 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
             onContextMenu={openCanvasMenu}
           >
             <DndContext sensors={sensors} onDragEnd={handleDragEnd} onDragMove={handleDragMove}>
-              {sectionsOn && (
-                <SectionsPanel
-                  sections={sections}
-                  tasks={visibleTasks}
-                  days={days}
-                  lists={lists}
-                  tags={tags}
-                  onOpenTask={(id) => setSelectedTaskId(id)}
-                  onRename={(id, name) => void renameSection(id, { name })}
-                  onSetRule={(id, kind, value) => void renameSection(id, { rule_kind: kind, rule_value: value })}
-                  onDelete={(id) => void removeSection(id)}
-                />
-              )}
               <div className="relative" style={{ minHeight: "100%", width: days.length * dayWidth }}>
                 <TimelineHeader days={days} dayWidth={dayWidth} />
                 <TimelineGrid days={days} dayWidth={dayWidth} />

@@ -129,19 +129,6 @@ vi.mock("@/components/timeline/TimelineGrid", () => ({
 vi.mock("@/components/timeline/TimelineLane", () => ({
   TimelineLane: () => <div />,
 }));
-vi.mock("@/components/timeline/SectionsPanel", () => ({
-  SectionsPanel: () => <div data-testid="sections-panel" />,
-}));
-
-vi.mock("@/hooks/useSections", () => ({
-  useSections: () => ({
-    sections: [],
-    loading: false,
-    addSection: vi.fn().mockResolvedValue({ id: "s1" }),
-    renameSection: vi.fn(),
-    removeSection: vi.fn(),
-  }),
-}));
 
 function renderTimeline(mode: TimelineViewMode = "timeline") {
   return render(
@@ -178,39 +165,12 @@ describe("TimelineView selection action bar", () => {
     renderTimeline("timeline");
     expect(screen.queryByTestId("selection-action-bar")).not.toBeInTheDocument();
   });
-});
-
-describe("TimelineView sections toggle", () => {
-  beforeEach(() => {
-    h.selectedTaskIds = [];
-    (globalThis as unknown as Record<string, unknown>).ResizeObserver = class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    };
-  });
-
-  it("renders the sections panel when the toolbar toggle is on", async () => {
-    const user = userEvent.setup();
-    renderTimeline("timeline");
-    expect(screen.queryByTestId("sections-panel")).not.toBeInTheDocument();
-    await user.click(screen.getByTestId("sections-toggle"));
-    const panel = screen.getByTestId("sections-panel");
-    expect(panel).toBeInTheDocument();
-    // Turn the toggle off again -> the panel hides.
-    await user.click(screen.getByTestId("sections-toggle"));
-    expect(screen.queryByTestId("sections-panel")).not.toBeInTheDocument();
-  });
 
   it("suppresses the native browser menu on blank-canvas right-click", async () => {
     renderTimeline("timeline");
     const body = document.querySelector("[data-timeline-body]") as HTMLElement;
     expect(body).not.toBeNull();
-    // Attach a native listener so we can observe whether React's handler called
-    // preventDefault() on the underlying event.
     const native = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 });
-    // jsdom patched: React 18 uses the native event; observe defaultPrevented
-    // by dispatching a manual event through the DOM path the handler registers.
     let defaultPrevented = false;
     const watcher = (e: Event) => {
       if (e.defaultPrevented) defaultPrevented = true;
@@ -226,9 +186,7 @@ describe("TimelineView sections toggle", () => {
     renderTimeline("timeline");
     const body = document.querySelector("[data-timeline-body]") as HTMLElement;
     const button = body.querySelector("button") as HTMLElement;
-    // If there's no button inside the body (timeline canvas empty), fall back
-    // to the Refresh button elsewhere; the filter applies to buttons anywhere.
-    const target = button ?? (screen.getByRole("button", { name: /Refresh|sections/i }) as HTMLElement);
+    const target = button ?? (screen.getByRole("button", { name: /New/i }) as HTMLElement);
     let defaultPrevented = false;
     const watcher = (e: Event) => {
       if (e.defaultPrevented) defaultPrevented = true;

@@ -7,7 +7,6 @@ import { useLocalBool } from "@/lib/use-local-bool";
 import { todayISO } from "@/lib/dates";
 import { NotesSection } from "@/components/sidebar/NotesSection";
 import { SidebarLists } from "@/components/sidebar/SidebarLists";
-import { SectionsSection } from "@/components/sidebar/SectionsSection";
 
 function isToday(dateStr: string | null): boolean {
   if (!dateStr) return false;
@@ -185,8 +184,6 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsO
       <NotesSection />
 
       <SidebarLists view={view} onSelectView={onSelectView} />
-
-      <SectionsSection />
 
       <div className="space-y-0.5">
         {VIEWS.map((item) => {
