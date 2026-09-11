@@ -15,7 +15,11 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
     encryption_key: str = ""
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3200,http://localhost:3200,https://prysmnote.com"
+    # CSRF Origin/Referer allowlist for unsafe /api requests. Desktop app
+    # (http://127.0.0.1:3200) and dev (localhost:3000, :8000) plus the
+    # production origin. Comma-separated; validated like cors_origins.
+    csrf_allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3200,http://localhost:3200,http://localhost:8000,https://prysmnote.com"
     # "development" (default) exposes /docs and permissive CSP; "production"
     # disables the schema endpoints and hardens headers.
     environment: str = "development"
@@ -24,7 +28,7 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
 
-    @field_validator("cors_origins")
+    @field_validator("cors_origins", "csrf_allowed_origins")
     @classmethod
     def validate_cors_origins(cls, v: str) -> str:
         origins = v.split(",")

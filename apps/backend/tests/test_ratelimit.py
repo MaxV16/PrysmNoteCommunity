@@ -155,3 +155,52 @@ async def test_ratelimiter_fails_open_on_redis_error():
         assert limiter.is_blocked("k") is True
     finally:
         rl_utils._redis_checked, rl_utils._redis_client = original_checked, original_client
+
+
+@pytest.mark.asyncio
+async def test_middleware_uses_cf_connecting_ip_for_rate_key(auth_client: AsyncClient):
+    """The global limiter keys on the real client IP (CF-Connecting-IP), not the
+    shared tunnel IP, so all users behind the tunnel do not share one budget."""
+    from starlette.requests import Request
+
+    from app.middleware.ratelimit import _api_limiter
+    from app.utils.client_ip import _client_ip
+
+    # Unit: the helper prefers CF-Connecting-IP, then X-Forwarded-For, then client.host.
+    class _FakeRequest:
+        def __init__(self, headers, client_host="203.0.113.7"):
+            self.headers = headers
+            self.client = type("C", (), {"host": client_host})()
+
+    req = _FakeRequest({"CF-Connecting-IP": "198.51.100.9", "X-Forwarded-For": "198.51.100.8, 10.0.0.1"})
+    assert _client_ip(req) == "198.51.100.9"
+
+    req2 = _FakeRequest({"X-Forwarded-For": "198.51.100.8, 10.0.0.1"})
+    assert _client_ip(req2) == "198.51.100.8"
+
+    req3 = _FakeRequest({})
+    assert _client_ip(req3) == "203.0.113.7"
+
+    # A spoofed non-IP CF-Connecting-IP is ignored.
+    req4 = _FakeRequest({"CF-Connecting-IP": "not-an-ip", "X-Forwarded-For": "198.51.100.6"})
+    assert _client_ip(req4) == "198.51.100.6"
+
+    # Integration: distributed clients with different CF-Connecting-IP do not
+    # share a budget.
+    settings.api_rate_limit_enabled = True
+    settings.api_rate_limit_per_min = 2
+    _api_limiter._memory.clear()
+    try:
+        # User A exhausts their own budget.
+        for _ in range(2):
+            r = await auth_client.get("/api/tasks/", headers={"CF-Connecting-IP": "198.51.100.10"})
+            assert r.status_code != 429
+        r = await auth_client.get("/api/tasks/", headers={"CF-Connecting-IP": "198.51.100.10"})
+        assert r.status_code == 429
+
+        # User B's distinct IP is unaffected.
+        r2 = await auth_client.get("/api/tasks/", headers={"CF-Connecting-IP": "198.51.100.11"})
+        assert r2.status_code != 429
+    finally:
+        settings.api_rate_limit_enabled = False
+        _api_limiter._memory.clear()

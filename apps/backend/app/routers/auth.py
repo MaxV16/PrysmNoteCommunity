@@ -37,6 +37,7 @@ from app.services.auth_service import (
     hash_password,
     verify_password,
 )
+from app.utils.client_ip import _client_ip
 from app.utils.ratelimit import RateLimiter, _get_redis
 
 # Precomputed at startup: a real bcrypt hash used when verifying a login for a
@@ -87,7 +88,7 @@ def _enforce_signup_rate_limit(req: Request, email: str) -> None:
     # must stay deterministic. Production has Redis, so the throttle is live.
     if _get_redis() is None:
         return
-    ip = req.client.host if req.client else "unknown"
+    ip = _get_client_ip(req)
     if _signup_limiter.count(f"ip:{ip}", _SIGNUP_IP_WINDOW) > _SIGNUP_IP_LIMIT:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -123,7 +124,7 @@ async def _verify_turnstile(token: str, ip: str | None) -> bool:
 
 
 def _enforce_mail_rate_limit(req: Request, email: str) -> None:
-    ip = req.client.host if req.client else "unknown"
+    ip = _get_client_ip(req)
     if _mail_limiter.count(f"email:{email}", _MAIL_WINDOW) > _MAIL_LIMIT:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -737,14 +738,14 @@ async def update_me(
 
 
 def _get_client_ip(req: Request) -> str:
-    # Do NOT trust the raw X-Forwarded-For header here: it is client-controlled
-    # when the app is reachable directly, letting an attacker spoof an arbitrary
-    # IP to bypass rate limiting or poison the blocklist. With uvicorn
-    # `--proxy-headers`, request.client.host is already the trusted proxy-derived
-    # real client IP (only populated from forwarded headers when the immediate
-    # peer is a trusted proxy). Falling back to the peer IP is conservative and
-    # cannot be spoofed from a direct connection.
-    return req.client.host if req.client else "unknown"
+    """Real client IP for auth rate limiting / blocklists.
+
+    Prefers ``CF-Connecting-IP`` (set by Cloudflare, the direct peer in
+    production) when it parses as an IP, then the first ``X-Forwarded-For``
+    entry, then the peer host. The value is validated to be an IP so a
+    client-supplied non-IP cannot poison the blocklist.
+    """
+    return _client_ip(req)
 
 
 _FAILED_LOGINS: dict[str, list[float]] = {}
