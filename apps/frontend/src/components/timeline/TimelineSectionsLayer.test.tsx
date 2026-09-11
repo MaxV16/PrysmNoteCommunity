@@ -150,4 +150,34 @@ describe("TimelineSectionsLayer", () => {
     await user.click(screen.getByLabelText("Split timeline band"));
     expect(onSplit).toHaveBeenCalled();
   });
+
+  it("anchors 50..100 bands to the scrollport, not the full-width canvas", () => {
+    // The layer runs inside the scroll container (data-timeline-body). Bands are
+    // laid out in content coordinates offset by scrollX so a 50..100% band
+    // always renders at 50% of the visible viewport regardless of scroll
+    // offset. With scrollX=0 and viewW=1000 (the jsdom default), the band must
+    // sit at left: 500px with a ~488px width, instead of "50%" of the canvas.
+    renderLayer();
+    const band = screen.getByTestId("timeline-section-sec1");
+    expect(parseFloat(band.style.left)).toBeCloseTo(500, 0);
+    expect(parseFloat(band.style.width)).toBeCloseTo(488, 0);
+  });
+
+  it("encodes the 3-tier priority options (High=1, Low=3)", async () => {
+    const user = userEvent.setup();
+    const onSetRule = vi.fn();
+    renderLayer({ onSetRule });
+    await user.click(screen.getByLabelText("Section rule"));
+    await user.click(await screen.findByText("Priority: High"));
+    expect(onSetRule).toHaveBeenCalledWith("sec1", "priority", "1");
+  });
+
+  it("offers the Low priority option as value 3", async () => {
+    const user = userEvent.setup();
+    const onSetRule = vi.fn();
+    renderLayer({ onSetRule });
+    await user.click(screen.getByLabelText("Section rule"));
+    await user.click(await screen.findByText("Priority: Low"));
+    expect(onSetRule).toHaveBeenCalledWith("sec1", "priority", "3");
+  });
 });

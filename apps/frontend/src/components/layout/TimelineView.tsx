@@ -556,7 +556,6 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   // Right-click on the plain timeline canvas (not a task bar, day cell or
   // interactive element) opens a bare new-task/new-note menu.
   const openCanvasMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
     const target = e.target as HTMLElement;
     if (
       target.closest(
@@ -565,6 +564,10 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     ) {
       return;
     }
+    // Only suppress the native menu on blank canvas. Interactive elements above
+    // return early so inputs keep their own copy/paste context menu, and task
+    // bars / day cells handle their own preventDefault in their handlers.
+    e.preventDefault();
     setMenu({ state: { kind: "empty" }, x: e.clientX, y: e.clientY });
   }, []);
 

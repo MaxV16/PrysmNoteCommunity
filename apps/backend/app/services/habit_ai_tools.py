@@ -171,6 +171,8 @@ async def _create_habit(args: dict, user_id: str, session) -> dict:
     title = str(args.get("title") or "").strip()
     if not title:
         return {"error": "title is required."}
+    if len(title) > 500:
+        return {"error": "title must be at most 500 characters"}
     frequency = str(args.get("frequency") or "daily")
     if frequency not in VALID_FREQUENCIES:
         return {"error": "frequency must be daily, weekly or monthly"}
@@ -185,7 +187,7 @@ async def _create_habit(args: dict, user_id: str, session) -> dict:
         title=title,
         frequency=frequency,
         target_count=target_count,
-        color=args.get("color"),
+        color=(str(args.get("color") or "")[:7] or None),
     )
     session.add(habit)
     await session.flush()
@@ -206,6 +208,8 @@ async def _update_habit(args: dict, user_id: str, session) -> dict:
         title = str(args["title"]).strip()
         if not title:
             return {"error": "title cannot be empty"}
+        if len(title) > 500:
+            return {"error": "title must be at most 500 characters"}
         habit.title = title
     if "frequency" in args and args.get("frequency") is not None:
         frequency = str(args["frequency"])
@@ -218,7 +222,7 @@ async def _update_habit(args: dict, user_id: str, session) -> dict:
         except (TypeError, ValueError):
             return {"error": "target_count must be an integer >= 1"}
     if "color" in args:
-        habit.color = args.get("color")
+        habit.color = (str(args.get("color") or "")[:7] or None)
     logs_result = await session.execute(
         select(HabitLog).where(HabitLog.habit_id == habit_uuid)
     )

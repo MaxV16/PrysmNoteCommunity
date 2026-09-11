@@ -11,7 +11,7 @@ interface HabitsWorkspaceProps {
 
 export function HabitsWorkspace(_props: HabitsWorkspaceProps) {
   const [showForm, setShowForm] = useState(false);
-  const { habits, loading, fetchHabits, createHabit, toggleLog, deleteHabit } = useHabits();
+  const { habits, loading, createHabit, toggleLog, deleteHabit } = useHabits();
 
   return (
     <div className="flex flex-col bg-base" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
@@ -35,7 +35,7 @@ export function HabitsWorkspace(_props: HabitsWorkspaceProps) {
             <HabitForm createHabit={createHabit} onCreated={() => setShowForm(false)} />
           </div>
         )}
-        <HabitTracker habits={habits} loading={loading} toggleLog={toggleLog} deleteHabit={deleteHabit} fetchHabits={fetchHabits} />
+        <HabitTracker habits={habits} loading={loading} toggleLog={toggleLog} deleteHabit={deleteHabit} />
       </div>
     </div>
   );

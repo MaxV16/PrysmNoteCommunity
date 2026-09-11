@@ -92,6 +92,7 @@ function ruleSummary(section: TimelineSection, lists: TaskList[], tags: { id: st
   switch (kind) {
     case "priority":
       if (value === "1") return "High";
+      if (value === "2") return "Medium";
       if (value === "3") return "Low";
       return `Priority ${value}`;
     case "status":
@@ -172,7 +173,9 @@ export function TimelineSectionsLayer({
     <div className="pointer-events-none absolute inset-0 z-10" data-testid="timeline-sections-layer">
       {/* Split handle: sits at 50% of the current viewport when sections are on
           and nothing already occupies that band. Splitting parts the band
-          rightward (50%..100%) into a new nameable segment. */}
+          rightward (50%..100%) into a new nameable segment. Positioned in
+          content coordinates (scrollX + pct*viewW) so it stays viewport-anchored
+          as the timeline scrolls, matching the bands below. */}
       {sections.length < 5 && !splitCovered && (
         <button
           data-testid="timeline-section-split"
@@ -181,7 +184,7 @@ export function TimelineSectionsLayer({
             onSplit();
           }}
           className="pointer-events-auto absolute z-30 flex h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-elevated text-secondary shadow-sm transition-colors hover:bg-hover hover:text-primary"
-          style={{ left: "50%", top: DAY_HEADER_HEIGHT + 6 }}
+          style={{ left: scrollX + viewW / 2, top: DAY_HEADER_HEIGHT + 6 }}
           title="Split the timeline band at 50%"
           aria-label="Split timeline band"
         >
@@ -198,6 +201,12 @@ export function TimelineSectionsLayer({
           : [];
         const summary = ruleSummary(section, lists, tags);
         const color = section.color ?? SECTION_PALETTE[idx % SECTION_PALETTE.length];
+        // Bands are laid out in content coordinates (an absolute child of the
+        // scroller scrolls with its content), so anchor them to the viewport by
+        // offsetting with scrollX: at any scroll position the band renders at
+        // pct*viewW on screen, which exactly matches bandDayRange.
+        const leftPx = scrollX + (section.start_pct / 100) * viewW;
+        const widthPx = Math.max(20, ((section.end_pct - section.start_pct) / 100) * viewW - 12);
         return (
           <SectionBand
             key={section.id}
@@ -205,6 +214,8 @@ export function TimelineSectionsLayer({
             color={color}
             summary={summary}
             bandTasks={bandTasks.map((s) => s.task).slice(0, 12)}
+            leftPx={leftPx}
+            widthPx={widthPx}
             onRename={onRename}
             onSetRule={onSetRule}
             onDelete={onDelete}
@@ -222,6 +233,8 @@ interface SectionBandProps {
   color: string;
   summary: string | null;
   bandTasks: Task[];
+  leftPx: number;
+  widthPx: number;
   lists: TaskList[];
   tags: { id: string; name: string; color: string | null }[];
   onRename: (id: string, name: string) => void;
@@ -234,6 +247,8 @@ function SectionBand({
   color,
   summary,
   bandTasks,
+  leftPx,
+  widthPx,
   lists,
   tags,
   onRename,
@@ -266,8 +281,8 @@ function SectionBand({
       data-section-band
       className="pointer-events-none absolute rounded-xl border border-border bg-surface/70 shadow-sm backdrop-blur-[1px]"
       style={{
-        left: `${section.start_pct}%`,
-        width: `calc(${section.end_pct - section.start_pct}% - 12px)`,
+        left: leftPx,
+        width: widthPx,
         top: DAY_HEADER_HEIGHT + 4,
         bottom: 8,
         borderTop: `3px solid ${color}`,

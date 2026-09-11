@@ -29,7 +29,6 @@ interface HabitTrackerProps {
   loading: boolean;
   toggleLog: (habitId: string) => Promise<unknown>;
   deleteHabit: (habitId: string) => Promise<unknown>;
-  fetchHabits: () => Promise<void>;
 }
 
 export function HabitTracker({ habits, loading, toggleLog, deleteHabit }: HabitTrackerProps) {

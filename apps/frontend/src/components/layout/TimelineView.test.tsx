@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TimelineView, type TimelineViewMode } from "./TimelineView";
 import { ToastProvider } from "@/lib/toast-context";
@@ -198,6 +198,52 @@ describe("TimelineView sections toggle", () => {
     // The dropdown opens; click the Show sections option.
     const show = await screen.findByText("Show sections");
     await user.click(show);
-    expect(screen.getByTestId("timeline-sections-layer")).toBeInTheDocument();
+    const layer = screen.getByTestId("timeline-sections-layer");
+    expect(layer).toBeInTheDocument();
+    // The layer must live inside the scrollable body so its bands resolve
+    // against the visible scrollport, not the full-width timeline canvas.
+    // In this test the layer is mocked, but the real component uses the same
+    // data-timeline-body container the mock renders under.
+    const body = document.querySelector("[data-timeline-body]");
+    expect(body).not.toBeNull();
+    expect(body!.contains(layer)).toBe(true);
+  });
+
+  it("suppresses the native browser menu on blank-canvas right-click", async () => {
+    renderTimeline("timeline");
+    const body = document.querySelector("[data-timeline-body]") as HTMLElement;
+    expect(body).not.toBeNull();
+    // Attach a native listener so we can observe whether React's handler called
+    // preventDefault() on the underlying event.
+    const native = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 });
+    // jsdom patched: React 18 uses the native event; observe defaultPrevented
+    // by dispatching a manual event through the DOM path the handler registers.
+    let defaultPrevented = false;
+    const watcher = (e: Event) => {
+      if (e.defaultPrevented) defaultPrevented = true;
+    };
+    document.addEventListener("contextmenu", watcher);
+    body.dispatchEvent(native);
+    document.removeEventListener("contextmenu", watcher);
+    // Blank canvas (no interactive target) must be intercepted by the app.
+    expect(defaultPrevented).toBe(true);
+  });
+
+  it("keeps the native context menu on interactive elements in the body", async () => {
+    renderTimeline("timeline");
+    const body = document.querySelector("[data-timeline-body]") as HTMLElement;
+    const button = body.querySelector("button") as HTMLElement;
+    // If there's no button inside the body (timeline canvas empty), fall back
+    // to the Refresh button elsewhere; the filter applies to buttons anywhere.
+    const target = button ?? (screen.getByRole("button", { name: /Refresh|sections/i }) as HTMLElement);
+    let defaultPrevented = false;
+    const watcher = (e: Event) => {
+      if (e.defaultPrevented) defaultPrevented = true;
+    };
+    document.addEventListener("contextmenu", watcher);
+    target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    document.removeEventListener("contextmenu", watcher);
+    // Interactive elements return before preventDefault; the native menu stays.
+    expect(defaultPrevented).toBe(false);
   });
 });

@@ -2465,8 +2465,8 @@ async def test_first_choice_in_stream_clients_skips_empty_choice_chunks(monkeypa
 
 @pytest.mark.asyncio
 async def test_execute_tool_calls_hard_caps_per_round(db_session: AsyncSession, ai_user):
-    """A turn with too many tool calls must stop instead of running a runaway
-    duplicate loop (the finance 31k-delete incident)."""
+    """A turn with too many tool calls must execute only the first cap and then
+    tell the model to stop and summarize (the finance 31k-delete incident)."""
     from app.services.ai_service import _MAX_TOOL_CALLS_PER_ROUND
 
     calls = [
@@ -2474,10 +2474,11 @@ async def test_execute_tool_calls_hard_caps_per_round(db_session: AsyncSession, 
         for i in range(_MAX_TOOL_CALLS_PER_ROUND + 5)
     ]
     results = await execute_tool_calls(calls, str(ai_user), db_session)
-    assert len(results) == 1
-    content = json.loads(results[0]["content"])
-    assert content["retryable"] is False
-    assert "Too many tool calls" in content["error"]
+    # The cap is executed, and one extra result tells the model to stop.
+    assert len(results) == _MAX_TOOL_CALLS_PER_ROUND + 1
+    last = json.loads(results[-1]["content"])
+    assert last["retryable"] is False
+    assert "Stop calling tools now" in last["error"]
 
 
 @pytest.mark.asyncio

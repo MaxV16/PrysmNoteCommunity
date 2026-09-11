@@ -1140,18 +1140,12 @@ async def execute_tool_calls(
     results = []
 
     # Hard cap on tool calls per round: prevent runaway duplicate loops (e.g.
-    # the AI calling delete one-at-a-time 31k times). When exceeded, append a
-    # final assistant note telling the model to stop and summarize.
-    if len(tool_calls) > _MAX_TOOL_CALLS_PER_ROUND:
-        results.append({
-            "tool_call_id": tool_calls[0].get("id"),
-            "role": "tool",
-            "content": json.dumps({
-                "error": f"Too many tool calls ({len(tool_calls)}). Stopped after {_MAX_TOOL_CALLS_PER_ROUND}.",
-                "retryable": False,
-            }),
-        })
-        return results
+    # the AI calling delete one-at-a-time 31k times). Execute up to the cap,
+    # then append a final note telling the model to stop and summarize so
+    # legitimate calls above the cap are not silently discarded.
+    truncated = len(tool_calls) > _MAX_TOOL_CALLS_PER_ROUND
+    if truncated:
+        tool_calls = tool_calls[:_MAX_TOOL_CALLS_PER_ROUND]
 
     for tc in tool_calls:
         fn = tc.get("function", {})
@@ -2656,6 +2650,18 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
         content = r.get("content", "")
         if isinstance(content, str) and len(content) > TOOL_RESULT_MAX_CHARS:
             r["content"] = content[:TOOL_RESULT_MAX_CHARS] + "\n...(truncated)"
+
+    # When the per-round cap was hit, tell the model to stop calling tools and
+    # summarize, so it does not continue the loop with the dropped calls.
+    if truncated:
+        results.append({
+            "tool_call_id": tool_calls[-1].get("id"),
+            "role": "tool",
+            "content": json.dumps({
+                "error": f"Tool-call cap reached ({_MAX_TOOL_CALLS_PER_ROUND}). Stop calling tools now and summarize what was done for the user. No further tool calls were executed.",
+                "retryable": False,
+            }),
+        })
 
     return results
 
