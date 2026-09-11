@@ -40,10 +40,10 @@ if (fs.existsSync(standaloneDir)) {
   console.warn("[build:desktop] .next/standalone not found; packaging may contain no bundled server");
 }
 
-console.log("[build:desktop] running electron-builder" + (target ? ` --${target}` : "") + "...");
+console.log("[build:desktop] running electron-builder" + (target ? ` --${target}` : "") + " (publish disabled: metadata is written, but uploads are handled by the release pipeline)...");
 const eb = spawnSync(
   "npx",
-  ["electron-builder", ...(target ? [`--${target}`] : [])],
+  ["electron-builder", ...(target ? [`--${target}`] : []), "--publish", "never"],
   { cwd: path.join(root, "ee/apps/desktop"), env, stdio: "inherit", shell: process.platform === "win32" }
 );
 if (eb.status !== 0) {

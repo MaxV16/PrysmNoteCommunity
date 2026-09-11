@@ -17,8 +17,8 @@ self.addEventListener("push", (event) => {
   }
   const options = {
     body: data.body,
-    icon: "/prysm-logo.png",
-    badge: "/prysm-logo.png",
+    icon: "/prysm-icon.svg",
+    badge: "/prysm-icon.svg",
     tag: "prysm-notification",
     renotify: true,
   };

@@ -12,7 +12,7 @@ export function BrandMark({
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- static brand mark */}
       <img
-        src="/prysm-logo.png"
+        src="/prysm-icon.svg"
         alt="Prysm Note"
         width={size}
         height={size}

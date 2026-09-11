@@ -48,6 +48,9 @@ Thumbs.db
 # Electron
 electron/out/
 
+# Desktop release artifacts (built locally or in CI; pushed to R2, never committed)
+ee/apps/desktop/release/
+
 apps/frontend/src/ee
 
 # Kilo agent plans
