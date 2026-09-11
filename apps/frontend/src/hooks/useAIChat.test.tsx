@@ -102,4 +102,48 @@ describe("useAIChat refresh-on-abort", () => {
     expect(ids).toContain("far");
     expect(ids).toContain("near");
   });
+
+  it("records an undo entry from tool_start/tool_results and UNDO deletes the created task", async () => {
+    const encoder = new TextEncoder();
+    const chunks = () => [
+      encoder.encode('event: tool_start\ndata: [{"name":"create_task","arguments":"{\\"title\\":\\"X\\"}"}]\n\n'),
+      encoder.encode('event: tool_results\ndata: ["{\\"created\\":true,\\"task\\":{\\"id\\":\\"t1\\",\\"title\\":\\"X\\"}}"]\n\n'),
+      encoder.encode('event: token\ndata: "done"\n\n'),
+    ];
+    // A fresh stream per fetch call: ensureCsrf's GET must not consume the
+    // stream the chat POST is about to read.
+    const fetchMock = vi.fn().mockImplementation(() => {
+      const c = chunks();
+      let i = 0;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(c[i++]);
+          controller.enqueue(c[i++]);
+          controller.enqueue(c[i]);
+          controller.close();
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 200 }));
+    });
+    global.fetch = fetchMock;
+
+    const { result } = renderHook(() => useAIChat());
+    await act(async () => {
+      await result.current.sendMessage("create a task");
+    });
+
+    // The tool_start event (with args) + tool_results populated the undo stack.
+    expect(result.current.hasUndo).toBe(true);
+
+    await act(async () => {
+      await result.current.undoLastAction();
+    });
+
+    // Undo issued a DELETE for the created task and cleared the stack.
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([url, opts]) => String(url).includes("/tasks/t1") && (opts as RequestInit)?.method === "DELETE"
+    );
+    expect(deleteCalls.length).toBeGreaterThan(0);
+    expect(result.current.hasUndo).toBe(false);
+  });
 });

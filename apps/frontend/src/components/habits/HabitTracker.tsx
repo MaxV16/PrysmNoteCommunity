@@ -91,7 +91,7 @@ export function HabitTracker({ habits, loading, toggleLog, deleteHabit }: HabitT
             <span className="text-[10px] text-muted w-8 text-right">{habit.streak}d</span>
             <button
               onClick={() => deleteHabit(habit.id)}
-              className="text-[10px] text-muted transition-colors hover:text-danger"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-base text-muted transition-colors hover:bg-danger/20 hover:text-danger"
               aria-label={`Delete ${habit.title}`}
               title="Delete habit"
             >

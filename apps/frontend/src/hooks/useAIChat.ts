@@ -48,6 +48,17 @@ function isAbortError(err: unknown): boolean {
   );
 }
 
+// The backend already appends this hint to tool errors; keep the UI copy in
+// sync so a provider-level failure surfaces the same guidance.
+const NEW_CHAT_HINT = "If you still have trouble, please open a new chat.";
+
+function withNewChatHint(message: string): string {
+  if (message.includes("open a new chat")) return message;
+  // Keep a clean separation before the hint.
+  const trimmed = message.replace(/\.\s*$/, "");
+  return `${trimmed}. (${NEW_CHAT_HINT})`;
+}
+
 // Merges the /tasks/ snapshot (never replaces) and replays the lazy far window,
 // so far-window tasks loaded by scroll-driven range fetches stay visible after
 // an AI tool turn ("the tasks disappeared" fix).
@@ -85,6 +96,26 @@ const TOOL_LABELS: Record<string, string> = {
 
 function prettyToolName(name: string): string {
   return TOOL_LABELS[name] || `Calling ${name}`;
+}
+
+function todayISODate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function plusDaysISODate(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Mirrors the backend quadrant_priority_patch: the canonical patch the
+// move_task_to_quadrant tool (and the drag handler) applies per quadrant.
+function quadrantPatchFor(qid: string): { priority: number; due_date: string | null } {
+  if (qid === "q1") return { priority: 1, due_date: todayISODate() };
+  if (qid === "q2") return { priority: 2, due_date: null };
+  if (qid === "q3") return { priority: 3, due_date: plusDaysISODate(3) };
+  return { priority: 3, due_date: null };
 }
 
 function buildFullContext(): string {
@@ -288,31 +319,41 @@ export function useAIChat() {
 
   const undoLastAction = useCallback(() => {
     const entry = undoStackRef.current.pop();
+    setHasUndo(undoStackRef.current.length > 0);
     if (!entry) return;
     (async () => {
       await ensureCsrf();
       const csrf = getCsrfToken();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (csrf) headers[CSRF_HEADER] = csrf;
       const store = useAppStore.getState();
-      if (entry.type === "create_task") {
-        const taskId = (entry.data as { id: string }).id;
-        try {
+      try {
+        if (entry.type === "create_task") {
+          const taskId = (entry.data as { id: string }).id;
+          if (!taskId) return;
           await fetch(`${API_URL}/tasks/${taskId}`, {
-            method: "DELETE", credentials: "include",
-            headers: csrf ? { [CSRF_HEADER]: csrf } : {},
+            method: "DELETE", credentials: "include", headers,
           });
           store.setTasks(store.tasks.filter((t) => t.id !== taskId));
-        } catch {}
-      } else if (entry.type === "update_task") {
-        const d = entry.data as { id: string; previous: Record<string, unknown> };
-        try {
+          await refreshTasksFromServer();
+        } else if (entry.type === "update_task") {
+          const d = entry.data as { id: string; previous: Record<string, unknown> };
           await fetch(`${API_URL}/tasks/${d.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json", ...(csrf ? { [CSRF_HEADER]: csrf } : {}) },
-            credentials: "include",
+            method: "PATCH", credentials: "include", headers,
             body: JSON.stringify(d.previous),
           });
           store.setTasks(store.tasks.map((t) => (t.id === d.id ? { ...t, ...d.previous } : t)));
-        } catch {}
+          await refreshTasksFromServer();
+        } else if (entry.type === "delete_task") {
+          const taskId = (entry.data as { id: string }).id;
+          // Soft-deleted tasks live in the Trash; restore brings them back.
+          await fetch(`${API_URL}/tasks/${taskId}/restore`, {
+            method: "POST", credentials: "include", headers,
+          });
+          await refreshTasksFromServer();
+        }
+      } catch {
+        // Undo failed; keep the stack trimmed but the action stays applied.
       }
     })();
   }, []);
@@ -543,6 +584,77 @@ export function useAIChat() {
         );
       };
 
+      // ---- AI undo tracking ----
+      // Tool rounds emit tool_start (with args) followed by tool_results
+      // (the JSON content strings, in the same order). We snapshot the store
+      // BEFORE the tools run (for updates/deletes) and pair the results back
+      // (for creates) so undo can replay the reverse API calls.
+      let pendingToolCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+      const pushUndoEntry = (type: string, data: unknown) => {
+        undoStackRef.current.push({ type, data });
+        if (undoStackRef.current.length > 5) undoStackRef.current.shift();
+        setHasUndo(true);
+      };
+
+      const recordUndoBeforeRun = (calls: Array<{ name: string; args: Record<string, unknown> }>) => {
+        for (const c of calls) {
+          if (c.name === "update_task" || c.name === "reschedule_task" || c.name === "move_task_to_quadrant") {
+            const taskId = (c.args.task_id as string) || "";
+            if (!taskId) continue;
+            const store = useAppStore.getState();
+            const task = store.tasks.find((t) => t.id === taskId);
+            if (!task) continue;
+            const fields: Record<string, unknown> = {};
+            if (c.name === "update_task") {
+              Object.assign(fields, (c.args.fields as Record<string, unknown>) || {});
+            } else if (c.name === "reschedule_task") {
+              if (c.args.new_start_date) fields.start_date = c.args.new_start_date;
+              if (c.args.new_due_date) fields.due_date = c.args.new_due_date;
+            } else {
+              // move_task_to_quadrant applies the canonical priority/due patch.
+              const patch = quadrantPatchFor(String(c.args.quadrant || "q4"));
+              fields.priority = patch.priority;
+              fields.due_date = patch.due_date;
+            }
+            const previous: Record<string, unknown> = {};
+            for (const key of Object.keys(fields)) {
+              previous[key] = (task as unknown as Record<string, unknown>)[key];
+            }
+            pushUndoEntry("update_task", { id: taskId, previous });
+          } else if (c.name === "delete_task") {
+            const taskId = (c.args.task_id as string) || "";
+            if (taskId) pushUndoEntry("delete_task", { id: taskId });
+          }
+        }
+      };
+
+      const recordUndoFromResults = (
+        calls: Array<{ name: string; args: Record<string, unknown> }>,
+        results: string[]
+      ) => {
+        calls.forEach((c, idx) => {
+          const content = results[idx];
+          if (typeof content !== "string") return;
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(content) as Record<string, unknown>;
+          } catch {
+            return;
+          }
+          if (!parsed || typeof parsed !== "object") return;
+          if (c.name === "create_task") {
+            const task = parsed.task as { id?: string } | undefined;
+            if (parsed.created && task?.id) pushUndoEntry("create_task", { id: task.id });
+          } else if (c.name === "batch_create_tasks") {
+            const tasks = Array.isArray(parsed.tasks) ? (parsed.tasks as Array<{ id?: string }>) : [];
+            for (const t of tasks) {
+              if (t?.id) pushUndoEntry("create_task", { id: t.id });
+            }
+          }
+        });
+      };
+
       let res: Response;
       try {
         await ensureCsrf();
@@ -615,7 +727,7 @@ export function useAIChat() {
         } catch {
           message = res.statusText || message;
         }
-        setAssistant(`Error: ${message}`);
+        setAssistant(`Error: ${withNewChatHint(message)}`);
         return;
       }
 
@@ -642,7 +754,7 @@ export function useAIChat() {
         if (event === "error") {
           // The backend surfaces a friendly, actionable provider error (e.g.
           // "out of credits") as an SSE error event instead of a dead stream.
-          errorMessage = data;
+          errorMessage = withNewChatHint(data);
           receivedToken = true;
         } else if (event === "token") {
           receivedToken = true;
@@ -658,17 +770,44 @@ export function useAIChat() {
           );
         } else if (event === "tool_start") {
           receivedTool = true;
-          const names = (() => {
+          // The backend sends either bare names (legacy) or
+          // [{name, arguments}, ...]; both are accepted.
+          const calls = (() => {
             try {
               const raw = JSON.parse(data);
-              if (Array.isArray(raw)) return raw;
+              if (Array.isArray(raw)) {
+                return raw
+                  .map((item): { name: string; args: Record<string, unknown> } | null => {
+                    if (typeof item === "string") return { name: item, args: {} };
+                    if (item && typeof item === "object") {
+                      let args: Record<string, unknown> = {};
+                      try {
+                        args = JSON.parse((item as { arguments?: string }).arguments || "{}") || {};
+                      } catch {}
+                      return { name: (item as { name?: string }).name || "", args };
+                    }
+                    return null;
+                  })
+                  .filter((c): c is { name: string; args: Record<string, unknown> } => !!c && !!c.name);
+              }
             } catch {}
             return [];
           })();
-          const label = names.length
-            ? names.map(prettyToolName).join(" · ")
+          const label = calls.length
+            ? calls.map((c) => prettyToolName(c.name)).join(" · ")
             : "using tools…";
           addToolBubble(label);
+          pendingToolCalls = calls;
+          recordUndoBeforeRun(calls);
+        } else if (event === "tool_results") {
+          try {
+            const results: unknown = JSON.parse(data);
+            if (Array.isArray(results)) {
+              recordUndoFromResults(pendingToolCalls, results as string[]);
+            }
+          } catch {
+            // Non-fatal: undo is opportunistic.
+          }
         } else if (event === "usage") {
           try {
             const u = JSON.parse(data);

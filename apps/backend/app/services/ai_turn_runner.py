@@ -399,7 +399,15 @@ async def _run_turn(job: TurnJob) -> None:
                     break
 
                 messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-                await job.events.put(("tool_start", [tc.get("function", {}).get("name") for tc in tool_calls]))
+                # Emit tool names AND their JSON arguments so the frontend can
+                # record an undo snapshot before the tools run.
+                await job.events.put((
+                    "tool_start",
+                    [{
+                        "name": tc.get("function", {}).get("name"),
+                        "arguments": tc.get("function", {}).get("arguments"),
+                    } for tc in tool_calls],
+                ))
                 try:
                     tool_results = await execute_tool_calls(tool_calls, job.user_id, session, client)
                 except Exception as tee:

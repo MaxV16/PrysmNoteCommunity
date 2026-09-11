@@ -1013,6 +1013,19 @@ REPLY FORMATTING (always follow):
                 "\n\n[UNTRUSTED DATA END]"
             )
 
+    # Always-present rule: the feature tools (finance, countdowns, quadrant,
+    # habits, watchlist) are available in this session regardless of what the
+    # earlier chat was about, so a task-heavy history can never drift the model
+    # into answering "list my financial items" without the money tools.
+    system_content += (
+        "\n\nFEATURE TOOLS: Tools for finance (accounts/expenses/income), "
+        "countdowns, the quadrant view, habits, and your watchlist are always "
+        "available to you in this session. If the user asks about money, a "
+        "countdown, a quadrant, a habit, or a show/movie, call the matching "
+        "tool immediately regardless of what the earlier chat was about. Never "
+        "answer such a question without checking data via a tool first."
+    )
+
     if include_finance and _FINANCE_SYSTEM_NOTE:
         system_content += "\n\n" + _FINANCE_SYSTEM_NOTE
     if include_finance and _OPENCLAW_SYSTEM_NOTE:
@@ -2603,6 +2616,13 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     handler = _FOCUS_TOOL_HANDLERS.get(name)
                 if handler is not None:
                     payload = await handler(args, user_id, session)
+                    if isinstance(payload, dict) and payload.get("error"):
+                        # Surface the cause plus a hint so the user (and the
+                        # model) knows a fresh chat often fixes it.
+                        payload["error"] = (
+                            f"{payload['error']} (If you still have trouble, "
+                            "please open a new chat.)"
+                        )
                     results.append({
                         "tool_call_id": tc.get("id"),
                         "role": "tool",
@@ -2612,7 +2632,9 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     results.append({
                         "tool_call_id": tc.get("id"),
                         "role": "tool",
-                        "content": json.dumps({"error": f"Unknown tool: {name}"}),
+                        "content": json.dumps({
+                            "error": f"Unknown tool: {name} (If you still have trouble, please open a new chat.)",
+                        }),
                     })
 
         except Exception as e:

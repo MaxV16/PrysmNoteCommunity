@@ -70,6 +70,7 @@ vi.mock("@/hooks/useTimeline", () => ({
   useTimeline: () => ({
     visibleRange: { start: h.start, end: h.end },
     viewDays: 20,
+    scrollOffset: -10,
     setScrollOffset: vi.fn(),
     expandBackward: vi.fn(),
     expandForward: vi.fn(),
@@ -128,13 +129,12 @@ vi.mock("@/components/timeline/TimelineGrid", () => ({
 vi.mock("@/components/timeline/TimelineLane", () => ({
   TimelineLane: () => <div />,
 }));
-vi.mock("@/components/timeline/TimelineSectionsLayer", () => ({
-  TimelineSectionsLayer: () => <div data-testid="timeline-sections-layer" />,
-  SECTION_DROPPABLE_PREFIX: "section:",
+vi.mock("@/components/timeline/SectionsPanel", () => ({
+  SectionsPanel: () => <div data-testid="sections-panel" />,
 }));
 
-vi.mock("@/hooks/useTimelineSections", () => ({
-  useTimelineSections: () => ({
+vi.mock("@/hooks/useSections", () => ({
+  useSections: () => ({
     sections: [],
     loading: false,
     addSection: vi.fn().mockResolvedValue({ id: "s1" }),
@@ -190,23 +190,16 @@ describe("TimelineView sections toggle", () => {
     };
   });
 
-  it("renders the sections layer when the toolbar toggle is on", async () => {
+  it("renders the sections panel when the toolbar toggle is on", async () => {
     const user = userEvent.setup();
     renderTimeline("timeline");
-    expect(screen.queryByTestId("timeline-sections-layer")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sections-panel")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("sections-toggle"));
-    // The dropdown opens; click the Show sections option.
-    const show = await screen.findByText("Show sections");
-    await user.click(show);
-    const layer = screen.getByTestId("timeline-sections-layer");
-    expect(layer).toBeInTheDocument();
-    // The layer must live inside the scrollable body so its bands resolve
-    // against the visible scrollport, not the full-width timeline canvas.
-    // In this test the layer is mocked, but the real component uses the same
-    // data-timeline-body container the mock renders under.
-    const body = document.querySelector("[data-timeline-body]");
-    expect(body).not.toBeNull();
-    expect(body!.contains(layer)).toBe(true);
+    const panel = screen.getByTestId("sections-panel");
+    expect(panel).toBeInTheDocument();
+    // Turn the toggle off again -> the panel hides.
+    await user.click(screen.getByTestId("sections-toggle"));
+    expect(screen.queryByTestId("sections-panel")).not.toBeInTheDocument();
   });
 
   it("suppresses the native browser menu on blank-canvas right-click", async () => {

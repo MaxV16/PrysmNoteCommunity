@@ -7,6 +7,7 @@ import { MediaCard } from "./MediaCard";
 import { usePreferencesStore } from "@/stores/preferences-store";
 import { PREF_WATCHLIST_REGION } from "@/lib/preferences";
 import type { WatchlistStatus } from "@/types/watchlist";
+import { AiPanelButton } from "@/components/ui/AiPanelButton";
 
 interface WatchlistViewProps {
   onOpenAi?: () => void;
@@ -22,7 +23,7 @@ const STATUS_GROUPS: { status: WatchlistStatus; label: string }[] = [
 
 type FilterTab = "all" | WatchlistStatus;
 
-export function WatchlistView(_props: WatchlistViewProps) {
+export function WatchlistView({ onOpenAi }: WatchlistViewProps) {
   const { items, loading, search, add, update, remove, fetchProviders } = useWatchlist();
   const [tab, setTab] = useState<FilterTab>("all");
   const [modalOpen, setModalOpen] = useState(false);
@@ -100,6 +101,7 @@ export function WatchlistView(_props: WatchlistViewProps) {
         <button onClick={() => setModalOpen(true)} className="btn btn-primary px-3 py-1.5 text-xs">
           + Add
         </button>
+        {onOpenAi && <AiPanelButton onClick={onOpenAi} />}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">

@@ -47,9 +47,11 @@ export function useGlobalShortcuts({
       const tag = (e.target as HTMLElement | null)?.tagName;
       const inEditable = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target as HTMLElement)?.isContentEditable;
 
-      // Intercept Ctrl/Cmd+F for in-app search (override browser find unless typing).
+      // Intercept Ctrl/Cmd+F for in-app search (override browser find unless
+      // typing). Only when this view actually has the global search input -
+      // otherwise let the native browser find open (quadrant, finance, ...).
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
-        if (!inEditable) {
+        if (!inEditable && document.getElementById("global-search")) {
           e.preventDefault();
           // Switch to the current view's search input / focus the global search.
           requestAnimationFrame(() => {

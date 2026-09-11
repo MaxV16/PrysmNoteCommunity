@@ -167,7 +167,7 @@ const TAB_GROUPS: TabGroup[] = [
   {
     label: "Integrations & Extras",
     tabs: [
-      { id: "integrations", label: "Integrations & Import", svg: "M13 2L3 14h9l-1 8 10-12h-9l1-8z" },
+      { id: "integrations", label: "Integrations", svg: "M13 2L3 14h9l-1 8 10-12h-9l1-8z" },
       { id: "collaborate", label: "Collaborate", svg: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75" },
       { id: "sticky-note", label: "Sticky Note", svg: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" },
       { id: "widgets", label: "Desktop Widgets", svg: "M3 3h18v18H3V3z M3 9h18 M9 3v18" },
@@ -1240,7 +1240,22 @@ export default function SettingsPage() {
           )}
 
           {/* === IMPORT === */}
-          {activeTab === "import" && <ImportPanel />}
+          {activeTab === "import" && (
+            <>
+              <ImportPanel />
+              <section className="card p-6 space-y-3">
+                <h3 className="text-sm font-semibold text-primary">Data Import/Export</h3>
+                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                  <div><p className="text-sm text-secondary">Export All Data</p><p className="text-xs text-muted">{lastExport ? `Last export: ${lastExport}` : "Download tasks as JSON"}</p></div>
+                  <button onClick={handleExport} className="btn btn-gradient px-4 py-1.5 text-xs rounded-xl">Export</button>
+                </div>
+                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                  <div><p className="text-sm text-secondary">Import Data</p><p className="text-xs text-muted">Restore from backup JSON file</p></div>
+                  <button onClick={handleImport} className="btn bg-elevated border border-border text-secondary px-4 py-1.5 text-xs rounded-xl hover:text-primary">Import</button>
+                </div>
+              </section>
+            </>
+          )}
 
           {/* === INTEGRATIONS === */}
           {activeTab === "integrations" && (
@@ -1252,24 +1267,13 @@ export default function SettingsPage() {
                   </svg>
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-primary">Integrations & Import</h2>
+                  <h2 className="text-lg font-bold text-primary">Integrations</h2>
                   <p className="text-sm text-muted">Connect external services</p>
                 </div>
               </div>
               <div className="space-y-3">
                 <IntegrationRow label="Slack" description="Receive task notifications in Slack" connected={slackConnected} onConnect={handleConnectSlack} onDisconnect={handleDisconnectSlack} />
                 <IntegrationRow label="Siri Shortcuts" description="Deep-link into Prysm Note from Shortcuts" connected={siriConnected} onConnect={handleConnectSiri} onDisconnect={handleDisconnectSiri} />
-              </div>
-              <div className="border-t border-border pt-5 space-y-3">
-                <h3 className="text-sm font-semibold text-primary">Data Import/Export</h3>
-                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
-                  <div><p className="text-sm text-secondary">Export All Data</p><p className="text-xs text-muted">{lastExport ? `Last export: ${lastExport}` : "Download tasks as JSON"}</p></div>
-                  <button onClick={handleExport} className="btn btn-gradient px-4 py-1.5 text-xs rounded-xl">Export</button>
-                </div>
-                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
-                  <div><p className="text-sm text-secondary">Import Data</p><p className="text-xs text-muted">Restore from backup JSON file</p></div>
-                  <button onClick={handleImport} className="btn bg-elevated border border-border text-secondary px-4 py-1.5 text-xs rounded-xl hover:text-primary">Import</button>
-                </div>
               </div>
             </section>
           )}

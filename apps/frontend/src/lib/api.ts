@@ -91,6 +91,10 @@ async function request<T>(
     throw new Error(message);
   }
 
+  // 204 No Content: no body to parse (countdown delete, PAT revoke, etc).
+  if (res.status === 204) return undefined as T;
+  // Some endpoints return 200 with an empty body; treat same as 204.
+  if (res.status === 200 && res.headers.get("content-length") === "0") return undefined as T;
   return res.json();
 }
 

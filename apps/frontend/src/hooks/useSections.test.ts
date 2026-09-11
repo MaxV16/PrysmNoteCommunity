@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { api } from "@/lib/api";
-import { useTimelineSections } from "./useTimelineSections";
+import { useSections } from "./useSections";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -23,7 +23,7 @@ const mockSection = {
   position: 0,
 };
 
-describe("useTimelineSections", () => {
+describe("useSections", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -31,14 +31,14 @@ describe("useTimelineSections", () => {
 
   it("loads sections once on mount", async () => {
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue([mockSection]);
-    const { result } = renderHook(() => useTimelineSections());
+    const { result } = renderHook(() => useSections());
     await waitFor(() => expect(result.current.sections).toHaveLength(1));
     expect(api.get).toHaveBeenCalledWith("/timeline-sections/");
   });
 
   it("addSection posts and appends to the store", async () => {
     (api.post as ReturnType<typeof vi.fn>).mockResolvedValue(mockSection);
-    const { result } = renderHook(() => useTimelineSections());
+    const { result } = renderHook(() => useSections());
     await act(async () => {
       await result.current.addSection({ name: "Focus" });
     });
@@ -48,7 +48,7 @@ describe("useTimelineSections", () => {
 
   it("renameSection patches optimistically and rolls back on failure", async () => {
     (api.patch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("nope"));
-    const { result } = renderHook(() => useTimelineSections());
+    const { result } = renderHook(() => useSections());
     await act(async () => {
       await result.current.renameSection("s1", { name: "Deep Work" });
     });
@@ -59,7 +59,7 @@ describe("useTimelineSections", () => {
   it("removeSection deletes and drops it locally", async () => {
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue([mockSection]);
     (api.delete as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "deleted" });
-    const { result } = renderHook(() => useTimelineSections());
+    const { result } = renderHook(() => useSections());
     await waitFor(() => expect(result.current.sections).toHaveLength(1));
     await act(async () => {
       await result.current.removeSection("s1");

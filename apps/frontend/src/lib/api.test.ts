@@ -182,4 +182,16 @@ describe("api", () => {
       "Cannot reach server at http://localhost:8000/api. Is the backend running?"
     );
   });
+
+  it("handles 204 No Content without throwing", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+      headers: new Headers(),
+      json: () => { throw new SyntaxError("Unexpected end of JSON input"); },
+    });
+
+    const result = await api.delete("/tasks/123");
+    expect(result).toBeUndefined();
+  });
 });

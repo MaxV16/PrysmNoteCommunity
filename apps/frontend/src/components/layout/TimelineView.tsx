@@ -34,9 +34,8 @@ import { matchesSearchQuery } from "@/lib/task-search";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useToast } from "@/lib/toast-context";
 import { SelectionActionBar } from "@/components/tasks/SelectionActionBar";
-import { useTimelineSections } from "@/hooks/useTimelineSections";
-import type { TimelineSection } from "@/hooks/useTimelineSections";
-import { TimelineSectionsLayer, SECTION_DROPPABLE_PREFIX } from "@/components/timeline/TimelineSectionsLayer";
+import { useSections } from "@/hooks/useSections";
+import { SectionsPanel } from "@/components/timeline/SectionsPanel";
 
 // How many days to prepend/append per expansion step.
 const EXPAND_STEP = 7;
@@ -83,7 +82,7 @@ interface TimelineViewProps {
 
 export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewModeChange }: TimelineViewProps) {
   const { tasks, selectedTaskId, setSelectedTaskId, selectedTaskIds, navFilter, setNavFilter, selectedTagId, searchQuery, setSearchQuery, activeListId, lists } = useAppStore();
-  const { visibleRange, viewDays, setScrollOffset, expandBackward, expandForward } = useTimeline(20, 10);
+  const { visibleRange, viewDays, scrollOffset, setScrollOffset, expandBackward, expandForward } = useTimeline(20, 10);
   const { createTask, updateTask, fetchRange } = useTasks();
   const { busy: batchDeleting, softDeleteWithUndo } = useBatchDelete();
   const { showToast } = useToast();
@@ -110,9 +109,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [sectionsOn, setSectionsOn] = useState(false);
-  const sectionsButtonRef = useRef<HTMLButtonElement | null>(null);
-  const [sectionsDropdownOpen, setSectionsDropdownOpen] = useState(false);
-  const { sections, addSection, renameSection, removeSection } = useTimelineSections();
+  const { sections, renameSection, removeSection } = useSections();
   const tags = useAppStore((s) => s.tags);
 
   // Mobile: drag-to-reschedule and drag-to-pan fight the touch scroll gesture,
@@ -210,17 +207,24 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       setScrollOffset((s) => s + step);
       if (body) body.scrollLeft -= step * dayWidth;
     } else {
+      // "Today": reset the window offset and park today's column at the left
+      // edge (scrollOffset -10 -> column -(-10) = 10).
       setScrollOffset(-10);
       if (body) body.scrollLeft = 10 * dayWidth;
     }
   }, [setScrollOffset, viewDays, dayWidth]);
 
+  // Live mirror of the scroll offset so post-expansion code can re-anchor on
+  // the freshest value without capturing a stale render closure.
+  const scrollOffsetRef = useRef(scrollOffset);
+  scrollOffsetRef.current = scrollOffset;
+
   useEffect(() => {
     const body = bodyRef.current;
     if (!body || safeMode !== "timeline") return;
-    // Position "today" (column baseLeftOffset) at the left edge, leaving room to
+    // Position "today" (column -scrollOffset) at the left edge, leaving room to
     // browse backwards before expansion kicks in.
-    body.scrollLeft = 10 * dayWidth;
+    body.scrollLeft = (-scrollOffsetRef.current) * dayWidth;
   }, [viewMode, dayWidth]);
 
   useEffect(() => {
@@ -268,64 +272,14 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     return () => ro.disconnect();
   }, [days.length, expandForward, viewMode, dayWidth]);
 
-  // Timeline sections: splitting at the 50% handle creates a new nameable band
-  // (start 50% -> end 100%). Naming/coloring/rule editing happens inline on the
-  // band itself; deleting a band just removes the display layer.
-  const handleSplit = useCallback(async () => {
-    try {
-      await addSection({
-        name: `Section ${sections.length + 1}`,
-        color: undefined,
-        start_pct: 50,
-        end_pct: 100,
-        rule_kind: "all",
-      });
-      showToast("Timeline section created", "success");
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "Could not create the section", "error");
-    }
-  }, [addSection, sections.length, showToast]);
-
-  const applySectionRule = useCallback(
-    async (taskId: string, section: TimelineSection) => {
-      const kind = section.rule_kind;
-      const value = section.rule_value;
-      if (!kind || kind === "all" || !value) return;
-      const patch: Record<string, unknown> = {};
-      if (kind === "list") {
-        patch.list_id = value;
-      } else if (kind === "tag") {
-        await api.post(`/tags/tasks/${taskId}?tag_id=${value}`);
-        showToast("Tag applied to the task", "success");
-        return;
-      } else if (kind === "priority") {
-        patch.priority = parseInt(value.split(",")[0], 10);
-      } else if (kind === "status") {
-        patch.status = value;
-      }
-      await updateTask(taskId, patch);
-      showToast("Section rule applied to the task", "success");
-    },
-    [updateTask, showToast]
-  );
+  // Timeline sections: horizontal pill rows live in SectionsPanel (rendered
+  // above the grid when toggled on). The old overlay bands are gone.
 
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, delta, over } = event;
       if (!active) return;
       const dragId = active.id as string;
-
-      // Dropping a task onto a section BAND applies that band's rule to the
-      // task (priority/status/list/tag) instead of rescheduling it. The band
-      // is registered as a droppable with id "section:<id>".
-      if (over && typeof over.id === "string" && over.id.startsWith(SECTION_DROPPABLE_PREFIX) && !dragId.includes(":")) {
-        const sectionId = over.id.slice(SECTION_DROPPABLE_PREFIX.length);
-        const section = sections.find((s) => s.id === sectionId);
-        if (section) {
-          await applySectionRule(dragId, section);
-        }
-        return;
-      }
 
       // Each day column is a fixed width in the infinite timeline. A tiny drag
       // still counts as at least one day so it never feels like a dead snap-back.
@@ -443,7 +397,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       );
       await updateTask(taskId, fields);
     },
-    [tasks, updateTask, dayWidth, sections, applySectionRule]
+    [tasks, updateTask, dayWidth]
   );
 
   // Expand the timeline forward/backward while dragging a task near the left or
@@ -636,6 +590,15 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     const targetRightCount = Math.max(currentRightCount, maxDays + 14);
     if (targetLeftScroll < currentLeftScroll) {
       expandBackward(currentLeftScroll - targetLeftScroll);
+      // The canvas grew LEFTWARD: today's column shifted from 10 to 10+k, but
+      // the mount anchor already set scrollLeft to 10*dayWidth. Re-anchor on
+      // the live offset after the re-render so the timeline opens on today
+      // (regression: returning to the timeline used to open far off to the
+      // right once tasks with past dates existed).
+      requestAnimationFrame(() => {
+        const b = bodyRef.current;
+        if (b) b.scrollLeft = (-scrollOffsetRef.current) * dayWidth;
+      });
     }
     if (targetRightCount > currentRightCount) {
       expandForward(targetRightCount - currentRightCount);
@@ -848,64 +811,18 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         {safeMode === "timeline" && (
           <div className="shrink-0">
             <button
-              ref={sectionsButtonRef}
-              onClick={() => setSectionsDropdownOpen(v => !v)}
+              onClick={() => setSectionsOn((v) => !v)}
               className={`btn border text-xs px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 transition-colors ${
                 sectionsOn
                   ? "bg-accent text-[var(--on-gradient)] border-transparent"
                   : "bg-elevated border-border text-secondary hover:text-primary"
               }`}
-              aria-haspopup="menu"
-              aria-expanded={sectionsDropdownOpen}
+              aria-pressed={sectionsOn}
               data-testid="sections-toggle"
               data-tour="timeline-sections"
             >
               Sections
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>
             </button>
-            <PopoverMenu
-              open={sectionsDropdownOpen}
-              triggerRef={sectionsButtonRef}
-              align="right"
-              onClose={() => setSectionsDropdownOpen(false)}
-              className="w-52"
-            >
-              <div className="px-3 py-2 text-xs font-medium text-secondary">Timeline Sections</div>
-              <button
-                onClick={() => {
-                  setSectionsOn(v => !v);
-                  setSectionsDropdownOpen(false);
-                }}
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover"
-              >
-                <span>{sectionsOn ? "Sections shown" : "Show sections"}</span>
-                <span
-                  className={`inline-flex h-4 w-7 items-center rounded-full px-0.5 transition-colors ${sectionsOn ? "bg-accent" : "bg-elevated border border-border"}`}
-                  aria-hidden
-                >
-                  <span className={`h-3 w-3 rounded-full bg-white transition-transform ${sectionsOn ? "translate-x-3" : ""}`} />
-                </span>
-              </button>
-              {sections.length > 0 && (
-                <>
-                  <div className="mt-1 border-t border-border/60 pt-1">
-                    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Bands</div>
-                    {sections.map((s) => (
-                      <div key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-xs text-secondary">
-                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color ?? undefined }} />
-                        <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                        <span className="text-[10px] text-muted">{s.start_pct}%</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-              <div className="mt-1 border-t border-border/60 pt-1">
-                <p className="px-3 py-1.5 text-[10px] leading-relaxed text-muted">
-                  Drag a task onto a band to apply its rule (list, tag, priority or status).
-                </p>
-              </div>
-            </PopoverMenu>
           </div>
         )}
 
@@ -980,6 +897,19 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
             onContextMenu={openCanvasMenu}
           >
             <DndContext sensors={sensors} onDragEnd={handleDragEnd} onDragMove={handleDragMove}>
+              {sectionsOn && (
+                <SectionsPanel
+                  sections={sections}
+                  tasks={visibleTasks}
+                  days={days}
+                  lists={lists}
+                  tags={tags}
+                  onOpenTask={(id) => setSelectedTaskId(id)}
+                  onRename={(id, name) => void renameSection(id, { name })}
+                  onSetRule={(id, kind, value) => void renameSection(id, { rule_kind: kind, rule_value: value })}
+                  onDelete={(id) => void removeSection(id)}
+                />
+              )}
               <div className="relative" style={{ minHeight: "100%", width: days.length * dayWidth }}>
                 <TimelineHeader days={days} dayWidth={dayWidth} />
                 <TimelineGrid days={days} dayWidth={dayWidth} />
@@ -996,21 +926,6 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
                   selectMode={selectionMode}
                 />
               </div>
-              {sectionsOn && (
-                <TimelineSectionsLayer
-                  sections={sections}
-                  tasks={visibleTasks}
-                  days={days}
-                  dayWidth={dayWidth}
-                  bodyRef={bodyRef}
-                  lists={lists}
-                  tags={tags}
-                  onSplit={() => void handleSplit()}
-                  onRename={(id, name) => void renameSection(id, { name })}
-                  onSetRule={(id, kind, value) => void renameSection(id, { rule_kind: kind, rule_value: value })}
-                  onDelete={(id) => void removeSection(id)}
-                />
-              )}
             </DndContext>
           </div>
 

@@ -4,12 +4,13 @@ import { useState } from "react";
 import { HabitTracker } from "@/components/habits/HabitTracker";
 import { HabitForm } from "@/components/habits/HabitForm";
 import { useHabits } from "@/hooks/useHabits";
+import { AiPanelButton } from "@/components/ui/AiPanelButton";
 
 interface HabitsWorkspaceProps {
   onOpenAi?: () => void;
 }
 
-export function HabitsWorkspace(_props: HabitsWorkspaceProps) {
+export function HabitsWorkspace({ onOpenAi }: HabitsWorkspaceProps) {
   const [showForm, setShowForm] = useState(false);
   const { habits, loading, createHabit, toggleLog, deleteHabit } = useHabits();
 
@@ -22,6 +23,7 @@ export function HabitsWorkspace(_props: HabitsWorkspaceProps) {
         </svg>
         <span className="text-lg font-bold text-primary">Habits</span>
         <div className="flex-1" />
+        {onOpenAi && <AiPanelButton onClick={onOpenAi} />}
         <button
           onClick={() => setShowForm((v) => !v)}
           className="btn btn-primary px-4 py-1.5 text-xs"
