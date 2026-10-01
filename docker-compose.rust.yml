@@ -1,0 +1,29 @@
+# Shadow-run override: run the Rust backend (prysm-server) alongside the Python
+# backend for a dual-run cutover rehearsal.
+#
+# It is published on host port 8001 (the container still listens on 8000) so it
+# does not clash with the Python backend on 8000, and background loops are
+# disabled so the two backends never contend for the shared advisory lock.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.rust.yml up -d backend-rust
+#
+# Point the API smoke test at it with:
+#   BASE_URL=http://localhost:8001/api npm run smoke:api
+services:
+  backend-rust:
+    build:
+      context: .
+      dockerfile: deploy/docker/backend-rust.prod.Dockerfile
+    environment:
+      PORT: "8000"
+      PRYSM_RUN_BACKGROUND_LOOPS: "false"
+      # The asyncpg scheme is intentional: it proves the Rust normalization path.
+      DATABASE_URL: postgresql+asyncpg://${DB_APP_USER}:${DB_APP_PASSWORD}@postgres:5432/prysm_note
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
