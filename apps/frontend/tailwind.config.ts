@@ -1,7 +1,10 @@
 import type { Config } from "tailwindcss";
+import plugin from "tailwindcss/plugin";
 
 const config: Config = {
-  content: ["./src/**/*.{ts,tsx}"],
+  content: [
+    "./src/**/*.{ts,tsx}",
+  ],
   theme: {
     extend: {
       fontFamily: {
@@ -28,6 +31,9 @@ const config: Config = {
         md: "var(--radius-md)",
         lg: "var(--radius-lg)",
       },
+      borderColor: {
+        DEFAULT: "var(--border)",
+      },
       boxShadow: {
         sm: "var(--shadow-sm)",
         md: "var(--shadow-md)",
@@ -41,7 +47,17 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Tailwind 3.4 ships no `pointer-*` variants (they landed in v4.1), but the
+    // app uses `pointer-coarse:` across ~15 files for touch targets. Register
+    // them here so those utilities actually compile instead of being dropped.
+    plugin(({ addVariant }) => {
+      addVariant("pointer-coarse", "@media (pointer: coarse)");
+      addVariant("pointer-fine", "@media (pointer: fine)");
+      addVariant("any-pointer-coarse", "@media (any-pointer: coarse)");
+      addVariant("any-pointer-fine", "@media (any-pointer: fine)");
+    }),
+  ],
 };
 
 export default config;

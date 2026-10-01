@@ -12,7 +12,7 @@ from app.dependencies import get_current_user
 from app.models.teams import Team, TeamInvite, TeamMember, TeamProject, TaskShare
 from app.models.task import Task
 from app.models.user import User
-from app.services.email import send_email
+from app.services.email import send_email_async
 from app.services.task_service import get_task
 from app.routers.tasks import _serialize_task
 from app.utils.ratelimit import RateLimiter
@@ -146,32 +146,57 @@ async def list_teams(
         .order_by(Team.created_at.desc())
     )
     teams = result.scalars().unique().all()
-    serialized = []
-    for team in teams:
-        data = await _serialize_team(session, team)
-        # Only the owner's own id + role are surfaced; email lookup per member.
-        members = data["members"]
-        for m in members:
-            mrow = await session.execute(select(User).where(User.id == UUID(m["user_id"])))
-            u = mrow.scalar_one_or_none()
-            m["email"] = u.email if u else None
-        my_membership = await _get_membership(session, team.id, user.id)
-        data["my_role"] = my_membership.role if my_membership else "member"
-        serialized.append(data)
+
+    serialized = [await _serialize_team(session, team) for team in teams]
+
+    # Batch-load member emails in one query instead of one lookup per member.
+    member_user_ids: set[UUID] = set()
+    for data in serialized:
+        for m in data["members"]:
+            uid = parse_uuid(m["user_id"])
+            if uid is not None:
+                member_user_ids.add(uid)
+    email_by_id: dict[str, str | None] = {}
+    if member_user_ids:
+        user_rows = await session.execute(
+            select(User.id, User.email).where(User.id.in_(member_user_ids))
+        )
+        email_by_id = {str(row[0]): row[1] for row in user_rows.all()}
+    for data in serialized:
+        for m in data["members"]:
+            m["email"] = email_by_id.get(m["user_id"])
+
+    # Resolve the caller's role for every team in one query.
+    memberships = await session.execute(
+        select(TeamMember.team_id, TeamMember.role).where(TeamMember.user_id == user.id)
+    )
+    role_by_team = {str(row[0]): row[1] for row in memberships.all()}
+    for data in serialized:
+        data["my_role"] = role_by_team.get(data["id"], "member")
+
     invites = await session.execute(
         select(TeamInvite).where(TeamInvite.status == "pending")
     )
     invites = invites.scalars().all()
-    my_invites = []
-    for inv in invites:
-        if inv.email.lower() == (user.email or "").lower():
-            team = (await session.execute(select(Team).where(Team.id == inv.team_id))).scalar_one_or_none()
-            my_invites.append({
-                "token": inv.token,
-                "team_id": str(inv.team_id),
-                "team_name": team.name if team else "Team",
-                "role": inv.role,
-            })
+    my_pending = [
+        inv for inv in invites if inv.email.lower() == (user.email or "").lower()
+    ]
+    team_name_by_id: dict[str, str] = {}
+    if my_pending:
+        invite_team_ids = {inv.team_id for inv in my_pending}
+        team_rows = await session.execute(
+            select(Team.id, Team.name).where(Team.id.in_(invite_team_ids))
+        )
+        team_name_by_id = {str(row[0]): row[1] for row in team_rows.all()}
+    my_invites = [
+        {
+            "token": inv.token,
+            "team_id": str(inv.team_id),
+            "team_name": team_name_by_id.get(str(inv.team_id), "Team"),
+            "role": inv.role,
+        }
+        for inv in my_pending
+    ]
     return {"teams": serialized, "invites": my_invites}
 
 
@@ -272,7 +297,7 @@ async def invite_member(
     await session.flush()
 
     accept_link = f"{settings.app_origin}/settings?tab=collaborate&invite={token}"
-    send_email(
+    await send_email_async(
         request.email,
         f"You're invited to join {team.name} on Prysm Note",
         f"Join the '{team.name}' team: {accept_link}\n\nIf you don't have an account yet, register first, then open the same link.",

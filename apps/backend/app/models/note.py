@@ -14,6 +14,8 @@ class Note(Base):
     __tablename__ = "notes"
     __table_args__ = (
         Index("idx_notes_user_import_batch", "user_id", "import_batch_id"),
+        # list_notes orders by (sort, updated_at) within a user.
+        Index("ix_notes_user_sort_updated", "user_id", "sort", "updated_at"),
     )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)

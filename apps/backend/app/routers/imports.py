@@ -27,9 +27,10 @@ from app.dependencies import get_current_user
 from app.models.note import Note
 from app.models.tag import Tag
 from app.models.task import Task, TaskStatus
+from app.models.task_list import TaskList
 from app.models.task_tag import TaskTag
 from app.models.user import User
-from app.services.task_service import create_task
+from app.services.task_service import create_task, default_list_id
 from app.utils.priority import normalize_priority
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
@@ -475,10 +476,10 @@ def _parse_ticktick(content: bytes) -> list[dict]:
         )
 
         tags = _split_tags(_pick(row, *TICKTICK_FIELDS["tags"]))
-        if list_name:
-            tags.append(f"List: {list_name}")
-        if folder_name:
-            tags.append(f"Folder: {folder_name}")
+        # TickTick folders/lists become Prysm lists (not tags). Prefer the list
+        # (the task's actual container) and fall back to the folder when a
+        # backup only records a folder.
+        list_title = list_name or folder_name
 
         # Backups often leave the id columns empty. Fall back to a stable
         # ordinal key so checklist items (and dedupe on re-import) still work.
@@ -499,6 +500,7 @@ def _parse_ticktick(content: bytes) -> list[dict]:
             "completed_at": completed_at,
             "created_at": created_at,
             "tags": tags,
+            "list_title": list_title or None,
             "source_key": source_key,
             "parent_key": parent_key,
             "is_note": is_note,
@@ -524,6 +526,7 @@ def _parse_ticktick(content: bytes) -> list[dict]:
                     "completed_at": completed_at if done else None,
                     "created_at": created_at,
                     "tags": list(tags),
+                    "list_title": list_title or None,
                     "source_key": f"{source_key}#{item_idx}",
                     "parent_key": source_key,
                     "is_note": False,
@@ -534,10 +537,22 @@ def _parse_ticktick(content: bytes) -> list[dict]:
 
 
 def _map_ticktick_status(value: str | None, completed_at: datetime | None) -> tuple[str, bool]:
+    """Map a TickTick status cell to (status, archived).
+
+    TickTick changed its encoding between export versions: older backups use
+    0 normal / 1 completed / 2 abandoned, while newer ones (7.x) use
+    0 normal / -1 abandoned / 2 completed. ``Completed Time`` is the only
+    signal stable across versions, so it wins outright; otherwise 1 (old
+    completed) stays done and 2 (old abandoned) or -1 (new abandoned) is
+    archived. Without this a 7.x backup imports every completed task as
+    todo + archived, and the UI hides archived rows.
+    """
+    if completed_at is not None:
+        return "done", False
     v = (value or "").strip()
     if v == "1":
         return "done", False
-    if v == "2":
+    if v in ("2", "-1"):
         return "todo", True
     return "todo", False
 
@@ -896,6 +911,44 @@ async def _load_tag_cache(session: AsyncSession, user_id) -> dict[str, Tag]:
     return {t.name: t for t in result.scalars().all()}
 
 
+async def _load_list_cache(session: AsyncSession, user_id) -> dict[str, TaskList]:
+    """Load every existing list name -> TaskList row for the user (one query).
+
+    Keyed case-insensitively so a TickTick list and a hand-made list with the
+    same name are not duplicated.
+    """
+    result = await session.execute(select(TaskList).where(TaskList.user_id == user_id))
+    cache: dict[str, TaskList] = {}
+    for lst in result.scalars().all():
+        cache.setdefault(lst.name.casefold(), lst)
+    return cache
+
+
+async def _get_or_create_list(
+    session: AsyncSession,
+    user_id,
+    name: str,
+    list_cache: dict[str, TaskList],
+    position_counter: list[int],
+) -> TaskList | None:
+    """Get-or-create a list by (case-insensitive) name, bounded to 200 lists."""
+    title = (name or "").strip()[:200]
+    if not title:
+        return None
+    key = title.casefold()
+    cached = list_cache.get(key)
+    if cached is not None:
+        return cached
+    if len(list_cache) >= 200:
+        return None
+    position_counter[0] += 1
+    lst = TaskList(user_id=user_id, name=title, position=position_counter[0])
+    session.add(lst)
+    await session.flush()
+    list_cache[key] = lst
+    return lst
+
+
 async def _attach_tags(
     session: AsyncSession,
     task_id,
@@ -926,6 +979,7 @@ def _build_task(
     row: dict,
     parent_task_id=None,
     batch_id=None,
+    list_id=None,
 ) -> Task | None:
     """Construct a Task ORM row without flushing (mirrors create_task's field
     mapping). Used by the batched-insert path; rows with a recurrence rule use
@@ -952,6 +1006,7 @@ def _build_task(
         is_archived=bool(row.get("is_archived", False)),
         completed_at=row.get("completed_at"),
         created_at=row.get("created_at"),
+        list_id=list_id if list_id is not None else row.get("list_id"),
         import_batch_id=batch_id,
     )
 
@@ -963,6 +1018,7 @@ async def _create_task_from_row(
     tag_cache: dict[str, Tag],
     parent_task_id=None,
     batch_id=None,
+    list_id=None,
 ) -> Task | None:
     title = (row.get("title") or "").strip()
     if not title or len(title) > 500:
@@ -978,6 +1034,7 @@ async def _create_task_from_row(
         start_date=row.get("start_date").isoformat() if row.get("start_date") else None,
         due_date=row.get("due_date").isoformat() if row.get("due_date") else None,
         recurrence_rule=row.get("recurrence_rule") or None,
+        list_id=list_id if list_id is not None else row.get("list_id"),
     )
     task.import_batch_id = batch_id
     if row.get("is_archived"):
@@ -1033,6 +1090,33 @@ async def _run_import(
     title_ids: dict[str, Any] = {}
     children: list[tuple[int, dict]] = []
     tag_cache = await _load_tag_cache(session, user_id)
+
+    # TickTick folders/lists map to Prysm lists. Resolve (and create) every
+    # referenced list up front so each row can carry a plain ``list_id`` and the
+    # insert loops below stay synchronous.
+    list_cache = await _load_list_cache(session, user_id)
+    list_pos_result = await session.execute(
+        select(func.max(TaskList.position)).where(TaskList.user_id == user_id)
+    )
+    list_position = [list_pos_result.scalar() or 0]
+    default_list = None
+    for row in rows:
+        lst = None
+        if row.get("list_title"):
+            lst = await _get_or_create_list(
+                session, user_id, row["list_title"], list_cache, list_position
+            )
+        if lst is not None:
+            row["list_id"] = lst.id
+            continue
+        # A row with no List/Folder cell (or one the 200-list cap dropped)
+        # belongs in the user's default "My Tasks" list, exactly like a task
+        # created through the API. Leaving list_id NULL here is what let the
+        # startup backfill sweep thousands of imported tasks into whichever
+        # list it happened to join.
+        if default_list is None:
+            default_list = await default_list_id(session, user_id)
+        row["list_id"] = default_list
 
     # Children dedupe by their stable source key within a batch, NOT by the
     # bare (title, start, due) tuple: checklist items inherit the parent's

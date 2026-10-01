@@ -25,6 +25,8 @@ from app.services.ai_shared import (
 )
 from app.services.ai_service import (
     MONEY_NUDGE,
+    TOOL_NUDGE,
+    _HALLUCINATED_ACTION_PATTERNS,
     _TOOL_REFUSAL_PATTERNS,
     _needs_tool_retry,
     build_messages,
@@ -49,6 +51,21 @@ MAX_TOOL_ROUNDS = 4
 MAX_RETRY_BUMPS = 2
 
 _APPLIED_LINE_CAP = 6
+
+
+def unmet_action(content: str, user_message: str, tools_ran: bool) -> bool:
+    """True when an action-y turn only narrated an action it never took.
+
+    Used once the retry/bump budget is exhausted: a hallucinated plan (e.g.
+    "Let me try deleting it") must not be streamed as the final answer when no
+    tool actually ran. A clean answer (no hallucinated-action phrasing) is
+    always allowed through.
+    """
+    if tools_ran or not content:
+        return False
+    return bool(_HALLUCINATED_ACTION_PATTERNS.search(content)) and _needs_tool_retry(
+        content, user_message
+    )
 
 
 def _summarize_tool_result(content: str) -> str | None:
@@ -141,6 +158,23 @@ def should_money_nudge(
     return current_model_index < min(chain_len - 1, MAX_RETRY_BUMPS)
 
 
+def should_bump_model(
+    premium: bool,
+    provider: str,
+    current_model_index: int,
+    chain_len: int,
+) -> bool:
+    """Decision helper for retrying a refused/empty round on a stronger model.
+
+    Bumping to the next (pricier) model in the hosting chain is a hosted-premium
+    convenience: it only applies to a Prysm-hosted (``prysmai``) premium turn.
+    Free users have no AI on the hosted build, and BYOK turns never carry a
+    hosting chain, so they never bump."""
+    if not premium or provider != "prysmai":
+        return False
+    return current_model_index < min(chain_len - 1, MAX_RETRY_BUMPS)
+
+
 def stream_fallback_reply(
     content: str,
     applied_actions: list[str],
@@ -197,6 +231,9 @@ class TurnJob:
     applied_actions: list[str] = field(default_factory=list)
     # True once the money-routing nudge has been delivered (never nudge twice).
     money_nudged: bool = False
+    # True once the action-request tool nudge has been delivered, so a BYOK
+    # turn retries the same model at most once (never nudge twice).
+    tool_nudged: bool = False
 
 
 _turns: dict[str, TurnJob] = {}
@@ -331,6 +368,7 @@ async def _run_turn(job: TurnJob) -> None:
             client = await _build_turn_client(job)
             content = ""
             tool_calls = None
+            tools_ran = False
 
             for _round in range(MAX_TOOL_ROUNDS):
                 if job.cancel_requested:
@@ -358,7 +396,11 @@ async def _run_turn(job: TurnJob) -> None:
                         content = _strip_text_tool_calls(content)
 
                 if not tool_calls and _needs_tool_retry(content, job.user_message):
-                    if job.current_model_index < min(len(job.chain) - 1, MAX_RETRY_BUMPS):
+                    # Bumping to a stronger, pricier model is a hosted-premium
+                    # convenience: only a Prysm-hosted premium turn pays for it.
+                    if should_bump_model(
+                        premium, job.provider, job.current_model_index, len(job.chain)
+                    ):
                         # A premium money request refused without any tool call
                         # gets the finance nudge once, so the bumped model re-
                         # asks with the finance tools instead of refusing again
@@ -374,6 +416,14 @@ async def _run_turn(job: TurnJob) -> None:
                         job.current_model_index += 1
                         await _safe_aclose(client)
                         client = await _build_turn_client(job)
+                        continue
+
+                    # A BYOK turn has no hosting chain to bump to, so retry the
+                    # same model once with an explicit tool nudge instead of
+                    # returning the refusal to the user unchanged.
+                    if not job.tool_nudged:
+                        job.tool_nudged = True
+                        messages.append({"role": "system", "content": TOOL_NUDGE})
                         continue
 
                 # Money safety net (Part 5): the model called only task tools
@@ -399,6 +449,7 @@ async def _run_turn(job: TurnJob) -> None:
                     break
 
                 messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+                tools_ran = True
                 # Emit tool names AND their JSON arguments so the frontend can
                 # record an undo snapshot before the tools run.
                 await job.events.put((
@@ -450,31 +501,44 @@ async def _run_turn(job: TurnJob) -> None:
             await _commit()
 
             streamed = ""
-            try:
-                async for chunk in client.stream_chat(messages, tools=None):
-                    streamed += chunk
+            # The retry/bump budget is exhausted and the model still only
+            # narrated an action it never took (e.g. "Let me try deleting it").
+            # Never stream that as the final answer: an action-y turn that ran
+            # no tool must end honestly instead of as a success-looking plan.
+            force_honest = unmet_action(content, job.user_message, tools_ran)
+            if force_honest:
+                streamed = (
+                    "I could not make that change, so nothing was saved. "
+                    "Tell me the exact item and what you want changed and I will do it."
+                )
+                for chunk in _chunk_text(streamed):
                     await job.events.put(("token", chunk))
-            except Exception as exc:
-                if not streamed.strip():
-                    streamed = stream_fallback_reply(
-                        content, job.applied_actions, cold="Interrupted."
-                    )
-                    if streamed == "Interrupted.":
-                        retried = await _retry_final_non_streaming(client, messages, session, job)
-                        if retried:
-                            streamed = retried
-                    for chunk in _chunk_text(streamed):
-                        await job.events.put(("token", chunk))
-                placeholder.content = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
+            else:
                 try:
-                    await _commit()
-                except Exception:
-                    pass
-                # Only surface the error when there is genuinely nothing to
-                # show: a partial stream or a retried answer is the reply.
-                if streamed == "Interrupted.":
-                    await job.events.put(("error", _fle(exc, job.provider)))
-                return
+                    async for chunk in client.stream_chat(messages, tools=None):
+                        streamed += chunk
+                        await job.events.put(("token", chunk))
+                except Exception as exc:
+                    if not streamed.strip():
+                        streamed = stream_fallback_reply(
+                            content, job.applied_actions, cold="Interrupted."
+                        )
+                        if streamed == "Interrupted.":
+                            retried = await _retry_final_non_streaming(client, messages, session, job)
+                            if retried:
+                                streamed = retried
+                        for chunk in _chunk_text(streamed):
+                            await job.events.put(("token", chunk))
+                    placeholder.content = _normalize_reply_markdown(_strip_text_tool_calls(streamed))
+                    try:
+                        await _commit()
+                    except Exception:
+                        pass
+                    # Only surface the error when there is genuinely nothing to
+                    # show: a partial stream or a retried answer is the reply.
+                    if streamed == "Interrupted.":
+                        await job.events.put(("error", _fle(exc, job.provider)))
+                    return
 
             if not streamed.strip():
                 fallback = stream_fallback_reply(content, job.applied_actions)

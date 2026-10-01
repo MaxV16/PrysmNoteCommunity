@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -40,6 +41,18 @@ def send_email(
         logger.warning("SMTP not configured, skipping email to %s: %s", to_address, subject)
         return False
     return _send_smtp(to_address, subject, body, sender)
+
+
+async def send_email_async(
+    to_address: str, subject: str, body: str, from_email: str | None = None
+) -> bool:
+    """Run the blocking mailer on a worker thread.
+
+    ``send_email`` uses blocking httpx/smtplib sockets, so awaiting it directly on
+    the event loop stalls every other request. Callers on the request path and in
+    background loops should await this instead.
+    """
+    return await asyncio.to_thread(send_email, to_address, subject, body, from_email)
 
 
 def _send_brevo_api(to_address: str, subject: str, body: str, sender: str) -> bool:

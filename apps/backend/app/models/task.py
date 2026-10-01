@@ -24,11 +24,22 @@ class Task(Base):
         Index("idx_tasks_user_status", "user_id", "status"),
         Index("idx_tasks_user_archived", "user_id", "is_archived"),
         Index("idx_tasks_parent", "parent_task_id"),
+        Index("idx_tasks_parent_start_date", "parent_task_id", "start_date"),
         Index("idx_tasks_user_created", "user_id", "created_at"),
         Index("ix_tasks_board_section", "user_id", "board_section_id", "board_order"),
         Index("idx_tasks_user_import_batch", "user_id", "import_batch_id"),
         Index("idx_tasks_user_deleted", "user_id", "deleted_at", postgresql_where=sa_text("deleted_at IS NOT NULL")),
+        # Active (non-trashed) task listing + ordering; partial keeps it small
+        # and directly serves the common `deleted_at IS NULL` filter.
+        Index("ix_tasks_user_active_created", "user_id", "created_at", postgresql_where=sa_text("deleted_at IS NULL")),
+        # Cross-user due-date scans (notification loop) filter only by due_date.
+        Index("ix_tasks_due_date_active", "due_date", postgresql_where=sa_text("deleted_at IS NULL")),
         Index("ix_tasks_list", "list_id"),
+        Index(
+            "ix_tasks_user_recurring",
+            "user_id",
+            postgresql_where=sa_text("recurrence_rule IS NOT NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -39,7 +50,7 @@ class Task(Base):
     # membership-by-status (board_section_id IS NULL + matching status).
     board_section_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("board_sections.id", ondelete="SET NULL"), nullable=True)
     board_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    title: Mapped[str] = mapped_column(String(5000), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[TaskStatus] = mapped_column(Enum(TaskStatus, name="task_status", values_callable=lambda x: [e.value for e in x]), default=TaskStatus.BACKLOG, nullable=False)
     priority: Mapped[int] = mapped_column(SmallInteger, default=2, nullable=False)
@@ -69,6 +80,11 @@ class Task(Base):
     # New tasks without a list are assigned the user's default "My Tasks" list.
     list_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("lists.id", ondelete="SET NULL"), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Per-task reminder opt-in. Reminders (in-app card, and email when the user
+    # has also enabled email reminders) are OFF unless the user marks a task.
+    reminder_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_text("FALSE"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

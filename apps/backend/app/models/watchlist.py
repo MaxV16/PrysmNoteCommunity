@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, SmallInteger, String, Text, UniqueConstraint, Uuid, func, text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, SmallInteger, String, Text, UniqueConstraint, Uuid, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +21,8 @@ class WatchlistItem(Base):
     __tablename__ = "watchlist_items"
     __table_args__ = (
         UniqueConstraint("user_id", "tmdb_id", name="uq_watchlist_items_user_tmdb"),
+        # List query orders by created_at within a user.
+        Index("ix_watchlist_items_user_created", "user_id", "created_at"),
     )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

@@ -11,6 +11,9 @@ export interface TourStep {
   body: string;
 }
 
+// Three highest-value steps, shown automatically once. The AI and Settings
+// surfaces become contextual discovery instead (see OnboardingDiscoveryCard),
+// so a new account reaches its first win before anything else.
 export const ONBOARDING_STEPS: TourStep[] = [
   {
     id: "sidebar",
@@ -23,19 +26,9 @@ export const ONBOARDING_STEPS: TourStep[] = [
     body: "Drag any task bar to move it to another day. Hold Cmd or Ctrl and click to select several tasks, then drag them all at once.",
   },
   {
-    id: "ai-panel",
-    title: "Prysm AI",
-    body: "Ask your AI assistant to create, find, reschedule or complete tasks in plain language. Click the lightning button to open the chat panel.",
-  },
-  {
     id: "view-switcher",
     title: "Five ways to see your tasks",
     body: "Switch between Timeline, Kanban, Calendar, List and Board. Every view reads the same tasks, so your plan stays in sync.",
-  },
-  {
-    id: "settings",
-    title: "Make Prysm yours",
-    body: "Themes, data imports, preferences and premium upgrades all live in Settings. Click the gear whenever you want to customize.",
   },
 ];
 

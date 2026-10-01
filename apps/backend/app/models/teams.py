@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -20,6 +20,9 @@ class TeamMember(Base):
     __tablename__ = "team_members"
     __table_args__ = (
         UniqueConstraint("team_id", "user_id", name="uq_team_member"),
+        # task_access_condition filters by member user_id; the unique above leads
+        # with team_id and cannot serve it.
+        Index("ix_team_members_user", "user_id"),
     )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -53,6 +56,10 @@ class TeamProject(Base):
 
 class TaskShare(Base):
     __tablename__ = "task_shares"
+    __table_args__ = (
+        Index("ix_task_shares_task", "task_id"),
+        Index("ix_task_shares_team", "team_id"),
+    )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     task_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)

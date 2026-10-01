@@ -34,6 +34,34 @@ async def test_global_api_rate_limit_429(auth_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_oauth_callbacks_are_exempt_from_global_rate_limit(auth_client: AsyncClient):
+    """A 429 on an OAuth callback would burn the single-use authorization code,
+    forcing the user to restart the whole consent flow from scratch."""
+    settings.api_rate_limit_enabled = True
+    settings.api_rate_limit_per_min = 1
+    ratelimit_mod._api_limiter = rl_utils.RateLimiter("rl:api")
+    try:
+        # Spend the window budget, then confirm ordinary /api traffic is 429.
+        assert (await auth_client.get("/api/tasks/")).status_code != 429
+        assert (await auth_client.get("/api/tasks/")).status_code == 429
+
+        for path in (
+            "/api/auth/oauth/google/callback",
+            "/api/auth/oauth/github/callback",
+            "/api/anything/callback",
+        ):
+            resp = await auth_client.get(path)
+            assert resp.status_code != 429, f"{path} was throttled: {resp.text}"
+
+        # Only the callback suffix is exempt - a sibling path still throttles.
+        assert (await auth_client.get("/api/auth/oauth/google/start")).status_code == 429
+    finally:
+        settings.api_rate_limit_enabled = False
+        settings.api_rate_limit_per_min = 120
+        ratelimit_mod._api_limiter = rl_utils.RateLimiter("rl:api")
+
+
+@pytest.mark.asyncio
 async def test_ratelimiter_memory_fallback_counts_window():
     """The in-memory fallback is a sliding window: old hits drop out of the
     window so the count does not grow forever."""

@@ -55,6 +55,17 @@ async def test_tool_set_contains_five_watchlist_tools():
     }
 
 
+def test_synthetic_tmdb_id_fits_int32():
+    """The synthesized id lands in an Integer (int32) column, so the digest must
+    stay in range (regression: a 48-bit hash overflowed asyncpg)."""
+    from app.services.watchlist_service import synthetic_tmdb_id
+
+    for media_type, title in (("movie", "Home Video"), ("tv", "Some Show"), ("movie", "X" * 300)):
+        value = synthetic_tmdb_id(media_type, title)
+        assert value < 0
+        assert -(2 ** 31) <= value <= 2 ** 31 - 1
+
+
 @pytest.mark.asyncio
 async def test_search_titles_returns_mapped_results(db_session: AsyncSession, ai_user, monkeypatch):
     async def fake_search_multi(query):
@@ -109,7 +120,62 @@ async def test_add_watchlist_item_and_dedupe(db_session: AsyncSession, ai_user, 
 
 
 @pytest.mark.asyncio
-async def test_add_watchlist_item_validates_media_type(db_session: AsyncSession, ai_user, monkeypatch):
+async def test_add_watchlist_item_manual_without_tmdb_id(db_session: AsyncSession, ai_user, monkeypatch):
+    """No TMDB key / no search results must still let the agent add a title by
+    handshaking media_type + title (synthesized negative id)."""
+    _stub_no_tmdb(monkeypatch)
+    payload = await WATCHLIST_TOOL_HANDLERS["add_watchlist_item"](
+        {"media_type": "movie", "title": "Home Video", "status": "plan_to_watch"},
+        str(ai_user),
+        db_session,
+    )
+    assert payload["created"] is True
+    assert payload["item"]["tmdb_id"] < 0
+    assert payload["item"]["title"] == "Home Video"
+
+    # Same title (case-insensitively) + media_type dedupes even with the hash id.
+    dup = await WATCHLIST_TOOL_HANDLERS["add_watchlist_item"](
+        {"media_type": "movie", "title": "home video"},
+        str(ai_user),
+        db_session,
+    )
+    assert dup["code"] == 409
+
+
+@pytest.mark.asyncio
+async def test_add_watchlist_item_requires_title_without_tmdb_id(db_session: AsyncSession, ai_user, monkeypatch):
+    _stub_no_tmdb(monkeypatch)
+    payload = await WATCHLIST_TOOL_HANDLERS["add_watchlist_item"](
+        {"media_type": "movie"},
+        str(ai_user),
+        db_session,
+    )
+    assert "error" in payload
+
+
+@pytest.mark.asyncio
+async def test_add_watchlist_item_uses_search_hit_when_no_id(db_session: AsyncSession, ai_user, monkeypatch):
+    monkeypatch.setattr(tmdb_service, "has_key", lambda: True)
+
+    async def _fake_search(query):
+        return [{"tmdb_id": 42, "media_type": "movie", "title": "Searched", "release_year": 1999, "poster_path": "/p.jpg"}]
+
+    monkeypatch.setattr(tmdb_service, "search_multi", _fake_search)
+
+    async def _noop_fetch(session, item):
+        return None
+
+    monkeypatch.setattr("app.services.watchlist_ai_tools.watchlist_service.fetch_and_store_metadata", _noop_fetch)
+
+    payload = await WATCHLIST_TOOL_HANDLERS["add_watchlist_item"](
+        {"media_type": "movie", "title": "Searched"},
+        str(ai_user),
+        db_session,
+    )
+    assert payload["created"] is True
+    assert payload["item"]["tmdb_id"] == 42
+
+
     _stub_no_tmdb(monkeypatch)
     payload = await WATCHLIST_TOOL_HANDLERS["add_watchlist_item"](
         {"tmdb_id": 1, "media_type": "book", "title": "X"},
@@ -160,6 +226,26 @@ async def test_update_watchlist_item_applies_fields(db_session: AsyncSession, ai
     assert data["status"] == "watched"
     assert data["rating"] == 8
     assert data["watched_at"] == "2026-08-30"
+
+
+@pytest.mark.asyncio
+async def test_update_watchlist_item_clears_rating_notes_and_watched_at(db_session: AsyncSession, ai_user):
+    item = await _add_item(db_session, ai_user, tmdb_id=8, title="Clear Me")
+    first = await WATCHLIST_TOOL_HANDLERS["update_watchlist_item"](
+        {"item_id": str(item.id), "rating": 7, "notes": "x", "watched_at": "2026-01-01"},
+        str(ai_user),
+        db_session,
+    )
+    assert first["item"]["rating"] == 7
+
+    cleared = await WATCHLIST_TOOL_HANDLERS["update_watchlist_item"](
+        {"item_id": str(item.id), "rating": None, "notes": None, "watched_at": None},
+        str(ai_user),
+        db_session,
+    )
+    assert cleared["item"]["rating"] is None
+    assert cleared["item"]["notes"] is None
+    assert cleared["item"]["watched_at"] is None
 
 
 @pytest.mark.asyncio

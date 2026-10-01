@@ -116,6 +116,40 @@ async def test_notes_crud(client):
 
 
 @pytest.mark.asyncio
+async def test_list_teams_shape_and_my_role(client, test_user):
+    """Refactor guard for the batched list_teams lookups: the response keeps its
+    {"teams", "invites"} shape and resolves the caller's role."""
+    await client.post("/api/teams/", json={"name": "Shape"})
+    body = (await client.get("/api/teams/")).json()
+    assert set(body.keys()) == {"teams", "invites"}
+    assert len(body["teams"]) == 1
+    assert body["teams"][0]["name"] == "Shape"
+    assert body["teams"][0]["my_role"] == "owner"
+    assert body["invites"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_teams_filters_invites_by_email(client, db_session):
+    """A pending invite only appears for the invitee's own email."""
+    from uuid import uuid4
+    from app.models.user import User
+
+    other = User(
+        id=uuid4(), email="other-invitee@example.com",
+        password_hash="fake", display_name="Other",
+    )
+    db_session.add(other)
+    await db_session.commit()
+
+    team = (await client.post("/api/teams/", json={"name": "InviteFilter"})).json()
+    await client.post(f"/api/teams/{team['id']}/members", json={"email": "other-invitee@example.com"})
+
+    # The caller is test_user, so the invitee's pending invite must NOT show up.
+    body = (await client.get("/api/teams/")).json()
+    assert body["invites"] == []
+
+
+@pytest.mark.asyncio
 async def test_share_only_own_task(client, test_user):
     team = (await client.post("/api/teams/", json={"name": "Delta"})).json()
     # Share a bogus task id -> 404

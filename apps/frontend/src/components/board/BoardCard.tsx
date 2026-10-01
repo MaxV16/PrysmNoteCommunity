@@ -1,13 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
+import { useLongPress } from "@/lib/use-long-press";
 import { formatDate } from "@/lib/dates";
 import { MUTED_PALETTE, type BoardDecoration } from "./board-utils";
 
-const MAX_CHECKLIST_ROWS = 6;
+const VISIBLE_SUBTASKS = 2;
 
 interface BoardCardProps {
   task: Task;
@@ -101,11 +103,11 @@ function RoundCheckbox({
       aria-checked={checked}
       aria-label={label}
       className={`flex h-[18px] w-[18px] shrink-0 cursor-pointer items-center justify-center rounded-full border-2 transition-all ${
-        checked ? "check-gradient border-transparent" : "border-[#5a5a72] hover:border-accent"
+        checked ? "check-gradient animate-pop border-transparent" : "border-border hover:border-accent"
       }`}
     >
       {checked && (
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--on-gradient)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="20 6 9 17 4 12" />
         </svg>
       )}
@@ -142,7 +144,13 @@ export function BoardCard({
 
   const isDone = task.status === "done";
   const doneCount = subtasks.filter((s) => s.status === "done").length;
-  const shownSubtasks = subtasks.slice(0, MAX_CHECKLIST_ROWS);
+  const [subtasksExpanded, setSubtasksExpanded] = useState(false);
+  const shownSubtasks = subtasksExpanded ? subtasks : subtasks.slice(0, VISIBLE_SUBTASKS);
+
+  // Touch long-press picks the card up for drag AND opens the mobile action bar.
+  const longPress = useLongPress(() => {
+    useAppStore.getState().setMobileActionTaskId(task.id);
+  }, {});
 
   return (
     <div
@@ -166,12 +174,12 @@ export function BoardCard({
       }}
       className={`group relative flex ${
         width ? "" : "w-full"
-      } shrink-0 cursor-pointer flex-col rounded-2xl border border-white/10 transition-colors duration-200 ${spanClass ?? ""}`}
+      } shrink-0 cursor-pointer flex-col rounded-2xl border border-border transition-colors duration-200 ${spanClass ?? ""}`}
       style={{
         width: width ?? undefined,
         marginTop: topOffset,
-        backgroundColor: "#101016",
-        backgroundImage: `linear-gradient(160deg, ${color}45, #101016 70%)`,
+        backgroundColor: "var(--bg-surface)",
+        backgroundImage: `linear-gradient(160deg, ${color}45, var(--bg-surface) 70%)`,
         boxShadow: selected
           ? "0 0 0 2px var(--accent), 0 0 16px var(--accent-glow), 0 2px 10px rgba(0, 0, 0, 0.35)"
           : `0 0 0 1px ${color}22, 0 2px 10px rgba(0, 0, 0, 0.35)`,
@@ -186,7 +194,18 @@ export function BoardCard({
       />
       <DecorativeLayer kind={decoration} color={color} />
 
-      <div className="relative z-10 flex flex-col gap-2.5 p-4" {...attributes} {...listeners}>
+      <div
+        className="relative z-10 flex flex-col gap-2.5 p-4"
+        {...attributes}
+        {...listeners}
+        onPointerDown={(e) => {
+          listeners?.onPointerDown?.(e);
+          longPress.onPointerDown(e);
+        }}
+        onPointerMove={longPress.onPointerMove}
+        onPointerUp={longPress.onPointerUp}
+        onPointerCancel={longPress.onPointerCancel}
+      >
         <div className="flex items-start gap-2">
           <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
           <h3 className={`min-w-0 flex-1 text-sm font-semibold leading-snug line-clamp-2 ${isDone ? "line-through text-muted" : "text-primary"}`}>
@@ -216,8 +235,18 @@ export function BoardCard({
                 </li>
               );
             })}
-            {subtasks.length > MAX_CHECKLIST_ROWS && (
-              <li className="px-1 text-[10px] text-muted">+{subtasks.length - MAX_CHECKLIST_ROWS} more</li>
+            {subtasks.length > VISIBLE_SUBTASKS && (
+              <li>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSubtasksExpanded((v) => !v);
+                  }}
+                  className="px-1 text-[10px] text-secondary transition-colors hover:text-primary"
+                >
+                  {subtasksExpanded ? "Show less" : `... ${subtasks.length - VISIBLE_SUBTASKS} more`}
+                </button>
+              </li>
             )}
           </ul>
         )}
@@ -230,12 +259,12 @@ export function BoardCard({
 
         <div className="flex items-center gap-1.5 pt-0.5">
           {subtasks.length > 0 && (
-            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] font-medium text-secondary">
+            <span className="rounded-full bg-elevated px-2 py-0.5 text-[10px] font-medium text-secondary">
               {doneCount} of {subtasks.length} done
             </span>
           )}
           {task.due_date && (
-            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-muted">
+            <span className="rounded-full bg-elevated px-2 py-0.5 text-[10px] text-muted">
               {formatDate(new Date(task.due_date + "T00:00:00"), { includeYear: false })}
             </span>
           )}
@@ -262,7 +291,7 @@ export function BoardCard({
                 onSetColor(task.id, c);
               }}
               aria-label={`Set card color ${c}`}
-              className={`h-3 w-3 rounded-full transition-transform hover:scale-125 ${c === color ? "ring-1 ring-white/70" : ""}`}
+              className={`h-3 w-3 rounded-full transition-transform hover:scale-125 ${c === color ? "ring-1 ring-accent" : ""}`}
               style={{ backgroundColor: c }}
             />
           ))}

@@ -189,6 +189,64 @@ async def test_oauth_callback_mobile_redirects_to_deep_link_and_code_exchanges(c
 
 
 @pytest.mark.asyncio
+async def test_oauth_start_desktop_marks_state_cookie_with_nonce(client):
+    # ?redirect=desktop prefixes the state cookie with the desktop marker and the
+    # nonce the Electron app generated, so the callback can echo it back and the
+    # app can reject a deep link it did not start.
+    orig_id, orig_secret = settings.google_client_id, settings.google_client_secret
+    try:
+        settings.google_client_id = "test-client"
+        settings.google_client_secret = "test-secret"
+        r = await client.get(
+            "/api/auth/oauth/google/start",
+            params={"redirect": "desktop", "nonce": "abc_DEF-123"},
+        )
+        assert r.status_code == 302
+        assert "accounts.google.com" in r.headers.get("location", "")
+        cookie = r.cookies.get("oauth_state")
+        assert cookie and cookie.startswith("desktop:abc_DEF-123:")
+
+        # An invalid nonce is dropped rather than injected into the cookie.
+        r2 = await client.get(
+            "/api/auth/oauth/google/start",
+            params={"redirect": "desktop", "nonce": "bad nonce!"},
+        )
+        cookie2 = r2.cookies.get("oauth_state")
+        assert cookie2 and cookie2.startswith("desktop::")
+    finally:
+        settings.google_client_id = orig_id
+        settings.google_client_secret = orig_secret
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_desktop_redirects_to_deep_link_with_nonce(client, monkeypatch):
+    # Full desktop loop: the callback (running in the system browser) issues a
+    # code and 307s to prysmnote:// carrying the nonce; the app then loads the
+    # exchange URL, which sets the session cookies in its own cookie store.
+    async def fake_fetch_identity(provider, code):
+        return {"email": "test@example.com", "name": "Test User", "email_verified": True}
+
+    monkeypatch.setattr(oauth_module, "_fetch_identity", fake_fetch_identity)
+    client.cookies.set("oauth_state", "desktop:nonce-xyz:abc123")
+
+    r = await client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": "4/0fake", "state": "abc123"},
+    )
+    assert r.status_code in (302, 307)
+    loc = r.headers.get("location", "")
+    assert loc.startswith("prysmnote://oauth/callback?code=")
+    assert "nonce=nonce-xyz" in loc
+    # No session cookies dropped in the system browser.
+    assert "access_token" not in r.headers.get("set-cookie", "")
+
+    code = parse_qs(urlparse(loc).query)["code"][0]
+    r2 = await client.get(f"/api/auth/mobile/exchange?code={code}")
+    assert r2.status_code == 307
+    assert "access_token" in r2.headers.get("set-cookie", "")
+
+
+@pytest.mark.asyncio
 async def test_mobile_exchange_sets_cookies_and_is_single_use(client, test_user):
     code = oauth_module._create_mobile_code(test_user)
     r = await client.get(f"/api/auth/mobile/exchange?code={code}")
@@ -232,3 +290,70 @@ async def test_mobile_exchange_rejects_expired_code(client, test_user):
     )
     r = await client.get(f"/api/auth/mobile/exchange?code={expired}")
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_oauth_start_mobile_marks_state_cookie_with_nonce(client):
+    # The mobile flow carries a nonce (like desktop) so a stray
+    # com.prysmnote.app:// deep link cannot log the app into an account the
+    # user did not authenticate as (login-CSRF guard).
+    orig_id, orig_secret = settings.google_client_id, settings.google_client_secret
+    try:
+        settings.google_client_id = "test-client"
+        settings.google_client_secret = "test-secret"
+        r = await client.get(
+            "/api/auth/oauth/google/start",
+            params={"redirect": "mobile", "nonce": "abc_DEF-123"},
+        )
+        assert r.status_code == 302
+        cookie = r.cookies.get("oauth_state")
+        assert cookie and cookie.startswith("mobile:abc_DEF-123:")
+
+        # An invalid nonce is dropped rather than injected into the cookie.
+        r2 = await client.get(
+            "/api/auth/oauth/google/start",
+            params={"redirect": "mobile", "nonce": "bad nonce!"},
+        )
+        cookie2 = r2.cookies.get("oauth_state")
+        assert cookie2 and cookie2.startswith("mobile::")
+    finally:
+        settings.google_client_id = orig_id
+        settings.google_client_secret = orig_secret
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_mobile_echoes_nonce(client, monkeypatch):
+    async def fake_fetch_identity(provider, code):
+        return {"email": "test@example.com", "name": "Test User", "email_verified": True}
+
+    monkeypatch.setattr(oauth_module, "_fetch_identity", fake_fetch_identity)
+    client.cookies.set("oauth_state", "mobile:nonce-abc:state123")
+
+    r = await client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": "4/0fake", "state": "state123"},
+    )
+    assert r.status_code in (302, 307)
+    loc = r.headers.get("location", "")
+    assert loc.startswith("com.prysmnote.app://oauth/client?code=")
+    assert "nonce=nonce-abc" in loc
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_mobile_legacy_cookie_without_nonce(client, monkeypatch):
+    # A state cookie written before the nonce was added ("mobile:<state>") must
+    # still validate, so an in-flight login is not broken by the deploy.
+    async def fake_fetch_identity(provider, code):
+        return {"email": "test@example.com", "name": "Test User", "email_verified": True}
+
+    monkeypatch.setattr(oauth_module, "_fetch_identity", fake_fetch_identity)
+    client.cookies.set("oauth_state", "mobile:state123")
+
+    r = await client.get(
+        "/api/auth/oauth/google/callback",
+        params={"code": "4/0fake", "state": "state123"},
+    )
+    assert r.status_code in (302, 307)
+    loc = r.headers.get("location", "")
+    assert loc.startswith("com.prysmnote.app://oauth/client?code=")
+    assert "nonce=" not in loc

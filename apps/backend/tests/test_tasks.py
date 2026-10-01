@@ -30,6 +30,29 @@ async def test_task_routes_reject_other_users_task(client: AsyncClient, db_sessi
 
 
 @pytest.mark.asyncio
+async def test_task_reminder_enabled_round_trip(client: AsyncClient):
+    """Reminders are per-task and default OFF; create/update/GET round-trip the flag."""
+    created = await client.post("/api/tasks/", json={
+        "title": "Remind me about this",
+        "due_date": "2026-09-20",
+        "reminder_enabled": True,
+    })
+    assert created.status_code == 200
+    data = created.json()
+    assert data["reminder_enabled"] is True
+    tid = data["id"]
+
+    plain = await client.post("/api/tasks/", json={"title": "No reminder"})
+    assert plain.json()["reminder_enabled"] is False
+
+    assert (await client.get(f"/api/tasks/{tid}")).json()["reminder_enabled"] is True
+
+    patched = await client.patch(f"/api/tasks/{tid}", json={"reminder_enabled": False})
+    assert patched.status_code == 200
+    assert patched.json()["reminder_enabled"] is False
+
+
+@pytest.mark.asyncio
 async def test_create_task(client: AsyncClient):
     response = await client.post("/api/tasks/", json={
         "title": "Test Task",
@@ -93,7 +116,10 @@ async def test_create_task_empty_title(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_create_task_long_title(client: AsyncClient):
     response = await client.post("/api/tasks/", json={"title": "x" * 501})
-    assert response.status_code == 422
+    assert response.status_code == 200
+
+    too_long = await client.post("/api/tasks/", json={"title": "x" * 5001})
+    assert too_long.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -1043,6 +1069,29 @@ async def test_lists_crud_and_default_backfill(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_default_list_cannot_be_deleted_or_renamed(client: AsyncClient):
+    """The default "My Tasks" list is permanent: delete and rename are refused.
+
+    It is the reassignment target for other deleted lists and the fallback home
+    for new tasks, so removing it (or renaming it away, which would spawn a new
+    empty one and leave the renamed list deletable) must be blocked.
+    """
+    lists = (await client.get("/api/lists/")).json()
+    default = next(l for l in lists if l["name"] == "My Tasks")
+
+    blocked_delete = await client.delete(f"/api/lists/{default['id']}")
+    assert blocked_delete.status_code == 403
+
+    blocked_rename = await client.patch(
+        f"/api/lists/{default['id']}", json={"name": "Renamed"}
+    )
+    assert blocked_rename.status_code == 403
+
+    still_there = (await client.get("/api/lists/")).json()
+    assert any(l["id"] == default["id"] and l["name"] == "My Tasks" for l in still_there)
+
+
+@pytest.mark.asyncio
 async def test_create_task_in_foreign_list_404(client: AsyncClient, db_session: AsyncSession):
     """C2: a list owned by another user must 404 on task create."""
     from app.models.task_list import TaskList
@@ -1059,3 +1108,100 @@ async def test_create_task_in_foreign_list_404(client: AsyncClient, db_session: 
 
     response = await client.post("/api/tasks/", json={"title": "nope", "list_id": str(foreign.id)})
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_task_title_length_cap(client: AsyncClient):
+    """Long titles are allowed up to 5000 chars; beyond that create/update/subtask 422."""
+    long_title = "x" * 600
+    created = await client.post("/api/tasks/", json={"title": long_title})
+    assert created.status_code == 200
+    assert created.json()["title"] == long_title
+    tid = created.json()["id"]
+
+    patched = await client.patch(f"/api/tasks/{tid}", json={"title": "y" * 600})
+    assert patched.status_code == 200
+    assert patched.json()["title"] == "y" * 600
+
+    subtask = await client.post(f"/api/tasks/{tid}/subtasks", json={"title": "z" * 600})
+    assert subtask.status_code == 200
+    assert subtask.json()["title"] == "z" * 600
+
+    too_long = "x" * 5001
+    rejected = await client.post("/api/tasks/", json={"title": too_long})
+    assert rejected.status_code == 422
+    assert "at most 5,000 characters" in str(rejected.json())
+
+    assert (await client.patch(f"/api/tasks/{tid}", json={"title": too_long})).status_code == 422
+    assert (
+        await client.post(f"/api/tasks/{tid}/subtasks", json={"title": too_long})
+    ).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_task_description_length_cap(client: AsyncClient):
+    """Descriptions fit 100,000 chars; the old 10,000 cap must not reject long notes."""
+    long_description = "x" * 20000
+    created = await client.post(
+        "/api/tasks/", json={"title": "long description", "description": long_description}
+    )
+    assert created.status_code == 200
+    assert created.json()["description"] == long_description
+    tid = created.json()["id"]
+
+    updated = await client.patch(f"/api/tasks/{tid}", json={"description": "y" * 20000})
+    assert updated.status_code == 200
+    assert updated.json()["description"] == "y" * 20000
+
+    too_long = "x" * 100001
+    rejected = await client.post(
+        "/api/tasks/", json={"title": "too long", "description": too_long}
+    )
+    assert rejected.status_code == 422
+    assert "at most 100,000 characters" in str(rejected.json())
+
+    assert (
+        await client.patch(f"/api/tasks/{tid}", json={"description": too_long})
+    ).status_code == 422
+    assert (
+        await client.post(
+            f"/api/tasks/{tid}/subtasks", json={"title": "sub", "description": too_long}
+        )
+    ).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_incremental_sync_updated_since_and_deleted(client: AsyncClient):
+    """Incremental sync returns rows changed after updated_since, tombstones included."""
+    created = await client.post("/api/tasks/", json={"title": "sync me"})
+    assert created.status_code == 200
+    tid = created.json()["id"]
+    assert created.json()["deleted_at"] is None
+
+    old = "2000-01-01T00:00:00+00:00"
+    patched = await client.patch(f"/api/tasks/{tid}", json={"title": "synced"})
+    assert patched.status_code == 200
+
+    changed = await client.get(
+        "/api/tasks/", params={"updated_since": old, "include_deleted": "true"}
+    )
+    assert changed.status_code == 200
+    rows = {t["id"]: t for t in changed.json()}
+    assert rows[tid]["title"] == "synced"
+
+    deleted = await client.delete(f"/api/tasks/{tid}")
+    assert deleted.status_code == 200
+
+    with_tombstones = await client.get(
+        "/api/tasks/", params={"updated_since": old, "include_deleted": "true"}
+    )
+    assert with_tombstones.status_code == 200
+    tombstoned = {t["id"]: t for t in with_tombstones.json()}
+    assert tombstoned[tid]["deleted_at"] is not None
+
+    live_only = await client.get("/api/tasks/", params={"updated_since": old})
+    assert live_only.status_code == 200
+    assert tid not in [t["id"] for t in live_only.json()]
+
+    bad = await client.get("/api/tasks/", params={"updated_since": "not-a-date"})
+    assert bad.status_code == 422

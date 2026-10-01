@@ -51,6 +51,30 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
                 if not _is_privilege_error(_err):
                     raise
 
+    # Per-task reminder opt-in. Idempotent and placed before the team RLS helper
+    # for the same reason as the block below: it must run even when that helper
+    # cannot be created and ensure_schema returns early.
+    if engine.dialect.name == "postgresql":
+        try:
+            async with engine.begin() as _conn:
+                await _conn.execute(text(
+                    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS "
+                    "reminder_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+        except ProgrammingError as _err:
+            if not _is_privilege_error(_err):
+                raise
+
+    if engine.dialect.name == "postgresql":
+        try:
+            async with engine.begin() as _conn:
+                await _conn.execute(text(
+                    "ALTER TABLE tasks ALTER COLUMN title TYPE VARCHAR(5000)"
+                ))
+        except ProgrammingError as _err:
+            if not _is_privilege_error(_err):
+                raise
+
     async with engine.begin() as conn:
         await conn.run_sync(lambda sync_conn: app.models.Base.metadata.create_all(sync_conn))
 
@@ -65,6 +89,62 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
                 await conn.execute(text("DROP TABLE IF EXISTS timeline_sections CASCADE"))
     except ProgrammingError:
         pass
+
+    # Per-list board sections: timeline sections now belong to a task list, so the
+    # column must exist before any board_sections query. Added after create_all
+    # and BEFORE the team RLS helper below (which can return early), so it always
+    # runs. Mirrored by alembic 0022.
+    try:
+        async with engine.begin() as _conn:
+            if _conn.dialect.name == "postgresql":
+                await _conn.execute(text(
+                    "ALTER TABLE board_sections ADD COLUMN IF NOT EXISTS "
+                    "list_id UUID REFERENCES lists(id) ON DELETE CASCADE"
+                ))
+                await _conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_board_sections_list ON board_sections (list_id)"
+                ))
+    except ProgrammingError as _err:
+        if not _is_privilege_error(_err):
+            raise
+
+    # Notification prefs were upgraded from email-first to in-app-first. The
+    # first time the new inapp_reminders column appears, the upgrade is applied
+    # ONCE to existing rows: the new columns are added, the email default flips
+    # to FALSE, and every pre-existing row (which was default-ON without an
+    # opt-in) is turned off. Gated on column existence so a later explicit
+    # opt-in by the user is never overwritten again. Placed here (before the
+    # team RLS helper) so it always runs even when the helper cannot be created
+    # and ensure_schema returns early, exactly like the timeline_sections drop.
+    if engine.dialect.name == "postgresql":
+        try:
+            async with engine.begin() as _conn:
+                exists = await _conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'user_notification_prefs' "
+                        "AND column_name = 'inapp_reminders'"
+                    )
+                )
+                if exists.scalar_one_or_none() is None:
+                    await _conn.execute(text(
+                        "ALTER TABLE user_notification_prefs "
+                        "ADD COLUMN inapp_reminders BOOLEAN NOT NULL DEFAULT TRUE"
+                    ))
+                    await _conn.execute(text(
+                        "ALTER TABLE user_notification_prefs "
+                        "ADD COLUMN reminder_time VARCHAR(5) NOT NULL DEFAULT '20:00'"
+                    ))
+                    await _conn.execute(text(
+                        "ALTER TABLE user_notification_prefs "
+                        "ALTER COLUMN email_reminders SET DEFAULT FALSE"
+                    ))
+                    await _conn.execute(text(
+                        "UPDATE user_notification_prefs SET email_reminders = FALSE"
+                    ))
+        except ProgrammingError as _err:
+            if not _is_privilege_error(_err):
+                raise
 
     # Grant the BYPASSRLS system role access to tables create_all creates after
     # initial provisioning. The init script (zz-init-roles.sh) only runs
@@ -82,7 +162,7 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
                         "user_notification_prefs, push_subscriptions, notification_logs, "
                         "notes, teams, team_members, team_invites, team_projects, task_shares, "
                         "user_preferences, board_sections, watchlist_items, "
-                        "analytics_events, analytics_daily TO prysm_system"
+                        "analytics_events, analytics_daily, passkeys TO prysm_system"
                     )
                 )
                 # analytics_events uses a bigint identity PK; the BYPASSRLS
@@ -230,6 +310,15 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         "DROP POLICY IF EXISTS user_isolation ON watchlist_items",
         "CREATE POLICY user_isolation ON watchlist_items "
         "USING (user_id = rls_user_id()) WITH CHECK (user_id = rls_user_id())",
+        # passkeys - user-scoped WebAuthn credentials. FORCE'd like the other
+        # user tables; the public sign-in lookup runs through the BYPASSRLS
+        # system engine because the credential owner is unknown until the row is
+        # found (no app.user_id context yet).
+        "ALTER TABLE passkeys ENABLE ROW LEVEL SECURITY",
+        "ALTER TABLE passkeys FORCE ROW LEVEL SECURITY",
+        "DROP POLICY IF EXISTS user_isolation ON passkeys",
+        "CREATE POLICY user_isolation ON passkeys "
+        "USING (user_id = rls_user_id()) WITH CHECK (user_id = rls_user_id())",
         # analytics_events - user-scoped first-party analytics. Mirrors the
         # tags/task_tags correction: ensure_schema must recreate the policy on
         # every startup, or a DB that lost it (e.g. a test-suite policy teardown
@@ -329,6 +418,18 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         # default list via ON DELETE SET NULL (the app moves them explicitly
         # too, for databases where the FK was provisioned without the reference).
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS list_id UUID REFERENCES lists(id) ON DELETE SET NULL",
+        # Per-task reminder opt-in (off by default; reminders only fire for
+        # tasks the user explicitly marked).
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reminder_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+        # In-app reminders (default on) + email off by default. The one-time
+        # upgrade above applies these to pre-existing rows; these idempotent
+        # statements cover databases where that block was skipped.
+        "ALTER TABLE user_notification_prefs ADD COLUMN IF NOT EXISTS inapp_reminders BOOLEAN NOT NULL DEFAULT TRUE",
+        "ALTER TABLE user_notification_prefs ADD COLUMN IF NOT EXISTS reminder_time VARCHAR(5) NOT NULL DEFAULT '20:00'",
+        "ALTER TABLE user_notification_prefs ALTER COLUMN email_reminders SET DEFAULT FALSE",
+        # Embedding source fingerprint: lets the embedding path skip a repeat
+        # provider call when a task's title/description did not actually change.
+        "ALTER TABLE task_embeddings ADD COLUMN IF NOT EXISTS source_hash VARCHAR(64)",
     ):
         try:
             async with engine.begin() as _conn:
@@ -352,8 +453,11 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         "CREATE INDEX IF NOT EXISTS ix_ai_conversations_user_session ON ai_conversations (user_id, session_id, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_ai_sessions_user_session ON ai_sessions (user_id, session_id)",
         "CREATE INDEX IF NOT EXISTS ix_ai_memories_user_active ON ai_memories (user_id, is_active)",
-        "CREATE INDEX IF NOT EXISTS ix_user_tokens_provider ON user_tokens (provider)",
-        "CREATE INDEX IF NOT EXISTS ix_calendar_events_user_google ON calendar_events (user_id, google_event_id)",
+        # Composite indexes matching the actual filters: tokens + calendar rows
+        # are always looked up by user_id first, so the composite serves the
+        # query (the legacy single/leading-column variants are dropped below).
+        "CREATE INDEX IF NOT EXISTS ix_user_tokens_user_provider ON user_tokens (user_id, provider)",
+        "CREATE INDEX IF NOT EXISTS ix_calendar_events_user_google_cal ON calendar_events (user_id, google_event_id, calendar_id)",
         "CREATE INDEX IF NOT EXISTS ix_tasks_board_section ON tasks (user_id, board_section_id, board_order)",
         "CREATE INDEX IF NOT EXISTS ix_token_blacklist_expires ON token_blacklist (expires_at)",
         # Import-batch lookups for the undo endpoint (backed by the model's
@@ -364,9 +468,54 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
         "CREATE INDEX IF NOT EXISTS idx_tasks_user_deleted ON tasks (user_id, deleted_at) WHERE deleted_at IS NOT NULL",
         # Task-list membership lookups.
         "CREATE INDEX IF NOT EXISTS ix_tasks_list ON tasks (list_id)",
+        # Recurring-occurrence expansion: lookup children by parent + start date.
+        "CREATE INDEX IF NOT EXISTS idx_tasks_parent_start_date ON tasks (parent_task_id, start_date)",
+        # Recurring expansion background loop scans templates only (partial).
+        "CREATE INDEX IF NOT EXISTS ix_tasks_user_recurring ON tasks (user_id) WHERE recurrence_rule IS NOT NULL",
+        # Recurring expansion scan: active (not done/cancelled, not trashed)
+        # templates, ordered by how recently they were expanded, so the hourly
+        # pass touches only rows that can still produce occurrences. The status
+        # comparison stays on the enum directly: casting it to text is not
+        # IMMUTABLE and Postgres rejects it in an index predicate.
+        "CREATE INDEX IF NOT EXISTS ix_tasks_recurring_active ON tasks (user_id, recurrence_last_expanded_at) "
+        "WHERE recurrence_rule IS NOT NULL AND deleted_at IS NULL AND status NOT IN ('done', 'cancelled')",
         # pgvector approximate nearest-neighbor search for semantic task search.
         "CREATE INDEX IF NOT EXISTS ix_task_embeddings_hnsw ON task_embeddings USING hnsw (embedding vector_cosine_ops)",
         "CREATE INDEX IF NOT EXISTS ix_ai_memories_hnsw ON ai_memories USING hnsw (embedding vector_cosine_ops)",
+        # Scale indexes (alembic 0026_add_scale_indexes): hot per-user listing
+        # and join paths that were previously unindexed. Names mirror the model
+        # __table_args__ and the migration so a fresh create_all DB, an
+        # alembic-upgraded DB and this pass all converge.
+        # Active-task listing (every read filters deleted_at IS NULL).
+        "CREATE INDEX IF NOT EXISTS ix_tasks_user_active_created ON tasks (user_id, created_at) WHERE deleted_at IS NULL",
+        # Cross-user due-date scan (notification loop) skips the user_id prefix.
+        "CREATE INDEX IF NOT EXISTS ix_tasks_due_date_active ON tasks (due_date) WHERE deleted_at IS NULL",
+        "CREATE INDEX IF NOT EXISTS ix_financial_items_user_created ON financial_items (user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_financial_transactions_user_date ON financial_transactions (user_id, date)",
+        "CREATE INDEX IF NOT EXISTS ix_financial_transactions_item ON financial_transactions (item_id)",
+        "CREATE INDEX IF NOT EXISTS ix_task_links_user ON task_links (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_task_links_source ON task_links (source_task_id)",
+        "CREATE INDEX IF NOT EXISTS ix_task_links_target ON task_links (target_task_id)",
+        "CREATE INDEX IF NOT EXISTS ix_task_shares_task ON task_shares (task_id)",
+        "CREATE INDEX IF NOT EXISTS ix_task_shares_team ON task_shares (team_id)",
+        "CREATE INDEX IF NOT EXISTS ix_team_members_user ON team_members (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_notification_logs_user_task_kind ON notification_logs (user_id, task_id, kind)",
+        "CREATE INDEX IF NOT EXISTS ix_notification_logs_kind_sent ON notification_logs (kind, sent_at)",
+        "CREATE INDEX IF NOT EXISTS ix_habits_user ON habits (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_push_subscriptions_user ON push_subscriptions (user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_ai_usage_user_provider_month ON ai_usage (user_id, provider, month)",
+        "CREATE INDEX IF NOT EXISTS ix_watchlist_items_user_created ON watchlist_items (user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_notes_user_sort_updated ON notes (user_id, sort, updated_at)",
+        "CREATE INDEX IF NOT EXISTS ix_lists_user ON lists (user_id)",
+        # Legacy names (init.sql / old model declarations) replaced by the
+        # composites above; drop them so the schema does not carry duplicates.
+        "DROP INDEX IF EXISTS ix_user_tokens_provider",
+        "DROP INDEX IF EXISTS ix_calendar_events_user_google",
+        "DROP INDEX IF EXISTS idx_user_tokens_provider",
+        "DROP INDEX IF EXISTS idx_calendar_events_google",
+        "DROP INDEX IF EXISTS idx_task_links_source",
+        "DROP INDEX IF EXISTS idx_task_links_target",
+        "DROP INDEX IF EXISTS idx_habits_user",
         # The original single-column-concatenation index never matched the search
         # operands and was dead weight on writes; drop it if still present.
         "DROP INDEX IF EXISTS ix_tasks_trgm",
@@ -392,14 +541,34 @@ async def ensure_schema(engine: AsyncEngine, system_engine: AsyncEngine | None =
                         "INSERT INTO lists (user_id, name, position) "
                         "SELECT DISTINCT t.user_id, 'My Tasks', 0 "
                         "FROM tasks t "
-                        "WHERE NOT EXISTS (SELECT 1 FROM lists l WHERE l.user_id = t.user_id)"
+                        "WHERE NOT EXISTS ("
+                        "SELECT 1 FROM lists l "
+                        "WHERE l.user_id = t.user_id AND l.name = 'My Tasks')"
                     )
                 )
+                # Scope the UPDATE to the user's own "My Tasks" list. Without the
+                # name guard Postgres joins every list of the user and picks an
+                # arbitrary one, which quietly moved thousands of list-less
+                # imported tasks into whichever list the planner reached first.
                 await _conn.execute(
                     text(
                         "UPDATE tasks SET list_id = l.id "
                         "FROM lists l "
-                        "WHERE tasks.user_id = l.user_id AND tasks.list_id IS NULL"
+                        "WHERE tasks.user_id = l.user_id "
+                        "AND tasks.list_id IS NULL "
+                        "AND l.name = 'My Tasks'"
+                    )
+                )
+                # Converge completed TickTick imports that the old status
+                # mapping filed as archived todo rows. Archived plus a
+                # completion timestamp is a self-contradictory state, so it is
+                # safe and idempotent to repair (completed tasks must be done).
+                await _conn.execute(
+                    text(
+                        "UPDATE tasks SET status = 'done', is_archived = false "
+                        "WHERE is_archived "
+                        "AND status = 'todo' "
+                        "AND completed_at IS NOT NULL"
                     )
                 )
         except Exception:

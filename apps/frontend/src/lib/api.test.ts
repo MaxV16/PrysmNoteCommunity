@@ -164,7 +164,7 @@ describe("api", () => {
     await expect(api.get("/tasks")).rejects.toThrow("Validation error");
   });
 
-  it("throws on non-ok response with status text fallback", async () => {
+  it("throws a clear message on a non-JSON 500 instead of the raw status text", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 500,
@@ -172,7 +172,31 @@ describe("api", () => {
       json: () => Promise.reject(new Error("parse failed")),
     });
 
-    await expect(api.get("/tasks")).rejects.toThrow("Internal Server Error");
+    await expect(api.get("/tasks")).rejects.toThrow("Server error (500). Please try again.");
+  });
+
+  it("explains an edge 502/504 error page instead of a bare 'Request failed'", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      json: () => Promise.reject(new Error("Unexpected token '<'")),
+    });
+
+    await expect(api.get("/tasks")).rejects.toThrow(
+      "The server was unavailable or the request took too long. Please try again."
+    );
+  });
+
+  it("keeps the status text for a non-5xx response with a non-JSON body", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      json: () => Promise.reject(new Error("parse failed")),
+    });
+
+    await expect(api.get("/tasks")).rejects.toThrow("Bad Request");
   });
 
   it("throws descriptive error when fetch fails (network down)", async () => {

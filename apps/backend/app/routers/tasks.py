@@ -15,12 +15,17 @@ from app.models.board_section import BoardSection
 from app.models.task_list import TaskList
 from app.models.user import User
 from app.services.embedding_service import generate_and_store_embedding
-from app.services.task_service import create_task, delete_task, get_task, search_tasks, update_task, task_access_condition, active_condition, delete_tasks_batch, reschedule_tasks_batch, move_tasks_to_section, set_task_dates_batch, restore_task, restore_tasks_batch, list_trashed, purge_trash, empty_trash
+from app.services.task_service import create_task, create_tasks_bulk, delete_task, get_task, search_tasks, update_task, task_access_condition, active_condition, delete_tasks_batch, reschedule_tasks_batch, move_tasks_to_section, set_task_dates_batch, restore_task, restore_tasks_batch, list_trashed, purge_trash, empty_trash
 from app.services import subtask_service
 from app.models.teams import TaskShare
 from app.utils.uuid_helpers import parse_uuid
 
 VALID_STATUSES = {s.value for s in TaskStatus}
+
+TASK_TITLE_MAX_CHARS = 5000
+TASK_DESCRIPTION_MAX_CHARS = 100000
+SUBTASK_TITLE_MAX_CHARS = TASK_TITLE_MAX_CHARS
+SUBTASK_DESCRIPTION_MAX_CHARS = TASK_DESCRIPTION_MAX_CHARS
 
 
 def _require_uuid(value: str) -> UUID:
@@ -49,6 +54,17 @@ def _parse_date_arg(value: str | None) -> date_type | None:
         return None
 
 
+async def _owned_list_uuid(session: AsyncSession, user_id: UUID, list_id: str) -> UUID:
+    """Resolve a list id the caller owns, 404ing when it is missing or foreign."""
+    list_uuid = _require_uuid(list_id)
+    owned_list = await session.execute(
+        select(TaskList.id).where(TaskList.id == list_uuid, TaskList.user_id == user_id)
+    )
+    if owned_list.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
+    return list_uuid
+
+
 def _serialize_task(task: Task, tags: list[dict] | None = None) -> dict:
     return {
         "id": str(task.id),
@@ -70,6 +86,7 @@ def _serialize_task(task: Task, tags: list[dict] | None = None) -> dict:
         "recurrence_end_date": task.recurrence_end_date.isoformat() if task.recurrence_end_date else None,
         "sort_order": task.sort_order,
         "is_archived": task.is_archived,
+        "reminder_enabled": task.reminder_enabled,
         "list_id": str(task.list_id) if task.list_id else None,
         "deleted_at": task.deleted_at.isoformat() if task.deleted_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
@@ -161,6 +178,7 @@ class CreateTaskRequest(BaseModel):
     estimated_minutes: int | None = None
     tag_ids: list[str] | None = None
     list_id: str | None = None
+    reminder_enabled: bool = False
 
     @field_validator("title")
     @classmethod
@@ -168,15 +186,15 @@ class CreateTaskRequest(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("Title is required")
-        if len(v) > 500:
-            raise ValueError("Title must be at most 500 characters")
+        if len(v) > TASK_TITLE_MAX_CHARS:
+            raise ValueError(f"Title must be at most {TASK_TITLE_MAX_CHARS:,} characters")
         return v
 
     @field_validator("description")
     @classmethod
     def validate_description(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 10000:
-            raise ValueError("Description must be at most 10,000 characters")
+        if v is not None and len(v) > TASK_DESCRIPTION_MAX_CHARS:
+            raise ValueError(f"Description must be at most {TASK_DESCRIPTION_MAX_CHARS:,} characters")
         return v
 
     @field_validator("status")
@@ -256,6 +274,7 @@ class UpdateTaskRequest(BaseModel):
     board_section_id: str | None = None
     board_order: int | None = None
     list_id: str | None = None
+    reminder_enabled: bool | None = None
 
     @field_validator("title")
     @classmethod
@@ -264,8 +283,8 @@ class UpdateTaskRequest(BaseModel):
             v = v.strip()
             if not v:
                 raise ValueError("Title must not be empty")
-            if len(v) > 500:
-                raise ValueError("Title must be at most 500 characters")
+            if len(v) > TASK_TITLE_MAX_CHARS:
+                raise ValueError(f"Title must be at most {TASK_TITLE_MAX_CHARS:,} characters")
         return v
 
     @field_validator("status")
@@ -303,8 +322,8 @@ class UpdateTaskRequest(BaseModel):
     @field_validator("description")
     @classmethod
     def validate_description(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 10000:
-            raise ValueError("Description must be at most 10,000 characters")
+        if v is not None and len(v) > TASK_DESCRIPTION_MAX_CHARS:
+            raise ValueError(f"Description must be at most {TASK_DESCRIPTION_MAX_CHARS:,} characters")
         return v
 
     @model_validator(mode="after")
@@ -352,8 +371,15 @@ class CreateSubtaskRequest(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("Title is required")
-        if len(v) > 500:
-            raise ValueError("Title must be at most 500 characters")
+        if len(v) > SUBTASK_TITLE_MAX_CHARS:
+            raise ValueError(f"Title must be at most {SUBTASK_TITLE_MAX_CHARS:,} characters")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > SUBTASK_DESCRIPTION_MAX_CHARS:
+            raise ValueError(f"Description must be at most {SUBTASK_DESCRIPTION_MAX_CHARS:,} characters")
         return v
 
 
@@ -378,6 +404,8 @@ async def list_tasks(
     date_from: str | None = None,
     date_to: str | None = None,
     list_id: str | None = None,
+    updated_since: str | None = None,
+    include_deleted: bool = False,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
@@ -431,21 +459,56 @@ async def list_tasks(
         )
         return await serialize_tasks(session, result.scalars().all())
 
+    # Incremental sync mode: return everything changed after `updated_since`
+    # ordered oldest-first so a client can page forward and advance its cursor.
+    # `include_deleted` drops the soft-delete filter so tombstoned rows come
+    # back with `deleted_at` set and the client can purge them locally.
+    if updated_since is not None:
+        from datetime import datetime as datetime_type
+        from datetime import timezone as timezone_type
+
+        try:
+            since = datetime_type.fromisoformat(updated_since)
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="updated_since must be a valid ISO datetime",
+            )
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone_type.utc)
+
+        changed_stmt = select(Task).where(
+            task_access_condition(user.id), Task.updated_at > since
+        )
+        if not include_deleted:
+            changed_stmt = changed_stmt.where(active_condition())
+        if list_id:
+            changed_stmt = changed_stmt.where(
+                Task.list_id == await _owned_list_uuid(session, user.id, list_id)
+            )
+        changed_stmt = (
+            changed_stmt.order_by(Task.updated_at.asc(), Task.id.asc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await session.execute(changed_stmt)
+        return await serialize_tasks(session, result.scalars().all())
+
+    stmt = select(Task).where(task_access_condition(user.id))
+    if not include_deleted:
+        stmt = stmt.where(active_condition())
     stmt = (
-        select(Task)
-        .where(task_access_condition(user.id), active_condition())
-        .order_by(Task.created_at.desc())
+        # id breaks created_at ties so LIMIT/OFFSET paging is stable: an import
+        # batch inserts thousands of rows in one transaction and they share a
+        # created_at timestamp.
+        stmt.order_by(Task.created_at.desc(), Task.id.desc())
         .offset(offset)
         .limit(limit)
     )
     if list_id:
-        list_uuid = _require_uuid(list_id)
-        owned_list = await session.execute(
-            select(TaskList.id).where(TaskList.id == list_uuid, TaskList.user_id == user.id)
+        stmt = stmt.where(
+            Task.list_id == await _owned_list_uuid(session, user.id, list_id)
         )
-        if owned_list.scalar_one_or_none() is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
-        stmt = stmt.where(Task.list_id == list_uuid)
     result = await session.execute(stmt)
     return await serialize_tasks(session, result.scalars().all())
 
@@ -531,10 +594,16 @@ async def create_task_route(
                 session.add(TaskTag(task_id=task.id, tag_id=tag_uuid))
         await session.flush()
 
+    if request.reminder_enabled:
+        task.reminder_enabled = True
+
     asyncio.create_task(
         _embed_task_background(task.id, user.id, task.title, task.description)
     )
 
+    # Flush before refresh so the reminder flag (and any other in-session change)
+    # is persisted rather than discarded by the reload.
+    await session.flush()
     await session.refresh(task)
     return (await serialize_tasks(session, [task]))[0]
 
@@ -587,8 +656,11 @@ async def update_task_route(
         existing_tags = await session.execute(
             select(TaskTag).where(TaskTag.task_id == task.id)
         )
-        for et in existing_tags.scalars().all():
-            await session.delete(et)
+        if existing_tags.scalars().all():
+            from sqlalchemy import delete as sa_delete
+            await session.execute(
+                sa_delete(TaskTag).where(TaskTag.task_id == task.id)
+            )
         for tag_uuid in tag_uuids:
             session.add(TaskTag(task_id=task.id, tag_id=tag_uuid))
         await session.flush()
@@ -842,6 +914,22 @@ async def update_subtask(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subtask not found")
     updated = await update_task(session, _require_uuid(subtask_id), request.to_fields_dict(), user.id)
     return {"id": str(updated.id), "title": updated.title, "status": updated.status.value}
+
+
+@router.delete("/{task_id}/subtasks/{subtask_id}")
+async def delete_subtask(
+    task_id: str,
+    subtask_id: str,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+):
+    subtask = await get_task(session, _require_uuid(subtask_id), user.id)
+    if not subtask or str(subtask.parent_task_id) != task_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subtask not found")
+    await delete_task(session, subtask.id, user.id)
+    return {"status": "deleted", "id": str(subtask.id)}
+
+
 @router.get("/search")
 async def search_tasks_route(
     q: str,
@@ -1013,23 +1101,28 @@ async def batch_create_tasks(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
-    created = []
-    for task_req in request.tasks:
-        task = await create_task(
-            session,
-            user_id=user.id,
-            title=task_req.title,
-            start_date=task_req.start_date,
-            due_date=task_req.due_date,
-            start_time=task_req.start_time,
-            end_time=task_req.end_time,
-            priority=task_req.priority,
-            recurrence_rule=task_req.recurrence_rule,
-            recurrence_end_date=task_req.recurrence_end_date,
-        )
-        created.append({"id": str(task.id), "title": task.title})
+    created = await create_tasks_bulk(
+        session,
+        user.id,
+        [
+            {
+                "title": task_req.title,
+                "start_date": task_req.start_date,
+                "due_date": task_req.due_date,
+                "start_time": task_req.start_time,
+                "end_time": task_req.end_time,
+                "priority": task_req.priority,
+                "recurrence_rule": task_req.recurrence_rule,
+                "recurrence_end_date": task_req.recurrence_end_date,
+            }
+            for task_req in request.tasks
+        ],
+    )
 
-    return {"created": len(created), "tasks": created}
+    return {
+        "created": len(created),
+        "tasks": [{"id": str(task.id), "title": task.title} for task in created],
+    }
 
 
 @router.post("/expand-recurring")

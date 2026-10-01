@@ -17,6 +17,7 @@ import { KanbanAddCard } from "./KanbanAddCard";
 interface KanbanColumnProps {
   section: BoardSection;
   tasks: Task[];
+  subtasksByParent: Map<string, Task[]>;
   cardLayout: CardLayout;
   onRefetch: () => void;
   onRename: (title: string) => void;
@@ -28,6 +29,7 @@ interface KanbanColumnProps {
 export function KanbanColumn({
   section,
   tasks,
+  subtasksByParent,
   cardLayout,
   onRefetch,
   onRename,
@@ -62,7 +64,7 @@ export function KanbanColumn({
       <div className="mb-1 flex items-center gap-2 px-4 pt-3 pb-2">
         <span
           className="block h-2.5 w-2.5 shrink-0 rounded-full"
-          style={{ backgroundColor: section.color || "#9E9E9E" }}
+          style={{ backgroundColor: section.color || "var(--text-muted)" }}
         />
         {editing ? (
           <input
@@ -85,8 +87,18 @@ export function KanbanColumn({
               setDraft(section.title);
               setEditing(true);
             }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setDraft(section.title);
+                setEditing(true);
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label={`Rename section ${section.title}`}
             title="Click to rename section"
-            className="flex-1 min-w-0 cursor-text truncate text-sm font-semibold text-primary"
+            className="flex-1 min-w-0 cursor-text truncate rounded text-sm font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
           >
             {section.title}
           </h3>
@@ -98,6 +110,7 @@ export function KanbanColumn({
           onClick={onRemove}
           className="text-xs text-muted transition-colors hover:text-red-400"
           title="Remove section"
+          aria-label={`Remove section ${section.title}`}
         >
           ✕
         </button>
@@ -117,12 +130,12 @@ export function KanbanColumn({
           {cardLayout === "side_by_side" ? (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3">
               {tasks.map((task) => (
-                <KanbanCard key={task.id} task={task} sectionId={section.id} onContextMenu={onCardContextMenu} selected={selectedTaskIds.includes(task.id)} />
+                <KanbanCard key={task.id} task={task} subtasks={subtasksByParent.get(task.id) ?? []} sectionId={section.id} onContextMenu={onCardContextMenu} selected={selectedTaskIds.includes(task.id)} />
               ))}
             </div>
           ) : (
             tasks.map((task) => (
-              <KanbanCard key={task.id} task={task} sectionId={section.id} onContextMenu={onCardContextMenu} selected={selectedTaskIds.includes(task.id)} />
+              <KanbanCard key={task.id} task={task} subtasks={subtasksByParent.get(task.id) ?? []} sectionId={section.id} onContextMenu={onCardContextMenu} selected={selectedTaskIds.includes(task.id)} />
             ))
           )}
         </SortableContext>

@@ -6,6 +6,8 @@ import type { Task, TaskStatus } from "@/types/task";
 import { toLocalDateString } from "@/lib/utils";
 import { TIER_LABELS, TIER_VALUES, normalizePriority, type PriorityTier } from "@/lib/priority";
 import { applyEnd, parseEnd, type RecurrenceEnd } from "@/lib/recurrence";
+import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
+import { CharLimitHint } from "@/components/ui/CharLimitHint";
 
 interface TaskFormProps {
   onSubmit: (data: {
@@ -22,10 +24,16 @@ interface TaskFormProps {
     recurrence_rule?: string;
     recurrence_end_date?: string;
     estimated_minutes?: number;
+    reminder_enabled?: boolean;
+    board_section_id?: string | null;
   }) => void;
   onCancel: () => void;
   initial?: Task | null;
   defaultDate?: string;
+  /** Status pre-selected for a new task (e.g. a board column's status). */
+  defaultStatus?: TaskStatus;
+  /** Board section a new task is filed into (free board columns). */
+  boardSectionId?: string | null;
 }
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
@@ -140,7 +148,7 @@ function CalendarPicker({ value, onChange, placeholder }: { value: string; onCha
                   onClick={() => selectDate(d)}
                   className={`text-xs py-1 rounded-md transition-colors ${
                     isSelected
-                      ? "gradient-bg text-[var(--on-gradient)] font-semibold shadow-glow"
+                      ? "gradient-bg text-[var(--on-gradient)] font-semibold"
                       : isToday
                       ? "bg-accent/15 text-accent font-medium"
                       : "text-secondary hover:bg-hover hover:text-primary"
@@ -157,21 +165,27 @@ function CalendarPicker({ value, onChange, placeholder }: { value: string; onCha
   );
 }
 
-export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormProps) {
-  const { tags, lists, activeListId } = useAppStore();
+export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStatus, boardSectionId }: TaskFormProps) {
+  const tags = useAppStore((s) => s.tags);
+  const lists = useAppStore((s) => s.lists);
+  const activeListId = useAppStore((s) => s.activeListId);
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || "");
   const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || "");
   const [startTime, setStartTime] = useState(initial?.start_time || "");
   const [endTime, setEndTime] = useState(initial?.end_time || "");
-  const [status, setStatus] = useState<TaskStatus>(initial?.status || "todo");
+  const [status, setStatus] = useState<TaskStatus>(initial?.status || defaultStatus || "todo");
   const [priority, setPriority] = useState<PriorityTier>(initial?.priority ? normalizePriority(initial.priority) : 2);
   const [selectedTags, setSelectedTags] = useState<string[]>(() => initial?.tags?.map((t) => t.id) ?? []);
   const [listId, setListId] = useState<string>(initial?.list_id || activeListId || "");
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     initial?.estimated_minutes?.toString() || (initial ? "" : "30")
   );
+  const [reminderEnabled, setReminderEnabled] = useState<boolean>(
+    initial?.reminder_enabled ?? false
+  );
+  const [showAdvanced, setShowAdvanced] = useState(() => !!initial);
 
   const initRecurrence = initial?.recurrence_rule || "";
   const [recurrencePreset, setRecurrencePreset] = useState(() => {
@@ -216,7 +230,15 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
     startTime && endTime && startTime >= endTime && sameDay
       ? "End time must be after the start time"
       : null;
-  const validationError = dateError ?? timeError;
+  const titleError =
+    title.length > TASK_TITLE_MAX
+      ? `Title is ${title.length - TASK_TITLE_MAX} characters over the limit`
+      : null;
+  const descriptionError =
+    description.length > TASK_DESCRIPTION_MAX
+      ? `Description is ${description.length - TASK_DESCRIPTION_MAX} characters over the limit`
+      : null;
+  const validationError = dateError ?? timeError ?? titleError ?? descriptionError;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -240,18 +262,22 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
       due_date: due || undefined,
       start_time: startTime.trim() || undefined,
       end_time: endTime.trim() || undefined,
-      status: isEdit ? status : undefined,
+      // Creates preserve the backend default unless the form was opened with an
+      // explicit status (a board column); edits always send the picked status.
+      status: isEdit || defaultStatus !== undefined ? status : undefined,
       priority: isEdit ? priority : undefined,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
       list_id: listId || undefined,
       recurrence_rule: endApplied.recurrence_rule || undefined,
       recurrence_end_date: endApplied.recurrence_end_date || undefined,
       estimated_minutes: estimatedMinutes ? Number(estimatedMinutes) : undefined,
+      reminder_enabled: reminderEnabled,
+      board_section_id: isEdit ? undefined : boardSectionId ?? undefined,
     });
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4 overflow-y-auto max-h-[60dvh] pb-safe" style={{ minHeight: 0 }}>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto max-h-[70dvh] pb-safe" style={{ minHeight: 0 }}>
       <div>
         <label className="text-xs font-medium text-secondary mb-1.5 block">Task Title</label>
         <input
@@ -262,6 +288,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           className="input-field text-sm placeholder:text-secondary"
           autoFocus
         />
+        <CharLimitHint value={title} max={TASK_TITLE_MAX} className="mt-1" />
       </div>
       <div>
         <label className="text-xs font-medium text-secondary mb-1.5 block">Description</label>
@@ -272,6 +299,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           rows={2}
           className="input-field resize-none text-xs placeholder:text-secondary"
         />
+        <CharLimitHint value={description} max={TASK_DESCRIPTION_MAX} className="mt-1" />
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
         <div className="flex-1">
@@ -344,6 +372,42 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           </select>
         </div>
       </div>
+      <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border bg-elevated px-3 py-2.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+            </svg>
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm text-secondary">Remind me</span>
+            <span className="block text-[11px] text-muted">Off by default; only tasks you mark are reminded.</span>
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          checked={reminderEnabled}
+          onChange={(e) => setReminderEnabled(e.target.checked)}
+          className="h-4 w-4 shrink-0"
+          style={{ accentColor: "var(--accent)" }}
+          data-testid="task-reminder-toggle"
+        />
+      </label>
+      <button
+        type="button"
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        className="flex items-center gap-1.5 text-xs text-secondary hover:text-primary transition-colors self-start"
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          className={`transition-transform ${showAdvanced ? "rotate-90" : ""}`}
+        >
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+        {showAdvanced ? "Less options" : "More options"}
+      </button>
+      {showAdvanced && (
+        <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
         <div className="flex-1">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Recurrence</label>
@@ -442,7 +506,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
                 }
                 className={`badge text-[10px] transition-all ${
                   isSelected
-                    ? "gradient-bg text-[var(--on-gradient)] shadow-glow"
+                    ? "gradient-bg text-[var(--on-gradient)]"
                     : "bg-elevated text-secondary hover:text-primary"
                 }`}
               >
@@ -452,13 +516,17 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate }: TaskFormP
           })}
         </div>
       )}
-      <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-border/40">
-        <button type="button" onClick={onCancel} className="btn bg-elevated border border-border px-4 py-2 text-sm text-secondary hover:bg-hover hover:text-primary">
-          Cancel
-        </button>
-        <button type="submit" disabled={!!validationError} className="btn btn-primary px-6 py-2 text-sm disabled:opacity-50">
-          {isEdit ? "Update Task" : "Create Task"}
-        </button>
+        </div>
+      )}
+      <div className="sticky bottom-0 bg-surface pt-2 mt-2 border-t border-border/40">
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="btn bg-elevated border border-border px-4 py-2 text-sm text-secondary hover:bg-hover hover:text-primary">
+            Cancel
+          </button>
+          <button type="submit" disabled={!!validationError} className="btn btn-primary px-6 py-2 text-sm disabled:opacity-50">
+            {isEdit ? "Update Task" : "Create Task"}
+          </button>
+        </div>
       </div>
     </form>
   );

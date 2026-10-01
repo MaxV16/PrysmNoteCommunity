@@ -40,6 +40,7 @@ from app.services.ai_cache import (
 )
 from app.services.ai_region import RegionBlockedError, resolve_ai_chain
 from app.services.ai_service import (
+    TOOL_NUDGE,
     build_messages,
     execute_tool_calls,
     get_llm_client,
@@ -50,6 +51,7 @@ from app.services.ai_service import (
 from app.services.ai_turn_runner import (
     cancel_turn,
     get_active_turn,
+    should_bump_model,
     start_turn,
 )
 from app.services.memory_service import (
@@ -575,11 +577,11 @@ async def chat(
     messages = build_messages(sanitized_history, request.message, request.context, current_summary, memories, include_finance=premium)
 
     MAX_TOOL_ROUNDS = 4
-    MAX_RETRY_BUMPS = 2
     chain_list: list[str] = [chain[0], *chain[1]] if chain else []
     current_model_index = 0
     content = ""
     tool_calls = None
+    nudged = False
     try:
         try:
             for _round in range(MAX_TOOL_ROUNDS):
@@ -599,11 +601,21 @@ async def chat(
                         content = _strip_text_tool_calls(content)
 
                 if not tool_calls and _needs_tool_retry(content, request.message):
-                    if current_model_index < min(len(chain_list) - 1, MAX_RETRY_BUMPS):
+                    # Bumping to a stronger, pricier model is a hosted-premium
+                    # convenience: only a Prysm-hosted premium turn pays for it.
+                    if should_bump_model(premium, provider, current_model_index, len(chain_list)):
                         current_model_index += 1
                         model = chain_list[current_model_index]
                         fallbacks = chain_list[current_model_index + 1:]
                         client = await get_llm_client(provider, api_key, model=model, fallbacks=fallbacks, zdr=settings.prysm_ai_zdr)
+                        continue
+
+                    # A BYOK turn has no hosting chain to bump to, so retry the
+                    # same model once with an explicit tool nudge instead of
+                    # handing the refusal straight back to the user.
+                    if not nudged:
+                        nudged = True
+                        messages.append({"role": "system", "content": TOOL_NUDGE})
                         continue
 
                 if not tool_calls:

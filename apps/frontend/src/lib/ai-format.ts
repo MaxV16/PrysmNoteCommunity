@@ -7,7 +7,7 @@
 // This mirrors the backend _normalize_reply_markdown (app/services/ai_shared.py)
 // so the live stream and the persisted history both display cleanly.
 
-import { COMMON_WORDS } from "./common-words";
+import { commonWords } from "./common-words";
 
 const TOOL_CALL_MARKER = "[TOOL_CALLS]";
 
@@ -140,9 +140,9 @@ function joinSplitHexRun(line: string): string {
 function isValidJoin(tokens: string[], i: number, k: number): boolean {
   const joined = tokens.slice(i, i + k).join("");
   if (joined.length < 4 || joined.length > 24) return false;
-  if (!COMMON_WORDS.has(joined.toLowerCase())) return false;
+  if (!commonWords().has(joined.toLowerCase())) return false;
   for (let t = i; t < i + k; t++) {
-    if (!COMMON_WORDS.has(tokens[t].toLowerCase())) return true;
+    if (!commonWords().has(tokens[t].toLowerCase())) return true;
   }
   return false;
 }
@@ -151,7 +151,7 @@ function rejoinLength(tokens: string[], i: number): number {
   const n = tokens.length;
   // Longest prefix that ends right before a standalone dictionary word.
   for (let k = Math.min(n - i - 1, 24); k >= 2; k--) {
-    if (isValidJoin(tokens, i, k) && COMMON_WORDS.has(tokens[i + k].toLowerCase())) {
+    if (isValidJoin(tokens, i, k) && commonWords().has(tokens[i + k].toLowerCase())) {
       return k;
     }
   }
@@ -258,7 +258,7 @@ function isFragmentLine(stripped: string): boolean {
 function isLooseCommonWord(word: string): boolean {
   const w = word.toLowerCase().replace(/[’'\u2019\u2018]/g, "");
   if (!w) return false;
-  if (COMMON_WORDS.has(w)) return true;
+  if (commonWords().has(w)) return true;
   const candidates: string[] = [];
   if (w.endsWith("ies")) candidates.push(w.slice(0, -3) + "y");
   if (w.endsWith("ing")) {
@@ -276,7 +276,7 @@ function isLooseCommonWord(word: string): boolean {
   } else if (w.endsWith("s")) {
     candidates.push(w.slice(0, -1));
   }
-  return candidates.some((c) => c.length >= 3 && COMMON_WORDS.has(c));
+  return candidates.some((c) => c.length >= 3 && commonWords().has(c));
 }
 
 // Separator between two reflowed tokens: "" when they are one unit
@@ -294,12 +294,12 @@ function joinSeparator(prev: string, nxt: string): string {
   if (/^\d{2}$/.test(prev) && /^\d{2}$/.test(nxt)) return "-";
   if (/^[a-z]+$/.test(prev) && /^[a-z]+$/.test(nxt)) {
     const combined = prev + nxt;
-    if (COMMON_WORDS.has(combined) && combined.length >= 4 && combined.length <= FRAGMENT_LINE_MAX) {
+    if (commonWords().has(combined) && combined.length >= 4 && combined.length <= FRAGMENT_LINE_MAX) {
       return "";
     }
     if (
-      !COMMON_WORDS.has(prev) &&
-      !COMMON_WORDS.has(nxt) &&
+      !commonWords().has(prev) &&
+      !commonWords().has(nxt) &&
       !isLooseCommonWord(prev) &&
       !isLooseCommonWord(nxt) &&
       !INFLECTED_STOP.has(prev) &&
@@ -497,7 +497,7 @@ export function protectDateLineBreaks(text: string): string {
 function splitMergedWord(line: string): string {
   return line.replace(/[A-Za-z]{6,}/g, (tok) => {
     const lower = tok.toLowerCase();
-    if (COMMON_WORDS.has(lower) || isLooseCommonWord(lower)) return tok;
+    if (commonWords().has(lower) || isLooseCommonWord(lower)) return tok;
     let firstValid = -1;
     let firstClean = -1;
     for (let i = 4; i <= lower.length - 2; i++) {
@@ -583,7 +583,7 @@ export function normalizeAssistantMarkdown(text: string): string {
       // fragment), so a deliberate spaced dash clause ("mean - it works")
       // survives untouched.
       s = s.replace(/([A-Za-z]+)[ \t]*-[ \t]*([A-Za-z]+)/g, (_m, a, b) => {
-        if (COMMON_WORDS.has(a.toLowerCase()) && COMMON_WORDS.has(b.toLowerCase())) return _m;
+        if (commonWords().has(a.toLowerCase()) && commonWords().has(b.toLowerCase())) return _m;
         return `${a}-${b}`;
       });
       // Words split by fragmented streaming ("Fin ance", "Pr ys m Note") and

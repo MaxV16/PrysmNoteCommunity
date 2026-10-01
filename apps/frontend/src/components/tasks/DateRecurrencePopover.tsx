@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { minOverlayTop } from "@/lib/desktop-bridge";
 import { MonthCalendar } from "./MonthCalendar";
 import {
   applyEnd,
@@ -17,10 +18,11 @@ interface DateRecurrencePopoverProps {
   open: boolean;
   triggerRef: React.RefObject<HTMLElement | null>;
   onClose: () => void;
-  value: string | null; // ISO date
+  startDate: string | null;
+  dueDate: string | null;
   recurrenceRule: string | null;
   recurrenceEndDate: string | null;
-  onChange: (value: string | null, recurrenceRule: string | null, recurrenceEndDate: string | null) => void;
+  onChange: (startDate: string | null, dueDate: string | null, recurrenceRule: string | null, recurrenceEndDate: string | null) => void;
   isAllDay?: boolean;
 }
 
@@ -54,13 +56,15 @@ export function DateRecurrencePopover({
   open,
   triggerRef,
   onClose,
-  value,
+  startDate,
+  dueDate,
   recurrenceRule,
   recurrenceEndDate,
   onChange,
 }: DateRecurrencePopoverProps) {
   const [view, setView] = useState<View>("main");
-  const [date, setDate] = useState<string | null>(value);
+  const [start, setStart] = useState<string | null>(startDate);
+  const [due, setDue] = useState<string | null>(dueDate);
   const [rule, setRule] = useState<string | null>(recurrenceRule);
   const [end, setEnd] = useState<RecurrenceEnd>(() =>
     parseEnd(recurrenceRule, recurrenceEndDate)
@@ -69,40 +73,66 @@ export function DateRecurrencePopover({
   // Synchronize with the task values whenever reopened.
   useEffect(() => {
     if (open) {
-      setDate(value);
+      setStart(startDate);
+      setDue(dueDate);
       setRule(recurrenceRule);
       setEnd(parseEnd(recurrenceRule, recurrenceEndDate));
       setView("main");
     }
-  }, [open, value, recurrenceRule, recurrenceEndDate]);
+  }, [open, startDate, dueDate, recurrenceRule, recurrenceEndDate]);
 
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // Phones get a bottom sheet instead of a 320px floating card: on a full-width
+  // mobile drawer the anchored card covers the title and description.
+  const [sheet, setSheet] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 640
+  );
+  useEffect(() => {
+    const onResize = () => setSheet(window.innerWidth < 640);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   useLayoutEffect(() => {
-    if (!open) {
+    if (!open || sheet) {
       setPos(null);
       return;
     }
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
+    const menuW = 320;
     const compute = () => {
       const menu = menuRef.current;
-      const menuW = 320;
       const menuH = menu ? menu.getBoundingClientRect().height : 480;
+      const minTop = minOverlayTop(12);
+      // The anchor button can be missing or not laid out yet (drawer just
+      // opened, window resizing). Fall back to the top-left but never onto the
+      // desktop window controls, and let the retry loop re-anchor.
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0)) {
+        return { top: minTop, left: 12, width: menuW };
+      }
       let left = Math.min(rect.left, window.innerWidth - menuW - 12);
       left = Math.max(12, left);
       let top = rect.bottom + 6;
       if (top + menuH > window.innerHeight - 12) {
-        top = Math.max(12, rect.top - menuH - 6);
+        top = Math.max(minTop, rect.top - menuH - 6);
       }
-      return { top, left, width: menuW };
+      return { top: Math.max(minTop, top), left, width: menuW };
     };
     setPos(compute());
+    // Re-measure after layout settles, and keep the popover glued to its
+    // trigger when the window is resized or the page scrolls underneath it.
     const raf = requestAnimationFrame(() => setPos(compute()));
-    return () => cancelAnimationFrame(raf);
-  }, [open, triggerRef, view]);
+    const onReflow = () => setPos(compute());
+    window.addEventListener("resize", onReflow);
+    window.addEventListener("scroll", onReflow, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onReflow);
+      window.removeEventListener("scroll", onReflow, true);
+    };
+  }, [open, triggerRef, view, sheet]);
 
   useEffect(() => {
     if (!open) return;
@@ -133,7 +163,7 @@ export function DateRecurrencePopover({
     };
   }, [open, onClose, triggerRef, view]);
 
-  const dateStr = date || new Date().toISOString().split("T")[0];
+  const anchorDate = due || start || new Date().toISOString().split("T")[0];
 
   // Custom recurrence draft state.
   const [custom, setCustom] = useState<{
@@ -142,7 +172,7 @@ export function DateRecurrencePopover({
     byDay: string;
     anchor: "due" | "completion";
     skipWeekends: boolean;
-  }>({ freq: "monthly", interval: 1, byDay: weekdayFromIso(dateStr), anchor: "due", skipWeekends: false });
+  }>({ freq: "monthly", interval: 1, byDay: weekdayFromIso(anchorDate), anchor: "due", skipWeekends: false });
 
   // Single source of truth for end-condition encoding: both the recurrence and
   // custom views commit through here so COUNT/date rules are built by applyEnd
@@ -151,13 +181,16 @@ export function DateRecurrencePopover({
     const { recurrence_rule, recurrence_end_date } = applyEnd(ruleValue || "", end);
     // A repeat needs a date to anchor the series: when a rule is applied with no
     // date picked, default it to today so the template is visible and expandable.
-    const committedDate = ruleValue ? date || new Date().toISOString().split("T")[0] : date;
-    onChange(committedDate, recurrence_rule || null, recurrence_end_date);
+    const todayIso = new Date().toISOString().split("T")[0];
+    const committedStart = ruleValue ? (start || todayIso) : start;
+    const committedDue = ruleValue ? (due || start || todayIso) : due;
+    onChange(committedStart, committedDue, recurrence_rule || null, recurrence_end_date);
     onClose();
   };
 
   const clear = () => {
-    setDate(null);
+    setStart(null);
+    setDue(null);
     setRule(null);
     setEnd({ kind: "never" });
   };
@@ -177,53 +210,85 @@ export function DateRecurrencePopover({
     },
   ];
 
+  if (!open) return null;
+
+  const body = (
+    <>
+        {view === "main" && (
+          <MainView
+            startDate={start}
+            dueDate={due}
+            setStart={setStart}
+            setDue={setDue}
+            rule={rule ?? recurrenceRule}
+            onOpenRecurrence={() => setView("recurrence")}
+            quickActions={quickActions}
+          />
+        )}
+        {view === "recurrence" && (
+          <RecurrenceView
+            date={due || start || new Date().toISOString().split("T")[0]}
+            rule={rule}
+            setRule={setRule}
+            end={end}
+            setEnd={setEnd}
+            onCustom={() => setView("custom")}
+            onBack={() => setView("main")}
+            onCommit={() => commit(rule)}
+          />
+        )}
+        {view === "custom" && (
+          <CustomView
+            onCommit={() => {
+              const r = toRRule({
+                type: "custom",
+                freq: custom.freq,
+                interval: custom.interval,
+                byDay: custom.byDay,
+                dayOfMonth: due ? new Date(due).getDate() : start ? new Date(start).getDate() : undefined,
+                skipWeekends: custom.skipWeekends,
+              });
+              commit(r);
+            }}
+            onCancel={() => setView("recurrence")}
+            custom={custom}
+            setCustom={setCustom}
+          />
+        )}
+      {view === "main" && <Footer onCommit={() => commit(rule)} onClear={clear} />}
+    </>
+  );
+
+  if (sheet) {
+    return createPortal(
+      <div
+        className="fixed inset-0 z-[70]"
+        style={{ top: "var(--desktop-titlebar, 0px)" }}
+      >
+        <div className="absolute inset-0 bg-black/50" aria-hidden onClick={onClose} />
+        <div
+          ref={menuRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Set reminder"
+          className="absolute inset-x-0 bottom-0 flex max-h-[85dvh] flex-col overflow-hidden rounded-t-2xl border border-border bg-surface pb-safe shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {body}
+        </div>
+      </div>,
+      document.body
+    );
+  }
+
   return createPortal(
     <div
       ref={menuRef}
       role="dialog"
       className="fixed z-[70] flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
-      style={{ top: pos?.top, left: pos?.left, width: "min(320px, calc(100vw - 24px))", maxHeight: "min(32rem, 90dvh)" }}
+      style={{ top: pos?.top ?? minOverlayTop(12), left: pos?.left ?? 12, width: "min(320px, calc(100vw - 24px))", maxHeight: "min(32rem, 90dvh)" }}
     >
-      {view === "main" && (
-        <MainView
-          date={date}
-          setDate={setDate}
-          rule={rule ?? recurrenceRule}
-          onOpenRecurrence={() => setView("recurrence")}
-          quickActions={quickActions}
-        />
-      )}
-      {view === "recurrence" && (
-        <RecurrenceView
-          date={dateStr}
-          rule={rule}
-          setRule={setRule}
-          end={end}
-          setEnd={setEnd}
-          onCustom={() => setView("custom")}
-          onBack={() => setView("main")}
-          onCommit={() => commit(rule)}
-        />
-      )}
-      {view === "custom" && (
-        <CustomView
-          onCommit={() => {
-            const r = toRRule({
-              type: "custom",
-              freq: custom.freq,
-              interval: custom.interval,
-              byDay: custom.byDay,
-              dayOfMonth: date ? new Date(date).getDate() : undefined,
-              skipWeekends: custom.skipWeekends,
-            });
-            commit(r);
-          }}
-          onCancel={() => setView("recurrence")}
-          custom={custom}
-          setCustom={setCustom}
-        />
-      )}
-      {view === "main" && <Footer onCommit={() => commit(rule)} onClear={clear} />}
+      {body}
     </div>,
     document.body
   );
@@ -250,7 +315,7 @@ function Segmented({ options, value, onChange }: { options: string[]; value: str
           key={o}
           onClick={() => onChange(o)}
           className="flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors"
-          style={value === o ? { backgroundColor: "var(--accent)", color: "#fff" } : { color: "var(--text-secondary)" }}
+          style={value === o ? { backgroundColor: "var(--accent)", color: "var(--on-gradient)" } : { color: "var(--text-secondary)" }}
         >
           {o}
         </button>
@@ -260,30 +325,41 @@ function Segmented({ options, value, onChange }: { options: string[]; value: str
 }
 
 function MainView({
-  date,
-  setDate,
+  startDate,
+  dueDate,
+  setStart,
+  setDue,
   rule,
   onOpenRecurrence,
   quickActions,
 }: {
-  date: string | null;
-  setDate: (d: string) => void;
+  startDate: string | null;
+  dueDate: string | null;
+  setStart: (d: string) => void;
+  setDue: (d: string) => void;
   rule: string | null;
   onOpenRecurrence: () => void;
   quickActions: { label: string; build: () => string }[];
 }) {
-  const dateStr = date || new Date().toISOString().split("T")[0];
+  const startStr = startDate || new Date().toISOString().split("T")[0];
+  const dueStr = dueDate || startDate || new Date().toISOString().split("T")[0];
   const summary = describeRule(rule);
+
+  const handleQuickAction = (iso: string) => {
+    // Quick actions set both dates to the same value
+    setStart(iso);
+    setDue(iso);
+  };
 
   return (
     <div className="flex flex-col overflow-y-auto">
-      <Header title="Set reminder" />
+      <Header title="Set dates" />
       <div className="px-3 pt-2">
         <div className="flex flex-wrap gap-1.5">
           {quickActions.map((a) => (
             <button
               key={a.label}
-              onClick={() => setDate(a.build())}
+              onClick={() => handleQuickAction(a.build())}
               className="rounded-md border border-border bg-elevated px-2 py-1 text-[11px] text-secondary hover:text-primary hover:border-accent/40 transition-colors"
             >
               {a.label}
@@ -291,17 +367,36 @@ function MainView({
           ))}
         </div>
       </div>
-      <div className="px-3 py-2">
-        <MonthCalendar value={dateStr} onChange={setDate} />
+      <div className="px-3 py-2 space-y-3">
+        <div>
+          <label className="block text-[10px] font-medium text-muted mb-1">Start date</label>
+          <MonthCalendar value={startStr} onChange={setStart} />
+        </div>
+        <div>
+          <label className="block text-[10px] font-medium text-muted mb-1">Due date</label>
+          <MonthCalendar value={dueStr} onChange={setDue} />
+        </div>
       </div>
       <div className="mx-3 border-t border-border/60 py-1">
-        <Row icon="🔄" label={summary ? `Every ${summary.toLowerCase()}` : "Repeat"} onClick={onOpenRecurrence} arrow />
+        <Row
+          icon={
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8" />
+              <path d="M20 4v4h-4" />
+              <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16" />
+              <path d="M4 20v-4h4" />
+            </svg>
+          }
+          label={summary ? `Every ${summary.toLowerCase()}` : "Repeat"}
+          onClick={onOpenRecurrence}
+          arrow
+        />
       </div>
     </div>
   );
 }
 
-function Row({ icon, label, onClick, arrow }: { icon: string; label: string; onClick: () => void; arrow?: boolean }) {
+function Row({ icon, label, onClick, arrow }: { icon: ReactNode; label: string; onClick: () => void; arrow?: boolean }) {
   return (
     <button
       onClick={onClick}
@@ -320,7 +415,7 @@ function Footer({ onCommit, onClear }: { onCommit: () => void; onClear: () => vo
       <button onClick={onClear} className="rounded-lg px-3 py-1.5 text-xs text-secondary hover:text-danger border border-border/60">
         Clear
       </button>
-      <button onClick={onCommit} className="rounded-lg bg-accent px-5 py-1.5 text-xs font-semibold text-white hover:opacity-90">
+      <button onClick={onCommit} className="rounded-lg bg-accent px-5 py-1.5 text-xs font-semibold text-[var(--on-gradient)] hover:opacity-90">
         OK
       </button>
     </div>
@@ -408,7 +503,7 @@ function RecurrenceView({
         )}
       </div>
       <div className="border-t border-border px-3 py-2">
-        <button onClick={onCommit} className="w-full rounded-lg bg-accent px-5 py-1.5 text-xs font-semibold text-white hover:opacity-90">
+        <button onClick={onCommit} className="w-full rounded-lg bg-accent px-5 py-1.5 text-xs font-semibold text-[var(--on-gradient)] hover:opacity-90">
           OK
         </button>
       </div>
@@ -475,7 +570,7 @@ function CustomView({
         <button onClick={onCancel} className="rounded-lg px-3 py-1.5 text-xs text-secondary hover:text-primary border border-border/60">
           Cancel
         </button>
-        <button onClick={onCommit} className="rounded-lg bg-accent px-5 py-1.5 text-xs font-semibold text-white hover:opacity-90">
+        <button onClick={onCommit} className="rounded-lg bg-accent px-5 py-1.5 text-xs font-semibold text-[var(--on-gradient)] hover:opacity-90">
           OK
         </button>
       </div>

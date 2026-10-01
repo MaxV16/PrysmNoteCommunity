@@ -5,7 +5,7 @@ import { useTheme } from "@/lib/theme-context";
 import { THEMES, type ThemeName } from "@/types/theme";
 import { ThemeImportExport } from "@/components/settings/ThemeImportExport";
 
-const APPEARANCE_THEMES: ThemeName[] = ["dark", "light", "slate", "dracula", "nord", "monokai", "coffee", "solarized", "github-dark", "tokyo"];
+const APPEARANCE_THEMES: ThemeName[] = ["dark", "light", "slate", "dracula", "nord", "monokai", "coffee", "solarized", "github-dark", "tokyo", "ocean", "forest", "sunset"];
 
 export function ThemeMenu() {
   const { themeName, setThemeName } = useTheme();
@@ -38,7 +38,7 @@ export function ThemeMenu() {
         aria-expanded={open}
         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
       >
-        <span className="flex h-5 w-5 items-center justify-center rounded-md" style={{ background: `linear-gradient(135deg, ${current?.colors?.surface || "#222"}, ${current?.colors?.accent || "#6c5ce7"})` }}>
+        <span className="flex h-5 w-5 items-center justify-center rounded-md" style={{ background: `linear-gradient(135deg, ${current?.colors?.surface || "#1b1b25"}, ${current?.colors?.accent || "#5B5BD6"})` }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
         </span>
         <span className="flex-1 text-left">{current?.label || themeName}</span>

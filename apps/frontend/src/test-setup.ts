@@ -35,3 +35,18 @@ if (typeof globalThis.localStorage === "undefined") {
 if (typeof globalThis.sessionStorage === "undefined") {
   globalThis.sessionStorage = createStorageMock();
 }
+
+// jsdom does not implement matchMedia. Components that branch on the viewport
+// (useMediaQuery, e.g. the quadrant view) need a minimal, always-desktop stub.
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}

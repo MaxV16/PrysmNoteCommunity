@@ -139,6 +139,11 @@ async def flush_pending(session_factory: async_sessionmaker) -> int:
 async def analytics_flush_loop(session_factory: async_sessionmaker) -> None:
     """Background loop: drain the in-memory queue into analytics_events.
 
+    Instead of polling on a fixed timer, the loop waits on the queue itself, so
+    an idle queue costs about zero CPU. A timeout still bounds how long a lone
+    event can sit before it is written, and a timeout error flushes nothing
+    (the next pass picks the event up).
+
     Runs through the system (BYPASSRLS) session factory so rows from every user
     can be inserted without an RLS user context. One failure never aborts the
     batch: each item is attempted independently and the loop keeps running.
@@ -148,7 +153,20 @@ async def analytics_flush_loop(session_factory: async_sessionmaker) -> None:
             await flush_pending(session_factory)
         except Exception:
             logger.exception("analytics flush loop pass failed")
-        await asyncio.sleep(settings.analytics_flush_interval)
+        try:
+            item = await asyncio.wait_for(
+                _queue().get(), timeout=settings.analytics_flush_interval
+            )
+            # Put it back so flush_pending drains it together with any events
+            # that arrived in the same window (we just freed a slot).
+            _queue().put_nowait(item)
+        except asyncio.TimeoutError:
+            # Idle queue: nothing to flush yet.
+            pass
+        except asyncio.QueueFull:
+            # Another producer filled the queue between get and put; skip the
+            # requeue and let the next pass drain it.
+            pass
 
 
 async def _rollup_day(session: AsyncSession, day: datetime) -> None:
@@ -199,6 +217,18 @@ async def run_rollup(session_factory: async_sessionmaker) -> None:
             )
         except Exception:
             logger.exception("analytics pruning failed")
+        # Anonymous events (no user_id) carry no long-term value: drop them
+        # sooner than identified events while keeping the daily rollup forever.
+        anon_cutoff = now - timedelta(days=settings.analytics_anon_retention_days)
+        try:
+            await session.execute(
+                delete(AnalyticsEvent).where(
+                    AnalyticsEvent.user_id.is_(None),
+                    AnalyticsEvent.created_at < anon_cutoff,
+                )
+            )
+        except Exception:
+            logger.exception("anonymous analytics pruning failed")
         await session.commit()
 
 

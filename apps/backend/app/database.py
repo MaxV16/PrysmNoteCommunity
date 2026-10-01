@@ -4,8 +4,11 @@ from app.config import settings
 
 engine = create_async_engine(
     settings.database_url,
-    pool_size=5,
-    max_overflow=5,
+    # Sized for the multi-worker prod stack: each uvicorn worker owns its own
+    # pool, so 6+4 (max 10) per worker stays well under Postgres max_connections
+    # even with 2 web workers plus the leader's dedicated connection.
+    pool_size=6,
+    max_overflow=4,
     pool_pre_ping=True,
     echo=False,
 )
@@ -28,6 +31,26 @@ system_session_factory = async_sessionmaker(system_engine, class_=AsyncSession, 
 
 async def get_db():
     async with async_session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+async def get_system_db():
+    """BYPASSRLS session for lookups that must happen BEFORE a user context exists.
+
+    Used by the public passkey sign-in endpoint to find a credential by id (the
+    credential owner is unknown until the lookup succeeds, so the row-level
+    policy cannot be satisfied yet). The BYPASSRLS ``prysm_system`` role is also
+    what the background loops use; the app-layer code still filters by the
+    authenticated user for every management operation.
+    """
+    async with system_session_factory() as session:
         try:
             yield session
             await session.commit()

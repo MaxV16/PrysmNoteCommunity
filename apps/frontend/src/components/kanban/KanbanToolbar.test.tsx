@@ -3,43 +3,36 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { KanbanToolbar } from "./KanbanToolbar";
 
 describe("KanbanToolbar", () => {
-  const onScrollDirectionChange = vi.fn();
-  const onCardLayoutChange = vi.fn();
   const onAddSection = vi.fn();
+  const onFilterChange = vi.fn();
 
   beforeEach(() => {
-    onScrollDirectionChange.mockClear();
-    onCardLayoutChange.mockClear();
     onAddSection.mockClear();
+    onFilterChange.mockClear();
   });
 
   function renderToolbar(props = {}) {
     return render(
       <KanbanToolbar
-        scrollDirection="horizontal"
-        cardLayout="stacked"
-        onScrollDirectionChange={onScrollDirectionChange}
-        onCardLayoutChange={onCardLayoutChange}
         onAddSection={onAddSection}
+        filter="all"
+        onFilterChange={onFilterChange}
         {...props}
       />
     );
   }
 
-  it("toggles the scroll direction", () => {
+  it("changes the completion filter", () => {
     renderToolbar();
-    fireEvent.click(screen.getByTestId("scroll-vertical"));
-    expect(onScrollDirectionChange).toHaveBeenCalledWith("vertical");
-    fireEvent.click(screen.getByTestId("scroll-horizontal"));
-    expect(onScrollDirectionChange).toHaveBeenCalledWith("horizontal");
+    fireEvent.click(screen.getByTestId("board-filter-completed"));
+    expect(onFilterChange).toHaveBeenCalledWith("completed");
+    fireEvent.click(screen.getByTestId("board-filter-active"));
+    expect(onFilterChange).toHaveBeenCalledWith("active");
   });
 
-  it("toggles the card layout", () => {
-    renderToolbar();
-    fireEvent.click(screen.getByTestId("layout-side-by-side"));
-    expect(onCardLayoutChange).toHaveBeenCalledWith("side_by_side");
-    fireEvent.click(screen.getByTestId("layout-stacked"));
-    expect(onCardLayoutChange).toHaveBeenCalledWith("stacked");
+  it("hides the filter when no handler is provided", () => {
+    renderToolbar({ onFilterChange: undefined });
+    expect(screen.queryByTestId("board-filter-completed")).toBeNull();
   });
 
   it("adds a section with a trimmed title", () => {

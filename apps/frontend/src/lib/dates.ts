@@ -1,5 +1,7 @@
 "use client";
 
+import { readPreferenceCache } from "./preferences";
+
 export interface DatePrefs {
   dateFormat: string;
   timeFormat: string;
@@ -7,19 +9,65 @@ export interface DatePrefs {
   startDay: "monday" | "sunday";
 }
 
+let cachedPrefs: DatePrefs | null = null;
+
+/**
+ * Read a setting that may be stored either JSON-encoded (the settings page uses
+ * `JSON.stringify`) or as a raw legacy string (older builds / the timezone
+ * sync hook). Also falls back to the server-hydrated `prysm_preferences` cache
+ * so a preference set on another device is honoured.
+ */
+function readSetting(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw !== null) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === "string") return parsed;
+      } catch {
+        /* legacy raw value */
+      }
+      return raw;
+    }
+  } catch {
+    /* storage unavailable */
+  }
+  const cached = readPreferenceCache()[key];
+  return typeof cached === "string" ? cached : null;
+}
+
+/** Validate an IANA timezone name; returns undefined when unusable. */
+export function isValidTimeZone(tz: string | null | undefined): string | undefined {
+  if (!tz) return undefined;
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+    return tz;
+  } catch {
+    return undefined;
+  }
+}
+
 export function getDatePrefs(): DatePrefs {
+  if (cachedPrefs) return cachedPrefs;
   if (typeof window === "undefined") {
     return { dateFormat: "dd/mm/yyyy", timeFormat: "24h", timeZone: undefined, startDay: "monday" };
   }
   try {
-    const dateFormat = localStorage.getItem("prysm_date_format") || "dd/mm/yyyy";
-    const timeFormat = localStorage.getItem("prysm_time_format") || "24h";
-    const tz = localStorage.getItem("prysm_tz") || undefined;
-    const startDay = localStorage.getItem("prysm_start_day") === "sunday" ? "sunday" : "monday";
-    return { dateFormat, timeFormat, timeZone: tz || undefined, startDay };
+    const dateFormat = readSetting("prysm_date_format") || "dd/mm/yyyy";
+    const timeFormat = readSetting("prysm_time_format") || "24h";
+    const timeZone = isValidTimeZone(readSetting("prysm_tz"));
+    const startDay = readSetting("prysm_start_day") === "sunday" ? "sunday" : "monday";
+    cachedPrefs = { dateFormat, timeFormat, timeZone, startDay };
+    return cachedPrefs;
   } catch {
     return { dateFormat: "dd/mm/yyyy", timeFormat: "24h", timeZone: undefined, startDay: "monday" };
   }
+}
+
+/** Invalidate the cached prefs so the next call re-reads localStorage. */
+export function invalidateDatePrefs(): void {
+  cachedPrefs = null;
 }
 
 /** Week start day for calendar grids: 0 = Sunday, 1 = Monday (default). */
@@ -54,7 +102,12 @@ function tzParts(d: Date): { y: string; m: string; dd: string } {
     });
     const parts = fmt.formatToParts(d);
     const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
-    return { y: get("year"), m: get("month"), dd: get("day") };
+    const y = get("year"), m = get("month"), dd = get("day");
+    const ny = Number(y), nm = Number(m), nd = Number(dd);
+    if (Number.isNaN(ny) || Number.isNaN(nm) || Number.isNaN(nd) || ny < 2000 || ny > 2100) {
+      return { y: String(d.getFullYear()), m: pad(d.getMonth() + 1), dd: pad(d.getDate()) };
+    }
+    return { y, m, dd };
   } catch {
     return { y: String(d.getFullYear()), m: pad(d.getMonth() + 1), dd: pad(d.getDate()) };
   }
@@ -76,24 +129,51 @@ export function todayStart(): Date {
 /**
  * Format a date according to the user's Date & Time preference
  * (`prysm_date_format`). Patterns: dd/mm/yyyy, mm/dd/yyyy, yyyy-mm-dd.
+ *
+ * A `YYYY-MM-DD` string is a calendar date, so it is rendered literally and
+ * never timezone-shifted (parsing it as a Date would treat it as UTC midnight,
+ * which displays as the previous day in negative-offset timezones). All other
+ * inputs are instant/datetime values and are converted into `prysm_tz`.
  */
 export function formatDate(date: Date | string, opts?: { includeYear?: boolean }): string {
+  const includeYear = opts?.includeYear ?? true;
+  const render = (dd: string, mm: string, yyyy: string): string => {
+    switch (getDatePrefs().dateFormat) {
+      case "mm/dd/yyyy":
+        return includeYear ? `${mm}/${dd}/${yyyy}` : `${mm}/${dd}`;
+      case "yyyy-mm-dd":
+        return includeYear ? `${yyyy}-${mm}-${dd}` : `${mm}-${dd}`;
+      case "dd/mm/yyyy":
+      default:
+        return includeYear ? `${dd}/${mm}/${yyyy}` : `${dd}/${mm}`;
+    }
+  };
+
+  // Date-only string: use its literal calendar parts.
+  if (typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const [yyyy, mm, dd] = date.split("-");
+    return render(dd, mm, yyyy);
+  }
+
   const d = typeof date === "string" ? new Date(date) : date;
   if (Number.isNaN(d.getTime())) return "";
-  const includeYear = opts?.includeYear ?? true;
-  const { dateFormat } = getDatePrefs();
-  const dd = pad(d.getDate());
-  const mm = pad(d.getMonth() + 1);
-  const yyyy = String(d.getFullYear());
-  switch (dateFormat) {
-    case "mm/dd/yyyy":
-      return includeYear ? `${mm}/${dd}/${yyyy}` : `${mm}/${dd}`;
-    case "yyyy-mm-dd":
-      return includeYear ? `${yyyy}-${mm}-${dd}` : `${mm}-${dd}`;
-    case "dd/mm/yyyy":
-    default:
-      return includeYear ? `${dd}/${mm}/${yyyy}` : `${dd}/${mm}`;
+  const { timeZone } = getDatePrefs();
+  if (timeZone) {
+    try {
+      const fmt = new Intl.DateTimeFormat("en-CA", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        timeZone,
+      });
+      const parts = fmt.formatToParts(d);
+      const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
+      return render(get("day"), get("month"), get("year"));
+    } catch {
+      /* fall through to browser-local parts */
+    }
   }
+  return render(pad(d.getDate()), pad(d.getMonth() + 1), String(d.getFullYear()));
 }
 
 /**

@@ -7,12 +7,13 @@ import { useTasks } from "@/hooks/useTasks";
 import { useToast } from "@/lib/toast-context";
 import { useAppStore } from "@/stores/app-store";
 import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
+import { useIsMobileOS } from "@/lib/use-is-mobile-os";
 import { useUiModule } from "@/lib/ui-module-registry";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { formatDate } from "@/lib/dates";
-import { openNotesWindow } from "@/lib/notes";
 import { ContextMenuItem, ContextMenuDivider } from "@/components/ui/ContextMenu";
 import { buildDuplicatePayload } from "./task-duplicate";
+
 
 
 export type ContextMenuState =
@@ -37,8 +38,10 @@ function TaskMenu({ task, onClose }: { task: Task; onClose: () => void }) {
   const { updateTask, deleteTask, restoreTask, createTask, fetchTasks } = useTasks();
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
   const { addNoteWithContent } = useStickyBoard();
-  const stickyOn = useUiModule("stickyNotes");
+  const isMobileOS = useIsMobileOS();
+  const stickyOn = useUiModule("stickyNotes") && !isMobileOS;
   const soundOn = useLocalBool("prysm_notif_sound", true);
+  const rewardsOn = useLocalBool("prysm_rewards", true);
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
 
@@ -49,9 +52,15 @@ function TaskMenu({ task, onClose }: { task: Task; onClose: () => void }) {
 
   const handleToggleStatus = async () => {
     const next = task.status === "done" ? "todo" : "done";
-    if (next === "done" && soundOn) {
-      const { playCompletionSound } = await import("@/lib/sounds");
-      playCompletionSound();
+    if (next === "done") {
+      if (soundOn) {
+        const { playCompletionSound } = await import("@/lib/sounds");
+        playCompletionSound();
+      }
+      if (rewardsOn) {
+        const { celebrate } = await import("@/lib/celebrate");
+        celebrate();
+      }
     }
     await updateTask(task.id, { status: next });
     onClose();
@@ -134,8 +143,9 @@ function EmptyMenu({
   onNewTask: (ctx: { day?: string; section?: { id: string | null; title: string } }) => void;
   onClose: () => void;
 }) {
+  const { open } = useStickyBoard();
   const label = day
-    ? `New task on ${formatDate(new Date(day + "T00:00:00"), { includeYear: false })}`
+    ? `New task on ${formatDate(day, { includeYear: false })}`
     : section
       ? `New task in ${section.title}`
       : "New task";
@@ -152,7 +162,7 @@ function EmptyMenu({
       </ContextMenuItem>
       <ContextMenuItem
         onClick={() => {
-          openNotesWindow();
+          open();
           onClose();
         }}
       >

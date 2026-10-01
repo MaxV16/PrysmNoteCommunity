@@ -5,8 +5,6 @@ services:
       POSTGRES_DB: prysm_note
       POSTGRES_USER: prysm
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
-      # Passed to db/init-roles.sh on first init to create the RLS-enforcing
-      # app/system roles (only created when the password env is provided).
       DB_APP_USER: ${DB_APP_USER:-prysm_app}
       DB_APP_PASSWORD: ${DB_APP_PASSWORD:-}
       DB_SYSTEM_USER: ${DB_SYSTEM_USER:-prysm_system}
@@ -22,10 +20,21 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "1024M"
+    command: |
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=64MB
+      -c max_connections=30
 
   redis:
     image: redis:7-alpine
-    # Ephemeral rate-limit counters only - no named volume (data loss is fine).
     ports:
       - "6379:6379"
     healthcheck:
@@ -33,6 +42,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "256M"
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
 
   backend:
     build:
@@ -41,15 +56,9 @@ services:
     env_file:
       - .env
     environment:
-      # The app runs as a NON-superuser, non-BYPASSRLS role so that PostgreSQL
-      # row-level security is actually enforced on its connection (not bypassed
-      # like a superuser would). DB_APP_PASSWORD is stored in .env.
       DATABASE_URL: postgresql+asyncpg://${DB_APP_USER:-prysm_app}:${DB_APP_PASSWORD:?DB_APP_PASSWORD must be set in .env}@postgres:5432/prysm_note
-      # System/background jobs use a BYPASSRLS non-superuser role so they can
-      # process all users' data while request traffic stays under enforced RLS.
       SYSTEM_DATABASE_URL: postgresql+asyncpg://${DB_SYSTEM_USER:-prysm_system}:${DB_SYSTEM_PASSWORD:?DB_SYSTEM_PASSWORD must be set in .env}@postgres:5432/prysm_note
       PYTHONPATH: /app
-      # Redis-backed rate limiting (rate-limit counters are ephemeral).
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
@@ -60,7 +69,12 @@ services:
         condition: service_healthy
     volumes:
       - ./apps/backend:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: "1024M"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --limit-max-requests 10000 --timeout-keep-alive 30 --backlog 2048
 
   frontend:
     build:
@@ -78,6 +92,11 @@ services:
       - ./apps/frontend:/app
       - /app/node_modules
       - /app/.next
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "2048M"
     command: npx next dev -p 3000
 
 volumes:

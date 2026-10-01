@@ -96,9 +96,8 @@ async function main() {
   console.log("      landed on", page.url());
 
   console.log("[2/5] open the new-task form via the toolbar + New button");
-  // There are two "+ New" buttons (sidebar "Lists" vs the timeline toolbar).
-  // Target the primary one in the timeline toolbar so we open the in-timeline form.
-  const newButton = page.locator("button.btn.btn-primary", { hasText: "+ New" });
+  // The primary new-task action is the icon-only plus in the timeline toolbar.
+  const newButton = page.getByTestId("new-task-button");
   await newButton.waitFor({ state: "visible" });
   await newButton.click();
   await page.getByText("Task Title").waitFor({ state: "visible" });
@@ -137,8 +136,8 @@ async function main() {
 
   console.log("[6] layout: open AI panel and assert timeline stays visible left of it");
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await page.locator('button[title="AI"]').waitFor({ state: "visible" });
-  await page.locator('button[title="AI"]').click();
+  await page.locator('button[aria-label="AI"]').waitFor({ state: "visible" });
+  await page.locator('button[aria-label="AI"]').click();
   await page.getByText("AI Command").first().waitFor({ state: "visible", timeout: 10000 });
   // The panel docks to the right ("lg:static"), so the timeline body must remain
   // visible and positioned entirely to the left of the panel (no overlap/hide).

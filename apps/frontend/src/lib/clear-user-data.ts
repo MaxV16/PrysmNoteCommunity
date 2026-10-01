@@ -8,6 +8,8 @@ import { useAppStore } from "@/stores/app-store";
 const PER_ACCOUNT_KEYS = [
   "ai_session_id",
   "prysm_tasks",
+  "prysm_task_cache_v1",
+  "prysm_user_snapshot",
   "prysm_habits",
   "prysm_key_openai",
   "prysm_key_gemini",

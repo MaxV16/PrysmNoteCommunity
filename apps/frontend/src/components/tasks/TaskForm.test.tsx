@@ -6,7 +6,10 @@ const useAppStore = vi.fn(() => ({ tags: [], lists: [], activeListId: null }));
 
 // Mock app-store
 vi.mock("@/stores/app-store", () => ({
-  useAppStore: () => useAppStore(),
+  useAppStore: (selector?: (state: any) => any) => {
+    const state = useAppStore();
+    return selector ? selector(state) : state;
+  },
 }));
 
 beforeEach(() => {
@@ -34,6 +37,7 @@ describe("TaskForm", () => {
 
   it("shows default 30 minutes for new tasks", () => {
     render(<TaskForm {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /more options/i }));
     const minInput = screen.getByDisplayValue("30");
     expect(minInput).toBeInTheDocument();
   });
@@ -51,6 +55,7 @@ describe("TaskForm", () => {
 
   it("recurrence presets dropdown includes all options", () => {
     render(<TaskForm {...defaultProps} />);
+    fireEvent.click(screen.getByRole("button", { name: /more options/i }));
     const selects = screen.getAllByRole("combobox");
     // The 4th select is the recurrence one (after list, status, priority)
     const recurrenceSelect = selects[3];
@@ -170,6 +175,27 @@ describe("TaskForm", () => {
     expect(screen.queryByText("End time must be after the start time")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /create task/i }));
     expect(onSubmit).toHaveBeenCalled();
+  });
+
+  it("includes defaultStatus and boardSectionId in a create payload", () => {
+    const onSubmit = vi.fn();
+    render(
+      <TaskForm
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+        defaultStatus={"backlog" as any}
+        boardSectionId="sec-1"
+      />
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Board task" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create task/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "backlog", board_section_id: "sec-1" })
+    );
   });
 
   it("blocks submit with an inline warning when the due date precedes the start date", () => {

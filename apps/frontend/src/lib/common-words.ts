@@ -12,5 +12,3 @@ export function commonWords(): ReadonlySet<string> {
   if (!_commonWords) _commonWords = buildSet();
   return _commonWords;
 }
-
-export const COMMON_WORDS: ReadonlySet<string> = commonWords();

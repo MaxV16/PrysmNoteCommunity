@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS habits (
   color VARCHAR(7),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_habits_user ON habits(user_id);
+CREATE INDEX IF NOT EXISTS ix_habits_user ON habits(user_id);
 
 -- Habit logs table
 CREATE TABLE IF NOT EXISTS habit_logs (
@@ -204,14 +204,14 @@ CREATE INDEX IF NOT EXISTS idx_tasks_user_due_date ON tasks(user_id, due_date);
 CREATE INDEX IF NOT EXISTS idx_tasks_user_status ON tasks(user_id, status);
 CREATE INDEX IF NOT EXISTS ix_tasks_trgm ON tasks
   USING gin (lower(title || ' ' || COALESCE(description, '')) gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_task_links_source ON task_links(source_task_id);
-CREATE INDEX IF NOT EXISTS idx_task_links_target ON task_links(target_task_id);
+CREATE INDEX IF NOT EXISTS ix_task_links_source ON task_links(source_task_id);
+CREATE INDEX IF NOT EXISTS ix_task_links_target ON task_links(target_task_id);
 CREATE INDEX IF NOT EXISTS idx_task_embeddings_ann ON task_embeddings
   USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 CREATE INDEX IF NOT EXISTS idx_ai_conversations_session ON ai_conversations(session_id);
 CREATE INDEX IF NOT EXISTS idx_ai_sessions_user_session ON ai_sessions(user_id, session_id);
-CREATE INDEX IF NOT EXISTS idx_calendar_events_google ON calendar_events(google_event_id);
-CREATE INDEX IF NOT EXISTS idx_user_tokens_provider ON user_tokens(user_id, provider);
+CREATE INDEX IF NOT EXISTS ix_calendar_events_user_google_cal ON calendar_events(user_id, google_event_id, calendar_id);
+CREATE INDEX IF NOT EXISTS ix_user_tokens_user_provider ON user_tokens(user_id, provider);
 
 -- RLS policies
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;

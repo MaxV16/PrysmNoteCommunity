@@ -10,9 +10,12 @@ from app.dependencies import get_current_user
 from app.models.user import User
 from app.models.task_list import TaskList
 from app.services import task_service
+from app.utils.cache import cache_delete, cache_get, cache_set, user_cache_key
 from app.utils.uuid_helpers import parse_uuid
 
 router = APIRouter(prefix="/api/lists", tags=["lists"])
+
+LISTS_CACHE_TTL = 30
 
 
 def _require_uuid(value: str | UUID) -> UUID:
@@ -77,13 +80,19 @@ async def list_lists(
     # Ensure every user has their default "My Tasks" list even before any task
     # is created, so the sidebar always has somewhere to put new tasks.
     await task_service.default_list_id(session, user.id)
+    key = user_cache_key("lists", user.id)
+    cached = await cache_get(key)
+    if cached is not None:
+        return cached
     result = await session.execute(
         select(TaskList)
         .where(TaskList.user_id == user.id)
         .order_by(TaskList.position, TaskList.created_at)
     )
     lists = result.scalars().all()
-    return [_serialize(lst) for lst in lists]
+    payload = [_serialize(lst) for lst in lists]
+    await cache_set(key, payload, LISTS_CACHE_TTL)
+    return payload
 
 
 @router.post("/")
@@ -119,6 +128,7 @@ async def create_list(
     session.add(lst)
     await session.flush()
     await session.refresh(lst)
+    await cache_delete(user_cache_key("lists", user.id))
     return _serialize(lst)
 
 
@@ -132,12 +142,20 @@ async def update_list(
     lst = await _get_list(session, _require_uuid(list_id), user.id)
     if lst is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
+    # Renaming the default list would make it a normal list (and silently spawn a
+    # fresh "My Tasks"), which is also the easy bypass for its delete guard.
+    if request.name is not None and task_service.is_default_list_name(lst.name):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The default \"My Tasks\" list cannot be renamed",
+        )
     if request.name is not None:
         lst.name = request.name
     if request.position is not None:
         lst.position = request.position
     await session.flush()
     await session.refresh(lst)
+    await cache_delete(user_cache_key("lists", user.id))
     return _serialize(lst)
 
 
@@ -150,6 +168,14 @@ async def delete_list(
     lst = await _get_list(session, _require_uuid(list_id), user.id)
     if lst is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
+
+    # "My Tasks" is the reassignment target for every other deleted list and the
+    # fallback home for new tasks, so it must never be removable.
+    if task_service.is_default_list_name(lst.name):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The default \"My Tasks\" list cannot be deleted",
+        )
 
     # Tasks of the deleted list move back to the user's default "My Tasks" list
     # before the list row goes away (ON DELETE SET NULL is only the fallback).
@@ -164,4 +190,5 @@ async def delete_list(
     )
     await session.delete(lst)
     await session.flush()
+    await cache_delete(user_cache_key("lists", user.id))
     return {"status": "deleted"}

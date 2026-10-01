@@ -86,7 +86,7 @@ export function MonthCalendar({ value, onChange, accent = "var(--accent)" }: Mon
               type="button"
               onClick={() => onChange(ds)}
               className="text-xs py-1 rounded-md transition-colors hover:bg-hover"
-              style={isSelected ? { backgroundColor: accent, color: "#fff", fontWeight: 600 } : isToday ? { backgroundColor: accent + "22", color: accent, fontWeight: 500 } : undefined}
+              style={isSelected ? { backgroundColor: accent, color: "var(--on-gradient)", fontWeight: 600 } : isToday ? { backgroundColor: `color-mix(in srgb, ${accent} 13%, transparent)`, color: accent, fontWeight: 500 } : undefined}
             >
               {d}
             </button>

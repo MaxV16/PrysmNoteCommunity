@@ -22,7 +22,7 @@ def _valid_encryption_key(monkeypatch):
 def _no_google_network(monkeypatch):
     """The manual pull hits the Google API via _list_events_blocking; replace it
     with a deterministic stub so tests never touch the network."""
-    def _stub_list(access_token, refresh_token, max_results=50):
+    def _stub_list(access_token, refresh_token, max_results=50, time_min=None):
         return [], None
 
     import app.services.calendar_service as cs

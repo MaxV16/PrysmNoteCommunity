@@ -16,7 +16,7 @@ class SyncAction(str, enum.Enum):
 class CalendarEvent(Base):
     __tablename__ = "calendar_events"
     __table_args__ = (
-        Index("ix_calendar_events_user_google", "user_id", "google_event_id"),
+        Index("ix_calendar_events_user_google_cal", "user_id", "google_event_id", "calendar_id"),
     )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

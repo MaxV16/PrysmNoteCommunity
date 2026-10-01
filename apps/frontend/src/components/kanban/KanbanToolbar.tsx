@@ -1,22 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import type { CardLayout, ScrollDirection } from "@/lib/preferences";
+import type { BoardSort } from "@/lib/board-dnd";
+
+export type BoardFilter = "all" | "active" | "completed";
+
+const SORTS: ReadonlyArray<readonly [BoardSort, string]> = [
+  ["manual", "Manual"],
+  ["tag", "By tag"],
+];
+
+const FILTERS: ReadonlyArray<readonly [BoardFilter, string]> = [
+  ["all", "All"],
+  ["active", "Active"],
+  ["completed", "Done"],
+];
 
 interface KanbanToolbarProps {
-  scrollDirection: ScrollDirection;
-  cardLayout: CardLayout;
-  onScrollDirectionChange: (d: ScrollDirection) => void;
-  onCardLayoutChange: (l: CardLayout) => void;
   onAddSection: (title: string) => void;
+  /** When provided, renders a "+ New" button that opens the board creation modal. */
+  onAddTask?: () => void;
+  /** When provided, renders the completion filter. */
+  filter?: BoardFilter;
+  onFilterChange?: (f: BoardFilter) => void;
+  /** When provided, renders the sort control. */
+  sort?: BoardSort;
+  onSortChange?: (s: BoardSort) => void;
 }
 
 export function KanbanToolbar({
-  scrollDirection,
-  cardLayout,
-  onScrollDirectionChange,
-  onCardLayoutChange,
   onAddSection,
+  onAddTask,
+  filter,
+  onFilterChange,
+  sort,
+  onSortChange,
 }: KanbanToolbarProps) {
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
@@ -30,52 +48,51 @@ export function KanbanToolbar({
   };
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface px-3 py-1.5">
-      <div className="flex items-center gap-0.5 rounded-full bg-elevated p-0.5">
-        <button
-          onClick={() => onScrollDirectionChange("horizontal")}
-          data-testid="scroll-horizontal"
-          title="Columns: sections side-by-side"
-          className={`rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
-            scrollDirection === "horizontal" ? "bg-accent text-[var(--on-gradient)] font-semibold" : "text-secondary hover:text-primary"
-          }`}
-        >
-          Horizontal
-        </button>
-        <button
-          onClick={() => onScrollDirectionChange("vertical")}
-          data-testid="scroll-vertical"
-          title="Rows: sections stacked full-width"
-          className={`rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
-            scrollDirection === "vertical" ? "bg-accent text-[var(--on-gradient)] font-semibold" : "text-secondary hover:text-primary"
-          }`}
-        >
-          Vertical
-        </button>
-      </div>
+    <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-surface px-4 py-2">
+      {onFilterChange && (
+        <div className="flex items-center gap-0.5 rounded-full bg-elevated p-0.5">
+          {FILTERS.map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => onFilterChange(value)}
+              data-testid={`board-filter-${value}`}
+              className={`rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
+                filter === value
+                  ? "bg-accent text-[var(--on-gradient)] font-semibold"
+                  : "text-secondary hover:text-primary"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
-      <div className="flex items-center gap-0.5 rounded-full bg-elevated p-0.5">
-        <button
-          onClick={() => onCardLayoutChange("stacked")}
-          data-testid="layout-stacked"
-          className={`rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
-            cardLayout === "stacked" ? "bg-accent text-[var(--on-gradient)] font-semibold" : "text-secondary hover:text-primary"
-          }`}
+      {onSortChange && (
+        <select
+          value={sort ?? "manual"}
+          onChange={(e) => onSortChange(e.target.value as BoardSort)}
+          aria-label="Sort board"
+          className="input-field h-8 w-28 text-xs"
         >
-          Stacked
-        </button>
-        <button
-          onClick={() => onCardLayoutChange("side_by_side")}
-          data-testid="layout-side-by-side"
-          className={`rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
-            cardLayout === "side_by_side" ? "bg-accent text-[var(--on-gradient)] font-semibold" : "text-secondary hover:text-primary"
-          }`}
-        >
-          Side-by-side
-        </button>
-      </div>
+          {SORTS.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      )}
 
       <div className="flex-1" />
+
+      {onAddTask && (
+        <button
+          onClick={onAddTask}
+          className="btn btn-primary px-3 py-1.5 text-xs"
+        >
+          + New
+        </button>
+      )}
 
       {adding ? (
         <div className="flex items-center gap-2">

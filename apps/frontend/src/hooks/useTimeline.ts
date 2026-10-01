@@ -1,65 +1,80 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
-import { useAppStore } from "@/stores/app-store";
-import { parseLocalDate } from "@/lib/utils";
+import { useCallback, useMemo, useState } from "react";
 import { todayStart } from "@/lib/dates";
+import {
+  TIMELINE_RENDER_DAYS,
+  clampSliceStart,
+  dateForDayIndex,
+  initialSliceStart,
+} from "@/lib/timeline-window";
+import { ZOOM_LEVELS, type ZoomLevel, DEFAULT_ZOOM } from "@/components/timeline/constants";
 
 /**
- * Infinite horizontal timeline state.
+ * Timeline state for a fixed, very wide day strip.
  *
- * `scrollOffset` is the number of days between "today" and the leftmost rendered
- * day (can be positive or negative). `days` is the total number of day columns
- * currently rendered. Expanding grows the rendered window (never shrinks), which
- * lets the DOM keep growing so the user can scroll indefinitely in both directions.
+ * The canvas width never changes, so the browser owns scrolling and `scrollLeft`
+ * maps directly to a date. This hook only tracks which slice of day columns is
+ * rendered around the viewport; moving the slice never moves the content,
+ * because every day keeps its absolute pixel position in the strip.
  */
-export function useTimeline(initialDays = 20, baseLeftOffset = 10) {
-  const tasks = useAppStore((s) => s.tasks);
-  const [days, setDays] = useState(initialDays);
-  const [scrollOffset, setScrollOffset] = useState(-baseLeftOffset);
+export function useTimeline() {
+  const [sliceStart, setSliceStart] = useState(() => initialSliceStart());
+  const [zoom, setZoom] = useState<ZoomLevel>(DEFAULT_ZOOM);
+  // `today` is resolved once per mount; the label/offsets stay stable for the
+  // session even if the app is left open across midnight.
+  const today = useMemo(() => todayStart(), []);
 
-  const expandBackward = useCallback((amount: number) => {
-    setScrollOffset((prev) => prev - amount);
-    setDays((prev) => prev + amount);
-  }, []);
-
-  const expandForward = useCallback((amount: number) => {
-    // Only grow rightward; do not shift the left edge.
-    setDays((prev) => prev + amount);
-  }, []);
-
-  const setRightEdge = useCallback((startOffset: number, count: number) => {
-    setScrollOffset(startOffset);
-    setDays((prev) => Math.max(prev, count));
-  }, []);
-
-  const visibleRange = useMemo(() => {
-    const start = todayStart();
-    start.setDate(start.getDate() + scrollOffset);
-    const end = new Date(start);
-    end.setDate(end.getDate() + days);
-    return { start, end };
-  }, [scrollOffset, days]);
-
-  const visibleTasks = useMemo(
+  const days = useMemo(
     () =>
-      tasks.filter((t) => {
-        if (!t.start_date && !t.due_date) return false;
-        const taskDate = parseLocalDate(t.start_date || t.due_date || "");
-        if (Number.isNaN(taskDate.getTime())) return false;
-        return taskDate >= visibleRange.start && taskDate <= visibleRange.end;
-      }),
-    [tasks, visibleRange]
+      Array.from({ length: TIMELINE_RENDER_DAYS }, (_, i) =>
+        dateForDayIndex(sliceStart + i, today)
+      ),
+    [sliceStart, today]
   );
 
+  const visibleRange = useMemo(
+    () => ({
+      start: days[0],
+      end: dateForDayIndex(sliceStart + TIMELINE_RENDER_DAYS, today),
+    }),
+    [days, sliceStart, today]
+  );
+
+  const moveSlice = useCallback((start: number) => {
+    setSliceStart(clampSliceStart(start));
+  }, []);
+
+  const changeZoom = useCallback((nextZoom: ZoomLevel) => {
+    setZoom(nextZoom);
+  }, []);
+
+  const zoomIn = useCallback(() => {
+    setZoom((current) => {
+      const idx = ZOOM_LEVELS.indexOf(current);
+      if (idx < ZOOM_LEVELS.length - 1) return ZOOM_LEVELS[idx + 1];
+      return current;
+    });
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setZoom((current) => {
+      const idx = ZOOM_LEVELS.indexOf(current);
+      if (idx > 0) return ZOOM_LEVELS[idx - 1];
+      return current;
+    });
+  }, []);
+
   return {
-    visibleTasks,
     visibleRange,
-    scrollOffset,
-    setScrollOffset,
-    viewDays: days,
-    expandBackward,
-    expandForward,
-    setRightEdge,
+    days,
+    sliceStart,
+    moveSlice,
+    today,
+    zoom,
+    setZoom: changeZoom,
+    zoomIn,
+    zoomOut,
+    zoomLevels: ZOOM_LEVELS,
   };
 }

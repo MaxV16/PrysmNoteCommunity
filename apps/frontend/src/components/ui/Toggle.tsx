@@ -21,7 +21,7 @@ export function Toggle({ checked, onChange, label, disabled }: ToggleProps) {
         }`}
       >
         <span
-          className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out ${
+          className={`inline-block h-3.5 w-3.5 rounded-full bg-[var(--on-gradient)] shadow-sm transition-transform duration-200 ease-in-out ${
             checked ? "translate-x-[1.15rem]" : "translate-x-[0.15rem]"
           }`}
         />

@@ -4,23 +4,9 @@ import { useMemo } from "react";
 import { useAppStore, type NavFilter } from "@/stores/app-store";
 import type { WorkspaceView } from "@/components/layout/AppShell";
 import { useLocalBool } from "@/lib/use-local-bool";
-import { todayISO } from "@/lib/dates";
 import { NotesSection } from "@/components/sidebar/NotesSection";
 import { SidebarLists } from "@/components/sidebar/SidebarLists";
-
-function isToday(dateStr: string | null): boolean {
-  if (!dateStr) return false;
-  return dateStr === todayISO();
-}
-
-function isWithinNext7Days(dateStr: string | null): boolean {
-  if (!dateStr) return false;
-  const start = new Date(`${todayISO()}T00:00:00`);
-  const weekLater = new Date(start);
-  weekLater.setDate(weekLater.getDate() + 7);
-  const d = new Date(`${dateStr}T00:00:00`);
-  return d >= start && d <= weekLater;
-}
+import { isToday, smartListCounts } from "@/lib/task-filters";
 
 interface SidebarNavProps {
   view: WorkspaceView;
@@ -41,12 +27,6 @@ interface FilterItem {
 }
 
 const FILTERS: FilterItem[] = [
-  {
-    label: "Inbox",
-    filter: "inbox",
-    storageKey: "prysm_smartlist_inbox",
-    icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>,
-  },
   {
     label: "Today",
     filter: "today",
@@ -118,22 +98,42 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsO
   const setActiveListId = useAppStore((s) => s.setActiveListId);
 
   const smartPrefs = {
-    inbox: useLocalBool("prysm_smartlist_inbox", true),
     today: useLocalBool("prysm_smartlist_today", true),
     next7: useLocalBool("prysm_smartlist_next7", true),
     all: useLocalBool("prysm_smartlist_all", true),
     completed: useLocalBool("prysm_smartlist_completed", true),
   };
 
-  const counts = useMemo(() => {
-    const active = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled" && !t.is_archived);
-    return {
-      inbox: active.filter((t) => !t.start_date && !t.due_date).length,
-      today: active.filter((t) => isToday(t.start_date) || isToday(t.due_date)).length,
-      next7: active.filter((t) => isWithinNext7Days(t.start_date) || isWithinNext7Days(t.due_date)).length,
-      all: active.length,
-      completed: tasks.filter((t) => t.status === "done" && !t.is_archived).length,
-    };
+  const counts = useMemo(() => smartListCounts(tasks), [tasks]);
+
+  // Today's done/total for the progress ring and the "all done" note.
+  const todayStats = useMemo(() => {
+    const relevant = tasks.filter(
+      (t) => !t.is_archived && t.status !== "cancelled" && (isToday(t.start_date) || isToday(t.due_date))
+    );
+    const total = relevant.length;
+    const done = relevant.filter((t) => t.status === "done").length;
+    return { total, done, remaining: total - done };
+  }, [tasks]);
+
+  // Consecutive days (ending today or yesterday) with at least one completed
+  // task. Derived from completed_at, no stored counter.
+  const streak = useMemo(() => {
+    const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    const days = new Set<string>();
+    for (const t of tasks) {
+      if (t.status !== "done" || !t.completed_at) continue;
+      const d = new Date(t.completed_at);
+      if (!Number.isNaN(d.getTime())) days.add(dayKey(d));
+    }
+    const cursor = new Date();
+    if (!days.has(dayKey(cursor))) cursor.setDate(cursor.getDate() - 1);
+    let count = 0;
+    while (days.has(dayKey(cursor)) && count < 400) {
+      count += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    return count;
   }, [tasks]);
 
   const visibleFilters = FILTERS.filter((f) => {
@@ -152,7 +152,7 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsO
   return (
     <nav className="space-y-5" aria-label="Primary">
       <div>
-        <p className="nav-label px-2 pb-1.5">Workspace</p>
+        <p className="nav-label px-2 pb-1.5">Smart lists</p>
         <div className="space-y-0.5">
           {visibleFilters.map((item) => {
             const isActive = view === "timeline" && navFilter === item.filter;
@@ -170,21 +170,56 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsO
               >
                 <span className="text-secondary group-hover:text-primary">{item.icon}</span>
                 <span className="flex-1 text-left">{item.label}</span>
-                {count > 0 && (
-                  <span className={`badge ml-auto ${isActive ? "bg-accent/20 text-accent" : "bg-elevated text-muted"}`}>
-                    {count}
-                  </span>
-                )}
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {item.filter === "today" && todayStats.total > 0 && (
+                    <span
+                      className="flex shrink-0"
+                      title={`${todayStats.done} of ${todayStats.total} done today`}
+                      aria-label={`${todayStats.done} of ${todayStats.total} tasks done today`}
+                      data-testid="today-progress"
+                    >
+                      <svg viewBox="0 0 36 36" className="h-3.5 w-3.5 -rotate-90">
+                        <circle cx="18" cy="18" r="15" fill="none" stroke="var(--border)" strokeWidth="6" />
+                        <circle
+                          cx="18"
+                          cy="18"
+                          r="15"
+                          fill="none"
+                          stroke="var(--accent)"
+                          strokeWidth="6"
+                          strokeLinecap="round"
+                          strokeDasharray={`${(todayStats.done / todayStats.total) * 94.25} 94.25`}
+                        />
+                      </svg>
+                    </span>
+                  )}
+                  {item.filter === "today" && streak >= 2 && (
+                    <span className="badge bg-accent/15 text-accent" title={`${streak}-day completion streak`}>
+                      {streak}d
+                    </span>
+                  )}
+                  {count > 0 && (
+                    <span className={`badge ${isActive ? "bg-accent/20 text-accent" : "bg-elevated text-muted"}`}>
+                      {count}
+                    </span>
+                  )}
+                </span>
               </button>
             );
           })}
         </div>
+        {smartPrefs.today && todayStats.total > 0 && todayStats.remaining === 0 && (
+          <p className="px-2 pt-1.5 text-[11px] text-muted" data-testid="all-done-today">
+            All done for today.
+          </p>
+        )}
       </div>
 
       <NotesSection />
 
       <SidebarLists view={view} onSelectView={onSelectView} />
 
+      <p className="nav-label px-2 pb-1.5">Workspace</p>
       <div className="space-y-0.5">
         {VIEWS.map((item) => {
           const isActive = view === item.view;

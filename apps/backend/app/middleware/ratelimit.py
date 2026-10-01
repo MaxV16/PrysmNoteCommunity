@@ -20,6 +20,12 @@ from app.utils.ratelimit import RateLimiter
 
 _api_limiter = RateLimiter("rl:api")
 
+# OAuth callbacks are never throttled: the browser returns here carrying a
+# single-use authorization code, so a 429 would burn that code and force the
+# user to restart the whole consent flow from scratch. Matched by suffix rather
+# than by a path list so this file stays provider-agnostic.
+_OAUTH_CALLBACK_SUFFIX = "/callback"
+
 
 class APIRateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -29,7 +35,12 @@ class APIRateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         # Only /api traffic; the auth endpoints are already rate-limited at a
         # finer grain by auth.py (and /health must never be throttled).
-        if not path.startswith("/api/") or path in CSRF_SAFE_PATHS or request.method in {"OPTIONS", "HEAD"}:
+        if (
+            not path.startswith("/api/")
+            or path in CSRF_SAFE_PATHS
+            or path.endswith(_OAUTH_CALLBACK_SUFFIX)
+            or request.method in {"OPTIONS", "HEAD"}
+        ):
             return await call_next(request)
 
         ip = _client_ip(request)

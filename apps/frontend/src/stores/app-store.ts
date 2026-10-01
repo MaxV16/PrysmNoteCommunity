@@ -27,6 +27,8 @@ interface AppState {
   selectedTaskId: string | null;
   selectedTaskIds: string[];
   selectedTagId: string | null;
+  /** Task whose touch long-press action bar is open (mobile/coarse pointers). */
+  mobileActionTaskId: string | null;
   searchQuery: string;
   navFilter: NavFilter;
   setTasks: (tasks: Task[]) => void;
@@ -43,6 +45,7 @@ interface AppState {
   setSelectedTaskIds: (ids: string[]) => void;
   toggleTaskSelected: (id: string) => void;
   clearTaskSelection: () => void;
+  setMobileActionTaskId: (id: string | null) => void;
   setSelectedTagId: (id: string | null) => void;
   setSearchQuery: (query: string) => void;
   setNavFilter: (filter: NavFilter) => void;
@@ -59,6 +62,7 @@ const initialState = {
   selectedTaskId: null,
   selectedTaskIds: [],
   selectedTagId: null,
+  mobileActionTaskId: null,
   searchQuery: "",
   navFilter: null,
 };
@@ -92,6 +96,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         : [...state.selectedTaskIds, id],
     })),
   clearTaskSelection: () => set({ selectedTaskIds: [] }),
+  setMobileActionTaskId: (id) => set({ mobileActionTaskId: id }),
   setSelectedTagId: (id) => set({ selectedTagId: id }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   setNavFilter: (filter) => set({ navFilter: filter }),

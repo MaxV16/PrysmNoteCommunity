@@ -28,9 +28,29 @@ export function Dropdown({ trigger, children }: DropdownProps) {
 
   return (
     <div ref={ref} className="relative inline-block">
-      <div onClick={() => setIsOpen(!isOpen)}>{trigger}</div>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setIsOpen((prev) => !prev);
+          } else if (e.key === "Escape") {
+            setIsOpen(false);
+          }
+        }}
+        className="cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-accent/50 rounded"
+      >
+        {trigger}
+      </div>
       {isOpen && (
-        <div className="absolute right-0 z-40 mt-1 min-w-[180px] rounded border border-border bg-surface py-1 shadow-lg">
+        <div
+          role="menu"
+          className="absolute right-0 z-40 mt-1 min-w-[180px] rounded border border-border bg-surface py-1 shadow-lg"
+        >
           {children}
         </div>
       )}

@@ -53,7 +53,7 @@ export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
           <div
             className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
               isUser
-                ? "gradient-bg text-[var(--on-gradient)] rounded-br-md shadow-glow"
+                ? "gradient-bg text-[var(--on-gradient)] rounded-br-md"
                 : "bg-elevated text-primary rounded-bl-md"
             }`}
           >

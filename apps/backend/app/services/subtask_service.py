@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task, TaskStatus
@@ -74,8 +74,10 @@ async def convert_subtasks_to_description(
 
     lines = [f"- {child.title}" for child in children]
     description = "\n".join(lines)
-    for child in children:
-        await session.delete(child)
+    if children:
+        await session.execute(
+            delete(Task).where(Task.id.in_([child.id for child in children]))
+        )
     parent.description = description
     await session.flush()
     return description
@@ -127,6 +129,7 @@ async def create_subtask_titles(
 ) -> list[Task]:
     """Persist the given subtask titles under a parent task, in order."""
     created: list[Task] = []
+    sort_order = await next_sort_order(session, parent.id)
     for title in titles:
         cleaned = (title or "").strip()
         if not cleaned:
@@ -137,10 +140,11 @@ async def create_subtask_titles(
             title=cleaned[:500],
             status=TaskStatus.TODO,
             priority=parent.priority,
-            sort_order=await next_sort_order(session, parent.id),
+            sort_order=sort_order,
         )
         session.add(child)
         created.append(child)
+        sort_order += 1
     await session.flush()
     return created
 

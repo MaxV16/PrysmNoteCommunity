@@ -9,8 +9,11 @@ import {
   deleteNote,
   NOTE_COLORS,
   noteBodyFontSize,
+  isNativeStickySupported,
+  openNativeStickyNote,
   type StickyNote,
 } from "@/lib/notes";
+import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 
 export function useNotes(): StickyNote[] {
   return useSyncExternalStore(subscribeNotes, getNotes, getNotes);
@@ -40,6 +43,9 @@ export function NoteWindow({ note }: { note: StickyNote }) {
   noteRef.current = note;
   const dragRef = useRef<DragState | null>(null);
   const resizeRef = useRef<ResizeState | null>(null);
+  const { nativeSupported, openNativeWindow, isNativeOpen } = useStickyBoard();
+  const isOpenNatively = isNativeOpen(note.id);
+  const nativeSupportedNow = nativeSupported && isNativeStickySupported();
 
   useEffect(() => {
     const handleMove = (e: PointerEvent) => {
@@ -113,22 +119,32 @@ export function NoteWindow({ note }: { note: StickyNote }) {
     if ((noteRef.current.zIndex || 0) < z) upsertNote(noteRef.current.id, { zIndex: z });
   };
 
+  const handlePopOut = async () => {
+    if (nativeSupportedNow) {
+      await openNativeWindow(note.id);
+    }
+  };
+
+  const vw = typeof window !== "undefined" ? window.innerWidth : Number.POSITIVE_INFINITY;
+  const vh = typeof window !== "undefined" ? window.innerHeight : Number.POSITIVE_INFINITY;
+  const width = Math.min(note.width, vw - 16);
+  const height = Math.min(note.height, vh - 16);
   const style: CSSProperties = {
-    left: note.x,
-    top: note.y,
-    width: note.width,
-    height: note.height,
+    left: Math.max(8, Math.min(note.x, vw - width - 8)),
+    top: Math.max(8, Math.min(note.y, vh - height - 8)),
+    width,
+    height,
     zIndex: note.zIndex || 10,
   };
 
   return (
     <div
       onPointerDown={onWindowPointerDown}
-      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-surface/85 shadow-glow-lg backdrop-blur-xl"
+      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl border border-border bg-surface/85 shadow-glow-lg backdrop-blur-xl"
       style={style}
     >
       <div
-        className="flex h-10 shrink-0 cursor-move select-none items-center justify-between gap-2 border-b border-white/10 px-3"
+        className="flex h-10 shrink-0 cursor-move select-none items-center justify-between gap-2 border-b border-border px-3"
         style={{ touchAction: "none" }}
         onPointerDown={onHeaderPointerDown}
       >
@@ -145,9 +161,28 @@ export function NoteWindow({ note }: { note: StickyNote }) {
           placeholder="Title"
           className="w-full min-w-0 flex-1 bg-transparent text-sm font-medium text-primary outline-none placeholder:text-muted"
         />
+        {nativeSupportedNow && (
+          <button
+            onClick={handlePopOut}
+            className={`flex h-6 w-6 shrink-0 pointer-coarse:h-9 pointer-coarse:w-9 items-center justify-center rounded-md transition-colors ${
+              isOpenNatively
+                ? "bg-accent/20 text-accent"
+                : "text-secondary hover:bg-hover hover:text-primary"
+            }`}
+            title={isOpenNatively ? "Already open as native window" : "Pop out as native window (always on top)"}
+            aria-label={isOpenNatively ? "Already open as native window" : "Pop out as native window"}
+            disabled={isOpenNatively}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </button>
+        )}
         <button
           onClick={() => minimizeNote(note.id)}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-secondary transition-colors hover:bg-hover hover:text-primary"
+          className="flex h-6 w-6 shrink-0 pointer-coarse:h-9 pointer-coarse:w-9 items-center justify-center rounded-md text-secondary transition-colors hover:bg-hover hover:text-primary"
           title="Minimize to sidebar"
           aria-label="Minimize note"
         >
@@ -159,7 +194,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
           onClick={() => {
             if (window.confirm("Delete this note?")) deleteNote(note.id);
           }}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-secondary transition-colors hover:bg-danger/20 hover:text-danger"
+          className="flex h-6 w-6 shrink-0 pointer-coarse:h-9 pointer-coarse:w-9 items-center justify-center rounded-md text-secondary transition-colors hover:bg-danger/20 hover:text-danger"
           title="Delete note"
           aria-label="Delete note"
         >
@@ -177,12 +212,12 @@ export function NoteWindow({ note }: { note: StickyNote }) {
         style={{ fontSize: noteBodyFontSize() }}
       />
 
-      <div className="flex shrink-0 items-center gap-2 border-t border-white/10 px-3 py-2.5">
+      <div className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-2.5">
         {NOTE_COLORS.map((c) => (
           <button
             key={c}
-            className={`h-5 w-5 rounded-full border border-white/20 transition-transform hover:scale-110 ${
-              note.color === c ? "ring-2 ring-white/70" : ""
+            className={`h-5 w-5 pointer-coarse:h-7 pointer-coarse:w-7 rounded-full border border-border transition-transform hover:scale-110 ${
+              note.color === c ? "ring-2 ring-accent" : ""
             }`}
             style={{ backgroundColor: c }}
             onClick={() => upsertNote(note.id, { color: c })}
@@ -195,7 +230,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
       {["nw", "ne", "sw", "se"].map((edge) => (
         <div
           key={edge}
-          className="absolute h-7 w-7"
+          className="absolute h-7 w-7 pointer-coarse:h-10 pointer-coarse:w-10"
           style={{
             ...(edge.includes("n") ? { top: -14 } : { bottom: -14 }),
             ...(edge.includes("w") ? { left: -14 } : { right: -14 }),

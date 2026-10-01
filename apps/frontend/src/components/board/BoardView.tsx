@@ -6,37 +6,34 @@ import {
   DragEndEvent,
   DragOverlay,
   DragStartEvent,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useDroppable,
   useSensor,
   useSensors,
   closestCorners,
 } from "@dnd-kit/core";
-import { SortableContext, rectSortingStrategy, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, rectSortingStrategy } from "@dnd-kit/sortable";
 import { api } from "@/lib/api";
-import type { Task } from "@/types/task";
+import type { Task, TaskStatus } from "@/types/task";
 import type { BoardSection } from "@/lib/board-sections";
 import { useAppStore } from "@/stores/app-store";
 import { useTasks } from "@/hooks/useTasks";
 import { useBoardSections } from "@/hooks/useBoardSections";
-import { usePreferencesStore } from "@/stores/preferences-store";
-import {
-  PREF_BOARD_BOARD_LAYOUT,
-  PREF_BOARD_BOARD_SCROLL,
-  type CardLayout,
-  type ScrollDirection,
-} from "@/lib/preferences";
 import {
   UNSORTED_ID,
   applyBoardDrop,
   applyBoardGroupDrop,
+  boardComparator,
   byBoardOrder,
   computeBoardDrop,
   unsortedTasks,
+  type BoardSort,
 } from "@/lib/board-dnd";
 import { useLocalBool } from "@/lib/use-local-bool";
-import { KanbanToolbar } from "@/components/kanban/KanbanToolbar";
+import { KanbanToolbar, type BoardFilter } from "@/components/kanban/KanbanToolbar";
 import { KanbanAddCard } from "@/components/kanban/KanbanAddCard";
+import { TaskForm } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
@@ -62,9 +59,12 @@ interface BoardGroupProps {
   color: string | null;
   isOver?: boolean;
   droppableId: string;
+  /** board_section_id to pin a created task to (null for status/Unsorted columns). */
+  boardSectionId: string | null;
+  /** Status a created task starts in. */
+  status: string;
+  listId: string | null;
   tasks: Task[];
-  cardLayout: CardLayout;
-  scrollDirection: ScrollDirection;
   childrenByParent: Map<string, Task[]>;
   overrides: Record<string, string>;
   selectedTaskIds: Set<string>;
@@ -72,6 +72,7 @@ interface BoardGroupProps {
   onToggleSubtask: (sub: Task) => void;
   onToggleTask: (task: Task) => void;
   onSetColor: (taskId: string, color: string) => void;
+  onAdd: () => void;
   onEmptyContextMenu?: (e: React.MouseEvent, droppableId: string, title: string) => void;
   onCardContextMenu?: (e: React.MouseEvent, task: Task) => void;
 }
@@ -81,9 +82,10 @@ function BoardGroup({
   color,
   isOver,
   droppableId,
+  boardSectionId,
+  status,
+  listId,
   tasks,
-  cardLayout,
-  scrollDirection,
   childrenByParent,
   onOpen,
   onToggleSubtask,
@@ -91,11 +93,12 @@ function BoardGroup({
   onSetColor,
   overrides,
   selectedTaskIds,
+  onAdd,
   onEmptyContextMenu,
   onCardContextMenu,
 }: BoardGroupProps) {
   const { setNodeRef } = useDroppable({ id: droppableId });
-  const strategy = cardLayout === "side_by_side" ? rectSortingStrategy : verticalListSortingStrategy;
+  const strategy = rectSortingStrategy;
 
   return (
     <div
@@ -106,53 +109,33 @@ function BoardGroup({
         e.stopPropagation();
         onEmptyContextMenu?.(e, droppableId, title);
       }}
-      className={`flex ${
-        scrollDirection === "horizontal" ? "min-w-full flex-1 lg:min-w-[480px]" : "w-full"
-      } flex-col rounded-2xl border bg-white/[0.02] p-4 transition-colors ${
-        isOver ? "border-accent/60 ring-2 ring-accent/30" : "border-white/5"
+      className={`flex w-full flex-col rounded-2xl border bg-surface/60 p-4 transition-colors ${
+        isOver ? "border-accent/60 ring-2 ring-accent/30" : "border-border"
       }`}
     >
       <div className="mb-3 flex items-center gap-2">
         <span
           className="block h-2.5 w-2.5 shrink-0 rounded-full"
-          style={{ backgroundColor: color || "#9E9E9E" }}
+          style={{ backgroundColor: color || "var(--text-muted)" }}
         />
         <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-primary">{title}</h3>
-        <span className="rounded-full bg-white/5 px-2 py-0.5 text-xs text-muted">{tasks.length}</span>
+        <span className="rounded-full bg-elevated px-2 py-0.5 text-xs text-muted">{tasks.length}</span>
       </div>
 
-      <div className={cardLayout === "side_by_side" ? "" : "flex flex-col gap-3"}>
+      <div>
         <SortableContext items={tasks.map((t) => t.id)} strategy={strategy}>
-          {cardLayout === "side_by_side" ? (
-            <div
-              data-testid="board-masonry"
-              className="grid grid-flow-dense gap-3 sm:gap-4 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]"
-            >
-              {tasks.map((task) => (
-                <BoardCard
-                  key={task.id}
-                  task={task}
-                  subtasks={childrenByParent.get(task.id) ?? []}
-                  color={cardColor(task.id, overrides)}
-                  decoration={pickDecoration(task.id)}
-                  spanClass={isWideCard(task.id) ? "sm:col-span-2" : ""}
-                  selected={selectedTaskIds.has(task.id)}
-                  onOpen={onOpen}
-                  onToggleSubtask={(sub) => onToggleSubtask(sub)}
-                  onToggleTask={(t) => onToggleTask(t)}
-                  onSetColor={onSetColor}
-                  onContextMenu={onCardContextMenu}
-                />
-              ))}
-            </div>
-          ) : (
-            tasks.map((task) => (
+          <div
+            data-testid="board-masonry"
+            className="grid grid-flow-dense gap-3 sm:gap-4 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]"
+          >
+            {tasks.map((task) => (
               <BoardCard
                 key={task.id}
                 task={task}
                 subtasks={childrenByParent.get(task.id) ?? []}
                 color={cardColor(task.id, overrides)}
                 decoration={pickDecoration(task.id)}
+                spanClass={isWideCard(task.id) ? "sm:col-span-2" : ""}
                 selected={selectedTaskIds.has(task.id)}
                 onOpen={onOpen}
                 onToggleSubtask={(sub) => onToggleSubtask(sub)}
@@ -160,14 +143,19 @@ function BoardGroup({
                 onSetColor={onSetColor}
                 onContextMenu={onCardContextMenu}
               />
-            ))
-          )}
+            ))}
+          </div>
         </SortableContext>
       </div>
 
-      {tasks.length === 0 && (
-        <p className="mt-2 text-xs text-muted">No tasks here yet - drop one or create it elsewhere.</p>
-      )}
+      <div className="mt-3">
+        <KanbanAddCard
+          status={status}
+          boardSectionId={boardSectionId}
+          listId={listId}
+          onAdd={onAdd}
+        />
+      </div>
     </div>
   );
 }
@@ -177,25 +165,28 @@ export function BoardView({ tasks }: BoardViewProps) {
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
   const setTasks = useAppStore((s) => s.setTasks);
   const activeListId = useAppStore((s) => s.activeListId);
-  const { fetchTasks, updateTask } = useTasks();
+  const { fetchTasks, updateTask, createTask } = useTasks();
   const { sections, addSection } = useBoardSections("board");
 
-  const scrollDirection = usePreferencesStore(
-    (s) => (s.prefs[PREF_BOARD_BOARD_SCROLL] as ScrollDirection) || "vertical"
-  );
-  const cardLayout = usePreferencesStore(
-    (s) => (s.prefs[PREF_BOARD_BOARD_LAYOUT] as CardLayout) || "side_by_side"
-  );
-  const setPreference = usePreferencesStore((s) => s.setPreference);
+  const [filter, setFilter] = useState<BoardFilter>("all");
+  const [sort, setSort] = useState<BoardSort>("manual");
+  const comparator = useMemo(() => boardComparator(sort), [sort]);
 
   const soundOn = useLocalBool("prysm_notif_sound", true);
+  const rewardsOn = useLocalBool("prysm_rewards", true);
   const [overrides, setOverrides] = useState<Record<string, string>>(() => loadColorOverrides());
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
-  const [scopedCreate, setScopedCreate] = useState<{ id: string | null; title: string } | null>(null);
+  const [scopedCreate, setScopedCreate] = useState<{
+    id: string | null;
+    title: string;
+    status: TaskStatus;
+    full: boolean;
+  } | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } })
   );
 
   // Full-store grouping (not the filtered list) so a filtered-out parent still
@@ -215,20 +206,32 @@ export function BoardView({ tasks }: BoardViewProps) {
     return map;
   }, [allTasks]);
 
-  const cards = useMemo(() => tasks.filter((t) => !t.parent_task_id), [tasks]);
+  const cards = useMemo(
+    () =>
+      tasks.filter((t) => {
+        if (t.parent_task_id) return false;
+        if (filter === "active") return t.status !== "done" && t.status !== "cancelled";
+        if (filter === "completed") return t.status === "done";
+        return true;
+      }),
+    [tasks, filter]
+  );
 
   const cardsBySection = useMemo(() => {
     const map = new Map<string, Task[]>();
     for (const section of sections) {
       map.set(
         section.id,
-        cards.filter((t) => t.board_section_id === section.id).sort(byBoardOrder)
+        cards.filter((t) => t.board_section_id === section.id).sort(comparator)
       );
     }
     return map;
-  }, [cards, sections]);
+  }, [cards, sections, comparator]);
 
-  const unsorted = useMemo(() => unsortedTasks(cards).sort(byBoardOrder), [cards]);
+  const unsorted = useMemo(
+    () => unsortedTasks(cards).sort(comparator),
+    [cards, comparator]
+  );
 
   const setOverride = useCallback((taskId: string, color: string) => {
     setOverrides((prev) => {
@@ -251,19 +254,63 @@ export function BoardView({ tasks }: BoardViewProps) {
   const handleToggleTask = useCallback(
     async (task: Task) => {
       const next = task.status === "done" ? "todo" : "done";
-      if (next === "done" && soundOn) {
-        const { playCompletionSound } = await import("@/lib/sounds");
-        playCompletionSound();
+      if (next === "done") {
+        if (soundOn) {
+          const { playCompletionSound } = await import("@/lib/sounds");
+          playCompletionSound();
+        }
+        if (rewardsOn) {
+          const { celebrate } = await import("@/lib/celebrate");
+          celebrate();
+        }
       }
       setTasks(allTasks.map((t) => (t.id === task.id ? { ...t, status: next } : t)));
       await updateTask(task.id, { status: next });
     },
-    [allTasks, setTasks, soundOn, updateTask]
+    [allTasks, setTasks, soundOn, rewardsOn, updateTask]
   );
 
+  // Open the board creation modal, scoped to a column. `full` hosts the rich
+  // TaskForm; otherwise the modal shows the quick inline add with an "Add
+  // details" path into the form.
+  const openCreateModal = useCallback(
+    (target: { id: string | null; title: string; status: TaskStatus; full?: boolean }) => {
+      setScopedCreate({
+        id: target.id,
+        title: target.title,
+        status: target.status,
+        full: !!target.full,
+      });
+    },
+    []
+  );
+
+  // Empty-state CTA and the toolbar "+ New" open the rich form scoped to the
+  // first column (or Unsorted when the board has no sections yet).
   const handleCreate = useCallback(() => {
-    window.dispatchEvent(new CustomEvent("prysm-new-task"));
-  }, []);
+    const first = sections[0];
+    openCreateModal({
+      id: first ? (first.status ? null : first.id) : null,
+      title: first?.title ?? "Unsorted",
+      status: (first?.status as TaskStatus) || "backlog",
+      full: true,
+    });
+  }, [sections, openCreateModal]);
+
+  const handleScopedFormSubmit = useCallback(
+    async (data: Record<string, unknown>) => {
+      try {
+        await createTask({
+          ...data,
+          list_id: (data.list_id as string | undefined) ?? activeListId ?? undefined,
+        });
+        setScopedCreate(null);
+      } catch {
+        // Keep the modal open so the user can retry.
+      }
+    },
+    [createTask, activeListId]
+  );
 
   const openCardMenu = useCallback((e: React.MouseEvent, task: Task) => {
     setMenu({ state: { kind: "task", task }, x: e.clientX, y: e.clientY });
@@ -282,12 +329,17 @@ export function BoardView({ tasks }: BoardViewProps) {
   const handleEmptyNewTask = useCallback(
     (ctx: { day?: string; section?: { id: string | null; title: string } }) => {
       if (ctx.section) {
-        setScopedCreate(ctx.section);
+        const section = sections.find((s) => s.id === ctx.section!.id);
+        openCreateModal({
+          id: ctx.section.id,
+          title: ctx.section.title,
+          status: (section?.status as TaskStatus) || "backlog",
+        });
         return;
       }
       window.dispatchEvent(new CustomEvent("prysm-new-task"));
     },
-    []
+    [sections, openCreateModal]
   );
 
   const handleDragStart = useCallback(
@@ -358,27 +410,19 @@ export function BoardView({ tasks }: BoardViewProps) {
 
   return (
     <div className="relative flex h-full min-w-0 flex-col bg-base">
-      {/* Fixed dark canvas treatment is intentional for this view in all themes:
-          the near-black scrapbook desk is the defining visual. Do not gate it on
-          the active theme. */}
       <div
         className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundColor: "#08080c",
-          backgroundImage: "radial-gradient(1200px 800px at 50% -10%, #15151f, transparent 70%)",
-        }}
-      />
-      <div
-        className="pointer-events-none absolute inset-0"
+        aria-hidden="true"
         style={{ backgroundImage: NOISE_BACKGROUND, backgroundSize: "256px 256px", opacity: 0.35 }}
       />
 
       <KanbanToolbar
-        scrollDirection={scrollDirection}
-        cardLayout={cardLayout}
-        onScrollDirectionChange={(d) => setPreference(PREF_BOARD_BOARD_SCROLL, d)}
-        onCardLayoutChange={(l) => setPreference(PREF_BOARD_BOARD_LAYOUT, l)}
-        onAddSection={(title) => void addSection({ title, color: "#3d4a63" })}
+        onAddSection={(title) => void addSection({ title, color: "var(--text-muted)" })}
+        onAddTask={handleCreate}
+        filter={filter}
+        onFilterChange={setFilter}
+        sort={sort}
+        onSortChange={setSort}
       />
 
       <div
@@ -396,22 +440,17 @@ export function BoardView({ tasks }: BoardViewProps) {
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div
-            className={
-              scrollDirection === "horizontal"
-                ? "flex items-start gap-6"
-                : "flex flex-col gap-8"
-            }
-          >
+          <div className="flex flex-col gap-8">
             {sections.map((section) => (
               <BoardGroup
                 key={section.id}
                 title={section.title}
                 color={section.color}
                 droppableId={section.id}
+                boardSectionId={section.status ? null : section.id}
+                status={section.status || "backlog"}
+                listId={activeListId}
                 tasks={cardsBySection.get(section.id) ?? []}
-                cardLayout={cardLayout}
-                scrollDirection={scrollDirection}
                 childrenByParent={childrenByParent}
                 overrides={overrides}
                 selectedTaskIds={new Set(selectedTaskIds)}
@@ -419,6 +458,7 @@ export function BoardView({ tasks }: BoardViewProps) {
                 onToggleSubtask={(sub) => void handleToggleSubtask(sub)}
                 onToggleTask={(t) => void handleToggleTask(t)}
                 onSetColor={setOverride}
+                onAdd={() => void fetchTasks()}
                 onEmptyContextMenu={openEmptyMenu}
                 onCardContextMenu={openCardMenu}
               />
@@ -428,9 +468,10 @@ export function BoardView({ tasks }: BoardViewProps) {
               title="Unsorted"
               color={null}
               droppableId={UNSORTED_ID}
+              boardSectionId={null}
+              status="backlog"
+              listId={activeListId}
               tasks={unsorted}
-              cardLayout={cardLayout}
-              scrollDirection={scrollDirection}
               childrenByParent={childrenByParent}
               overrides={overrides}
               selectedTaskIds={new Set(selectedTaskIds)}
@@ -438,6 +479,7 @@ export function BoardView({ tasks }: BoardViewProps) {
               onToggleSubtask={(sub) => void handleToggleSubtask(sub)}
               onToggleTask={(t) => void handleToggleTask(t)}
               onSetColor={setOverride}
+              onAdd={() => void fetchTasks()}
               onEmptyContextMenu={openEmptyMenu}
               onCardContextMenu={openCardMenu}
             />
@@ -464,7 +506,7 @@ export function BoardView({ tasks }: BoardViewProps) {
 
         {cards.length === 0 && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-4">
-            <div className="pointer-events-auto max-w-sm rounded-2xl border border-white/10 bg-[#101016]/90 p-6 text-center backdrop-blur-sm">
+            <div className="pointer-events-auto max-w-sm rounded-2xl border border-border bg-surface/90 p-6 text-center backdrop-blur-sm">
               <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -493,17 +535,41 @@ export function BoardView({ tasks }: BoardViewProps) {
         onClose={() => setScopedCreate(null)}
         title={scopedCreate ? `New task in ${scopedCreate.title}` : "New Task"}
       >
-        <KanbanAddCard
-          key={scopedCreate?.id ?? "none"}
-          autoExpand
-          status="backlog"
-          boardSectionId={scopedCreate?.id && scopedCreate.id !== UNSORTED_ID ? scopedCreate.id : null}
-          listId={activeListId}
-          onAdd={() => {
-            setScopedCreate(null);
-            void fetchTasks();
-          }}
-        />
+        {scopedCreate &&
+          (scopedCreate.full ? (
+            <TaskForm
+              key={scopedCreate.id ?? "unsorted"}
+              onSubmit={handleScopedFormSubmit}
+              onCancel={() => setScopedCreate(null)}
+              defaultStatus={scopedCreate.status}
+              boardSectionId={
+                scopedCreate.id && scopedCreate.id !== UNSORTED_ID ? scopedCreate.id : null
+              }
+            />
+          ) : (
+            <div className="flex flex-col gap-2">
+              <KanbanAddCard
+                key={scopedCreate.id ?? "none"}
+                autoExpand
+                status={scopedCreate.status}
+                boardSectionId={
+                  scopedCreate.id && scopedCreate.id !== UNSORTED_ID ? scopedCreate.id : null
+                }
+                listId={activeListId}
+                onAdd={() => {
+                  setScopedCreate(null);
+                  void fetchTasks();
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setScopedCreate((prev) => (prev ? { ...prev, full: true } : prev))}
+                className="self-start text-xs text-secondary transition-colors hover:text-primary"
+              >
+                Add details
+              </button>
+            </div>
+          ))}
       </Modal>
 
       <ContextMenu

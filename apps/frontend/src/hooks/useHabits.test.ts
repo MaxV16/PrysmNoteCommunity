@@ -31,7 +31,7 @@ describe("useHabits", () => {
     (api.get as ReturnType<typeof vi.fn>).mockResolvedValue([mockHabit]);
     const { result } = renderHook(() => useHabits());
     await waitFor(() => expect(result.current.habits).toHaveLength(1));
-    expect(api.get).toHaveBeenCalledWith("/habits");
+    expect(api.get).toHaveBeenCalledWith("/habits/");
   });
 
   it("createHabit posts and appends to the list", async () => {
@@ -40,7 +40,7 @@ describe("useHabits", () => {
     await act(async () => {
       await result.current.createHabit({ title: "Read", frequency: "daily" });
     });
-    expect(api.post).toHaveBeenCalledWith("/habits", { title: "Read", frequency: "daily" });
+    expect(api.post).toHaveBeenCalledWith("/habits/", { title: "Read", frequency: "daily" });
     expect(result.current.habits).toHaveLength(1);
     expect(result.current.habits[0].title).toBe("Read");
   });

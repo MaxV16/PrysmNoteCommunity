@@ -33,6 +33,8 @@ export interface Task {
   recurrence_end_date: string | null;
   sort_order: number;
   is_archived: boolean;
+  /** Per-task reminder opt-in; reminders are off unless this is true. */
+  reminder_enabled?: boolean;
   list_id: string | null;
   deleted_at: string | null;
   completed_at: string | null;

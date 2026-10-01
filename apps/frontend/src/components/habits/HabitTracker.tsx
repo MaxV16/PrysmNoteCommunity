@@ -54,7 +54,16 @@ export function HabitTracker({ habits, loading, toggleLog, deleteHabit }: HabitT
       </div>
 
       {habits.length === 0 && (
-        <div className="text-xs text-muted text-center py-3">No habits yet. Add one below.</div>
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-3 py-4 text-center">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10 text-accent">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+          </span>
+          <p className="text-xs font-semibold text-primary">No habits yet</p>
+          <p className="text-[11px] text-secondary">Add one with the button above.</p>
+        </div>
       )}
 
       <div className="space-y-2">

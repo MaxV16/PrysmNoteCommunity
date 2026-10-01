@@ -18,6 +18,15 @@ interface AIComposerProps {
 
 const MAX_LENGTH = 2000;
 
+// A small, curated set: the emoji people actually send in a note app. Kept
+// inline (no icon library) per the repo's assets/licensing rules.
+const EMOJI = [
+  "😀", "😂", "🙂", "😍", "👍", "🙏",
+  "🎉", "🔥", "✅", "❌", "❤️", "💡",
+  "📌", "⏰", "🚀", "✨", "😅", "🤔",
+  "👀", "💪", "📝", "⭐", "☕", "🌙",
+];
+
 export function AIComposer({
   onSend,
   disabled,
@@ -29,7 +38,10 @@ export function AIComposer({
   onRegisterInsert,
 }: AIComposerProps) {
   const [input, setInput] = useState("");
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement>(null);
+  const emojiPopoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!onRegisterInsert) return;
@@ -49,6 +61,47 @@ export function AIComposer({
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 132) + "px";
   }, [input]);
+
+  // Escape or an outside click closes the emoji picker.
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (
+        emojiPopoverRef.current &&
+        !emojiPopoverRef.current.contains(e.target as Node) &&
+        !emojiButtonRef.current?.contains(e.target as Node)
+      ) {
+        setEmojiOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEmojiOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [emojiOpen]);
+
+  /** Insert at the caret through setRangeText so browser undo keeps working. */
+  const insertAtCaret = (text: string) => {
+    const el = textareaRef.current;
+    if (!el) {
+      setInput((prev) => (prev + text).slice(0, MAX_LENGTH));
+      return;
+    }
+    const start = el.selectionStart ?? el.value.length;
+    const end = el.selectionEnd ?? start;
+    if (typeof el.setRangeText === "function") {
+      el.setRangeText(text, start, end, "end");
+    } else {
+      el.value = el.value.slice(0, start) + text + el.value.slice(end);
+    }
+    setInput(el.value.slice(0, MAX_LENGTH));
+    el.focus();
+  };
 
   const submit = () => {
     if (!input.trim() || disabled) return;
@@ -111,11 +164,52 @@ export function AIComposer({
             </span>
           )}
           {additionalAction}
+          <div className="relative">
+            <button
+              ref={emojiButtonRef}
+              type="button"
+              onClick={() => setEmojiOpen((v) => !v)}
+              aria-label="Insert emoji"
+              aria-haspopup="dialog"
+              aria-expanded={emojiOpen}
+              className="pointer-coarse:h-10 pointer-coarse:w-10 flex h-8 w-8 items-center justify-center rounded-xl text-secondary transition-colors hover:bg-hover hover:text-primary"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M8.5 14.5a4.5 4.5 0 0 0 7 0" />
+                <line x1="9" y1="9.5" x2="9.01" y2="9.5" />
+                <line x1="15" y1="9.5" x2="15.01" y2="9.5" />
+              </svg>
+            </button>
+            {emojiOpen && (
+              <div
+                ref={emojiPopoverRef}
+                role="dialog"
+                aria-label="Pick an emoji"
+                className="absolute bottom-full right-0 z-20 mb-2 grid w-[13.5rem] grid-cols-6 gap-0.5 rounded-xl border border-border bg-surface p-1.5 shadow-lg"
+              >
+                {EMOJI.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    aria-label={`Insert ${emoji}`}
+                    onClick={() => {
+                      insertAtCaret(emoji);
+                      setEmojiOpen(false);
+                    }}
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-base transition-colors hover:bg-hover"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="submit"
             disabled={disabled || !input.trim()}
             aria-label="Send message"
-            className="gradient-bg flex h-8 w-8 items-center justify-center rounded-xl text-[var(--on-gradient)] shadow-glow transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="gradient-bg pointer-coarse:h-10 pointer-coarse:w-10 flex h-8 w-8 items-center justify-center rounded-xl text-[var(--on-gradient)] shadow-glow transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"/>

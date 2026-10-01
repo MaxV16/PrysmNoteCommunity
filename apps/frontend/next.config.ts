@@ -1,10 +1,17 @@
 ﻿import path from "path";
 import fs from "fs";
 import type { NextConfig } from "next";
+import bundleAnalyzer from "@next/bundle-analyzer";
 
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Serve future raster content as modern formats first. Icons deliberately
+  // stay PNG (favicon/apple-touch/PWA): WebP is not a valid <link rel="icon">
+  // for every browser.
+  images: {
+    formats: ["image/avif", "image/webp"],
+  },
   // Strict type/ESLint checks on production builds (CI + deploy), so a TS or
   // lint error fails the build instead of shipping. Local `next dev` keeps the
   // lenient settings for fast iteration (M5).
@@ -69,4 +76,8 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+const withBundleAnalyzer = bundleAnalyzer({
+  enabled: process.env.ANALYZE === "true",
+});
+
+export default withBundleAnalyzer(nextConfig);

@@ -16,12 +16,19 @@ a short-lived, single-use one-time code and 307s to the app's custom deep link
 `com.prysmnote.app://oauth/client?code=...`; the native side catches `appUrlOpen`
 and loads `GET /api/auth/mobile/exchange?code=...` inside the WebView, where the
 code is validated, the session cookies are set, and the app reloads at `/`.
+
+Desktop (Electron) flow: identical idea, separate scheme. `GET ?redirect=desktop`
+(or with a `nonce`) opens the provider in the system browser; the callback 307s to
+`prysmnote://oauth/callback?code=...&nonce=...`. The Electron main process verifies
+the nonce it generated, then loads the same exchange URL inside the app window so
+the cookies land there. This avoids Google's embedded-webview block, which the old
+in-window redirect hit on macOS/Windows.
 """
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from datetime import datetime, timezone
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -32,11 +39,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models.token_blacklist import TokenBlacklist
 from app.models.user import User
+from app.services.app_login_codes import create_app_login_code
 from app.services.auth_service import create_access_token, create_refresh_token
 from app.utils.auth_cookies import set_auth_cookies, OAUTH_REDIRECT_URI
 from app.utils.ratelimit import RateLimiter
+from app.utils.token_revocation import blacklist_jti
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +71,13 @@ GITHUB_SCOPES = "read:user user:email"
 # blacklisted on use, mirroring the password-reset token pattern).
 MOBILE_REDIRECT_PARAM = "mobile"
 MOBILE_STATE_PREFIX = "mobile:"
-MOBILE_CODE_TTL_MINUTES = 2
+# Desktop (Electron) uses the same one-time-code exchange but its own scheme and
+# a nonce the app generates, so a stray `prysmnote://` link cannot log the app
+# into an account the user did not authenticate as (login-CSRF guard).
+DESKTOP_REDIRECT_PARAM = "desktop"
+DESKTOP_STATE_PREFIX = "desktop:"
+DESKTOP_DEEP_LINK = "prysmnote://oauth/callback"
+NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MOBILE_EXCHANGE_LIMIT = 20  # per IP, per window of 10 minutes
 MOBILE_EXCHANGE_WINDOW = 10 * 60
 
@@ -106,18 +120,36 @@ def _app_url(path: str) -> str:
 
 
 @router.get("/{provider}/start")
-async def oauth_start(provider: str, request: Request, redirect: str | None = None):
+async def oauth_start(
+    provider: str,
+    request: Request,
+    redirect: str | None = None,
+    nonce: str | None = None,
+):
     if provider not in _PROVIDERS:
         return RedirectResponse(url=_app_url("/login?error=unsupported_provider"), status_code=302)
     if not _configured(provider):
         return RedirectResponse(url=_app_url("/login?error=sso_not_configured"), status_code=302)
     state = secrets.token_urlsafe(24)
     # Persist the state so the callback can validate it (store in a signed cookie).
-    # For the mobile flow the state string is prefixed with a marker so the
-    # callback knows to send the session to the app's custom deep link instead of
-    # setting cookies in the system browser (where they would be useless).
+    # For the app flows the state string is prefixed with a marker so the callback
+    # knows to send the session to the app's custom deep link instead of setting
+    # cookies in the system browser (where they would be useless). The desktop
+    # marker also carries the nonce the app generated, which the callback echoes
+    # back so the app can reject a deep link it did not initiate.
     mobile = redirect == MOBILE_REDIRECT_PARAM
-    cookie_value = f"{MOBILE_STATE_PREFIX}{state}" if mobile else state
+    desktop = redirect == DESKTOP_REDIRECT_PARAM
+    if mobile:
+        # Mobile carries a nonce too (like desktop) so a stray
+        # com.prysmnote.app:// link cannot log the app into an account the user
+        # did not authenticate as (login-CSRF guard).
+        safe_nonce = nonce if nonce and NONCE_RE.fullmatch(nonce) else ""
+        cookie_value = f"{MOBILE_STATE_PREFIX}{safe_nonce}:{state}"
+    elif desktop:
+        safe_nonce = nonce if nonce and NONCE_RE.fullmatch(nonce) else ""
+        cookie_value = f"{DESKTOP_STATE_PREFIX}{safe_nonce}:{state}"
+    else:
+        cookie_value = state
     response = RedirectResponse(url=_provider_authorize_url(provider, state), status_code=302)
     response.set_cookie("oauth_state", cookie_value, httponly=True, samesite="lax",
                         secure=request.url.scheme == "https", path="/")
@@ -150,11 +182,25 @@ async def oauth_callback(
     if provider == "google" and code and GITHUB_CODE_RE.fullmatch(code):
         provider = "github"
 
-    expected_state = request.cookies.get("oauth_state") if request else None
-    mobile_flow = False
-    if expected_state and expected_state.startswith(MOBILE_STATE_PREFIX):
-        expected_state = expected_state[len(MOBILE_STATE_PREFIX):]
-        mobile_flow = True
+    expected_raw = request.cookies.get("oauth_state") if request else None
+    app_flow: str | None = None
+    mobile_nonce = ""
+    desktop_nonce = ""
+    expected_state = expected_raw
+    if expected_raw and expected_raw.startswith(DESKTOP_STATE_PREFIX):
+        app_flow = "desktop"
+        rest = expected_raw[len(DESKTOP_STATE_PREFIX):]
+        desktop_nonce, _, expected_state = rest.partition(":")
+    elif expected_raw and expected_raw.startswith(MOBILE_STATE_PREFIX):
+        app_flow = "mobile"
+        rest = expected_raw[len(MOBILE_STATE_PREFIX):]
+        # New format is "<nonce>:<state>"; a cookie without a colon (older
+        # backend, no nonce) is treated as the state alone.
+        if ":" in rest:
+            mobile_nonce, _, expected_state = rest.partition(":")
+        else:
+            mobile_nonce = ""
+            expected_state = rest
     if not expected_state or not secrets.compare_digest(expected_state, state or ""):
         return RedirectResponse(url=_app_url("/login?error=sso_invalid_state"), status_code=307)
 
@@ -180,14 +226,25 @@ async def oauth_callback(
     # browser whether the flow was mobile or web).
     response.delete_cookie("oauth_state", path="/")
 
-    if mobile_flow:
+    if app_flow == "mobile":
         # Mobile: the provider ran in the system browser, so cookies set here
         # would never reach the WebView. Issue a short-lived one-time code and
         # bounce to the app's custom deep link instead; the native side loads
         # GET /api/auth/mobile/exchange?code=... inside the WebView where the
-        # session cookies finally land.
+        # session cookies finally land. Echo the nonce so the app only accepts
+        # a deep link for the flow it started.
         code = _create_mobile_code(user)
-        return RedirectResponse(url=f"com.prysmnote.app://oauth/client?code={code}", status_code=307)
+        suffix = f"&nonce={mobile_nonce}" if mobile_nonce else ""
+        return RedirectResponse(url=f"com.prysmnote.app://oauth/client?code={code}{suffix}", status_code=307)
+
+    if app_flow == "desktop":
+        # Desktop: same reason, and Electron's protocol handler loads the
+        # exchange URL in the app window. Echo the nonce so the app only accepts
+        # the deep link for the flow it started.
+        code = _create_mobile_code(user)
+        # desktop_nonce passed NONCE_RE, so it is already URL-safe.
+        suffix = f"&nonce={desktop_nonce}" if desktop_nonce else ""
+        return RedirectResponse(url=f"{DESKTOP_DEEP_LINK}?code={code}{suffix}", status_code=307)
 
     set_auth_cookies(response, str(user.id), request, user.token_version)
     return response
@@ -297,19 +354,13 @@ async def _getorcreate_user(session: AsyncSession, email: str, identity: dict, p
 
 
 def _create_mobile_code(user: User) -> str:
-    """Short-lived, single-use JWT carrying only the user id.
+    """Short-lived, single-use code for the app deep-link exchange.
 
-    Expiry is enforced by the JWT ``exp`` (checked at exchange); single use by
-    blacklisting the ``jti`` in ``token_blacklist`` at exchange time. The code
-    never carries user data beyond the id and is useless outside the ~2 min
-    window, so it can travel through the app's custom deep link.
+    Thin wrapper around ``app.services.app_login_codes.create_app_login_code``
+    (shared with the passkey login flow); kept here so existing callers/tests
+    keep their import.
     """
-    expires = datetime.now(timezone.utc) + timedelta(minutes=MOBILE_CODE_TTL_MINUTES)
-    return jwt.encode(
-        {"sub": str(user.id), "exp": expires, "type": "mobile_oauth", "jti": str(uuid4())},
-        settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
-    )
+    return create_app_login_code(user)
 
 
 @mobile_router.get("/exchange")
@@ -318,13 +369,13 @@ async def mobile_exchange(
     request: Request,
     session: AsyncSession = Depends(get_db),
 ):
-    """Validate a mobile one-time code and set the session cookies.
+    """Validate an app one-time code and set the session cookies.
 
-    Called from inside the Capacitor WebView after the native side catches the
-    ``com.prysmnote.app://oauth/client?code=...`` deep link. Cookies set here
-    land in the WebView's cookie store, so the app is authenticated immediately.
-    The code is single-use (jti blacklisted) and both expired and replayed codes
-    are rejected identically.
+    Called from inside the Capacitor WebView (``com.prysmnote.app://`` deep link)
+    or the Electron window (``prysmnote://`` deep link) after the native main
+    process catches it. Cookies set here land in that app's cookie store, so it
+    is authenticated immediately. The code is single-use (jti blacklisted) and
+    both expired and replayed codes are rejected identically.
     """
     client_ip = request.client.host if request.client else "unknown"
     if _mobile_exchange_limiter.count(f"exchange:{client_ip}", MOBILE_EXCHANGE_WINDOW) > MOBILE_EXCHANGE_LIMIT:
@@ -340,19 +391,18 @@ async def mobile_exchange(
     except (JWTError, ValueError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
 
-    # Single-use: a jti already in the blacklist means the code was consumed.
-    used = (await session.execute(select(TokenBlacklist).where(TokenBlacklist.jti == jti))).scalar_one_or_none()
-    if used:
+    # Single-use: the code's jti is blacklisted on first use. The insert is
+    # race-safe, so a concurrent replay is rejected with 400 rather than 500 on
+    # the unique jti constraint.
+    exp = payload.get("exp")
+    expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else datetime.now(timezone.utc)
+    if not await blacklist_jti(session, jti, UUID(user_id), expires_at):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
 
     result = await session.execute(select(User).where(User.id == UUID(user_id)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired code")
-
-    exp = payload.get("exp")
-    expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else datetime.now(timezone.utc)
-    session.add(TokenBlacklist(jti=jti, user_id=user.id, expires_at=expires_at))
 
     response = RedirectResponse(url=_app_url("/"), status_code=307)
     set_auth_cookies(response, str(user.id), request, user.token_version)

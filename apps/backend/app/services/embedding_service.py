@@ -1,3 +1,5 @@
+import asyncio
+import hashlib
 from uuid import UUID
 
 from sqlalchemy import select
@@ -6,6 +8,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.api_key import ApiKey
 from app.models.embedding import TaskEmbedding
 from app.models.task import Task
+
+# Bounds how many embedding provider calls ever overlap. Embeddings are
+# fire-and-forget, but an import or a burst of edits must not fan out an
+# unbounded number of concurrent requests.
+_EMBED_SEMAPHORE = asyncio.Semaphore(2)
+
+
+def _embedding_text(title: str, description: str | None) -> str:
+    if description:
+        return f"{title}\n{description}"
+    return title
+
+
+def _source_hash(title: str, description: str | None) -> str:
+    return hashlib.sha256(_embedding_text(title, description).encode("utf-8")).hexdigest()
 
 
 async def get_user_llm_client_for_embedding(session: AsyncSession, user_id: UUID):
@@ -36,33 +53,60 @@ async def generate_and_store_embedding(
     title: str,
     description: str | None = None,
 ):
+    # No usable AI path (free tier with no key and no hosted entitlement): skip
+    # before touching the provider or the api_keys table.
+    from app.services.ai_entitlement import get_ai_mode
+
+    try:
+        if (await get_ai_mode(user_id, session)).get("mode") == "none":
+            return None
+    except Exception:
+        # Fail-open: an entitlement lookup failure must not block BYOK embeddings.
+        pass
+
     provider_info = await get_user_llm_client_for_embedding(session, user_id)
     if not provider_info:
         return None
 
+    text = _embedding_text(title, description)
+    source_hash = _source_hash(title, description)
+
+    # Unchanged text already has an embedding: skip the provider call entirely.
+    existing_result = await session.execute(
+        select(TaskEmbedding).where(TaskEmbedding.task_id == task_id)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing is not None and existing.source_hash == source_hash:
+        return existing
+
     provider_name, client = provider_info
-    text = title
-    if description:
-        text = f"{title}\n{description}"
 
-    try:
-        embedding = await client.embed(text)
-    except Exception:
-        return None
+    async with _EMBED_SEMAPHORE:
+        try:
+            embedding = await client.embed(text)
+        except Exception:
+            return None
 
-    return await store_embedding(session, task_id, embedding)
+    return await store_embedding(session, task_id, embedding, source_hash)
 
 
-async def store_embedding(session: AsyncSession, task_id: UUID, embedding: list[float]) -> TaskEmbedding:
+async def store_embedding(
+    session: AsyncSession,
+    task_id: UUID,
+    embedding: list[float],
+    source_hash: str | None = None,
+) -> TaskEmbedding:
     result = await session.execute(
         select(TaskEmbedding).where(TaskEmbedding.task_id == task_id)
     )
     existing = result.scalar_one_or_none()
     if existing:
         existing.embedding = embedding
+        if source_hash is not None:
+            existing.source_hash = source_hash
         emb = existing
     else:
-        emb = TaskEmbedding(task_id=task_id, embedding=embedding)
+        emb = TaskEmbedding(task_id=task_id, embedding=embedding, source_hash=source_hash)
         session.add(emb)
     await session.flush()
     return emb

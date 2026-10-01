@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Enum, func, Uuid
+from sqlalchemy import DateTime, ForeignKey, Enum, Index, func, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -16,6 +16,11 @@ class TaskLinkType(str, enum.Enum):
 
 class TaskLink(Base):
     __tablename__ = "task_links"
+    __table_args__ = (
+        Index("ix_task_links_user", "user_id"),
+        Index("ix_task_links_source", "source_task_id"),
+        Index("ix_task_links_target", "target_task_id"),
+    )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     user_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)

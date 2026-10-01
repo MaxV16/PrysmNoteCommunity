@@ -7,9 +7,9 @@ export const TIER_LABELS: Record<PriorityTier, string> = {
 };
 
 export const TIER_COLORS: Record<PriorityTier, string> = {
-  1: "#ef5350", // red   high
-  2: "#4fc3f7", // blue  medium
-  3: "#66bb6a", // green low
+  1: "#a8504c", // red   high
+  2: "#4a6ea5", // blue  medium
+  3: "#4a7c62", // green low
 };
 
 export const TIER_VALUES: PriorityTier[] = [1, 2, 3];

@@ -26,6 +26,7 @@ vi.mock("@/stores/app-store", () => {
   };
   const useAppStore = (selector?: (s: unknown) => unknown) => (selector ? selector(state) : state);
   useAppStore.getState = () => state;
+  useAppStore.subscribe = () => () => {};
   return { useAppStore };
 });
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { FEATURE_COLORS } from "@/lib/palette";
 
-const COLORS = ["#4C7EFF", "#22C55E", "#FF9500", "#EF4444", "#EC4899", "#A855F7"];
+const COLORS = FEATURE_COLORS;
 
 export function HabitForm({
   createHabit,
@@ -52,7 +53,7 @@ export function HabitForm({
               key={c}
               type="button"
               onClick={() => setColor(c)}
-              className={`w-6 h-6 rounded-full transition-all hover:scale-110 ${color === c ? "ring-2 ring-white scale-110" : ""}`}
+              className={`w-6 h-6 rounded-full transition-all hover:scale-110 ${color === c ? "ring-2 ring-accent scale-110" : ""}`}
               style={{ backgroundColor: c }}
             />
           ))}

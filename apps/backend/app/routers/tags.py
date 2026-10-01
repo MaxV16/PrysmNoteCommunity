@@ -10,9 +10,13 @@ from app.models.tag import Tag
 from app.models.task import Task
 from app.models.task_tag import TaskTag
 from app.models.user import User
+from app.utils.cache import cache_delete, cache_get, cache_set, user_cache_key
 from app.utils.uuid_helpers import require_uuid
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
+
+TAG_NAME_MAX_CHARS = 50
+TAGS_CACHE_TTL = 30
 
 
 class CreateTagRequest(BaseModel):
@@ -24,8 +28,8 @@ class CreateTagRequest(BaseModel):
     def validate_name(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError("name must not be empty")
-        if len(v) > 50:
-            raise ValueError("name must be 50 characters or fewer")
+        if len(v) > TAG_NAME_MAX_CHARS:
+            raise ValueError(f"name must be {TAG_NAME_MAX_CHARS} characters or fewer")
         return v
 
 
@@ -33,19 +37,36 @@ class UpdateTagRequest(BaseModel):
     name: str | None = None
     color: str | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not v.strip():
+            raise ValueError("name must not be empty")
+        if len(v) > TAG_NAME_MAX_CHARS:
+            raise ValueError(f"name must be {TAG_NAME_MAX_CHARS} characters or fewer")
+        return v
+
 
 @router.get("/")
 async def list_tags(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ):
+    key = user_cache_key("tags", user.id)
+    cached = await cache_get(key)
+    if cached is not None:
+        return cached
     result = await session.execute(
         select(Tag).where(Tag.user_id == user.id)
     )
-    return [
+    payload = [
         {"id": str(t.id), "name": t.name, "color": t.color}
         for t in result.scalars().all()
     ]
+    await cache_set(key, payload, TAGS_CACHE_TTL)
+    return payload
 
 
 @router.post("/")
@@ -61,6 +82,7 @@ async def create_tag_route(
     except IntegrityError:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A tag with this name already exists")
+    await cache_delete(user_cache_key("tags", user.id))
     return {"id": str(tag.id), "name": tag.name, "color": tag.color}
 
 
@@ -103,6 +125,7 @@ async def update_tag_route(
     except IntegrityError:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A tag with this name already exists")
+    await cache_delete(user_cache_key("tags", user.id))
     return {"id": str(tag.id), "name": tag.name, "color": tag.color}
 
 
@@ -120,6 +143,7 @@ async def delete_tag_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
     await session.delete(tag)
     await session.flush()
+    await cache_delete(user_cache_key("tags", user.id))
     return {"status": "deleted"}
 
 

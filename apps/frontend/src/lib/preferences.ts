@@ -14,9 +14,50 @@ export const PREF_FINANCE_PROJECTION_MONTHS = "finance_projection_months";
 export const PREF_FINANCE_PROJECTION_MIN_BALANCE = "finance_projection_min_balance";
 export const PREF_WATCHLIST_REGION = "watchlist_region";
 export const PREF_ONBOARDING_DONE = "onboarding_done";
+// Per-list last-used view mode (map of list id -> view mode) so opening a list
+// restores the view it was last seen in. Server-synced like every other pref.
+export const PREF_LIST_VIEWS = "list_views";
+// Sidebar list grouping: user-created collapsible sections that lists are
+// dragged into. Persisted as one pref value so it syncs across devices.
+export const PREF_LIST_SECTIONS = "list_sections";
+// Active task-filter state (smart list, active list, tag, search) so returning
+// to the app restores exactly the view the user left. Server-synced like every
+// other preference, with the localStorage cache for a flash-free first paint.
+export const PREF_NAV_FILTER = "nav_filter";
+export const PREF_ACTIVE_LIST = "active_list";
+export const PREF_SELECTED_TAG = "selected_tag";
+export const PREF_SEARCH_QUERY = "search_query";
 
 export type ScrollDirection = "horizontal" | "vertical";
 export type CardLayout = "stacked" | "side_by_side";
+
+/** Map of list id -> last-used timeline view mode. */
+export type ListViewsMap = Record<string, string>;
+
+/** A user-created collapsible sidebar group of lists. */
+export interface ListSection {
+  id: string;
+  name: string;
+  collapsed?: boolean;
+  listIds: string[];
+}
+
+export interface ListSectionsConfig {
+  sections: ListSection[];
+}
+
+export function readListViews(): ListViewsMap {
+  const value = getPrefSync<unknown>(PREF_LIST_VIEWS, {});
+  return value && typeof value === "object" ? (value as ListViewsMap) : {};
+}
+
+export function readListSections(): ListSection[] {
+  const value = getPrefSync<unknown>(PREF_LIST_SECTIONS, null);
+  if (value && typeof value === "object" && Array.isArray((value as ListSectionsConfig).sections)) {
+    return (value as ListSectionsConfig).sections;
+  }
+  return [];
+}
 
 export const PREFERENCES_KEY = "prysm_preferences";
 

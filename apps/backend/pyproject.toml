@@ -28,6 +28,9 @@ dependencies = [
     # Official Model Context Protocol SDK (MIT). Pinned below 2.x: the FastMCP
     # API used by the EE MCP server was renamed to MCPServer in v2.
     "mcp>=1.2,<2",
+    # py_webauthn (BSD-3-Clause): WebAuthn challenge generation/verification
+    # for passkey registration and sign-in.
+    "webauthn>=2.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -36,19 +39,17 @@ test = ["pytest>=8", "pytest-asyncio", "httpx", "aiosqlite"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# The Enterprise backend package lives at the repo root, so its tests are
+# outside this package. List both roots so a plain `pytest` (CI runs `pytest
+# -v` from apps/backend) also exercises the EE/premium backend instead of
+# silently shipping it untested.
+testpaths = ["tests"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
-# The enterprise backend package lives at the repo root, one level above this
-# package. A plain `where=["."]` find only sees the empty `apps/backend/ee`
-# shim directory (and a fresh `pip install -e .[test]` then maps `ee` to it, so
-# every EE-guarded import silently degrades to its community no-op under pytest,
-# see test_should_money_nudge). Map the top-level `ee` package to the real repo
-# root explicitly; subpackages resolve through its __init__.py hierarchy.
 [tool.setuptools]
-package-dir = { ee = "../../ee" }
 
 [tool.setuptools.packages.find]
-include = ["app*", "ee*"]
+include = ["app*"]

@@ -19,8 +19,43 @@ from app.services.ai_turn_runner import (
     _extract_applied_actions,
     _summarize_tool_result,
     should_money_nudge,
+    should_bump_model,
     stream_fallback_reply,
+    unmet_action,
 )
+
+
+class TestUnmetAction:
+    def test_narrated_action_without_tool_call_is_unmet(self):
+        assert unmet_action(
+            "Let me try deleting it. First, I'll delete the existing Revolut loan.",
+            "modify the Revolut loan",
+            tools_ran=False,
+        )
+
+    def test_claim_of_completion_without_tools_is_unmet(self):
+        assert unmet_action("I've deleted the Revolut loan.", "remove the Revolut loan", tools_ran=False)
+
+    def test_real_tool_call_is_not_unmet(self):
+        assert not unmet_action(
+            "Let me try deleting it.",
+            "delete the Revolut loan",
+            tools_ran=True,
+        )
+
+    def test_clean_answer_is_not_unmet(self):
+        assert not unmet_action(
+            "Your loan balance is 700 EUR and the next payment is on the 1st.",
+            "what's my loan balance",
+            tools_ran=False,
+        )
+
+    def test_plain_question_answer_is_not_unmet(self):
+        assert not unmet_action(
+            "Which loan do you mean? I can see two.",
+            "update the loan",
+            tools_ran=False,
+        )
 
 
 @pytest.mark.asyncio
@@ -227,6 +262,24 @@ async def test_extract_applied_actions_dedupes_and_caps():
     # keeps all distinct lines so the cap stays in the runner loop.
     assert len(_extract_applied_actions(many)) == 20
     assert _APPLIED_LINE_CAP == 6
+
+
+def test_should_bump_model():
+    """Only a Prysm-hosted (prysmai) premium turn may bump to the next, pricier
+    model in the hosting chain. Free users and BYOK providers never bump."""
+    # Hosted premium with a bump left -> bump.
+    assert should_bump_model(True, "prysmai", 0, 3)
+    # Hosted premium but already at the last model -> no bump.
+    assert not should_bump_model(True, "prysmai", 2, 3)
+    # Hosted premium but out of retry budget (MAX_RETRY_BUMPS = 2) -> no bump.
+    assert not should_bump_model(True, "prysmai", 2, 6)
+    # Free user on the hosted build -> never bump.
+    assert not should_bump_model(False, "prysmai", 0, 3)
+    # BYOK providers never carry a hosting chain -> never bump.
+    assert not should_bump_model(True, "openai", 0, 3)
+    assert not should_bump_model(True, "deepseek", 0, 3)
+    # No chain at all -> no bump.
+    assert not should_bump_model(True, "prysmai", 0, 0)
 
 
 def test_stream_fallback_reply_summary():

@@ -23,7 +23,17 @@ from app.models.board_section import BoardSection
 from app.models.task_list import TaskList
 from app.models.watchlist import WatchlistItem
 from app.models.analytics_event import AnalyticsEvent, AnalyticsDaily
+from app.models.passkey import Passkey
+from app.models.finance import (
+    Direction,
+    FinancialItem,
+    FinancialTransaction,
+    Frequency,
+    ItemKind,
+    TransactionSource,
+)
 
+from app.models.api_token import ApiToken
 from app.models.token_blacklist import TokenBlacklist
 
 __all__ = [
@@ -57,4 +67,12 @@ __all__ = [
     "WatchlistItem",
     "AnalyticsEvent",
     "AnalyticsDaily",
+    "Passkey",
+    "FinancialItem",
+    "FinancialTransaction",
+    "Direction",
+    "ItemKind",
+    "Frequency",
+    "TransactionSource",
+    "ApiToken",
 ]

@@ -167,7 +167,7 @@ export function ImportPanel() {
   return (
     <section className="card p-6 space-y-5">
       <div className="flex items-center gap-4">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="17 8 12 3 7 8" />
@@ -288,7 +288,7 @@ export function ImportPanel() {
             <button
               onClick={undo}
               disabled={undoing}
-              className="btn px-4 py-1.5 text-sm text-white disabled:opacity-50"
+              className="btn px-4 py-1.5 text-sm text-[var(--on-gradient)] disabled:opacity-50"
               style={{ background: "var(--danger)" }}
             >
               {undoing ? "Undoing..." : "Yes, undo it"}

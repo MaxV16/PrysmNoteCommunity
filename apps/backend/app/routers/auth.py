@@ -35,8 +35,11 @@ from app.services.auth_service import (
     create_user,
     get_user_by_email,
     hash_password,
-    verify_password,
+    hash_password_async,
+    verify_password_async,
 )
+from app.utils.auth_cookies import set_auth_cookies
+from app.utils.token_revocation import blacklist_jti
 from app.utils.client_ip import _client_ip
 from app.utils.ratelimit import RateLimiter, _get_redis
 
@@ -227,11 +230,22 @@ async def register(request: RegisterRequest, response: Response, req: Request, s
 
     _enforce_signup_rate_limit(req, request.email)
 
+    # Initialized outside the RISK_EE block: the community strip deletes the
+    # risk-engine hook, but line 261 still reads this flag (must stay defined).
+    must_verify_override = False
 
     existing = await get_user_by_email(session, request.email)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user = await create_user(session, request.email, request.password, request.display_name)
+
+    # One-time product welcome note, off the request path. Non-commercial and
+    # a no-op when the mailer is not configured.
+    from app.services.lifecycle_email import send_welcome_email
+
+    asyncio.create_task(
+        asyncio.to_thread(send_welcome_email, user.email, user.display_name)
+    )
 
     # When the deployment requires email verification - OR the risk engine
     # challenged this signup - do NOT log the user in; they must click the link
@@ -277,10 +291,10 @@ async def login(request: LoginRequest, response: Response, req: Request, session
     # non-existent emails (prevents account enumeration via response time).
     # A fixed dummy hash is used when the account doesn't exist.
     if user and user.password_hash:
-        password_ok = verify_password(request.password, user.password_hash)
+        password_ok = await verify_password_async(request.password, user.password_hash)
     else:
         password_ok = False
-        verify_password(request.password, DUMMY_PASSWORD_HASH)
+        await verify_password_async(request.password, DUMMY_PASSWORD_HASH)
     if not user or not password_ok:
         _track_failed_login(ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -333,12 +347,8 @@ async def refresh(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     jti = payload.get("jti")
-    if jti:
-        result = await session.execute(
-            select(TokenBlacklist).where(TokenBlacklist.jti == jti)
-        )
-        if result.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
+    exp = payload.get("exp")
+    revoke_expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else None
 
     result = await session.execute(select(User).where(User.id == UUID(user_id)))
     user = result.scalar_one_or_none()
@@ -350,18 +360,16 @@ async def refresh(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
 
     # Refresh-token rotation: revoke the presented refresh token so a stolen
-    # token can't be replayed to mint new sessions. (The old jti is blacklisted
-    # before new cookies are set.)
+    # token can't be replayed to mint new sessions. The old jti is blacklisted
+    # before new cookies are set.
+    #
+    # The insert is race-safe: when two requests present the same token at the
+    # same moment the loser is rejected with 401 instead of crashing on the
+    # unique jti constraint (which used to 500 and strip the client of its new
+    # cookies, stranding the session).
     if jti:
-        exp = payload.get("exp")
-        expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else None
-        entry = TokenBlacklist(
-            jti=jti,
-            user_id=UUID(user_id),
-            expires_at=expires_at,
-        )
-        session.add(entry)
-        await session.flush()
+        if not await blacklist_jti(session, jti, UUID(user_id), revoke_expires_at):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked")
 
     secure = _cookie_secure(req)
     access_token = create_access_token(str(user.id), user.token_version)
@@ -377,38 +385,37 @@ async def refresh(
     return {"id": str(user.id), "email": user.email, "display_name": user.display_name}
 
 
+async def _blacklist_token(session: AsyncSession, token: str | None) -> None:
+    # Decode a presented JWT and persist its jti so the token cannot be replayed
+    # even though it has not expired yet. Malformed or foreign tokens are ignored.
+    if not token:
+        return
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        jti = payload.get("jti")
+        exp = payload.get("exp")
+        user_id = payload.get("sub")
+        if jti and exp and user_id:
+            expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+            await blacklist_jti(session, jti, UUID(user_id), expires_at)
+    except (JWTError, Exception):
+        pass
+
+
 @router.post("/logout")
 async def logout(
     response: Response,
     refresh_token: str | None = Cookie(None),
+    access_token: str | None = Cookie(None),
     session: AsyncSession = Depends(get_db),
     credentials: HTTPAuthorizationCredentials | None = Depends(security_optional),
 ):
-    tokens = {}
-    if refresh_token:
-        tokens["refresh"] = refresh_token
+    # The access token normally lives in an HttpOnly cookie, so blacklist both
+    # cookies as well as any Bearer-supplied access token.
+    await _blacklist_token(session, refresh_token)
+    await _blacklist_token(session, access_token)
     if credentials and credentials.credentials:
-        tokens["access"] = credentials.credentials
-    for _type, token in tokens.items():
-        try:
-            payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-            jti = payload.get("jti")
-            exp = payload.get("exp")
-            user_id = payload.get("sub")
-            if jti and exp and user_id:
-                expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
-                exists = await session.execute(
-                    select(TokenBlacklist).where(TokenBlacklist.jti == jti)
-                )
-                if not exists.scalar_one_or_none():
-                    entry = TokenBlacklist(
-                        jti=jti,
-                        user_id=UUID(user_id),
-                        expires_at=expires_at,
-                    )
-                    session.add(entry)
-        except (JWTError, Exception):
-            pass
+        await _blacklist_token(session, credentials.credentials)
     await session.flush()
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
@@ -458,14 +465,28 @@ class ChangePasswordRequest(BaseModel):
 @router.post("/change-password")
 async def change_password(
     request: ChangePasswordRequest,
+    response: Response,
+    http_request: Request,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
+    refresh_token: str | None = Cookie(None),
+    access_token: str | None = Cookie(None),
 ):
-    if not user.password_hash or not verify_password(request.current_password, user.password_hash):
+    if not user.password_hash or not await verify_password_async(request.current_password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is incorrect")
-    from app.services.auth_service import hash_password
-    user.password_hash = hash_password(request.new_password)
+    user.password_hash = await hash_password_async(request.new_password)
+    # Bind the new password to a fresh token_version and blacklist the tokens
+    # presented here, so every session minted before this change is invalidated
+    # (the same recovery guarantee reset-password gives). Without the bump a
+    # stolen access or refresh token would keep working after the password
+    # change, indefinitely, because each refresh mints a new 7-day token.
+    await _blacklist_token(session, refresh_token)
+    await _blacklist_token(session, access_token)
+    user.token_version += 1
     await session.flush()
+    # Re-mint this device's cookies so the user who just changed the password
+    # stays signed in while every other device is logged out.
+    set_auth_cookies(response, str(user.id), http_request, user.token_version)
     return {"status": "password_updated"}
 
 
@@ -648,26 +669,21 @@ async def reset_password(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
 
     jti = payload.get("jti")
-    if jti:
-        result = await session.execute(
-            select(TokenBlacklist).where(TokenBlacklist.jti == jti)
-        )
-        if result.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
 
     result = await session.execute(select(User).where(User.id == UUID(user_id)))
     user = result.scalar_one_or_none()
     if not user or not user.password_hash:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
 
-    # One-time use: blacklist the reset token's jti.
+    # One-time use: blacklist the reset token's jti. Race-safe, so two concurrent
+    # submissions of the same link cannot 500 on the unique jti constraint.
     exp = payload.get("exp")
     expires_at = datetime.fromtimestamp(exp, tz=timezone.utc) if exp else datetime.now(timezone.utc)
-    session.add(TokenBlacklist(jti=jti, user_id=user.id, expires_at=expires_at))
+    if jti:
+        if not await blacklist_jti(session, jti, UUID(user_id), expires_at):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired token")
 
-    from app.services.auth_service import hash_password
-
-    user.password_hash = hash_password(request.new_password)
+    user.password_hash = await hash_password_async(request.new_password)
     # Invalidate every outstanding access/refresh token for this account.
     user.token_version += 1
     await session.flush()

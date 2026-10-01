@@ -42,26 +42,31 @@ def _origin_allowed(origin: str | None) -> bool:
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 CSRF_COOKIE_NAME = "csrf_token"
 CSRF_HEADER_NAME = "X-CSRF-Token"
-# Login/register/refresh/logout are CSRF-exempt (their own bearer/token flows
-# protect them; logout is a trivial CSRF with no state change). Webhook
-# endpoints are exempt because provider signature verification (Stripe HMAC)
-# is the auth mechanism - an external webhook sender cannot read the
-# double-submit cookie, so CSRF would only block legitimate provider deliveries.
+# These paths skip the double-submit gate only (their own bearer/token/
+# signature flows protect them, and a non-browser client cannot read the
+# cookie); the Origin/Referer allowlist still applies to their unsafe methods.
 CSRF_SAFE_PATHS = {
     "/api/auth/login",
     "/api/auth/register",
     "/api/auth/refresh",
     "/api/auth/logout",
+    # Passkey sign-in is unauthenticated (the challenge cookie is single-use and
+    # HttpOnly); the registration endpoints stay behind the double-submit gate.
+    "/api/auth/passkey/login/options",
+    "/api/auth/passkey/login/verify",
     "/api/health",
     "/api/ee/billing/webhook/stripe",
+    # MCP clients (VS Code, Cursor, Claude, ...) authenticate with a Bearer PAT
+    # and can never read the double-submit cookie, so the whole endpoint is
+    # exempt; the MCP server enforces the entitlement gate on every request.
+    "/api/mcp",
+    "/api/mcp/",
 }
 
 
 class CSRFSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if not settings.csrf_enabled:
-            return await call_next(request)
-        if request.url.path in CSRF_SAFE_PATHS:
             return await call_next(request)
 
         if request.method in SAFE_METHODS:
@@ -87,6 +92,11 @@ class CSRFSecurityMiddleware(BaseHTTPMiddleware):
                 status_code=403,
                 content={"detail": "Origin not allowed"},
             )
+
+        # Exempt paths skip the double-submit gate only (bearer/token/signature
+        # flows cannot read the cookie) but still get the origin allowlist.
+        if request.url.path in CSRF_SAFE_PATHS:
+            return await call_next(request)
 
         csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
         csrf_header = request.headers.get(CSRF_HEADER_NAME)

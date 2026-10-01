@@ -143,6 +143,7 @@ All providers implement `LLMClient` ABC in `app/llm/base.py`. Register with `@re
 | `POST /api/auth/register` | Create account |
 | `POST /api/auth/login` | Sign in |
 | `POST /api/auth/refresh` | Refresh JWT |
+| `POST /api/auth/passkey/register/*`, `POST /api/auth/passkey/login/*` | Passkey (WebAuthn) registration and sign-in |
 | `GET/POST/PATCH/DELETE /api/tasks` | Task CRUD |
 | `GET/POST /api/tasks/{id}/subtasks` | Subtask management |
 | `POST /api/tasks/expand-recurring` | Expand recurring tasks |
@@ -155,7 +156,7 @@ All providers implement `LLMClient` ABC in `app/llm/base.py`. Register with `@re
 | `POST /api/ai/chat/stream` | AI chat (SSE streaming) |
 | `GET /api/ai/sessions` | List AI chat sessions |
 | `POST /api/keys` | Save API key (encrypted) |
-| `POST /api/calendar/sync` | Sync with Google Calendar |
+| `GET /api/calendar/status` + `POST /api/calendar/pull` | Google Calendar connection status + manual event pull |
 
 ## Common Commands
 

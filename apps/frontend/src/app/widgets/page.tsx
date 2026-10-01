@@ -33,14 +33,14 @@ export default function WidgetsPage() {
   }, {});
 
   return (
-    <div className="min-h-screen bg-base p-4" style={{ fontFamily: "var(--font-ui)" }}>
+    <div className="min-h-dvh bg-base p-4" style={{ fontFamily: "var(--font-ui)" }}>
       <div className="max-w-sm mx-auto space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-base font-bold text-primary">Prysm Widgets</h1>
           <Link href="/" className="text-xs text-accent hover:underline">Open Main App</Link>
         </div>
 
-        <div className="rounded-xl bg-surface border border-border p-4">
+        <div className="card p-4">
           <h2 className="text-xs font-semibold text-secondary uppercase tracking-wider mb-3">Task Overview</h2>
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-lg bg-elevated p-3 text-center border border-border">
@@ -54,7 +54,7 @@ export default function WidgetsPage() {
           </div>
         </div>
 
-        <div className="rounded-xl bg-surface border border-border p-4">
+        <div className="card p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-xs font-semibold text-secondary uppercase tracking-wider">Calendar</h2>
             <div className="flex gap-2">
@@ -73,7 +73,7 @@ export default function WidgetsPage() {
               const count = daysWithTasks[dateStr] || 0;
               const isToday = dateStr === today;
               return (
-                <div key={d} className={`text-xs py-1 rounded-md relative ${isToday ? "gradient-bg text-[var(--on-gradient)] font-semibold shadow-glow" : "text-secondary"}`}>
+                <div key={d} className={`text-xs py-1 rounded-md relative ${isToday ? "gradient-bg text-[var(--on-gradient)] font-semibold" : "text-secondary"}`}>
                   {d}
                   {count > 0 && <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-accent" />}
                 </div>
@@ -82,7 +82,7 @@ export default function WidgetsPage() {
           </div>
         </div>
 
-        <div className="rounded-xl bg-surface border border-border p-4">
+        <div className="card p-4">
           <h2 className="text-xs font-semibold text-secondary uppercase tracking-wider mb-3">Today&apos;s Tasks</h2>
           <div className="space-y-1">
             {tasks.filter((t) => t.due_date === today).slice(0, 5).map((t: any) => (

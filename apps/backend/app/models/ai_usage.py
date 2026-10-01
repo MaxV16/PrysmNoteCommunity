@@ -7,7 +7,7 @@ allowance on paid plans and the 14-day trial.
 """
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Uuid, event, func, text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Uuid, event, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -15,6 +15,10 @@ from app.models.base import Base
 
 class AiUsage(Base):
     __tablename__ = "ai_usage"
+    __table_args__ = (
+        # Monthly allowance sums filter (user_id, provider, month >= ...).
+        Index("ix_ai_usage_user_provider_month", "user_id", "provider", "month"),
+    )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     user_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)

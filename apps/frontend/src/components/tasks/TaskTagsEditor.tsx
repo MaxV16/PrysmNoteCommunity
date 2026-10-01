@@ -5,6 +5,9 @@ import { api } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
 import { useTags } from "@/hooks/useTags";
 import { useTasks } from "@/hooks/useTasks";
+import { TAG_COLORS } from "@/lib/palette";
+import { TAG_NAME_MAX } from "@/lib/char-limits";
+import { CharLimitHint } from "@/components/ui/CharLimitHint";
 import type { TaskTag } from "@/types/task";
 
 interface TaskTagsEditorProps {
@@ -60,8 +63,8 @@ export function TaskTagsEditor({ taskId, tags, onChange }: TaskTagsEditorProps) 
   const handleCreateNew = async () => {
     const name = query.trim();
     if (!name) return;
-    const colors = ["#4fc3f7", "#66bb6a", "#ffa726", "#ef5350", "#ab47bc", "#42a5f5", "#78909c"];
-    const color = colors[available.length % colors.length];
+    if (name.length > TAG_NAME_MAX) return;
+    const color = TAG_COLORS[available.length % TAG_COLORS.length];
     const created = await createTag({ name, color });
     await assign(created.id);
     setQuery("");
@@ -96,24 +99,28 @@ export function TaskTagsEditor({ taskId, tags, onChange }: TaskTagsEditorProps) 
           </span>
         ))}
         {adding ? (
-          <span className="inline-flex items-center gap-1 rounded-md border border-accent/30 bg-elevated px-1">
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreateNew();
-                if (e.key === "Escape") {
-                  setAdding(false);
-                  setQuery("");
-                }
-              }}
-              placeholder="Search or create…"
-              className="bg-transparent text-xs text-primary outline-none w-28 py-1"
-            />
+          <span className="inline-flex flex-col items-start gap-0.5">
+            <span className="inline-flex items-center gap-1 rounded-md border border-accent/30 bg-elevated px-1">
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateNew();
+                  if (e.key === "Escape") {
+                    setAdding(false);
+                    setQuery("");
+                  }
+                }}
+                placeholder="Search or create…"
+                className="bg-transparent text-xs text-primary outline-none w-28 py-1"
+              />
+            </span>
+            <CharLimitHint value={query} max={TAG_NAME_MAX} />
           </span>
         ) : (
+
           <button
             onClick={() => {
               setQuery("");

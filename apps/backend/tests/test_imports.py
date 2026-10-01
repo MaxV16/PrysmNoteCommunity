@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.note import Note
 from app.models.tag import Tag
 from app.models.task import Task
+from app.models.task_list import TaskList
 from app.models.task_tag import TaskTag
 
 
@@ -277,11 +278,56 @@ async def test_import_ticktick_tasks_tags_recurrence_subtasks(
         select(Tag).where(Tag.name.in_(["web", "work", "List: Work", "Folder: Work"]))
     )
     tag_names = {t.name for t in tag_result.scalars().all()}
-    assert tag_names == {"web", "work", "List: Work", "Folder: Work"}
+    # Folder/List become Prysm lists, not tags.
+    assert tag_names == {"web", "work"}
     links = await db_session.execute(
         select(TaskTag).where(TaskTag.task_id == parent.id)
     )
-    assert len(links.scalars().all()) == 4
+    assert len(links.scalars().all()) == 2
+
+    list_result = await db_session.execute(
+        select(TaskList).where(TaskList.name == "Work")
+    )
+    work_list = list_result.scalar_one()
+    assert parent.list_id == work_list.id
+    assert child.list_id == work_list.id
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_maps_folder_and_list_to_separate_lists(
+    client: AsyncClient, db_session: AsyncSession
+):
+    csv = (
+        "Date: 2022-03-01\nVersion: 1\n\n"
+        + TICKTICK_HEADER
+        + "\n"
+        + 'Work,Work,Task A,,,N,2022-03-14,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-a,\n"
+        + 'Home,Groceries,Task B,,,N,2022-03-15,,,,2,0,'
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-b,\n"
+    ).encode("utf-8")
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("ticktick.csv", csv, "text/csv")},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    assert response.json()["imported"] == 2
+
+    task_a = await get_task_by_title(db_session, "Task A")
+    task_b = await get_task_by_title(db_session, "Task B")
+    assert task_a is not None and task_b is not None
+    assert task_a.list_id is not None and task_b.list_id is not None
+    assert task_a.list_id != task_b.list_id
+
+    names = set()
+    for lid in (task_a.list_id, task_b.list_id):
+        lst = (
+            await db_session.execute(select(TaskList).where(TaskList.id == lid))
+        ).scalar_one()
+        names.add(lst.name)
+    # The TickTick List Name wins; each source list maps to its own Prysm list.
+    assert names == {"Work", "Groceries"}
 
 
 @pytest.mark.asyncio
@@ -958,3 +1004,90 @@ async def test_import_ticktick_single_line_prose_is_not_split_into_items(
     assert parent is not None
     assert parent.description == "Budget is 2*3 per unit"
     assert await _subtask_titles(db_session, parent.id) == set()
+
+
+def build_ticktick_status_variants() -> bytes:
+    """TickTick 7.x backup rows covering all three Status encodings.
+
+    The export legend is 0 Normal / -1 Abandoned / 2 Completed, and the
+    completed rows carry a Completed Time. Older backups instead used
+    1 Completed / 2 Abandoned, so a bare 2 without a timestamp stays archived.
+    """
+    return (
+        TICKTICK_HEADER
+        + "\n"
+        + "Work,Work,Done with stamp,,,N,2022-03-14,,,,2,2,"
+        "2022-03-01 10:00:00+0000,2022-03-15 08:00:00+0000,1,Europe/Berlin,0,0,"
+        "List,0,1,tt-done,\n"
+        + "Work,Work,Archived todo,,,N,2022-03-14,,,,2,2,"
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-arch,\n"
+        + "Work,Work,Abandoned,,,N,2022-03-14,,,,2,-1,"
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-aband,\n"
+    ).encode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_v7_status_mapping_uses_completed_time(
+    client: AsyncClient, db_session: AsyncSession
+):
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("ticktick.csv", build_ticktick_status_variants(), "text/csv")},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported"] == 3
+    assert body["failed"] == 0
+
+    # Status 2 in a 7.x backup means completed; the Completed Time proves it.
+    done = await get_task_by_title(db_session, "Done with stamp")
+    assert done is not None
+    assert done.status.value == "done"
+    assert done.is_archived is False
+    assert done.completed_at is not None
+
+    # Status 2 without a completion timestamp keeps the older "abandoned" meaning.
+    archived = await get_task_by_title(db_session, "Archived todo")
+    assert archived is not None
+    assert archived.status.value == "todo"
+    assert archived.is_archived is True
+
+    # Status -1 is abandoned in 7.x exports.
+    abandoned = await get_task_by_title(db_session, "Abandoned")
+    assert abandoned is not None
+    assert abandoned.status.value == "todo"
+    assert abandoned.is_archived is True
+
+
+def build_ticktick_row_without_list() -> bytes:
+    return (
+        TICKTICK_HEADER
+        + "\n"
+        + ",,No list row,,,N,2022-03-14,,,,2,0,"
+        "2022-03-01 10:00:00+0000,,1,Europe/Berlin,0,0,List,0,1,tt-nolist,\n"
+    ).encode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_import_ticktick_row_without_list_falls_back_to_default(
+    client: AsyncClient, db_session: AsyncSession
+):
+    # A row whose List Name and Folder Name cells are both empty must not be
+    # persisted with a NULL list_id (the startup backfill used to sweep those
+    # into an arbitrary list). It belongs in the default "My Tasks" list.
+    response = await client.post(
+        "/api/imports/tasks",
+        files={"file": ("ticktick.csv", build_ticktick_row_without_list(), "text/csv")},
+        data={"format": "ticktick", "notes_as_notes": "false"},
+    )
+    assert response.status_code == 200
+    assert response.json()["imported"] == 1
+
+    task = await get_task_by_title(db_session, "No list row")
+    assert task is not None
+    assert task.list_id is not None
+    lst = (
+        await db_session.execute(select(TaskList).where(TaskList.id == task.list_id))
+    ).scalar_one()
+    assert lst.name == "My Tasks"

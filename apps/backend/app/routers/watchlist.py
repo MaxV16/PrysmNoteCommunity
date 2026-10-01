@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,9 +20,11 @@ VALID_STATUSES = {"plan_to_watch", "watching", "watched"}
 
 
 class WatchlistAddRequest(BaseModel):
-    tmdb_id: int
+    # tmdb_id is optional: a manual entry needs only media_type + title and gets
+    # a synthesized id (TMDB search is used first when a key is configured).
+    tmdb_id: int | None = None
     media_type: str
-    # Manual-entry fallback fields; fresh TMDB metadata (when available) wins.
+    # Manual-entry fields; fresh TMDB metadata (when available) wins.
     title: str = ""
     release_year: int | None = None
     poster_path: str | None = None
@@ -43,6 +45,11 @@ def _validate_add(payload: WatchlistAddRequest) -> None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="media_type must be movie or tv")
     if payload.status is not None and payload.status not in VALID_STATUSES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid status")
+    if payload.tmdb_id is None and not payload.title.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="title is required when tmdb_id is not provided",
+        )
 
 
 @router.get("/")
@@ -79,22 +86,39 @@ async def add_item(
     session: AsyncSession = Depends(get_db),
 ):
     _validate_add(payload)
-    duplicate = await session.execute(
-        select(WatchlistItem.id).where(
-            WatchlistItem.user_id == user.id,
-            WatchlistItem.tmdb_id == payload.tmdb_id,
-        )
+    title = payload.title.strip()
+    tmdb_id, resolved_title, search_poster, search_year = await watchlist_service.resolve_add_identity(
+        payload.media_type, title, payload.tmdb_id
     )
+    resolved_title = (resolved_title or title).strip()
+
+    if watchlist_service.is_synthetic(tmdb_id):
+        # Manual entries dedupe on the normalized title + media_type because the
+        # synthesized id is a title hash.
+        duplicate = await session.execute(
+            select(WatchlistItem.id).where(
+                WatchlistItem.user_id == user.id,
+                WatchlistItem.media_type == payload.media_type,
+                func.lower(WatchlistItem.title) == resolved_title.lower(),
+            )
+        )
+    else:
+        duplicate = await session.execute(
+            select(WatchlistItem.id).where(
+                WatchlistItem.user_id == user.id,
+                WatchlistItem.tmdb_id == tmdb_id,
+            )
+        )
     if duplicate.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already on your watchlist")
 
     item = WatchlistItem(
         user_id=user.id,
-        tmdb_id=payload.tmdb_id,
+        tmdb_id=tmdb_id,
         media_type=payload.media_type,
-        title=payload.title.strip(),
-        poster_path=payload.poster_path,
-        release_year=payload.release_year,
+        title=resolved_title,
+        poster_path=payload.poster_path or search_poster,
+        release_year=payload.release_year if payload.release_year is not None else search_year,
         status=payload.status or "plan_to_watch",
         rating=payload.rating,
         notes=payload.notes,
@@ -185,6 +209,8 @@ async def get_providers(
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Watchlist item not found")
+    if watchlist_service.is_synthetic(item.tmdb_id):
+        return item.providers_json or {}
 
     providers = await tmdb_service.watch_providers(item.tmdb_id, item.media_type, region)
     if providers is not None:

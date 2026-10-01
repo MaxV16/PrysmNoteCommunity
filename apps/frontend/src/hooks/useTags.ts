@@ -11,7 +11,10 @@ interface Tag {
 }
 
 export function useTags() {
-  const { tags, setTags, addTag, removeTag } = useAppStore();
+  const tags = useAppStore((s) => s.tags);
+  const setTags = useAppStore((s) => s.setTags);
+  const addTag = useAppStore((s) => s.addTag);
+  const removeTag = useAppStore((s) => s.removeTag);
 
   const fetchTags = useCallback(async () => {
     const data = await api.get<Tag[]>("/tags/");

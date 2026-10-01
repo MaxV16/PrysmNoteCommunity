@@ -63,3 +63,30 @@ export function playAiReplyPing(): void {
   playTone(1046.5, 0, 0.12, 0.08);
   playTone(1568, 0.09, 0.18, 0.06);
 }
+
+// A gentle reminder ping for in-app task reminders: two soft descending notes,
+// distinct from the completion chime and the AI reply ping. Synthesized so no
+// audio asset is required.
+export function playReminderPing(): void {
+  const audio = getCtx();
+  if (!audio) return;
+  if (audio.state === "suspended") audio.resume();
+
+  const now = audio.currentTime;
+  const playTone = (freq: number, start: number, duration: number, gain: number) => {
+    const osc = audio.createOscillator();
+    const g = audio.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, now + start);
+    g.gain.exponentialRampToValueAtTime(gain, now + start + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + start + duration);
+    osc.connect(g);
+    g.connect(audio.destination);
+    osc.start(now + start);
+    osc.stop(now + start + duration + 0.04);
+  };
+
+  playTone(987.77, 0, 0.16, 0.09);
+  playTone(740, 0.13, 0.22, 0.08);
+}

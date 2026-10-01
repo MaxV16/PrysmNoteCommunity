@@ -17,6 +17,18 @@ async function doRefresh(): Promise<boolean> {
   }
 }
 
+function statusFallback(res: Response): string {
+  // Edge/proxy errors return HTML (or nothing) instead of our JSON envelope, so
+  // the generic fallback is all the user would otherwise see.
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    return "The server was unavailable or the request took too long. Please try again.";
+  }
+  if (res.status >= 500) {
+    return `Server error (${res.status}). Please try again.`;
+  }
+  return res.statusText || "Request failed";
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -55,7 +67,11 @@ async function request<T>(
     credentials: "include",
   }).catch((err) => {
     console.error(`[API] Failed to connect to ${API_URL}${path}:`, err);
-    throw new Error(`Cannot reach server at ${API_URL}. Is the backend running?`);
+    const isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
+    const message = isOnline
+      ? `Cannot reach server at ${API_URL}. Is the backend running?`
+      : "Not connected to the internet. Please connect and try again.";
+    throw new Error(message);
   });
 
   if (res.status === 401 && !_retried) {
@@ -83,10 +99,12 @@ async function request<T>(
       } else if (typeof body?.message === "string") {
         message = body.message;
       } else {
-        message = res.statusText || "Request failed";
+        message = statusFallback(res);
       }
     } catch {
-      message = res.statusText || "Request failed";
+      // A non-JSON body (an edge/proxy error page, an HTML 502/504) lands here;
+      // "Request failed" alone tells the user nothing actionable.
+      message = statusFallback(res);
     }
     throw new Error(message);
   }
@@ -98,8 +116,25 @@ async function request<T>(
   return res.json();
 }
 
+// In-flight GET coalescing: several components often request the same resource
+// at the same moment (mount + focus + realtime refresh). Sharing the single
+// promise avoids duplicate network round trips and duplicate JSON parsing.
+const inflightGets = new Map<string, Promise<unknown>>();
+
+function dedupedGet<T>(path: string): Promise<T> {
+  const existing = inflightGets.get(path);
+  if (existing) return existing as Promise<T>;
+  const promise = request<T>(path).finally(() => {
+    if (inflightGets.get(path) === promise) {
+      inflightGets.delete(path);
+    }
+  });
+  inflightGets.set(path, promise);
+  return promise;
+}
+
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string) => dedupedGet<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: JSON.stringify(body) }),
   put: <T>(path: string, body?: unknown) =>

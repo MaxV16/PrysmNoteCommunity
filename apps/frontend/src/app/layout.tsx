@@ -6,21 +6,40 @@ import { ThemeProvider } from "@/lib/theme-context";
 import { ToastProvider } from "@/lib/toast-context";
 import { SubscriptionProvider } from "@/lib/subscription-context";
 import { UpdateBanner } from "@/components/ui/UpdateBanner";
+import { OfflineBanner } from "@/components/ui/OfflineBanner";
 import { CookieBanner } from "@/components/ui/CookieBanner";
 import { DesktopTitlebar } from "@/components/desktop/DesktopTitlebar";
 import { CapbridgeInit } from "@/components/capbridge/CapbridgeInit";
 import Script from "next/script";
 
 export const metadata: Metadata = {
-  title: "Prysm Note",
-  description: "AI-powered task management",
+  metadataBase: new URL("https://prysmnote.com"),
+  title: {
+    default: "Prysm Note",
+    template: "%s | Prysm Note",
+  },
+  description:
+    "Prysm Note is an AI-powered task manager that turns what you type or say into a plan. It remembers your commitments, keeps your schedule, and syncs across every device.",
   manifest: "/manifest.webmanifest",
-  icons: { icon: "/prysm-icon.svg", apple: "/icons/apple-touch-icon.png" },
-  themeColor: "#6c5ce7",
+  icons: { icon: "/prysm-icon.png", apple: "/icons/apple-touch-icon.png" },
   appleWebApp: {
     capable: true,
     title: "Prysm Note",
     statusBarStyle: "black-translucent",
+  },
+  openGraph: {
+    type: "website",
+    siteName: "Prysm Note",
+    title: "Prysm Note",
+    description:
+      "An AI-powered task manager that turns what you type or say into a plan, keeps your schedule, and syncs across every device.",
+    url: "/",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Prysm Note",
+    description:
+      "An AI-powered task manager that turns what you type or say into a plan, keeps your schedule, and syncs across every device.",
   },
 };
 
@@ -28,7 +47,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#6c5ce7",
+  themeColor: "#5B5BD6",
 };
 
 // Optional Cloudflare Web Analytics beacon (cookieless, traffic-level). Absent
@@ -58,6 +77,7 @@ export default function RootLayout({
           <AuthProvider>
             <SubscriptionProvider>
               <ToastProvider>
+                <OfflineBanner />
                 {children}
                 <UpdateBanner />
                 <CookieBanner />

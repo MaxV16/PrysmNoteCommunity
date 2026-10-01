@@ -129,6 +129,20 @@ describe("AddMediaModal", () => {
     expect(screen.queryByText("Dune")).not.toBeInTheDocument();
   });
 
+  it("adds a manual entry without tmdb_id so the backend synthesizes one", async () => {
+    renderModal();
+    await userEvent.click(screen.getByText(/Add manually/i));
+    await userEvent.type(screen.getByPlaceholderText("Title"), "My Home Movie");
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    const payload = onAdd.mock.calls[0][0];
+    expect(payload).toMatchObject({ media_type: "movie", title: "My Home Movie" });
+    // A client timestamp overflowed the int32 tmdb_id column and could not dedupe.
+    expect(payload).not.toHaveProperty("tmdb_id");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the modal open when only some adds fail", async () => {
     onAdd.mockImplementation((payload: { title: string }) =>
       payload.title === "Dune"

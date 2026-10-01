@@ -149,8 +149,10 @@ export function AddMediaModal({ open, onClose, search, onAdd }: AddMediaModalPro
     e.preventDefault();
     if (!manualTitle.trim()) return;
     const year = manualYear.trim() ? Number(manualYear.trim()) : null;
+    // No tmdb_id: the backend tries a TMDB search and otherwise synthesizes a
+    // stable negative id. Sending a client timestamp overflowed the int32
+    // tmdb_id column and could not dedupe.
     void addItem({
-      tmdb_id: Math.floor(Date.now()),
       media_type: manualType,
       title: manualTitle.trim(),
       release_year: year && year > 1800 && year < 2100 ? year : null,

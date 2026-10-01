@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
 import type { Habit, HabitLog } from "@/types/habit";
+import { FOREGROUND_REFRESH_EVENT } from "@/hooks/useForegroundRefresh";
 
 export function useHabits() {
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -10,7 +11,7 @@ export function useHabits() {
 
   const fetchHabits = useCallback(async () => {
     try {
-      const data = await api.get<Habit[]>("/habits");
+      const data = await api.get<Habit[]>("/habits/");
       setHabits(data);
     } catch {
     } finally {
@@ -22,9 +23,16 @@ export function useHabits() {
     fetchHabits();
   }, [fetchHabits]);
 
+  // Cross-device sync: a habit logged on another device shows up on return.
+  useEffect(() => {
+    const onRefresh = () => void fetchHabits();
+    window.addEventListener(FOREGROUND_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(FOREGROUND_REFRESH_EVENT, onRefresh);
+  }, [fetchHabits]);
+
   const createHabit = useCallback(
     async (input: { title: string; frequency: string; target_count?: number; color?: string }) => {
-      const h = await api.post<Habit>("/habits", input);
+      const h = await api.post<Habit>("/habits/", input);
       setHabits((prev) => [...prev, h]);
       return h;
     },

@@ -27,7 +27,7 @@ interface ContextMenuProps {
  */
 export function ContextMenu({ open, x, y, onClose, children, className = "" }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; maxH: number } | null>(null);
 
   // Keep the latest onClose in a ref so the keyboard/dismissal effect only
   // depends on `open`. The views pass inline closures (new identity per render);
@@ -47,9 +47,11 @@ export function ContextMenu({ open, x, y, onClose, children, className = "" }: C
       const menu = menuRef.current;
       const w = menu?.getBoundingClientRect().width ?? 240;
       const h = menu?.getBoundingClientRect().height ?? 200;
+      const top = Math.max(8, Math.min(y, window.innerHeight - h - 8));
       return {
-        top: Math.max(8, Math.min(y, window.innerHeight - h - 8)),
+        top,
         left: Math.max(8, Math.min(x, window.innerWidth - w - 8)),
+        maxH: Math.max(160, window.innerHeight - top - 8),
       };
     };
     setPos(compute());
@@ -137,8 +139,8 @@ export function ContextMenu({ open, x, y, onClose, children, className = "" }: C
     <div
       ref={menuRef}
       role="menu"
-      className={`fixed z-[70] overflow-hidden rounded-xl border border-border bg-surface py-1 shadow-2xl ${className}`}
-      style={pos ? { top: pos.top, left: pos.left } : { top: y, left: x }}
+      className={`fixed z-[70] overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface py-1 shadow-2xl ${className}`}
+      style={pos ? { top: pos.top, left: pos.left, maxHeight: pos.maxH } : { top: y, left: x }}
     >
       {children}
     </div>,

@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { api } from "@/lib/api";
 import { track } from "@/lib/track";
+import { readTaskCache, readTaskCacheCursor, writeTaskCache } from "@/lib/task-cache";
 import { useAppStore } from "@/stores/app-store";
 import type { Task } from "@/types/task";
 
@@ -15,10 +16,124 @@ import type { Task } from "@/types/task";
 let loadedRangeRef: { from: string; to: string } | null = null;
 let fetchSeq = 0;
 
+// Cursor for the incremental sync: the wall-clock time up to which the store is
+// known to reflect the server. Advanced with a small overlap so a row written in
+// the same transaction as its siblings (all share an updated_at timestamp) is
+// never skipped.
+let syncCursor: number | null = null;
+const SYNC_OVERLAP_MS = 2000;
+const SYNC_FALLBACK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Debounced reconcile used after a gesture-driven persist. Patching fires and
+// forgets; the heavier window refresh runs once the user stops, so a drag never
+// awaits a full refetch while the pointer is still moving.
+let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleReconcile() {
+  if (reconcileTimer) clearTimeout(reconcileTimer);
+  reconcileTimer = setTimeout(() => {
+    reconcileTimer = null;
+    void refreshTasksPreservingWindow();
+  }, 800);
+}
+
 function isoDaysAgo(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+let cachePersistTimer: ReturnType<typeof setTimeout> | null = null;
+let cachedTasksRef: Task[] | null = null;
+
+if (typeof window !== "undefined") {
+  syncCursor = readTaskCacheCursor();
+  if (useAppStore.getState().tasks.length === 0) {
+    const cached = readTaskCache();
+    if (cached && cached.length > 0) {
+      useAppStore.getState().mergeTasks(cached);
+      cachedTasksRef = useAppStore.getState().tasks;
+    }
+  }
+  useAppStore.subscribe((state) => {
+    if (state.tasks === cachedTasksRef) return;
+    cachedTasksRef = state.tasks;
+    if (cachePersistTimer) clearTimeout(cachePersistTimer);
+    cachePersistTimer = setTimeout(() => {
+      cachePersistTimer = null;
+      writeTaskCache(useAppStore.getState().tasks, syncCursor);
+    }, 1000);
+  });
+}
+
+// A full snapshot has to page: GET /tasks/ caps limit at 200, so a single
+// request can never return a large import and the store would only ever hold
+// the newest window. The first load walks pages until a short batch; later
+// refreshes fetch only the newest page because mergeTasks is additive.
+const TASK_PAGE_SIZE = 200;
+// The first-load snapshot is bounded to the newest handful of pages so a large
+// account never blocks the workspace behind dozens of serial requests: older
+// tasks are pulled lazily by the scroll-driven range fetch, and edits are
+// picked up by the incremental (updated_since) sync below.
+const SNAPSHOT_MAX_PAGES = 10;
+// Catch-up after being offline uses the cursor with a small overlap, so it may
+// legitimately need many pages; keep the higher cap for that path only.
+const TASK_MAX_PAGES = 60;
+let fullSnapshotLoaded = false;
+
+async function fetchTaskSnapshot(seq: number): Promise<Task[] | null> {
+  // Page fully on the first load, and again whenever the store is empty (a
+  // logout clears it), so a second account in the same tab still gets every
+  // task instead of just the newest page.
+  const full = !fullSnapshotLoaded || useAppStore.getState().tasks.length === 0;
+  const pages = full ? SNAPSHOT_MAX_PAGES : 1;
+  const all: Task[] = [];
+  for (let page = 0; page < pages; page += 1) {
+    const batch = await api.get<Task[]>(
+      `/tasks/?limit=${TASK_PAGE_SIZE}&offset=${page * TASK_PAGE_SIZE}`
+    );
+    if (seq !== fetchSeq) return null; // a newer fetch superseded this one
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    all.push(...batch);
+    if (batch.length < TASK_PAGE_SIZE) break;
+  }
+  fullSnapshotLoaded = true;
+  return all;
+}
+
+// Incremental sync: pull only rows changed since the cursor, tombstones
+// included, oldest-first so the cursor can advance past a page once it is fully
+// merged. This replaces the old newest-200-only refresh that silently missed
+// every edit to an older task on a large account (edited descriptions/subtasks
+// never appeared until a hard reload walked every page).
+async function fetchIncrementalChanges(seq: number): Promise<Task[] | null> {
+  const since =
+    (syncCursor ?? Date.now() - SYNC_FALLBACK_WINDOW_MS) - SYNC_OVERLAP_MS;
+  const sinceIso = encodeURIComponent(new Date(since).toISOString());
+  const all: Task[] = [];
+  for (let page = 0; page < TASK_MAX_PAGES; page += 1) {
+    const batch = await api.get<Task[]>(
+      `/tasks/?updated_since=${sinceIso}&include_deleted=true&limit=${TASK_PAGE_SIZE}&offset=${page * TASK_PAGE_SIZE}`
+    );
+    if (seq !== fetchSeq) return null;
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    all.push(...batch);
+    if (batch.length < TASK_PAGE_SIZE) break;
+  }
+  return all;
+}
+
+function applyIncrementalChanges(changes: Task[]) {
+  const store = useAppStore.getState();
+  const deletedIds = new Set<string>();
+  const live: Task[] = [];
+  for (const change of changes) {
+    if (change.deleted_at) deletedIds.add(change.id);
+    else live.push(change);
+  }
+  if (deletedIds.size > 0) {
+    store.setTasks(store.tasks.filter((t) => !deletedIds.has(t.id)));
+  }
+  if (live.length > 0) store.mergeTasks(live);
 }
 
 async function fetchRangeImpl(from: string, to: string, mergeTasks: (tasks: Task[]) => void) {
@@ -50,8 +165,19 @@ export async function refreshTasksPreservingWindow() {
   const store = useAppStore.getState();
   const seq = ++fetchSeq;
   try {
-    const data = await api.get<Task[]>("/tasks/");
-    if (seq === fetchSeq) store.mergeTasks(data);
+    if (fullSnapshotLoaded && store.tasks.length > 0) {
+      const changes = await fetchIncrementalChanges(seq);
+      if (seq === fetchSeq && changes) {
+        applyIncrementalChanges(changes);
+        syncCursor = Date.now();
+      }
+    } else {
+      const data = await fetchTaskSnapshot(seq);
+      if (seq === fetchSeq && data) {
+        store.mergeTasks(data);
+        syncCursor = Date.now();
+      }
+    }
   } catch {
     // Keep whatever is already loaded; a failed refresh must not wipe the store.
   }
@@ -72,9 +198,21 @@ export function useTasks() {
 
   const fetchTasks = useCallback(async () => {
     const seq = ++fetchSeq;
+    const store = useAppStore.getState();
     try {
-      const data = await api.get<Task[]>("/tasks/");
-      if (seq === fetchSeq) mergeTasks(data);
+      if (fullSnapshotLoaded && store.tasks.length > 0) {
+        const changes = await fetchIncrementalChanges(seq);
+        if (seq === fetchSeq && changes) {
+          applyIncrementalChanges(changes);
+          syncCursor = Date.now();
+        }
+      } else {
+        const data = await fetchTaskSnapshot(seq);
+        if (seq === fetchSeq && data) {
+          store.mergeTasks(data);
+          syncCursor = Date.now();
+        }
+      }
     } catch {
       // Keep whatever is already loaded; a failed refresh must not wipe the store.
     }
@@ -103,10 +241,29 @@ export function useTasks() {
     async (id: string, fields: Record<string, unknown>) => {
       const data = await api.patch<Task>(`/tasks/${id}`, fields);
       if (fields.status === "done") track("task_completed");
-      await fetchTasks();
+      // Merge the server's copy immediately so an open editor reflects the save
+      // without waiting on a full snapshot refetch, then reconcile ordering and
+      // derived state in the background. Awaiting `fetchTasks()` here replaced
+      // the whole task object mid-edit, which is why a description edit only
+      // appeared after leaving and reopening the drawer on mobile.
+      useAppStore.getState().mergeTasks([data]);
+      scheduleReconcile();
       return data;
     },
-    [fetchTasks]
+    []
+  );
+
+  // Gesture-friendly persist: patch and reconcile in the background instead of
+  // awaiting a full `fetchTasks()` inside the interaction. Callers still do an
+  // optimistic store write, so the UI stays instant.
+  const persistTask = useCallback(
+    async (id: string, fields: Record<string, unknown>) => {
+      const data = await api.patch<Task>(`/tasks/${id}`, fields);
+      if (fields.status === "done") track("task_completed");
+      scheduleReconcile();
+      return data;
+    },
+    []
   );
 
   const deleteTask = useCallback(
@@ -172,6 +329,7 @@ export function useTasks() {
     fetchRange,
     createTask,
     updateTask,
+    persistTask,
     deleteTask,
     deleteTasksBatch,
     restoreTask,

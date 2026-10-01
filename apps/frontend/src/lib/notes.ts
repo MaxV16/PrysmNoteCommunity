@@ -1,6 +1,7 @@
 "use client";
 
 import { api } from "@/lib/api";
+import { getDesktopBridge } from "@/lib/desktop-bridge";
 
 export interface StickyNote {
   id: string;
@@ -11,6 +12,7 @@ export interface StickyNote {
   title: string;
   content: string;
   color: string;
+  alwaysOnTop?: boolean;
   minimized: boolean;
   open: boolean;
   zIndex?: number;
@@ -22,6 +24,7 @@ interface ServerNote extends Omit<StickyNote, "zIndex"> {
 }
 
 export const NOTES_STORAGE_KEY = "prysm_sticky_notes";
+export const NOTES_SYNCED_KEY = "prysm_sticky_notes_synced";
 export const NOTE_COLORS = [
   "#fbbf24",
   "#f87171",
@@ -65,10 +68,37 @@ export function loadNotes(): StickyNote[] {
       ...n,
       minimized: n.minimized ?? false,
       open: n.open ?? false,
+      alwaysOnTop: n.alwaysOnTop ?? true,
     }));
   } catch {
     return [];
   }
+}
+
+/**
+ * Ids we last confirmed on the server, persisted so a fresh page load can tell
+ * a brand-new offline note (push it) from a note that already existed on the
+ * server but is gone now (deleted on another device: drop it).
+ */
+function loadSyncedIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(NOTES_SYNCED_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? new Set(parsed.filter((x): x is string => typeof x === "string"))
+      : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSyncedIds(ids: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(NOTES_SYNCED_KEY, JSON.stringify([...ids]));
+  } catch {}
 }
 
 // --- Reactive module store (shared by sidebar + note windows) ---------------
@@ -78,7 +108,7 @@ let notes: StickyNote[] = loadNotes();
 const listeners = new Set<Listener>();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
-let knownServerIds = new Set<string>();
+let knownServerIds = loadSyncedIds();
 const unsyncedDeletes = new Set<string>();
 let syncing = false;
 
@@ -102,19 +132,23 @@ async function pushToServer(id: string) {
   const note = notes.find((n) => n.id === id);
   try {
     if (!note) {
-      // Note was deleted locally.
-      if (knownServerIds.has(id) || unsyncedDeletes.has(id)) {
+      // Note was deleted locally. Always tell the server so the deletion reaches
+      // the other devices; the API returns 404 when it is already gone, which
+      // the outer catch swallows.
+      if (unsyncedDeletes.has(id) || knownServerIds.has(id)) {
         await api.delete(`/notes/${encodeURIComponent(id)}`);
-        knownServerIds.delete(id);
-        unsyncedDeletes.delete(id);
       }
+      knownServerIds.delete(id);
+      unsyncedDeletes.delete(id);
+      saveSyncedIds(knownServerIds);
       return;
     }
     if (knownServerIds.has(id)) {
       await api.patch(`/notes/${encodeURIComponent(id)}`, serverPayload(note));
     } else {
-      await api.post("/notes", serverPayload(note));
+      await api.post("/notes/", serverPayload(note));
       knownServerIds.add(id);
+      saveSyncedIds(knownServerIds);
     }
   } catch {}
 }
@@ -123,7 +157,7 @@ function scheduleServerPush() {
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
     pushTimer = null;
-    const ids = notes.map((n) => n.id);
+    const ids = new Set([...notes.map((n) => n.id), ...unsyncedDeletes]);
     ids.forEach((id) => void pushToServer(id));
   }, 600);
 }
@@ -168,33 +202,63 @@ export function openNotesWindow(focusNoteId?: string): Window | null {
 }
 
 /**
- * One-way sync from the server on app mount: server notes are authoritative;
- * local-only notes (created offline) are pushed up; offline deletions are
- * propagated. Merges by id without clobbering unsynced local edits.
+ * Open one note as its own small floating window. This is the default notes
+ * experience: pressing Notes or + pops open a single sticky note, not a
+ * dashboard. The popup renders the note standalone (see StickyNoteClient) and
+ * syncs edits back through the shared note store.
+ */
+export function openStickyWindow(noteId: string): Window | null {
+  if (typeof window === "undefined") return null;
+  return window.open(
+    `/notes/sticky/${encodeURIComponent(noteId)}`,
+    `sticky_${noteId}`,
+    "width=360,height=340,resizable=yes,scrollbars=yes"
+  );
+}
+
+/**
+ * Reconcile the local store with the server. The contract is deliberately
+ * simple and symmetric so a change made on one device shows up on the others:
+ *
+ *   1. Local deletions are pushed first, then excluded from the server
+ *      snapshot so they can never be resurrected by this same pass.
+ *   2. A local note missing from the server is either brand new (push it) or
+ *      one that already existed before and is now gone (deleted on another
+ *      device, drop it). Ids we previously confirmed on the server tell them
+ *      apart.
+ *   3. Server notes are merged in, server content winning while local
+ *      open/zIndex state is preserved so an open window does not jump.
  */
 export async function syncNotesFromServer(): Promise<void> {
   if (syncing) return;
   syncing = true;
   try {
-    const server = await api.get<ServerNote[]>("/notes").catch(() => null);
+    const server = await api.get<ServerNote[]>("/notes/").catch(() => null);
     if (!server) return;
-    const serverIds = new Set(server.map((n) => n.id));
-    const localById = new Map(notes.map((n) => [n.id, n]));
 
-    for (const id of unsyncedDeletes) {
+    // Push offline deletions and remember them so the snapshot below (taken
+    // before the deletes) cannot bring them back.
+    const deleted = new Set(unsyncedDeletes);
+    for (const id of deleted) {
       await api.delete(`/notes/${encodeURIComponent(id)}`).catch(() => {});
+      knownServerIds.delete(id);
     }
     unsyncedDeletes.clear();
 
-    for (const local of notes) {
-      if (!serverIds.has(local.id)) {
-        await api.post("/notes", serverPayload(local)).catch(() => {});
-        knownServerIds.add(local.id);
-      }
-    }
-    knownServerIds = new Set(serverIds);
+    const serverNotes = server.filter((s) => !deleted.has(s.id));
+    const serverIds = new Set(serverNotes.map((n) => n.id));
+    const localById = new Map(notes.map((n) => [n.id, n]));
+    const previouslySynced = new Set(knownServerIds);
 
-    const merged: StickyNote[] = server.map((s) => {
+    const pushed = new Set<string>();
+    for (const local of notes) {
+      if (serverIds.has(local.id)) continue;
+      if (previouslySynced.has(local.id)) continue; // deleted on another device
+      await api.post("/notes/", serverPayload(local)).catch(() => {});
+      pushed.add(local.id);
+    }
+
+    const merged: StickyNote[] = serverNotes.map((s) => {
       const local = localById.get(s.id);
       // Server wins for content/position; preserve local open/zIndex state so a
       // window that was open before sync doesn't jump around.
@@ -205,7 +269,13 @@ export async function syncNotesFromServer(): Promise<void> {
         open: local?.open ?? s.open,
       };
     });
+    for (const local of notes) {
+      if (pushed.has(local.id)) merged.push(local);
+    }
+
     notes = merged;
+    knownServerIds = new Set([...serverIds, ...pushed]);
+    saveSyncedIds(knownServerIds);
     emit();
     try {
       localStorage.setItem(NOTES_STORAGE_KEY, JSON.stringify(notes));
@@ -240,6 +310,19 @@ if (typeof window !== "undefined") {
       emit();
     }
   });
+  // Reconcile with the server when the app returns to the foreground so a note
+  // deleted on another device disappears here without a manual reload.
+  let lastForegroundSync = 0;
+  const handleForeground = () => {
+    const now = Date.now();
+    if (now - lastForegroundSync < 5000) return;
+    lastForegroundSync = now;
+    void syncNotesFromServer();
+  };
+  window.addEventListener("focus", handleForeground);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") handleForeground();
+  });
 }
 
 export function getNotes(): StickyNote[] {
@@ -269,6 +352,7 @@ export function createNote(title = "", content = ""): StickyNote {
     title,
     content,
     color: defaultNoteColor(),
+    alwaysOnTop: true,
     minimized: false,
     open: true,
     zIndex: (notes.reduce((max, n) => Math.max(max, n.zIndex || 0), 0) || 0) + 1,
@@ -293,6 +377,153 @@ export function minimizeNote(id: string) {
 }
 
 export function deleteNote(id: string) {
-  if (knownServerIds.has(id)) unsyncedDeletes.add(id);
+  // Always record the deletion so it reaches the server and the other devices,
+  // even for a note that was never pushed (created offline, deleted before the
+  // debounced push ran).
+  unsyncedDeletes.add(id);
+  knownServerIds.delete(id);
+  saveSyncedIds(knownServerIds);
   mutate(notes.filter((n) => n.id !== id));
+}
+
+export interface NativeStickyWindowInfo {
+  windowId: string;
+  noteId: string;
+  bounds?: { x: number; y: number; width: number; height: number };
+  alwaysOnTop: boolean;
+}
+
+/**
+ * Check if native sticky windows are supported (running in desktop app)
+ */
+export function isNativeStickySupported(): boolean {
+  if (typeof window === "undefined") return false;
+  const bridge = getDesktopBridge();
+  return !!bridge?.sticky;
+}
+
+/**
+ * Open a note as a native sticky window (always-on-top, frameless)
+ */
+export async function openNativeStickyNote(note: StickyNote): Promise<string | null> {
+  if (typeof window === "undefined") return null;
+  const bridge = getDesktopBridge();
+  if (!bridge?.sticky?.create) return null;
+  try {
+    const windowId = await bridge.sticky.create({
+      noteId: note.id,
+      x: note.x,
+      y: note.y,
+      width: note.width,
+      height: note.height,
+      color: note.color,
+      title: note.title,
+      content: note.content,
+      minimized: note.minimized,
+      alwaysOnTop: true,
+    });
+    return windowId;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Close a native sticky window by windowId
+ */
+export async function closeNativeStickyNote(windowId: string): Promise<void> {
+  if (typeof window === "undefined") return;
+  const bridge = getDesktopBridge();
+  if (!bridge?.sticky?.close) return;
+  try {
+    await bridge.sticky.close(windowId);
+  } catch {}
+}
+
+/**
+ * Update a native sticky window (position, size, color, alwaysOnTop)
+ */
+export async function updateNativeStickyNote(windowId: string, patch: Partial<StickyNote> & { alwaysOnTop?: boolean }): Promise<void> {
+  if (typeof window === "undefined") return;
+  const bridge = getDesktopBridge();
+  if (!bridge?.sticky?.update) return;
+  try {
+    await bridge.sticky.update(windowId, patch);
+  } catch {}
+}
+
+/**
+ * Set always-on-top for a native sticky window
+ */
+export async function setNativeStickyAlwaysOnTop(windowId: string, onTop: boolean): Promise<void> {
+  if (typeof window === "undefined") return;
+  const bridge = getDesktopBridge();
+  if (!bridge?.sticky?.setAlwaysOnTop) return;
+  try {
+    await bridge.sticky.setAlwaysOnTop(windowId, onTop);
+  } catch {}
+}
+
+/**
+ * Get all open native sticky windows
+ */
+export async function getNativeStickyWindows(): Promise<NativeStickyWindowInfo[]> {
+  if (typeof window === "undefined") return [];
+  const bridge = getDesktopBridge();
+  if (!bridge?.sticky?.getAll) return [];
+  try {
+    return await bridge.sticky.getAll();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get native sticky window by note ID
+ */
+export async function getNativeStickyByNoteId(noteId: string): Promise<NativeStickyWindowInfo | null> {
+  if (typeof window === "undefined") return null;
+  const bridge = getDesktopBridge();
+  if (!bridge?.sticky?.getByNoteId) return null;
+  try {
+    return await bridge.sticky.getByNoteId(noteId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Subscribe to native sticky window closed events
+ */
+export function subscribeNativeStickyClosed(callback: (data: { windowId: string; noteId: string }) => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const bridge = getDesktopBridge();
+  if (!bridge?.sticky?.onClosed) return () => {};
+  bridge.sticky.onClosed(callback);
+  return () => {
+    // Note: Electron's ipcRenderer.on returns a function to remove the listener
+    // but our bridge doesn't expose that, so we can't actually unsubscribe
+  };
+}
+
+/**
+ * Subscribe to native sticky note updates (from native window to main app)
+ */
+export function subscribeNativeStickyNoteUpdated(callback: (data: { noteId: string } & Partial<StickyNote>) => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const bridge = getDesktopBridge();
+  if (!bridge?.sticky?.onNoteUpdated) return () => {};
+  bridge.sticky.onNoteUpdated(callback);
+  return () => {};
+}
+
+/**
+ * Subscribe to native sticky note minimized events
+ */
+export function subscribeNativeStickyNoteMinimized(callback: (data: { noteId: string }) => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const bridge = getDesktopBridge();
+  if (!bridge?.sticky?.onNoteMinimized) return () => {};
+  bridge.sticky.onNoteMinimized(callback);
+  return () => {};
 }

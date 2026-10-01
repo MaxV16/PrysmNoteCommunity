@@ -90,6 +90,81 @@ async def test_duplicate_add_409(client: AsyncClient, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_add_manual_without_tmdb_id_synthesizes(client: AsyncClient, monkeypatch):
+    """A manual entry needs only media_type + title; with no TMDB key it gets a
+    stable negative id so the NOT NULL + unique constraint still hold."""
+    monkeypatch.setattr(settings, "tmdb_api_key", "")
+    resp = await client.post("/api/watchlist/", json={"media_type": "movie", "title": "My Home Movie"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["title"] == "My Home Movie"
+    assert data["tmdb_id"] < 0
+
+    # Case-insensitive title + media_type dedupe for manual entries.
+    dup = await client.post("/api/watchlist/", json={"media_type": "movie", "title": "my home movie"})
+    assert dup.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_add_manual_requires_title_without_tmdb_id(client: AsyncClient, monkeypatch):
+    monkeypatch.setattr(settings, "tmdb_api_key", "")
+    resp = await client.post("/api/watchlist/", json={"media_type": "movie"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_add_without_tmdb_id_uses_search_hit(client: AsyncClient, monkeypatch):
+    async def fake_search(query):
+        return [{"tmdb_id": 42, "media_type": "movie", "title": "Searched", "release_year": 1999, "poster_path": "/p.jpg"}]
+
+    async def fake_movie_details(tmdb_id):
+        return {"id": tmdb_id, "title": "Searched", "poster_path": "/p.jpg", "release_date": "1999-01-01"}
+
+    async def fake_compute_upcoming(tmdb_id, media_type):
+        return []
+
+    async def fake_has_theatrical(tmdb_id):
+        return False
+
+    monkeypatch.setattr(tmdb_service, "search_multi", fake_search)
+    monkeypatch.setattr(tmdb_service, "movie_details", fake_movie_details)
+    monkeypatch.setattr(tmdb_service, "compute_upcoming", fake_compute_upcoming)
+    monkeypatch.setattr(tmdb_service, "has_theatrical_release", fake_has_theatrical)
+
+    resp = await client.post("/api/watchlist/", json={"media_type": "movie", "title": "Searched"})
+    assert resp.status_code == 200
+    assert resp.json()["tmdb_id"] == 42
+    assert resp.json()["title"] == "Searched"
+
+
+@pytest.mark.asyncio
+async def test_add_without_tmdb_id_synthesizes_when_only_other_type_result(client: AsyncClient, monkeypatch):
+    """A search hit of the wrong media_type must not be borrowed; the entry is
+    created as a manual one with a synthesized id instead."""
+
+    async def fake_search(query):
+        return [{"tmdb_id": 1396, "media_type": "tv", "title": "Searched", "release_year": 2008, "poster_path": None}]
+
+    async def fake_movie_details(tmdb_id):
+        return None
+
+    async def fake_compute_upcoming(tmdb_id, media_type):
+        return []
+
+    async def fake_has_theatrical(tmdb_id):
+        return False
+
+    monkeypatch.setattr(tmdb_service, "search_multi", fake_search)
+    monkeypatch.setattr(tmdb_service, "movie_details", fake_movie_details)
+    monkeypatch.setattr(tmdb_service, "compute_upcoming", fake_compute_upcoming)
+    monkeypatch.setattr(tmdb_service, "has_theatrical_release", fake_has_theatrical)
+
+    resp = await client.post("/api/watchlist/", json={"media_type": "movie", "title": "Searched"})
+    assert resp.status_code == 200
+    assert resp.json()["tmdb_id"] < 0
+
+
+@pytest.mark.asyncio
 async def test_invalid_media_type_and_status_rejected(client: AsyncClient):
     assert (await client.post("/api/watchlist/", json={"tmdb_id": 1, "media_type": "book"})).status_code == 422
     assert (await client.post("/api/watchlist/", json={"tmdb_id": 1, "media_type": "movie", "status": "binge"})).status_code == 422

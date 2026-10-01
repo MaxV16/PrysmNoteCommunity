@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import type { ThemeName, ThemeColors, BackgroundPreset, CustomTheme } from "@/types/theme";
 import { THEMES, FONT_PRESETS, BACKGROUND_PRESETS, DEFAULT_THEME, DEFAULT_FONT } from "@/types/theme";
 import { KNOWN_CSS_VARS } from "@/lib/theme-vars";
@@ -283,23 +283,38 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (colors) setThemeNameState("custom");
   }, []);
 
+  const value = useMemo(
+    () => ({
+      themeName,
+      setThemeName,
+      toggleTheme,
+      isDark: themeName !== "light",
+      fontFamily,
+      setFontFamily,
+      background,
+      setBackgroundPreset,
+      setBackgroundImage,
+      clearBackground,
+      customTheme,
+      setCustomTheme,
+    }),
+    [
+      themeName,
+      setThemeName,
+      toggleTheme,
+      fontFamily,
+      setFontFamily,
+      background,
+      setBackgroundPreset,
+      setBackgroundImage,
+      clearBackground,
+      customTheme,
+      setCustomTheme,
+    ]
+  );
+
   return (
-    <ThemeContext.Provider
-      value={{
-        themeName,
-        setThemeName,
-        toggleTheme,
-        isDark: themeName !== "light",
-        fontFamily,
-        setFontFamily,
-        background,
-        setBackgroundPreset,
-        setBackgroundImage,
-        clearBackground,
-        customTheme,
-        setCustomTheme,
-      }}
-    >
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

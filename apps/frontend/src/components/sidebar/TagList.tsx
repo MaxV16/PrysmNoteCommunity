@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { useTags } from "@/hooks/useTags";
+import { TAG_COLORS } from "@/lib/palette";
+import { TAG_NAME_MAX } from "@/lib/char-limits";
+import { CharLimitHint } from "@/components/ui/CharLimitHint";
 
 export function TagList() {
   const tags = useAppStore((s) => s.tags);
@@ -14,8 +17,8 @@ export function TagList() {
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
-    const colors = ["#4fc3f7", "#66bb6a", "#ffa726", "#ef5350", "#ab47bc", "#42a5f5", "#ef5350", "#78909c"];
-    const color = colors[tags.length % colors.length];
+    const color = TAG_COLORS[tags.length % TAG_COLORS.length];
+    if (newName.trim().length > TAG_NAME_MAX) return;
     await createTag({ name: newName.trim(), color });
     setNewName("");
     setIsAdding(false);
@@ -50,16 +53,26 @@ export function TagList() {
             className="input-field text-xs"
             autoFocus
           />
+          <CharLimitHint value={newName} max={TAG_NAME_MAX} className="mt-1" />
         </div>
       )}
       <div className="flex flex-wrap gap-1.5">
         {tags.map((tag) => {
           const isActive = selectedTagId === tag.id;
           return (
-            <button
+            <div
               key={tag.id}
+              role="button"
+              tabIndex={0}
+              aria-pressed={isActive}
               onClick={() => handleTagClick(tag.id)}
-              className={`badge gap-1.5 cursor-pointer group transition-all text-left ${
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleTagClick(tag.id);
+                }
+              }}
+              className={`badge gap-1.5 cursor-pointer group transition-all text-left outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
                 isActive ? "ring-2 ring-accent/50 scale-105" : ""
               }`}
               style={{
@@ -87,7 +100,7 @@ export function TagList() {
               >
                 ✕
               </button>
-            </button>
+            </div>
           );
         })}
         {tags.length === 0 && !isAdding && (

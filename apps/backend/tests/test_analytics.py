@@ -112,6 +112,43 @@ async def test_flush_writes_events(test_user, empty_queue):
 
 
 @pytest.mark.asyncio
+async def test_flush_loop_wakes_on_enqueue(test_user, empty_queue, monkeypatch):
+    """The flush loop must wake on a new event, not only on its timer.
+
+    With the loop's timeout pushed out to 30s, an event enqueued right after the
+    loop starts can only be written if the loop is waiting on the queue itself
+    (the old fixed `asyncio.sleep(5)` poll would leave it queued).
+    """
+    import contextlib
+
+    from app.config import settings
+    from tests.conftest import _test_session_factory as _test_factory
+
+    monkeypatch.setattr(settings, "analytics_flush_interval", 30)
+
+    task = asyncio.create_task(analytics.analytics_flush_loop(_test_factory))
+    try:
+        await asyncio.sleep(0.05)
+        analytics.enqueue_event(None, "wake_on_enqueue")
+        for _ in range(75):
+            await asyncio.sleep(0.02)
+            if analytics._queue().empty():
+                break
+        assert analytics._queue().empty(), "the loop did not wake on the enqueued event"
+        async with _test_factory() as session:
+            rows = (
+                await session.execute(
+                    select(AnalyticsEvent).where(AnalyticsEvent.event == "wake_on_enqueue")
+                )
+            ).scalars().all()
+            assert len(rows) == 1
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+@pytest.mark.asyncio
 async def test_enqueue_rejects_bad_events(empty_queue):
     assert analytics.enqueue_event(None, "") is False
     assert analytics.enqueue_event(None, "x" * 65) is False

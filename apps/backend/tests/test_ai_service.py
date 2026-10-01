@@ -11,11 +11,17 @@ from app.services.ai_service import (
     execute_tool_calls,
     build_messages,
     TOOL_DEFINITIONS,
+    TOOL_NUDGE,
     _FINANCE_TOOL_DEFINITIONS,
+    _FINANCE_TOOL_HANDLERS,
     _OPENCLAW_TOOL_DEFINITIONS,
     _QUADRANT_TOOL_DEFINITIONS,
     _FOCUS_TOOL_DEFINITIONS,
+    _GITHUB_TOOL_DEFINITIONS,
+    _WORKFLOW_TOOL_DEFINITIONS,
+    _SLACK_TOOL_DEFINITIONS,
     _needs_tool_retry,
+    tools_for_user,
 )
 
 
@@ -64,6 +70,61 @@ class TestNeedsToolRetry:
             "I don't see any tools available to handle that request.",
             "add a reminder",
         )
+
+    def test_observed_finance_refusals_retry(self):
+        """The exact narration from the reported Revolut failure must trigger a
+        retry instead of being streamed as a success-looking plan."""
+        assert _needs_tool_retry(
+            "Let me try deleting it. First, I'll delete the existing Revolut loan.",
+            "hmm",
+        )
+        assert _needs_tool_retry("I wasn't able to update the Revolut loan.", "hmm")
+        assert _needs_tool_retry("I'm going to create that for you now.", "hmm")
+
+    def test_clean_non_action_answer_not_retried(self):
+        assert not _needs_tool_retry("That sounds interesting, tell me more.", "hmm")
+
+    def test_slack_standup_refusal_is_retryable(self):
+        """The reported "I don't have the necessary access" standup refusal.
+
+        The Settings button could post, but the agent answered with this
+        refusal instead of calling post_team_digest, so the detector must treat
+        it as an action request that needs a tool call.
+        """
+        assert _needs_tool_retry(
+            "I'm sorry, but I don't have the necessary access to post a stand up "
+            "to your social media.",
+            "post a standup to social via slack",
+        )
+
+    def test_tool_nudge_forbids_a_refusal(self):
+        """The nudge that rescues a BYOK turn must forbid a refusal.
+
+        The tool names are private-build only (the community build offers no
+        Slack or GitHub tools), so they are asserted when present.
+        """
+        text = TOOL_NUDGE.lower()
+        assert "do not reply that you cannot" in text
+        assert "call the right tool" in text
+        assert "access or permissions" in text
+        if "post_team_digest" in text:
+            for name in (
+                "post_team_digest",
+                "send_slack_message",
+                "send_slack_dm",
+                "create_slack_channel",
+                "open_draft_pull_request",
+                "triage_github_issues",
+                "github_weekly_digest",
+            ):
+                assert name in text
+
+
+def test_finance_toolset_includes_transaction_tools():
+    names = {t["function"]["name"] for t in _FINANCE_TOOL_DEFINITIONS}
+    if not names:
+        pytest.skip("finance tools absent (community build)")
+    assert {"list_transactions", "reverse_transaction"} <= names
 
 
 @pytest.mark.asyncio
@@ -114,9 +175,11 @@ async def test_tool_definitions_have_all_tools():
         "complete_task", "duplicate_task", "list_tags", "add_tag_to_task",
         "get_task_stats",
         "batch_delete_tasks",
+        "delete_matching_tasks",
         "restore_task",
         "add_event", "cancel_task_by_keywords",
         "create_list", "list_lists", "rename_list", "delete_list",
+        "organize_timeline_into_sections",
         "search_titles", "list_watchlist", "add_watchlist_item",
         "update_watchlist_item", "remove_watchlist_item",
         "list_habits", "create_habit", "update_habit", "delete_habit",
@@ -131,7 +194,26 @@ async def test_tool_definitions_have_all_tools():
     expected |= {t["function"]["name"] for t in _OPENCLAW_TOOL_DEFINITIONS}
     expected |= {t["function"]["name"] for t in _QUADRANT_TOOL_DEFINITIONS}
     expected |= {t["function"]["name"] for t in _FOCUS_TOOL_DEFINITIONS}
+    expected |= {t["function"]["name"] for t in _GITHUB_TOOL_DEFINITIONS}
+    expected |= {t["function"]["name"] for t in _WORKFLOW_TOOL_DEFINITIONS}
+    expected |= {t["function"]["name"] for t in _SLACK_TOOL_DEFINITIONS}
     assert tool_names == expected, f"Missing tools: {expected - tool_names}"
+
+
+@pytest.mark.asyncio
+async def test_premium_gets_slack_tools_and_free_users_do_not():
+    """Slack team actions must be offered to premium users only.
+
+    Regression guard for the report that the agent replied "I'm sorry, but I
+    don't have the necessary access to post a stand up": if those tools are
+    missing from the premium toolset, the model can only refuse.
+    """
+    slack_names = {t["function"]["name"] for t in _SLACK_TOOL_DEFINITIONS}
+    premium_names = {t["function"]["name"] for t in tools_for_user(True)}
+    free_names = {t["function"]["name"] for t in tools_for_user(False)}
+    assert slack_names <= premium_names
+    assert not (slack_names & free_names)
+    assert "create_task" in free_names
 
 
 @pytest.mark.asyncio
@@ -182,7 +264,7 @@ async def test_build_messages_includes_feature_guide():
         messages = build_messages([], "how do I use the calendar", include_finance=include_finance)
         system = messages[0]["content"]
         assert "FEATURE GUIDE" in system
-        assert "SPEECH TO TEXT" in system
+        assert "PASSKEYS" in system
 
 
 @pytest.mark.asyncio
@@ -516,6 +598,192 @@ async def test_execute_batch_delete_tasks(db_session: AsyncSession, ai_user):
     )).scalars().all()
     assert len(remaining) == 2  # soft delete keeps the rows
     assert all(t.deleted_at is not None for t in remaining)
+
+
+@pytest.mark.asyncio
+async def test_execute_search_tasks_undated_scopes_inbox(db_session: AsyncSession, ai_user):
+    from datetime import date
+
+    from app.models.task import Task
+    user_id = ai_user
+    undated = Task(user_id=user_id, title="Inbox item")
+    dated = Task(user_id=user_id, title="Dated item", start_date=date(2026, 9, 20))
+    db_session.add_all([undated, dated])
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_scope",
+        "function": {
+            "name": "search_tasks",
+            "arguments": json.dumps({"undated": True}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    payload = results[0]["content"]
+    # The Inbox smart list is "no start_date and no due_date" - searching the
+    # text "inbox" matched nothing, which is what made these requests fail.
+    assert "Inbox item" in payload
+    assert "Dated item" not in payload
+
+
+@pytest.mark.asyncio
+async def test_execute_search_tasks_excludes_subtasks_by_default(db_session: AsyncSession, ai_user):
+    """Test that search_tasks excludes subtasks by default."""
+    from app.models.task import Task
+    user_id = ai_user
+    parent = Task(user_id=user_id, title="Parent task")
+    db_session.add(parent)
+    await db_session.flush()
+    subtask = Task(user_id=user_id, title="Subtask", parent_task_id=parent.id)
+    db_session.add(subtask)
+    await db_session.flush()
+
+    # Default: should only find parent
+    tool_calls = [{
+        "id": "call_search",
+        "function": {
+            "name": "search_tasks",
+            "arguments": json.dumps({"query": "task"}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    payload = json.loads(results[0]["content"])
+    assert payload["found"] == 1
+    assert payload["tasks"][0]["title"] == "Parent task"
+
+
+@pytest.mark.asyncio
+async def test_execute_search_tasks_include_subtasks(db_session: AsyncSession, ai_user):
+    """Test that search_tasks includes subtasks when include_subtasks=true."""
+    from app.models.task import Task
+    user_id = ai_user
+    parent = Task(user_id=user_id, title="Parent task")
+    db_session.add(parent)
+    await db_session.flush()
+    subtask = Task(user_id=user_id, title="Subtask", parent_task_id=parent.id)
+    db_session.add(subtask)
+    await db_session.flush()
+
+    # With include_subtasks=true: should find both
+    tool_calls = [{
+        "id": "call_search",
+        "function": {
+            "name": "search_tasks",
+            "arguments": json.dumps({"query": "task", "include_subtasks": True}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    payload = json.loads(results[0]["content"])
+    assert payload["found"] == 2
+    titles = {t["title"] for t in payload["tasks"]}
+    assert "Parent task" in titles
+    assert "Subtask" in titles
+
+
+@pytest.mark.asyncio
+async def test_execute_delete_matching_tasks_inbox(db_session: AsyncSession, ai_user):
+    from datetime import date
+
+    from app.models.task import Task
+    from sqlalchemy import select
+    user_id = ai_user
+    a = Task(user_id=user_id, title="Inbox A")
+    b = Task(user_id=user_id, title="Inbox B")
+    dated = Task(user_id=user_id, title="Dated C", start_date=date(2026, 9, 20))
+    db_session.add_all([a, b, dated])
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_wipe",
+        "function": {
+            "name": "delete_matching_tasks",
+            "arguments": json.dumps({"list_name": "Inbox"}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert content["deleted_count"] == 2
+    rows = (await db_session.execute(
+        select(Task).where(Task.user_id == user_id)
+    )).scalars().all()
+    by_title = {t.title: t for t in rows}
+    assert by_title["Inbox A"].deleted_at is not None
+    assert by_title["Inbox B"].deleted_at is not None
+    assert by_title["Dated C"].deleted_at is None
+
+
+@pytest.mark.asyncio
+async def test_execute_delete_matching_tasks_requires_scope(db_session: AsyncSession, ai_user):
+    from app.models.task import Task
+    from sqlalchemy import select
+    user_id = ai_user
+    task = Task(user_id=user_id, title="Keep me")
+    db_session.add(task)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_noscope",
+        "function": {
+            "name": "delete_matching_tasks",
+            "arguments": json.dumps({}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert "error" in content
+    fresh = (await db_session.execute(select(Task).where(Task.id == task.id))).scalar_one()
+    assert fresh.deleted_at is None
+
+
+@pytest.mark.asyncio
+async def test_execute_delete_matching_tasks_unknown_list(db_session: AsyncSession, ai_user):
+    from app.models.task import Task
+    from sqlalchemy import select
+    user_id = ai_user
+    task = Task(user_id=user_id, title="Untouched")
+    db_session.add(task)
+    await db_session.flush()
+
+    tool_calls = [{
+        "id": "call_badlist",
+        "function": {
+            "name": "delete_matching_tasks",
+            "arguments": json.dumps({"list_name": "Nonexistent"}),
+        },
+    }]
+    results = await execute_tool_calls(tool_calls, str(user_id), db_session)
+    content = json.loads(results[0]["content"])
+    assert "error" in content
+    assert content["deleted_count"] == 0
+    fresh = (await db_session.execute(select(Task).where(Task.id == task.id))).scalar_one()
+    assert fresh.deleted_at is None
+
+
+@pytest.mark.asyncio
+async def test_execute_delete_and_rename_default_list_refused(db_session: AsyncSession, ai_user):
+    """The AI must not delete or rename the protected default 'My Tasks' list."""
+    from app.services.task_service import default_list_id
+
+    user_id = ai_user
+    default_id = await default_list_id(db_session, user_id)
+
+    del_results = await execute_tool_calls([{
+        "id": "call_del_default",
+        "function": {
+            "name": "delete_list",
+            "arguments": json.dumps({"list_id": str(default_id)}),
+        },
+    }], str(user_id), db_session)
+    assert "error" in json.loads(del_results[0]["content"])
+
+    ren_results = await execute_tool_calls([{
+        "id": "call_ren_default",
+        "function": {
+            "name": "rename_list",
+            "arguments": json.dumps({"list_id": str(default_id), "name": "Nope"}),
+        },
+    }], str(user_id), db_session)
+    assert "error" in json.loads(ren_results[0]["content"])
 
 
 @pytest.mark.asyncio
@@ -2470,7 +2738,7 @@ async def test_execute_tool_calls_hard_caps_per_round(db_session: AsyncSession, 
     from app.services.ai_service import _MAX_TOOL_CALLS_PER_ROUND
 
     calls = [
-        {"id": f"c{i}", "function": {"name": "list_accounts", "arguments": "{}"}}
+        {"id": f"c{i}", "function": {"name": "list_tags", "arguments": "{}"}}
         for i in range(_MAX_TOOL_CALLS_PER_ROUND + 5)
     ]
     results = await execute_tool_calls(calls, str(ai_user), db_session)
@@ -2483,14 +2751,44 @@ async def test_execute_tool_calls_hard_caps_per_round(db_session: AsyncSession, 
 
 @pytest.mark.asyncio
 async def test_execute_tool_calls_error_includes_tool_name(db_session: AsyncSession, ai_user):
-    """A failing handler must surface which tool failed, so the model can stop
-    instead of blindly retrying the same call."""
-    # update_financial_item coerces item_id with uuid.UUID(); a malformed id
-    # raises inside the handler, which must be reported with the tool name.
+    """A malformed id returns an actionable validation error naming the tool (no
+    raw uuid cast failure), so the model can correct the call instead of
+    blindly retrying."""
     bad = await execute_tool_calls([
         {"id": "c1", "function": {"name": "update_financial_item", "arguments": json.dumps({"item_id": "not-a-uuid"})}},
     ], str(ai_user), db_session)
     content = json.loads(bad[0]["content"])
-    assert "update_financial_item" in content["error"] or "update_financial_item" in content.get("message", "")
+    assert "update_financial_item" in content["error"]
+    if _FINANCE_TOOL_HANDLERS:
+        # EE build: the handler returns an actionable validation error, never a
+        # raw uuid bind failure. Community builds have no finance handler, so the
+        # dispatcher reports it as an unknown tool instead.
+        assert content["error"].startswith("Invalid item_id format")
 
 
+
+
+@pytest.mark.asyncio
+async def test_execute_organize_timeline_tool(db_session: AsyncSession, ai_user, monkeypatch):
+    """The AI parity tool delegates to the organizer service and passes force."""
+    from app.services import timeline_organizer as organizer_mod
+
+    seen = {}
+
+    async def fake_organize(session, user, *, provider=None, force=False, **kwargs):
+        seen["force"] = force
+        seen["user_id"] = str(user.id)
+        return {"sections_created": 2, "tasks_assigned": 3, "topics": ["Work", "Home"], "skipped": False}
+
+    monkeypatch.setattr(organizer_mod, "organize_timeline", fake_organize)
+
+    results = await execute_tool_calls(
+        [{"id": "c1", "function": {"name": "organize_timeline_into_sections", "arguments": json.dumps({"force": True})}}],
+        str(ai_user),
+        db_session,
+    )
+    content = json.loads(results[0]["content"])
+    assert content["sections_created"] == 2
+    assert content["tasks_assigned"] == 3
+    assert seen["force"] is True
+    assert seen["user_id"] == str(ai_user)

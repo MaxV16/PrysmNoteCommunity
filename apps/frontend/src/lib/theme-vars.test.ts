@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import fs from "fs";
 import path from "path";
-import { KNOWN_CSS_VARS, validateCustomTheme, validateCustomThemeError } from "@/lib/theme-vars";
+import {
+  KNOWN_CSS_VARS,
+  NON_THEME_CSS_VARS,
+  validateCustomTheme,
+  validateCustomThemeError,
+} from "@/lib/theme-vars";
 
 let globalsCss = "";
 beforeAll(() => {
@@ -87,11 +92,19 @@ describe("validateCustomTheme", () => {
   });
 
   it("accepts extra with every allowlisted variable", () => {
+    const importable = [...KNOWN_CSS_VARS].filter((v) => !NON_THEME_CSS_VARS.has(v));
     const extra: Record<string, string> = {};
-    for (const name of KNOWN_CSS_VARS) extra[name] = "#123456";
+    for (const name of importable) extra[name] = "#123456";
     const theme = validateCustomTheme({ ...validTheme, extra });
     expect(theme).not.toBeNull();
-    expect(Object.keys(theme!.extra ?? {})).toHaveLength(KNOWN_CSS_VARS.size);
+    expect(Object.keys(theme!.extra ?? {})).toHaveLength(importable.length);
+  });
+
+  it("rejects layout-only shell variables", () => {
+    for (const name of NON_THEME_CSS_VARS) {
+      const err = validateCustomThemeError({ ...validTheme, extra: { [name]: "0px" } });
+      expect(err).toContain(name);
+    }
   });
 
   it("sanitizes an unsafe label", () => {

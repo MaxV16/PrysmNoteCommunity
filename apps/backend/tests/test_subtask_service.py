@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.task import Task
+from app.models.task import Task, TaskStatus
 from app.services import subtask_service
 from app.services.ai_service import execute_tool_calls
 from app.utils.priority import normalize_priority
@@ -87,6 +87,31 @@ async def test_reorder_subtasks(db_session: AsyncSession, ai_user):
     )).scalars().all()
     assert [c.title for c in children] == ["c", "a", "b"]
     assert [c.sort_order for c in children] == [0, 1, 2]
+
+
+@pytest.mark.asyncio
+async def test_create_subtask_titles_contiguous_order(db_session: AsyncSession, ai_user):
+    """Refactor guard: one ordering pass assigns contiguous sort_order starting
+    at max+1, skips blank titles, and inherits the parent's priority while
+    forcing TODO status."""
+    parent = Task(user_id=ai_user, title="Parent", priority=1)
+    db_session.add(parent)
+    await db_session.flush()
+
+    existing = Task(
+        user_id=ai_user, parent_task_id=parent.id, title="old",
+        status=TaskStatus.TODO, sort_order=2,
+    )
+    db_session.add(existing)
+    await db_session.flush()
+
+    created = await subtask_service.create_subtask_titles(
+        db_session, parent, ["  a  ", "   ", "b", "c"]
+    )
+    assert [c.title for c in created] == ["a", "b", "c"]
+    assert [c.sort_order for c in created] == [3, 4, 5]
+    assert all(c.status == TaskStatus.TODO for c in created)
+    assert all(c.priority == 1 for c in created)
 
 
 @pytest.mark.asyncio

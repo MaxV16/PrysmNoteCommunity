@@ -62,3 +62,19 @@ if [[ -n "${DB_SYSTEM_PASSWORD:-}" ]]; then
     GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO prysm_system;
   "
 fi
+
+# Tables are created at runtime by the app role (startup create_all + Alembic),
+# so the one-time GRANT ... ON ALL TABLES above does not cover them and the
+# BYPASSRLS system role gets "permission denied for table <new_table>". Set
+# default privileges so every object the app role creates is automatically
+# usable by the system role. Needs both roles to exist.
+if [[ -n "${DB_APP_PASSWORD:-}" && -n "${DB_SYSTEM_PASSWORD:-}" ]]; then
+  psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$_db" -c "
+    ALTER DEFAULT PRIVILEGES FOR ROLE prysm_app IN SCHEMA public
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO prysm_system;
+    ALTER DEFAULT PRIVILEGES FOR ROLE prysm_app IN SCHEMA public
+      GRANT USAGE, SELECT ON SEQUENCES TO prysm_system;
+    ALTER DEFAULT PRIVILEGES FOR ROLE prysm_app IN SCHEMA public
+      GRANT EXECUTE ON FUNCTIONS TO prysm_system;
+  "
+fi

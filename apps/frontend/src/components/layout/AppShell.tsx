@@ -1,26 +1,49 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { SidebarLeft } from "@/components/sidebar/SidebarLeft";
+import dynamic from "next/dynamic";
 import { TimelineView, type TimelineViewMode } from "@/components/layout/TimelineView";
-import { AIPanel } from "@/components/ai/AIPanel";
 import { useUiModule } from "@/lib/ui-module-registry";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useTheme } from "@/lib/theme-context";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { getNotes, minimizeNote, syncNotesFromServer, openNotesWindow } from "@/lib/notes";
+import { getNotes, minimizeNote, syncNotesFromServer } from "@/lib/notes";
 import { FinancialWorkspace } from "@/components/finance/FinancialWorkspace";
 import { HabitsWorkspace } from "@/components/habits/HabitsWorkspace";
 import { QuadrantWorkspace } from "@/components/quadrant/QuadrantWorkspace";
 import { FocusWorkspace } from "@/components/focus/FocusWorkspace";
 import { CountdownWorkspace } from "@/components/countdown/CountdownWorkspace";
 import { WatchlistView } from "@/components/watchlist/WatchlistView";
-import { PREF_DEFAULT_VIEW, getPrefSync } from "@/lib/preferences";
+import {
+  PREF_DEFAULT_VIEW,
+  PREF_LIST_VIEWS,
+  getPrefSync,
+  type ListViewsMap,
+} from "@/lib/preferences";
 import { usePreferencesStore } from "@/stores/preferences-store";
+import { useSyncTimezone } from "@/hooks/useSyncTimezone";
 import { track } from "@/lib/track";
 import { initErrorTracking } from "@/lib/error-track";
 import { MobileTabBar } from "@/components/layout/MobileTabBar";
-import { usePwaInstall } from "@/hooks/use-pwa-install";
+import { InstallBanner } from "@/components/pwa/InstallBanner";
+import { useInAppReminders } from "@/hooks/useInAppReminders";
+import { ReminderStack } from "@/components/notifications/ReminderStack";
+import { MobileTaskActionBar } from "@/components/tasks/MobileTaskActionBar";
+import { OnboardingDiscoveryCard } from "@/components/onboarding/OnboardingDiscoveryCard";
+import { useAppStore } from "@/stores/app-store";
+import { useForegroundRefresh, FOREGROUND_REFRESH_EVENT } from "@/hooks/useForegroundRefresh";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
+import { refreshTasksPreservingWindow } from "@/hooks/useTasks";
+import { registerBackHandler } from "@/lib/back-nav";
+import { useFilterPersistence } from "@/hooks/useFilterPersistence";
+
+// The chat panel pulls in react-markdown + a large tool/voice surface; keep it
+// out of the initial workspace bundle and load it only when the user opens it.
+const AIPanel = dynamic(
+  () => import("@/components/ai/AIPanel").then((m) => m.AIPanel),
+  { ssr: false }
+);
 
 export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits" | "quadrant" | "focus" | "countdown";
 
@@ -28,6 +51,77 @@ const VIEW_MODES: TimelineViewMode[] = ["timeline", "kanban", "calendar", "list"
 
 export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Sync browser timezone to localStorage + server on mount.
+  useSyncTimezone();
+
+  // Cross-device sync: when the app returns to the foreground (and every 30s
+  // while it stays visible) pull the latest tasks, then let every mounted view
+  // reload its own slice (sections, reminders, habits, watchlist, countdown,
+  // finance) off one shared event - no per-feature timers.
+  const refreshFromServer = useCallback(() => {
+    // Skip while a task drawer is open: a mid-edit refresh replaced the task
+    // object under the editor, so the saved description only appeared after a
+    // reopen. The drawer reconciles itself once it closes.
+    if (useAppStore.getState().selectedTaskId) return;
+    void refreshTasksPreservingWindow();
+    window.dispatchEvent(new CustomEvent(FOREGROUND_REFRESH_EVENT));
+  }, []);
+
+  // The interval is a slow safety net; SSE below pushes changes as they happen.
+  useForegroundRefresh(refreshFromServer);
+  useRealtimeSync(refreshFromServer);
+
+  const { reminders, total: reminderTotal, dismiss, complete, snooze, open } = useInAppReminders();
+  const mobileActionTaskId = useAppStore((s) => s.mobileActionTaskId);
+  const selectedTaskId = useAppStore((s) => s.selectedTaskId);
+
+  // Background refreshes pause while a task drawer is open, so reconcile once
+  // it closes to pick up anything that changed elsewhere in the meantime.
+  const wasDrawerOpenRef = useRef(false);
+  useEffect(() => {
+    if (selectedTaskId) {
+      wasDrawerOpenRef.current = true;
+      return;
+    }
+    if (wasDrawerOpenRef.current) {
+      wasDrawerOpenRef.current = false;
+      void refreshTasksPreservingWindow();
+    }
+  }, [selectedTaskId]);
+
+  // The header's "Notifications" action (More menu) surfaces reminders: it rings
+  // the stack when there is something pending, or flashes a short toast when
+  // there is nothing so the action always gives visible feedback.
+  const [remindersHighlighted, setRemindersHighlighted] = useState(false);
+  const [notifToast, setNotifToast] = useState<string | null>(null);
+  const notifHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notifToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasReminders = reminders.length > 0;
+  useEffect(() => {
+    const onShowReminders = () => {
+      if (hasReminders) {
+        setRemindersHighlighted(true);
+        if (notifHighlightTimerRef.current) clearTimeout(notifHighlightTimerRef.current);
+        notifHighlightTimerRef.current = setTimeout(() => setRemindersHighlighted(false), 1600);
+      } else {
+        setNotifToast("No new notifications");
+        if (notifToastTimerRef.current) clearTimeout(notifToastTimerRef.current);
+        notifToastTimerRef.current = setTimeout(() => setNotifToast(null), 2400);
+      }
+    };
+    window.addEventListener("prysm:show-reminders", onShowReminders);
+    return () => window.removeEventListener("prysm:show-reminders", onShowReminders);
+  }, [hasReminders]);
+  useEffect(
+    () => () => {
+      if (notifHighlightTimerRef.current) clearTimeout(notifHighlightTimerRef.current);
+      if (notifToastTimerRef.current) clearTimeout(notifToastTimerRef.current);
+    },
+    []
+  );
+
+  const activeListId = useAppStore((s) => s.activeListId);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [view, setView] = useState<WorkspaceView>("timeline");
@@ -38,10 +132,53 @@ export function AppShell() {
     return VIEW_MODES.includes(saved) ? saved : "timeline";
   });
 
+  // Per-list view: changing the view while a list is selected remembers it for
+  // that list only, so re-opening the list restores the same view.
+  const changeViewMode = useCallback((mode: TimelineViewMode) => {
+    setViewMode(mode);
+    const listId = useAppStore.getState().activeListId;
+    if (!listId) return;
+    const current =
+      (usePreferencesStore.getState().prefs[PREF_LIST_VIEWS] as ListViewsMap) || {};
+    if (current[listId] === mode) return;
+    usePreferencesStore.getState().setPreference(PREF_LIST_VIEWS, {
+      ...current,
+      [listId]: mode,
+    });
+  }, []);
+
+  // Restore a list's remembered view when it becomes active. A list with no
+  // remembered view falls back to the global default view preference.
+  const prefsHydrated = usePreferencesStore((s) => s.hydrated);
+  useEffect(() => {
+    if (!prefsHydrated) return;
+    const listId = useAppStore.getState().activeListId;
+    if (!listId) return;
+    const savedViews =
+      (usePreferencesStore.getState().prefs[PREF_LIST_VIEWS] as ListViewsMap) || {};
+    const saved = savedViews[listId];
+    const fallback = getPrefSync<TimelineViewMode>(PREF_DEFAULT_VIEW, "timeline");
+    const next =
+      saved && VIEW_MODES.includes(saved as TimelineViewMode)
+        ? (saved as TimelineViewMode)
+        : VIEW_MODES.includes(fallback)
+          ? fallback
+          : "timeline";
+    setViewMode((prev) => (prev === next ? prev : next));
+  }, [activeListId, prefsHydrated]);
+
+  // Board-section kind for the active view. The mobile action bar's section
+  // picker must match it; calendar/list and the non-task workspaces have none.
+  const boardKind: "timeline" | "kanban" | "board" | null =
+    view === "timeline" &&
+    (viewMode === "timeline" || viewMode === "kanban" || viewMode === "board")
+      ? viewMode
+      : null;
+
   const { toggleTheme } = useTheme();
   const sidebarOn = useUiModule("sidebar");
   const aiOn = useUiModule("aiPanel");
-  const financeOn = false;
+  const financeOn = useUiModule("finance");
   const watchlistOn = useUiModule("watchlist");
   const habitsOn = useUiModule("habits");
   const quadrantOn = false;
@@ -54,11 +191,19 @@ export function AppShell() {
     if (!smallScreen) setSidebarCollapsed(v);
   };
 
-  // PWA install prompt (mobile only): captured on load, shown as a small
-  // dismissible banner until the user installs or dismisses it.
-  const { canInstall, promptInstall } = usePwaInstall();
-  const [installBannerDismissed, setInstallBannerDismissed] = useState(false);
-  const showInstallBanner = canInstall && !installBannerDismissed;
+  // Cross-browser PWA install surface (native dialog on Chromium, manual
+  // Share/menu steps on iOS, Brave, Firefox and other non-supporting browsers).
+  // The marketing "Install on your phone" link sets ?install=1 to open the guide.
+  const [installRequested, setInstallRequested] = useState(false);
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get("install") === "1") {
+        setInstallRequested(true);
+      }
+    } catch {
+      /* ignore malformed URLs */
+    }
+  }, []);
 
   const handleSelectView = (v: WorkspaceView) => {
     setView(v);
@@ -126,6 +271,20 @@ export function AppShell() {
     return () => window.removeEventListener("prysm-open-workspace", onOpenWorkspace);
   }, [smallScreen]);
 
+  // Hardware/Android back: close the top-most drawer first, then leave a
+  // non-timeline workspace for the timeline, so back never exits the app while
+  // something is still open. Overlays register at a higher priority elsewhere
+  // (modals, expanded quadrant, task drawers).
+  useEffect(() => {
+    const unregister: Array<() => void> = [];
+    if (view !== "timeline") {
+      unregister.push(registerBackHandler(() => setView("timeline"), 0));
+    }
+    if (aiOpen) unregister.push(registerBackHandler(() => setAiOpen(false), 50));
+    if (sidebarOpen) unregister.push(registerBackHandler(() => setSidebarOpen(false), 50));
+    return () => unregister.forEach((u) => u());
+  }, [view, aiOpen, sidebarOpen]);
+
   // "Auto-show notes on launch": notes that were open persist their open state.
   // If the setting is off, tuck them away so nothing pops up unexpectedly.
   useEffect(() => {
@@ -152,30 +311,19 @@ export function AppShell() {
     void usePreferencesStore.getState().hydrate();
   }, []);
 
+  // Restore + persist the smart-list / list / tag / search filter across reloads.
+  useFilterPersistence(prefsHydrated);
+
+  // Service worker registration for PWA offline support.
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  }, []);
+
   return (
-    <div className="flex h-dvh w-screen flex-col overflow-hidden bg-base">
-      {showInstallBanner && (
-        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-elevated px-4 py-2">
-          <p className="min-w-0 flex-1 truncate text-xs text-secondary">
-            {smallScreen
-              ? "Install Prysm Note for quick access and voice capture."
-              : "Install Prysm Note on this device for quick access."}
-          </p>
-          <button
-            onClick={() => { void promptInstall(); setInstallBannerDismissed(true); }}
-            className="btn btn-primary px-3 py-1 text-[11px]"
-          >
-            Install
-          </button>
-          <button
-            onClick={() => setInstallBannerDismissed(true)}
-            aria-label="Dismiss install prompt"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs text-muted hover:bg-hover hover:text-primary"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+    <div data-app-shell className="flex h-dvh max-h-dvh w-screen flex-col overflow-hidden bg-base">
+      <InstallBanner smallScreen={smallScreen} autoOpenGuide={installRequested} />
 
       <div className="flex min-h-0 min-w-0 flex-1">
       {sidebarOn && !smallScreen && (
@@ -196,7 +344,7 @@ export function AppShell() {
             aria-hidden
             onClick={() => setSidebarOpen(false)}
           />
-          <div className="fixed inset-y-0 left-0 z-40 slide-in-left">
+          <div className="fixed inset-y-0 left-0 z-40 slide-in-left pt-safe pb-safe">
             <SidebarLeft
               collapsed={false}
               onToggle={() => setSidebarOpen(false)}
@@ -218,7 +366,7 @@ export function AppShell() {
           ) : view === "watchlist" && watchlistOn ? (
             <WatchlistView onOpenAi={openAi} />
           ) : view === "quadrant" && quadrantOn ? (
-            <QuadrantWorkspace onOpenAi={openAi} />
+            <QuadrantWorkspace onOpenAi={openAi} onExit={() => handleSelectView("timeline")} />
           ) : view === "focus" && focusOn ? (
             <FocusWorkspace onOpenAi={openAi} />
           ) : view === "countdown" && countdownOn ? (
@@ -230,7 +378,7 @@ export function AppShell() {
               onToggleRight={toggleAi}
               onOpenSidebar={smallScreen ? openSidebar : undefined}
               viewMode={viewMode}
-              onViewModeChange={setViewMode}
+              onViewModeChange={changeViewMode}
             />
           )}
 
@@ -238,17 +386,28 @@ export function AppShell() {
               drawer overlay below lg so timeline content is never clipped or pushed
               off-screen. */}
           {aiOn && aiOpen && (
-            <div
-              data-ai-dock
-              className={
-                smallScreen
-                  ? "absolute inset-y-0 right-0 z-30 w-[min(22rem,92vw)] shadow-lg"
-                  : "relative h-full min-h-0 w-[22.5rem] shrink-0 border-l border-border"
-              }
-            >
-              <AIPanel onClose={() => setAiOpen(false)} view={view} />
-            </div>
+            <>
+              {smallScreen && (
+                <div
+                  className="absolute inset-0 z-20 bg-black/40"
+                  aria-hidden
+                  onClick={() => setAiOpen(false)}
+                />
+              )}
+              <div
+                data-ai-dock
+                className={
+                  smallScreen
+                    ? "absolute inset-y-0 right-0 z-30 w-[min(22rem,92vw)] shadow-lg"
+                    : "relative h-full min-h-0 w-[22.5rem] shrink-0 border-l border-border"
+                }
+              >
+                <AIPanel onClose={() => setAiOpen(false)} view={view} />
+              </div>
+            </>
           )}
+
+          {view === "timeline" && <OnboardingDiscoveryCard />}
         </div>
       </main>
       </div>
@@ -266,6 +425,30 @@ export function AppShell() {
           showCountdown={countdownOn}
         />
       )}
+
+      <ReminderStack
+        reminders={reminders}
+        total={reminderTotal}
+        raised={Boolean(mobileActionTaskId)}
+        drawerOpen={Boolean(selectedTaskId)}
+        highlight={remindersHighlighted}
+        onDone={(id) => void complete(id)}
+        onSnooze={snooze}
+        onOpen={open}
+        onDismiss={dismiss}
+      />
+
+      {notifToast && (
+        <div
+          role="status"
+          data-testid="notification-toast"
+              className="pointer-events-none fixed bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] right-4 z-[9999] slide-up rounded-xl border border-border bg-elevated px-3.5 py-2 text-xs font-medium text-primary shadow-lg sm:bottom-4"
+        >
+          {notifToast}
+        </div>
+      )}
+
+      <MobileTaskActionBar sectionKind={boardKind} />
     </div>
   );
 }

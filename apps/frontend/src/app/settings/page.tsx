@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
@@ -10,8 +10,14 @@ import { useSubscription } from "@/hooks/use-subscription";
 import { TeamList } from "@/components/collaborate/TeamList";
 import { ImportPanel } from "@/components/import/ImportPanel";
 import { ThemeImportExport } from "@/components/settings/ThemeImportExport";
-import { useNotificationPrefs, subscribeToPush, unsubscribeFromPush } from "@/lib/notifications";
+import { PasskeysSettings } from "@/components/settings/PasskeysSettings";
+import { FinanceSettings } from "@/components/finance/FinanceSettings";
+import { McpSettings } from "@/components/mcp/McpSettings";
+import { useNotificationPrefs, subscribeToPush, unsubscribeFromPush, notificationPermission, requestNotificationPermission, notificationsSupported } from "@/lib/notifications";
+import { useLocalBool } from "@/lib/use-local-bool";
 import { api } from "@/lib/api";
+import { savePreference } from "@/lib/preferences";
+import { invalidateDatePrefs } from "@/lib/dates";
 import { track } from "@/lib/track";
 import { useAppStore } from "@/stores/app-store";
 import { restartOnboardingTour } from "@/hooks/useOnboardingTour";
@@ -46,7 +52,6 @@ function sanitizeImportedTasks(value: unknown): Task[] | null {
   }
   return out.length > 0 ? out : null;
 }
-
 
 
 
@@ -140,6 +145,8 @@ type SettingsTab =
   | "ai-keys"
   | "shortcuts"
   | "about"
+  | "finance"
+  | "mcp";
 
 interface TabGroup {
   label: string;
@@ -168,6 +175,8 @@ const TAB_GROUPS: TabGroup[] = [
     label: "Integrations & Extras",
     tabs: [
       { id: "integrations", label: "Integrations", svg: "M13 2L3 14h9l-1 8 10-12h-9l1-8z" },
+      { id: "finance", label: "Finance", svg: "M3 3h18v18H3V3z M3 9h18 M9 3v18" },
+      { id: "mcp", label: "AI Connect", svg: "M13 2L3 14h9l-1 8 10-12h-9l1-8z M7 14l4-4 3 3 5-6" },
       { id: "collaborate", label: "Collaborate", svg: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75" },
       { id: "sticky-note", label: "Sticky Note", svg: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" },
       { id: "widgets", label: "Desktop Widgets", svg: "M3 3h18v18H3V3z M3 9h18 M9 3v18" },
@@ -243,15 +252,16 @@ function useStringSetting(key: string, fallback = ""): [string, (v: string) => v
   return [v, set];
 }
 
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+function Toggle({ value, onChange, disabled = false }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
     <button
-      onClick={() => onChange(!value)}
-      className="relative w-11 h-6 rounded-full transition-colors"
+      onClick={() => { if (!disabled) onChange(!value); }}
+      disabled={disabled}
+      className={`relative w-11 h-6 rounded-full transition-colors ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
       style={{ backgroundColor: value ? 'var(--accent)' : 'var(--border)' }}
     >
       <span
-        className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-all"
+        className="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-[var(--on-gradient)] transition-all"
         style={{ transform: value ? 'translateX(1.25rem)' : 'translateX(0)' }}
       />
     </button>
@@ -281,13 +291,13 @@ function IntegrationRow({ label, description, connected, onConnect, onDisconnect
 }
 
 export default function SettingsPage() {
-  const { user, logout, refreshSession } = useAuth();
+  const { user, loading, logout, refreshSession } = useAuth();
   const subscription = useSubscription();
   const { themeName, setThemeName, fontFamily, setFontFamily, background, setBackgroundPreset, setBackgroundImage, clearBackground, customTheme, setCustomTheme } =
     useTheme();
   const router = useRouter();
   const { keys, fetchKeys, saveKey, deleteKey, recoverKey, getLocalKey: getApiLocalKey } = useApiKeys();
-  const { tasks } = useAppStore();
+  const tasks = useAppStore((s) => s.tasks);
 
   const [activeTab, setActiveTab] = useState<SettingsTab>("account");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -314,22 +324,66 @@ export default function SettingsPage() {
   const [kanbanOn, setKanbanOn] = useBoolSetting("prysm_feature_kanban", true);
   const [habitsOn, setHabitsOn] = useBoolSetting("prysm_feature_habits", true);
 
-  const [showInbox, setShowInbox] = useBoolSetting("prysm_smartlist_inbox", true);
   const [showToday, setShowToday] = useBoolSetting("prysm_smartlist_today", true);
   const [showNext7, setShowNext7] = useBoolSetting("prysm_smartlist_next7", true);
   const [showAll, setShowAll] = useBoolSetting("prysm_smartlist_all", true);
   const [showCompleted, setShowCompleted] = useBoolSetting("prysm_smartlist_completed", true);
 
   const { prefs: notifPrefs, update: updateNotifPref } = useNotificationPrefs();
+  const rewardsOn = useLocalBool("prysm_rewards", true);
+  const setRewards = useCallback((value: boolean) => {
+    try {
+      localStorage.setItem("prysm_rewards", JSON.stringify(value));
+      // Notify same-tab subscribers of useLocalBool (the native storage event
+      // only fires in other tabs).
+      window.dispatchEvent(new Event("storage"));
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
 
   const [startDay, setStartDay] = useStringSetting("prysm_start_day", "monday");
   const [timeFormat, setTimeFormat] = useStringSetting("prysm_time_format", "24h");
   const [dateFormat, setDateFormat] = useStringSetting("prysm_date_format", "dd/mm/yyyy");
   const [timezone, setTimezone] = useStringSetting("prysm_tz", Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
 
+  // Full IANA timezone list from the runtime (Chrome 99+/Safari 16.4+/Firefox 93+).
+  const timezoneOptions = useMemo(() => {
+    try {
+      const supported = (
+        Intl as unknown as { supportedValuesOf?: (k: string) => string[] }
+      ).supportedValuesOf?.("timeZone");
+      if (Array.isArray(supported) && supported.length > 0) return supported;
+    } catch {
+      /* fall through to a minimal list */
+    }
+    return ["UTC"];
+  }, []);
+
+  // Timezone changes must persist server-side (so other devices agree) and bust
+  // the in-memory date-prefs cache so displayed dates reformat immediately.
+  const handleTimezoneChange = useCallback(
+    (value: string) => {
+      setTimezone(value);
+      invalidateDatePrefs();
+      void savePreference("prysm_tz", value).catch(() => {});
+    },
+    [setTimezone]
+  );
+
   const [lastExport, setLastExport] = useStringSetting("prysm_last_export");
 
-  const [notificationStatus, setNotificationStatus] = useState<"idle" | "granted" | "denied">("idle");
+  const [notificationStatus, setNotificationStatus] = useState<
+    "idle" | "granted" | "denied" | "unsupported"
+  >("idle");
+  const [isDesktopApp, setIsDesktopApp] = useState(false);
+
+  useEffect(() => {
+    setIsDesktopApp(typeof window !== "undefined" && Boolean(window.prysmDesktop?.isDesktop));
+    const perm = notificationPermission();
+    if (perm === "granted" || perm === "denied") setNotificationStatus(perm);
+    else if (perm === "unsupported") setNotificationStatus("unsupported");
+  }, []);
 
   const [stickyColor, setStickyColor] = useStringSetting("prysm_sticky_color", "#FFD700");
   const [stickyFontSize, setStickyFontSize] = useStringSetting("prysm_sticky_font", "14px");
@@ -356,17 +410,25 @@ export default function SettingsPage() {
   const [passwordMsg, setPasswordMsg] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
 
-  const [slackConnected, setSlackConnected] = useState(() => !!lsGet("prysm_integration_slack_webhook", ""));
   const [siriConnected, setSiriConnected] = useState(() => !!lsGet("prysm_integration_siri_url", ""));
   const [inviteEmailCheck, setInviteEmailCheck] = useState("");
 
   useEffect(() => {
+    // Wait for the session check before bouncing: on a full page load `user` is
+    // still null (the auth context seeds it from a snapshot, then confirms with
+    // /auth/me), and pushing /login immediately would discard the current query
+    // string. That is exactly how an OAuth round trip lost its ?code=...&state=...
+    // before the Integrations panel could exchange it.
     if (!user) {
-      router.push("/login");
+      if (loading) return;
+      // Send the user back here (with the query string) after signing in, so a
+      // deep link such as a returning OAuth callback keeps its ?code=...&state=...
+      const here = `${window.location.pathname}${window.location.search}`;
+      router.push(`/login?next=${encodeURIComponent(here)}`);
       return;
     }
     fetchKeys();
-  }, [user, router, fetchKeys]);
+  }, [user, loading, router, fetchKeys]);
 
   // Re-hydrate the local cache from the server for any configured provider whose
   // local copy is missing or unreadable (e.g. a fresh tab/session lost the
@@ -414,16 +476,35 @@ export default function SettingsPage() {
     })();
   }, []);
 
+
+  // Deep-link to the finance settings: /settings?tab=finance
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab === "finance") setActiveTab("finance");
   }, []);
 
+  // Deep-link from the marketing AI Connect docs: /settings?tab=mcp
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab === "mcp") setActiveTab("mcp");
   }, []);
 
+  // Integrations tab: explicit deep-links (including the GitHub sub-views,
+  // which have no tab of their own) and the OAuth provider redirect. Every
+  // provider returns to /settings?code=...&state=... with no tab, so select
+  // Integrations and leave the query string for the Integrations panel to
+  // exchange the code on mount.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (tab === "integrations" || tab === "github-repos" || tab === "github-link") {
+      setActiveTab("integrations");
+      return;
+    }
+    if (params.get("code")) setActiveTab("integrations");
   }, []);
 
   const handleSaveProfile = async () => {
@@ -577,30 +658,25 @@ export default function SettingsPage() {
     input.click();
   };
 
-  const handleRequestNotification = async () => {
-    if (!("Notification" in window)) return;
-    const perm = await Notification.requestPermission();
-    setNotificationStatus(perm as "granted" | "denied");
-    if (perm === "granted") {
-      const ok = await subscribeToPush();
-      if (ok) await updateNotifPref({ push_enabled: true });
-    }
-  };
-
-  const handlePushToggle = async (on: boolean) => {
-    if (on) {
-      if (Notification.permission !== "granted") {
-        const perm = await Notification.requestPermission();
-        setNotificationStatus(perm as "granted" | "denied");
-        if (perm !== "granted") return;
-      }
-      const ok = await subscribeToPush();
-      if (!ok) return;
-      await updateNotifPref({ push_enabled: true });
-    } else {
-      await unsubscribeFromPush();
+  const handleSystemNotifToggle = async (on: boolean) => {
+    if (!on) {
       await updateNotifPref({ push_enabled: false });
+      if (!isDesktopApp) void unsubscribeFromPush();
+      return;
     }
+    if (isDesktopApp) {
+      await updateNotifPref({ push_enabled: true });
+      return;
+    }
+    if (!notificationsSupported()) {
+      setNotificationStatus("unsupported");
+      return;
+    }
+    const ok = await requestNotificationPermission();
+    setNotificationStatus(ok ? "granted" : "denied");
+    if (!ok) return;
+    await updateNotifPref({ push_enabled: true });
+    void subscribeToPush();
   };
 
   const handleImageUpload = () => {
@@ -617,19 +693,6 @@ export default function SettingsPage() {
       reader.readAsDataURL(file);
     };
     input.click();
-  };
-
-  const handleConnectSlack = () => {
-    const webhook = prompt("Enter Slack Webhook URL:");
-    if (webhook && webhook.trim()) {
-      lsSet("prysm_integration_slack_webhook", webhook.trim());
-      setSlackConnected(true);
-    }
-  };
-
-  const handleDisconnectSlack = () => {
-    localStorage.removeItem("prysm_integration_slack_webhook");
-    setSlackConnected(false);
   };
 
   const handleConnectSiri = () => {
@@ -733,7 +796,7 @@ export default function SettingsPage() {
           {activeTab === "account" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl font-bold text-accent float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl font-bold text-accent "> 
                   {(user.display_name || user.email || "U")[0].toUpperCase()}
                 </div>
                 <div>
@@ -769,6 +832,7 @@ export default function SettingsPage() {
                   </div>
                   <button onClick={() => setPasswordResetOpen(true)} className="btn btn-gradient px-4 py-1.5 text-xs rounded-xl">Reset Password</button>
                 </div>
+                <PasskeysSettings />
               </div>
 
               <div className="border-t border-border pt-4 space-y-4">
@@ -818,7 +882,7 @@ export default function SettingsPage() {
           {activeTab === "features" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5" />
                   </svg>
@@ -850,7 +914,7 @@ export default function SettingsPage() {
           {activeTab === "smart-list" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8" />
                   </svg>
@@ -862,7 +926,6 @@ export default function SettingsPage() {
               </div>
               <div className="space-y-3">
                 {[
-                  { label: "Inbox", value: showInbox, set: setShowInbox },
                   { label: "Today", value: showToday, set: setShowToday },
                   { label: "Next 7 Days", value: showNext7, set: setShowNext7 },
                   { label: "All Tasks", value: showAll, set: setShowAll },
@@ -881,7 +944,7 @@ export default function SettingsPage() {
           {activeTab === "notifications" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" />
                   </svg>
@@ -892,33 +955,92 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
-                  <div>
-                    <p className="text-sm text-secondary">Browser Push Notifications</p>
-                    <p className="text-[11px] text-muted">
-                      {notificationStatus === "granted"
-                        ? "Enabled"
-                        : notificationStatus === "denied"
-                          ? "Blocked by browser"
-                          : "Not requested"}
-                    </p>
+                {isDesktopApp ? (
+                  <>
+                    <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                      <div>
+                        <p className="text-sm text-secondary">Desktop notifications</p>
+                        <p className="text-[11px] text-muted">
+                          Reminders appear as real notifications from Prysm Note
+                        </p>
+                      </div>
+                      <Toggle
+                        value={notifPrefs.inapp_reminders}
+                        onChange={(v) => void updateNotifPref({ inapp_reminders: v })}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border opacity-60">
+                      <div>
+                        <p className="text-sm text-secondary">Browser push notifications</p>
+                        <p className="text-[11px] text-muted">Not used in the desktop app</p>
+                      </div>
+                      <Toggle value={false} onChange={() => {}} disabled />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                    <div>
+                      <p className="text-sm text-secondary">System notifications</p>
+                      <p className="text-[11px] text-muted">
+                        {notificationStatus === "granted"
+                          ? "Reminders appear as real desktop notifications"
+                          : notificationStatus === "denied"
+                            ? "Blocked by your browser settings"
+                            : notificationStatus === "unsupported"
+                              ? "This browser can't show desktop notifications. On iPhone or iPad, add Prysm Note to your Home Screen first."
+                              : "Get reminders as real desktop notifications"}
+                      </p>
+                    </div>
+                    {notificationStatus === "granted" ? (
+                      <Toggle
+                        value={notifPrefs.push_enabled}
+                        onChange={(v) => void handleSystemNotifToggle(v)}
+                      />
+                    ) : notificationStatus === "idle" ? (
+                      <button
+                        onClick={() => void handleSystemNotifToggle(true)}
+                        className="btn btn-gradient px-4 py-1.5 text-xs rounded-xl"
+                      >
+                        Enable
+                      </button>
+                    ) : null}
                   </div>
-                  {notificationStatus === "idle" ? (
-                    <button onClick={handleRequestNotification} className="btn btn-gradient px-4 py-1.5 text-xs rounded-xl">
-                      Enable
-                    </button>
-                  ) : (
+                )}
+                {!isDesktopApp && (
+                  <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                    <div>
+                      <p className="text-sm text-secondary">In-app Reminders</p>
+                      <p className="text-[11px] text-muted">
+                        Show tomorrow&apos;s tasks in a bottom-right card each day
+                      </p>
+                    </div>
                     <Toggle
-                      value={notifPrefs.push_enabled && notificationStatus === "granted"}
-                      onChange={handlePushToggle}
+                      value={notifPrefs.inapp_reminders}
+                      onChange={(v) => void updateNotifPref({ inapp_reminders: v })}
                     />
-                  )}
-                </div>
+                  </div>
+                )}
+                {notifPrefs.inapp_reminders && (
+                  <div className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                    <div>
+                      <p className="text-sm text-secondary">Reminder Time</p>
+                      <p className="text-[11px] text-muted">When in-app reminders appear, in your local time</p>
+                    </div>
+                    <input
+                      type="time"
+                      className="input-field w-32"
+                      value={notifPrefs.reminder_time}
+                      onChange={(e) => void updateNotifPref({ reminder_time: e.target.value })}
+                      data-testid="reminder-time"
+                    />
+                  </div>
+                )}
                 {[
-                  { label: "Email Task Reminders", desc: "Receive reminders via email", value: notifPrefs.email_reminders, set: (v: boolean) => void updateNotifPref({ email_reminders: v }) },
+                  { label: "Email Task Reminders (optional)", desc: "Off by default. Email is an extra on top of in-app reminders", value: notifPrefs.email_reminders, set: (v: boolean) => void updateNotifPref({ email_reminders: v }) },
                   { label: "Due Date Alerts (24h)", desc: "Notify 24 hours before due", value: notifPrefs.due_alerts, set: (v: boolean) => void updateNotifPref({ due_alerts: v }) },
                   { label: "Daily Digest Email", desc: "Summary of your tasks each morning", value: notifPrefs.email_digest, set: (v: boolean) => void updateNotifPref({ email_digest: v }) },
-                  { label: "Sound Alerts", desc: "Play sound on notifications", value: notifPrefs.sound, set: (v: boolean) => void updateNotifPref({ sound: v }) },
+                  { label: "Sound Alerts", desc: "Play a ping when a reminder appears", value: notifPrefs.sound, set: (v: boolean) => void updateNotifPref({ sound: v }) },
+                  { label: "Completion Animations", desc: "A short confetti burst when you complete a task", value: rewardsOn, set: setRewards },
                 ].map((n) => (
                   <div key={n.label} className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
                     <div>
@@ -936,7 +1058,7 @@ export default function SettingsPage() {
           {activeTab === "date-time" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
                   </svg>
@@ -949,7 +1071,7 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-secondary">Week Starts On</label>
-                  <select className="input-field" value={startDay} onChange={(e) => setStartDay(e.target.value)}>
+                  <select className="input-field" value={startDay} onChange={(e) => { setStartDay(e.target.value); invalidateDatePrefs(); }}>
                     <option value="monday">Monday</option>
                     <option value="sunday">Sunday</option>
                     <option value="saturday">Saturday</option>
@@ -957,14 +1079,14 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-secondary">Time Format</label>
-                  <select className="input-field" value={timeFormat} onChange={(e) => setTimeFormat(e.target.value)}>
+                  <select className="input-field" value={timeFormat} onChange={(e) => { setTimeFormat(e.target.value); invalidateDatePrefs(); }}>
                     <option value="24h">24-hour (14:00)</option>
                     <option value="12h">12-hour (2:00 PM)</option>
                   </select>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-secondary">Date Format</label>
-                  <select className="input-field" value={dateFormat} onChange={(e) => setDateFormat(e.target.value)}>
+                  <select className="input-field" value={dateFormat} onChange={(e) => { setDateFormat(e.target.value); invalidateDatePrefs(); }}>
                     <option value="dd/mm/yyyy">DD/MM/YYYY</option>
                     <option value="mm/dd/yyyy">MM/DD/YYYY</option>
                     <option value="yyyy-mm-dd">YYYY-MM-DD</option>
@@ -972,7 +1094,34 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-secondary">Timezone</label>
-                  <input className="input-field" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="UTC" />
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="input-field flex-1"
+                      value={timezone}
+                      onChange={(e) => handleTimezoneChange(e.target.value)}
+                    >
+                      {!timezoneOptions.includes(timezone) && timezone && (
+                        <option value={timezone}>{timezone}</option>
+                      )}
+                      {timezoneOptions.map((tz) => (
+                        <option key={tz} value={tz}>{tz}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                        if (detected) handleTimezoneChange(detected);
+                      }}
+                      className="btn shrink-0 bg-elevated border border-border px-3 py-2 text-xs text-secondary hover:text-primary"
+                      title="Use this device's timezone"
+                    >
+                      Detect
+                    </button>
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted">
+                    Used for due dates, reminders and calendar times.
+                  </p>
                 </div>
               </div>
             </section>
@@ -982,7 +1131,7 @@ export default function SettingsPage() {
           {activeTab === "appearance" && (
             <section className="card p-6 space-y-6">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="5" />
                   </svg>
@@ -994,6 +1143,10 @@ export default function SettingsPage() {
               </div>
 
               <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider">Theme</h3>
+              <p className="text-xs text-muted">
+                Pick a built-in preset, or create your own by editing every color below. You can export a theme to a
+                JSON file and import it on another device, and switch back to the defaults at any time.
+              </p>
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-5 gap-2">
                 {THEME_NAMES.map((name) => {
                   const isBuiltin = name !== "custom";
@@ -1013,7 +1166,7 @@ export default function SettingsPage() {
                         }
                       }}
                       className={`rounded-2xl border-2 p-2.5 text-center transition-all duration-200 ${
-                        active ? "border-accent bg-accent/10 shadow-glow-lg scale-105" : "border-border bg-elevated hover:border-text-muted hover:bg-hover"
+                        active ? "border-accent bg-accent/10" : "border-border bg-elevated hover:border-text-muted hover:bg-hover"
                       }`}
                     >
                       <div
@@ -1087,6 +1240,17 @@ export default function SettingsPage() {
                       className="btn bg-elevated border border-border text-secondary px-4 py-2 text-sm rounded-xl"
                     >
                       Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        setCustomThemeColors({ ...THEMES.dark.colors });
+                        if (themeName === "custom") setThemeName("dark");
+                        setCustomTheme(null);
+                      }}
+                      className="btn bg-elevated border border-border text-secondary px-4 py-2 text-sm rounded-xl"
+                      title="Reset to the default theme colors"
+                    >
+                      Restore defaults
                     </button>
                   </div>
                 </div>
@@ -1184,7 +1348,7 @@ export default function SettingsPage() {
             <section className="space-y-5">
               <div className="card p-6 space-y-5">
                 <div className="flex items-center gap-4">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="3" />
                       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -1261,7 +1425,7 @@ export default function SettingsPage() {
           {activeTab === "integrations" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                   </svg>
@@ -1272,19 +1436,22 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-3">
-                <IntegrationRow label="Slack" description="Receive task notifications in Slack" connected={slackConnected} onConnect={handleConnectSlack} onDisconnect={handleDisconnectSlack} />
                 <IntegrationRow label="Siri Shortcuts" description="Deep-link into Prysm Note from Shortcuts" connected={siriConnected} onConnect={handleConnectSiri} onDisconnect={handleDisconnectSiri} />
               </div>
             </section>
           )}
 
+          {/* === FINANCE === */}
+          {activeTab === "finance" && <FinanceSettings />}
 
+          {/* === AI CONNECT (MCP) === */}
+          {activeTab === "mcp" && <McpSettings />}
 
           {/* === COLLABORATE === */}
               {activeTab === "collaborate" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75" />
                   </svg>
@@ -1298,7 +1465,9 @@ export default function SettingsPage() {
                 <div className="rounded-xl bg-accent/10 border border-accent/30 px-4 py-2.5 text-sm text-accent">{inviteMsg}</div>
               )}
               {subscription.tier === "team" || subscription.tier === "company" ? (
-                <TeamList />
+                <>
+                  <TeamList />
+                </>
               ) : (
                 <div className="rounded-2xl border border-border bg-elevated px-6 py-10 text-center">
                   <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-accent/15 text-accent">
@@ -1309,11 +1478,6 @@ export default function SettingsPage() {
                     Create teams, invite members and share projects with a Team or Company
                     subscription. Upgrade to unlock collaboration.
                   </p>
-                  <button
-                    className="btn btn-gradient mt-6 px-6 py-2.5 text-sm rounded-xl"
-                  >
-                    View premium plans
-                  </button>
                 </div>
               )}
             </section>
@@ -1323,7 +1487,7 @@ export default function SettingsPage() {
           {activeTab === "sticky-note" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                   </svg>
@@ -1337,7 +1501,7 @@ export default function SettingsPage() {
                 <div>
                   <label className="mb-1.5 block text-xs font-medium text-secondary">Default Color</label>
                   <div className="flex gap-2">{["#FFD700","#FF6B6B","#4ECDC4","#95E1D3","#F38181","#AA96DA"].map((c) => (
-                    <button key={c} onClick={() => setStickyColor(c)} className={`w-8 h-8 rounded-lg transition-all hover:scale-110 ${stickyColor === c ? "ring-2 ring-white scale-110" : ""}`} style={{ backgroundColor: c }} />
+                    <button key={c} onClick={() => setStickyColor(c)} className={`w-8 h-8 rounded-lg transition-all hover:scale-110 ${stickyColor === c ? "ring-2 ring-accent scale-110" : ""}`} style={{ backgroundColor: c }} />
                   ))}</div>
                 </div>
                 <div>
@@ -1361,7 +1525,7 @@ export default function SettingsPage() {
           {activeTab === "widgets" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="3" width="18" height="18" rx="2" />;<line x1="3" y1="9" x2="21" y2="9" />;<line x1="9" y1="3" x2="9" y2="21" />
                   </svg>
@@ -1393,7 +1557,7 @@ export default function SettingsPage() {
           {activeTab === "ai-keys" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                   </svg>
@@ -1471,7 +1635,7 @@ export default function SettingsPage() {
           {activeTab === "shortcuts" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 8V4 M8 12H4 M12 16v4 M16 12h4 M12 2v2 M12 22v-2 M2 12h2 M22 12h-2" />
                   </svg>
@@ -1496,7 +1660,7 @@ export default function SettingsPage() {
           {activeTab === "about" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl float">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
                   </svg>

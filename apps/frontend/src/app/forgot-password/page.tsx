@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { FormStatus } from "@/components/ui/FormStatus";
+import { AuthThemeToggle } from "@/components/auth/AuthThemeToggle";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -23,12 +25,13 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-base p-4">
+    <div className="relative flex min-h-dvh items-center justify-center bg-base p-4">
+      <AuthThemeToggle />
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 float">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                 <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
@@ -40,20 +43,20 @@ export default function ForgotPasswordPage() {
 
           {status === "sent" && (
             <div className="mb-4 space-y-2">
-              <div className="rounded-lg bg-success/10 px-4 py-2.5 text-sm text-success">
+              <FormStatus variant="success">
                 If an account exists for that email, a reset link is on its way. Check your inbox.
-              </div>
-              <div className="rounded-lg bg-elevated border border-border px-4 py-2.5 text-xs text-secondary">
+              </FormStatus>
+              <FormStatus variant="info">
                 Signed up with Google or GitHub instead? Those accounts don&apos;t have a password
                 to reset - just use the <span className="text-accent">Continue with Gmail / GitHub</span>{" "}
                 buttons on the sign-in page.
-              </div>
+              </FormStatus>
             </div>
           )}
           {status === "error" && error && (
-            <div className="mb-4 rounded-lg bg-danger/10 px-4 py-2.5 text-sm text-danger">
+            <FormStatus variant="error" className="mb-4">
               {error}
-            </div>
+            </FormStatus>
           )}
 
           {status === "sent" ? (

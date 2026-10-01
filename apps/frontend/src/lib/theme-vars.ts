@@ -26,6 +26,7 @@ export const KNOWN_CSS_VARS: ReadonlySet<string> = new Set([
   "--info",
   "--text-info",
   "--ring",
+  "--weekend-tint",
   "--radius-xs",
   "--radius-sm",
   "--radius-md",
@@ -35,11 +36,32 @@ export const KNOWN_CSS_VARS: ReadonlySet<string> = new Set([
   "--shadow-md",
   "--shadow-lg",
   "--shadow-glow",
+  "--dur-fast",
+  "--dur-base",
+  "--dur-slow",
+  "--ease-out",
+  "--ease-spring",
   "--bg-image",
   "--bg-size",
   "--bg-opacity",
   "--bg-image-display",
   "--font-ui",
+  // Layout-only properties that appear in globals.css but must never be
+  // importable as theme tokens (see NON_THEME_CSS_VARS below).
+  "--desktop-titlebar",
+]);
+
+/**
+ * Custom properties that globals.css legitimately uses but that a user-imported
+ * theme must NOT be able to set: they carry layout/shell state, not colors.
+ */
+export const NON_THEME_CSS_VARS: ReadonlySet<string> = new Set([
+  "--desktop-titlebar",
+  "--dur-fast",
+  "--dur-base",
+  "--dur-slow",
+  "--ease-out",
+  "--ease-spring",
 ]);
 
 const COLOR_RE = /^#?[0-9a-f]{3,8}$|^rgb(a)?\(|^hsl(a)?\(/i;
@@ -132,7 +154,7 @@ export function validateCustomThemeError(raw: unknown): string | null {
       if (!VAR_KEY_RE.test(key)) {
         return `Import failed: invalid variable name "${key}"`;
       }
-      if (!KNOWN_CSS_VARS.has(key)) {
+      if (!KNOWN_CSS_VARS.has(key) || NON_THEME_CSS_VARS.has(key)) {
         return `Import failed: "${key}" is not an allowed variable`;
       }
       if (typeof value !== "string") {

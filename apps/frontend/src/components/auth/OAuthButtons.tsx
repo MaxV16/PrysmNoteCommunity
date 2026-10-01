@@ -1,13 +1,16 @@
 "use client";
 
 import { openMobileSso } from "@/lib/capbridge";
+import { openDesktopSso } from "@/lib/desktop-bridge";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
 async function startSso(provider: "google" | "github") {
-  // Inside the Capacitor WebView open the provider in the system browser
-  // (@capacitor/browser + one-time-code deep link), because Google blocks
-  // OAuth in embedded webviews. Everywhere else the plain redirect works.
+  // Google blocks OAuth in embedded webviews, so the native app shells open the
+  // provider in the system browser and finish via a one-time-code deep link
+  // (Capacitor) or an Electron deep link. In a plain browser/PWA both are
+  // no-ops and the normal redirect runs.
+  if (await openDesktopSso(provider)) return;
   if (await openMobileSso(provider)) return;
   // The start endpoint 307-redirects the browser to the provider, and the SSO
   // callback sets the session cookies and bounces back to the app.

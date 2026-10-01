@@ -15,13 +15,13 @@ export function HabitsWorkspace({ onOpenAi }: HabitsWorkspaceProps) {
   const { habits, loading, createHabit, toggleLog, deleteHabit } = useHabits();
 
   return (
-    <div className="flex flex-col bg-base" style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-base">
       <div className="flex items-center gap-3 border-b border-border bg-surface px-4 py-2 shrink-0">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
           <polyline points="22 4 12 14.01 9 11.01"/>
         </svg>
-        <span className="text-lg font-bold text-primary">Habits</span>
+        <span className="text-sm font-semibold text-primary">Habits</span>
         <div className="flex-1" />
         {onOpenAi && <AiPanelButton onClick={onOpenAi} />}
         <button

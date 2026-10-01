@@ -6,8 +6,10 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Spinner } from "@/components/ui/Spinner";
 import { useTasks } from "@/hooks/useTasks";
 import { useTags } from "@/hooks/useTags";
+import { useAppStore } from "@/stores/app-store";
 import { StickyBoardProvider } from "@/components/sticky/StickyNoteBoard";
 import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
+
 
 
 
@@ -28,7 +30,12 @@ class ErrorBoundaryInner extends React.Component<
         this.props.fallback || (
           <div className="flex h-full items-center justify-center bg-base p-8 text-center text-sm text-danger">
             <div className="flex flex-col items-center gap-3">
-              <span className="text-4xl">⚠️</span>
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-danger/10 text-danger">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
+                  <path d="M12 9v4M12 17h.01" />
+                </svg>
+              </span>
               <p>Something went wrong. Please refresh the page.</p>
               <button
                 onClick={() => window.location.reload()}
@@ -67,28 +74,30 @@ export function ThreePaneLayout() {
     };
 
     (async () => {
-      await refreshWindow();
-      if (disposed) return;
+      // Instant start: when the store already holds the cached snapshot, render
+      // the workspace right away and let the full refresh finish in the
+      // background instead of blocking on a multi-page fetch.
+      if (useAppStore.getState().tasks.length > 0) {
+        setDataLoaded(true);
+        void refreshWindow();
+      } else {
+        await refreshWindow();
+        if (disposed) return;
+        setDataLoaded(true);
+      }
       try { await fetchTags(); } catch {}
-      setDataLoaded(true);
     })();
 
     // Rolling refresh so every view (timeline, kanban, list, calendar, board)
     // sees recurring series keep growing without a reload, and the timeline
-    // stays ahead of its scroll edge.
+    // stays ahead of its scroll edge. Foreground/visibility resyncs are owned by
+    // AppShell (one shared refresh + SSE), so this is interval-only to avoid
+    // duplicate fetches.
     const intervalId = setInterval(() => { void refreshWindow(); }, 5 * 60_000);
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") void refreshWindow();
-    };
-    const onFocus = () => { void refreshWindow(); };
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onFocus);
 
     return () => {
       disposed = true;
       clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onFocus);
     };
   }, [fetchTasks, fetchRange, fetchTags]);
 

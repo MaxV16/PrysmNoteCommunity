@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 export type SubscriptionStatus = {
   tier: string;
@@ -73,5 +73,8 @@ export function useSubscription(): SubscriptionValue {
     void refresh();
   }, [refresh]);
 
-  return { ...sub, isPremium: sub.active, loading, refresh };
+  return useMemo(
+    () => ({ ...sub, isPremium: sub.active, loading, refresh }),
+    [sub, loading, refresh]
+  );
 }

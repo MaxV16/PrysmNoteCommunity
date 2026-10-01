@@ -1,22 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import type { Task, TaskTag } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
+import { useAppStore } from "@/stores/app-store";
 import { useToast } from "@/lib/toast-context";
+import { registerBackHandler } from "@/lib/back-nav";
 import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { TaskForm } from "./TaskForm";
 import { TaskChecklist } from "./TaskChecklist";
 import { TaskLinks } from "./TaskLinks";
 import { TaskTagsEditor } from "./TaskTagsEditor";
 import { DateRecurrencePopover } from "./DateRecurrencePopover";
+import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
 import { Markdown } from "@/components/ai/Markdown";
 import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { formatDate } from "@/lib/dates";
 import { taskTimeLabel } from "@/lib/task-time";
+import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
+import { CharLimitHint } from "@/components/ui/CharLimitHint";
 
 import {
   TIER_COLORS,
@@ -73,6 +78,7 @@ interface TaskDetailDrawerProps {
 
 export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const soundOn = useLocalBool("prysm_notif_sound", true);
+  const rewardsOn = useLocalBool("prysm_rewards", true);
   const [editing, setEditing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(task.title);
@@ -114,7 +120,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [descDraft, setDescDraft] = useState(task.description || "");
   const [busy, setBusy] = useState(false);
   const [subtasks, setSubtasks] = useState<Task[]>(task.subtasks || []);
-  const [loadedSubtasks, setLoadedSubtasks] = useState(false);
   const [tags, setTags] = useState<TaskTag[]>(task.tags || []);
   const [dateOpen, setDateOpen] = useState(false);
   const datePillRef = useRef<HTMLButtonElement | null>(null);
@@ -122,6 +127,8 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const footerMoreRef = useRef<HTMLButtonElement | null>(null);
   const priorityRef = useRef<HTMLButtonElement | null>(null);
   const statusRef = useRef<HTMLButtonElement | null>(null);
+  const descSectionRef = useRef<HTMLDivElement | null>(null);
+  const descTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [optionsTrigger, setOptionsTrigger] = useState<HTMLButtonElement | null>(null);
   const { updateTask, deleteTask, restoreTask, fetchTasks } = useTasks();
   const { showToast } = useToast();
@@ -132,42 +139,48 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const dateRange = formatDateRange(task);
 
   const hasSubtasks = subtasks.length > 0;
-  const [mode, setMode] = useState<"description" | "subtasks">(
-    hasSubtasks ? "subtasks" : "description"
-  );
 
-  // The timeline task list does not embed nested subtasks; fetch them so the
-  // drawer can show the checklist and auto-select the subtask mode accurately.
+  // Description and subtasks share ONE page now, so the checklist is fetched as
+  // soon as the drawer opens. Re-fetching on `task.updated_at` (and the store
+  // sync below) is what makes a remote change show up without a hard reload.
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const data = await api.get<Task[]>(`/tasks/${task.id}/subtasks`);
-        if (alive) {
-          setSubtasks(data);
-          setLoadedSubtasks(true);
-        }
+        if (alive) setSubtasks(data);
       } catch {
-        if (alive) {
-          setSubtasks(task.subtasks || []);
-          setLoadedSubtasks(true);
-        }
+        if (alive) setSubtasks((prev) => (prev.length ? prev : task.subtasks || []));
       }
     })();
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.id]);
+  }, [task.id, task.updated_at]);
 
-  // If the fetched subtasks reveal the task has children, switch to the
-  // checklist view so they are immediately visible.
+  // Keep the checklist in step with the shared store: the list payload carries
+  // every subtask row (flat, with parent_task_id), so a refresh that changes a
+  // child lands here without reopening the drawer.
+  const storeTasks = useAppStore((s) => s.tasks);
   useEffect(() => {
-    if (loadedSubtasks && subtasks.length > 0 && mode === "description") {
-      setMode("subtasks");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedSubtasks, subtasks.length]);
+    const children = storeTasks
+      .filter((t) => t.parent_task_id === task.id)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    setSubtasks((prev) => {
+      if (children.length === 0 && prev.length > 0) return prev;
+      const same =
+        children.length === prev.length &&
+        children.every(
+          (c, i) =>
+            c.id === prev[i].id &&
+            c.updated_at === prev[i].updated_at &&
+            c.status === prev[i].status &&
+            c.title === prev[i].title
+        );
+      return same ? prev : children;
+    });
+  }, [storeTasks, task.id]);
 
   const closeMenus = () => {
     setOptionsOpen(false);
@@ -177,9 +190,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
 
   const handleRename = async () => {
     setRenaming(false);
-    if (draftTitle.trim() && draftTitle.trim() !== task.title) {
-      await updateTask(task.id, { title: draftTitle.trim() });
+    const nextTitle = draftTitle.trim();
+    if (!nextTitle || nextTitle === task.title) return;
+    if (nextTitle.length > TASK_TITLE_MAX) {
+      showToast(`Title is ${(nextTitle.length - TASK_TITLE_MAX).toLocaleString()} characters over the limit`, "error");
+      return;
     }
+    await updateTask(task.id, { title: nextTitle });
   };
 
   const handleDelete = async () => {
@@ -209,6 +226,10 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         const { playCompletionSound } = await import("@/lib/sounds");
         playCompletionSound();
       }
+      if (rewardsOn) {
+        const { celebrate } = await import("@/lib/celebrate");
+        celebrate();
+      }
     }
     await updateTask(task.id, { status: newStatus });
   };
@@ -221,8 +242,38 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   };
 
   const handleDescriptionSave = async () => {
+    // Save FIRST, then close the editor. Closing first re-rendered the stale
+    // `task.description` while the PATCH was in flight, so the new (formatted)
+    // text only appeared after leaving and reopening the drawer.
+    if (descDraft.length > TASK_DESCRIPTION_MAX) {
+      showToast(`Description is ${(descDraft.length - TASK_DESCRIPTION_MAX).toLocaleString()} characters over the limit`, "error");
+      return;
+    }
+    try {
+      await updateTask(task.id, { description: descDraft || null });
+      setEditingDescription(false);
+    } catch {
+      // Keep the editor open so a failed save never loses the draft.
+    }
+  };
+
+  const startDescriptionEdit = () => {
+    setDescDraft(task.description || "");
+    setEditingDescription(true);
+  };
+
+  // Escape / blur-cancel restores the saved text so a stray key cannot wipe it.
+  const cancelDescriptionEdit = () => {
+    setDescDraft(task.description || "");
     setEditingDescription(false);
-    await updateTask(task.id, { description: descDraft || null });
+  };
+
+  // Footer "T": jump straight into the description editor with the toolbar.
+  const openDescriptionEditor = () => {
+    startDescriptionEdit();
+    requestAnimationFrame(() => {
+      descSectionRef.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    });
   };
 
   useEffect(() => {
@@ -233,15 +284,18 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Android/hardware back closes the task drawer instead of leaving the app.
+  useEffect(() => {
+    return registerBackHandler(onClose, 100);
+  }, [onClose]);
+
   const handleConvertToSubtasks = async () => {
     setBusy(true);
     try {
       await api.post(`/tasks/${task.id}/description-to-subtasks`);
       const data = await api.get<Task[]>(`/tasks/${task.id}/subtasks`);
       setSubtasks(data);
-      setLoadedSubtasks(true);
       await fetchTasks();
-      setMode("subtasks");
     } finally {
       setBusy(false);
       setOptionsOpen(false);
@@ -254,7 +308,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       await api.post(`/tasks/${task.id}/subtasks-to-description`);
       setSubtasks([]);
       await fetchTasks();
-      setMode("description");
     } finally {
       setBusy(false);
       setOptionsOpen(false);
@@ -279,8 +332,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
       await fetchTasks();
       const data = await api.get<Task[]>(`/tasks/${task.id}/subtasks`);
       setSubtasks(data);
-      setLoadedSubtasks(true);
-      setMode("subtasks");
       // Auto-open the AI panel for follow-up guidance.
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("prysm-open-ai"));
@@ -307,6 +358,10 @@ const handleUpdate = async (data: {
     tag_ids?: string[];
     recurrence_rule?: string;
     recurrence_end_date?: string;
+    reminder_enabled?: boolean;
+    list_id?: string | null;
+    estimated_minutes?: number | null;
+    board_section_id?: string | null;
   }) => {
     const fields: Record<string, unknown> = {};
     if (data.title !== task.title) fields.title = data.title;
@@ -325,23 +380,33 @@ const handleUpdate = async (data: {
       fields.recurrence_rule = data.recurrence_rule ?? null;
     if (data.recurrence_end_date !== (task.recurrence_end_date || ""))
       fields.recurrence_end_date = data.recurrence_end_date ?? null;
+    if (data.reminder_enabled !== undefined && data.reminder_enabled !== !!task.reminder_enabled)
+      fields.reminder_enabled = data.reminder_enabled;
+    if (data.list_id !== undefined && (data.list_id || "") !== (task.list_id || ""))
+      fields.list_id = data.list_id || null;
+    if (data.estimated_minutes !== undefined && data.estimated_minutes !== (task.estimated_minutes ?? undefined))
+      fields.estimated_minutes = data.estimated_minutes ?? null;
+    if (data.board_section_id !== undefined && (data.board_section_id || "") !== (task.board_section_id || ""))
+      fields.board_section_id = data.board_section_id || null;
     if (Object.keys(fields).length > 0) {
       await updateTask(task.id, fields);
     }
     setEditing(false);
   };
 
-  const handleDateChange = async (newDate: string | null, newRule: string | null, newEndDate: string | null) => {
+  const handleDateChange = async (
+    newStartDate: string | null,
+    newDueDate: string | null,
+    newRule: string | null,
+    newEndDate: string | null
+  ) => {
     setDateOpen(false);
     const fields: Record<string, unknown> = {};
-    if (newDate) {
-      // Keep start/due aligned to the chosen date unless the task already had a
-      // start/due range (then preserve the existing start).
-      fields.due_date = newDate;
-      if (!task.start_date) fields.start_date = newDate;
-    } else {
+    if (newStartDate) fields.start_date = newStartDate;
+    if (newDueDate) fields.due_date = newDueDate;
+    else {
+      fields.start_date = null;
       fields.due_date = null;
-      fields.start_date = task.start_date;
     }
     fields.recurrence_rule = newRule;
     fields.recurrence_end_date = newEndDate;
@@ -372,16 +437,30 @@ const handleUpdate = async (data: {
             ref={datePillRef}
             onClick={() => setDateOpen((v) => !v)}
             className="shrink-0 rounded-full bg-elevated px-2 py-0.5 text-[10px] text-muted hover:bg-hover hover:text-primary transition-colors"
-            title="Set date & recurrence"
+            aria-label="Set date and recurrence"
           >
-            {dateRange ? `📅 ${dateRange}` : "📅 No date"}
-            {task.recurrence_rule ? " 🔄" : ""}
+            <span className="inline-flex items-center gap-1">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <path d="M16 2v4M8 2v4M3 10h18" />
+              </svg>
+              {dateRange || "No date"}
+              {task.recurrence_rule && (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8" />
+                  <path d="M20 4v4h-4" />
+                  <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16" />
+                  <path d="M4 20v-4h4" />
+                </svg>
+              )}
+            </span>
           </button>
           <DateRecurrencePopover
             open={dateOpen}
             triggerRef={datePillRef}
             onClose={() => setDateOpen(false)}
-            value={task.due_date || task.start_date || null}
+            startDate={task.start_date}
+            dueDate={task.due_date}
             recurrenceRule={task.recurrence_rule}
             recurrenceEndDate={task.recurrence_end_date}
             onChange={handleDateChange}
@@ -397,7 +476,6 @@ const handleUpdate = async (data: {
                 setPriorityOpen((v) => !v);
               }}
               className="flex h-5 w-5 items-center justify-center rounded-full border border-border/40 p-1 transition-transform hover:scale-110"
-              title={`Priority: ${TIER_LABELS[tier]} (click to change)`}
               aria-label="Change priority"
             >
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TIER_COLORS[tier] }} />
@@ -438,29 +516,32 @@ const handleUpdate = async (data: {
           onClick={toggleStatus}
           className="mt-1.5 flex h-[18px] w-[18px] shrink-0 cursor-pointer items-center justify-center rounded-full border-2 transition-colors"
           style={{
-            borderColor: task.status === "done" ? "var(--accent)" : "#5a5a72",
+            borderColor: task.status === "done" ? "var(--accent)" : "var(--border)",
             backgroundColor: task.status === "done" ? "var(--accent)" : "transparent",
           }}
           aria-label="Complete task"
         >
           {task.status === "done" && (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--on-gradient)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12" />
             </svg>
           )}
         </button>
         {renaming ? (
-          <input
-            autoFocus
-            value={draftTitle}
-            onChange={(e) => setDraftTitle(e.target.value)}
-            onBlur={handleRename}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              if (e.key === "Escape") setRenaming(false);
-            }}
-            className="input-field w-full bg-transparent text-lg font-semibold text-primary"
-          />
+          <div className="min-w-0 flex-1">
+            <input
+              autoFocus
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={handleRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") setRenaming(false);
+              }}
+              className="input-field w-full bg-transparent text-lg font-semibold text-primary"
+            />
+            <CharLimitHint value={draftTitle} max={TASK_TITLE_MAX} className="mt-1" />
+          </div>
         ) : (
           <div className="flex min-w-0 flex-1 items-start gap-1.5">
             <h2
@@ -468,7 +549,6 @@ const handleUpdate = async (data: {
                 setDraftTitle(task.title);
                 setRenaming(true);
               }}
-              title="Double-click to rename"
               className={task.status === "done" ? "min-w-0 flex-1 text-lg font-semibold leading-snug text-muted line-through" : "min-w-0 flex-1 text-lg font-semibold leading-snug text-primary"}
             >
               {task.title}
@@ -525,55 +605,86 @@ const handleUpdate = async (data: {
         </div>
       </div>
 
-      {/* Content: description or subtasks */}
-      <div className="mt-4 flex-1 overflow-y-auto">
-        {mode === "description" ? (
-          <div>
-            <Label>Description</Label>
+      {/* Content: description then subtasks, all on one page */}
+      <div ref={descSectionRef} className="mt-4 flex-1 overflow-y-auto">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <Label>Description</Label>
+          {!editingDescription && (
+            <button
+              onClick={startDescriptionEdit}
+              aria-label="Edit description"
+              className="pointer-coarse:h-9 pointer-coarse:w-9 flex h-7 w-7 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-hover hover:text-primary"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+            </button>
+          )}
+        </div>
+        <div>
             {editingDescription ? (
-              <textarea
-                autoFocus
-                value={descDraft}
-                onChange={(e) => setDescDraft(e.target.value)}
-                onBlur={handleDescriptionSave}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleDescriptionSave();
-                  if (e.key === "Escape") {
-                    setEditingDescription(false);
-                  }
-                }}
-                placeholder="Write a description (markdown supported)…"
-                rows={6}
-                className="input-field w-full bg-transparent text-sm"
-              />
+              <div className="rounded-lg border border-border/60 bg-elevated/40 p-1.5">
+                <MarkdownToolbar
+                  textareaRef={descTextareaRef}
+                  onChange={setDescDraft}
+                  className="mb-1 border-b border-border/60 pb-1"
+                />
+                <textarea
+                  ref={descTextareaRef}
+                  autoFocus
+                  value={descDraft}
+                  onChange={(e) => setDescDraft(e.target.value)}
+                  onBlur={() => void handleDescriptionSave()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      void handleDescriptionSave();
+                    }
+                    if (e.key === "Escape") {
+                      // Revert instead of closing the drawer.
+                      e.stopPropagation();
+                      cancelDescriptionEdit();
+                    }
+                  }}
+                  placeholder="Write a description (markdown supported)…"
+                  rows={6}
+                  className="input-field w-full bg-transparent text-sm"
+                />
+                <div className="mt-1 flex items-center justify-end gap-2">
+                  <CharLimitHint value={descDraft} max={TASK_DESCRIPTION_MAX} className="mr-auto" />
+                  <button
+                    onClick={() => void handleDescriptionSave()}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => e.preventDefault()}
+                    className="btn btn-primary px-3 py-1 text-xs"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
             ) : task.description ? (
-              <div
-                onClick={() => {
-                  setDescDraft(task.description || "");
-                  setEditingDescription(true);
-                }}
-                title="Click to edit"
-              >
+              <div onClick={startDescriptionEdit} aria-label="Edit description" className="cursor-text">
                 <Markdown>{task.description}</Markdown>
               </div>
             ) : (
               <button
-                onClick={() => {
-                  setDescDraft(task.description || "");
-                  setEditingDescription(true);
-                }}
+                onClick={startDescriptionEdit}
                 className="w-full rounded-lg border border-dashed border-border/60 px-3 py-4 text-left text-sm text-muted transition-colors hover:border-accent/40 hover:text-secondary"
               >
                 No description - click to add one
               </button>
             )}
-          </div>
-        ) : (
-          <div>
+        </div>
+
+        <div className="mt-5 border-t border-border pt-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
             <Label>Subtasks</Label>
-            <TaskChecklist subtasks={subtasks} taskId={task.id} />
+            {hasSubtasks && (
+              <span className="text-[11px] text-muted">
+                {subtasks.filter((s) => s.status === "done").length}/{subtasks.length}
+              </span>
+            )}
           </div>
-        )}
+          <TaskChecklist subtasks={subtasks} taskId={task.id} />
+        </div>
       </div>
 
       {/* Meta: tags, links, break-down */}
@@ -595,7 +706,10 @@ const handleUpdate = async (data: {
           disabled={busy}
           className="btn mt-4 w-full gap-2 border border-accent/20 bg-accent/10 px-3 py-2 text-xs text-accent transition-all hover:border-accent/40 hover:bg-accent/20 disabled:opacity-50"
         >
-          <span>🧠</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <path d="M12 2.5l1.7 4.8 4.8 1.7-4.8 1.7L12 15.5l-1.7-4.8L5.5 9l4.8-1.7L12 2.5z" />
+            <path d="M18.6 14.4l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z" />
+          </svg>
           <span>{busy ? "Breaking down…" : "Break this down into subtasks"}</span>
         </button>
       )}
@@ -632,20 +746,26 @@ const handleUpdate = async (data: {
             </PopoverMenu>
           </div>
           <div className="flex items-center gap-1">
-            <span
-              className="rounded-lg p-1.5 text-muted"
-              title="Markdown formatting supported in description / AI chat"
+            <button
+              type="button"
+              onClick={openDescriptionEditor}
+              aria-label="Edit description formatting"
+              className="pointer-coarse:h-10 pointer-coarse:w-10 rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M4 7V4h16v3" />
                 <path d="M9 20h6" />
                 <path d="M12 4v16" />
               </svg>
-            </span>
+            </button>
+            {/* Comments are not built yet: a disabled control is clearer than a
+                bubble that silently closed the drawer. */}
             <button
-              onClick={onClose}
+              type="button"
+              disabled
+              aria-label="Comments (coming soon)"
               title="Comments (coming soon)"
-              className="rounded-lg p-1.5 text-muted"
+              className="cursor-not-allowed rounded-lg p-1.5 text-muted opacity-50"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -658,7 +778,6 @@ const handleUpdate = async (data: {
               }}
               className="rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
               aria-label="Share with a team"
-              title="Share with a team"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
@@ -753,7 +872,14 @@ interface DrawerShellProps {
 
 function DrawerShell({ onClose, title, dimmed, children }: DrawerShellProps) {
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
+    <div
+      className="fixed inset-0 z-40 flex justify-end"
+      // In the Electron desktop shell the top strip holds the OS window
+      // controls: start the overlay below it (so the strip stays draggable and
+      // the buttons stay visible) and mark the overlay no-drag so the close
+      // button is clickable on macOS instead of starting a window drag.
+      style={{ top: "var(--desktop-titlebar, 0px)", WebkitAppRegion: "no-drag" } as CSSProperties}
+    >
       <div
         className="h-full flex-1 bg-black/40 backdrop-blur-[2px]"
         aria-hidden

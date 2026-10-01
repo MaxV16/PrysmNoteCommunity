@@ -9,6 +9,16 @@ from app.models.task_list import TaskList
 from app.models.teams import TaskShare, TeamMember
 from app.utils.priority import normalize_priority
 
+# The default list every user gets. It is protected from deletion because it is
+# the reassignment target for tasks whose list is deleted and the fallback home
+# for new tasks; removing it would orphan both.
+DEFAULT_LIST_NAME = "My Tasks"
+
+
+def is_default_list_name(name: str | None) -> bool:
+    """True when ``name`` is the protected default list name."""
+    return name == DEFAULT_LIST_NAME
+
 
 def shared_task_ids_subquery(user_id: UUID):
     """Task ids the user can access through team memberships (task_shares)."""
@@ -68,7 +78,7 @@ async def default_list_id(session: AsyncSession, user_id: UUID) -> UUID:
     """
     result = await session.execute(
         select(TaskList.id)
-        .where(TaskList.user_id == user_id, TaskList.name == "My Tasks")
+        .where(TaskList.user_id == user_id, TaskList.name == DEFAULT_LIST_NAME)
         .order_by(TaskList.position, TaskList.created_at)
         .limit(1)
     )
@@ -78,7 +88,7 @@ async def default_list_id(session: AsyncSession, user_id: UUID) -> UUID:
     pos_result = await session.execute(
         select(func.max(TaskList.position)).where(TaskList.user_id == user_id)
     )
-    default = TaskList(user_id=user_id, name="My Tasks", position=(pos_result.scalar() or 0) + 1)
+    default = TaskList(user_id=user_id, name=DEFAULT_LIST_NAME, position=(pos_result.scalar() or 0) + 1)
     session.add(default)
     await session.flush()
     return default.id
@@ -189,6 +199,95 @@ async def create_task(
     return task
 
 
+async def create_tasks_bulk(
+    session: AsyncSession,
+    user_id: UUID,
+    items: list[dict],
+) -> list[Task]:
+    """Create many tasks with a bounded number of queries.
+
+    Looping :func:`create_task` re-resolves list ownership and the default list
+    and flushes once per row, so a 50-item batch costs ~100-200 statements. This
+    validates every explicit list id in a single query, resolves the default
+    list once, flushes once, and then expands only the recurring templates.
+    """
+    if not items:
+        return []
+
+    requested_list_ids: set[UUID] = set()
+    for item in items:
+        lid = item.get("list_id")
+        if lid is not None:
+            lid = lid if isinstance(lid, UUID) else _coerce_uuid(lid)
+            if lid is None:
+                raise ValueError("List not found")
+            requested_list_ids.add(lid)
+
+    if requested_list_ids:
+        owned = await session.execute(
+            select(TaskList.id).where(
+                TaskList.id.in_(requested_list_ids), TaskList.user_id == user_id
+            )
+        )
+        owned_list_ids = {row[0] for row in owned.all()}
+        if owned_list_ids != requested_list_ids:
+            raise ValueError("List not found")
+
+    default_id: UUID | None = None
+    tasks: list[Task] = []
+    recurring: list[Task] = []
+    for item in items:
+        lid = item.get("list_id")
+        if lid is not None:
+            lid = lid if isinstance(lid, UUID) else _coerce_uuid(lid)
+        else:
+            if default_id is None:
+                default_id = await default_list_id(session, user_id)
+            lid = default_id
+
+        start_date = item.get("start_date")
+        recurrence_rule = item.get("recurrence_rule")
+        if recurrence_rule and not start_date:
+            start_date = date_type.today().isoformat()
+
+        validate_task_order(
+            _parse_date(start_date),
+            _parse_date(item.get("due_date")),
+            _parse_time(item.get("start_time")),
+            _parse_time(item.get("end_time")),
+        )
+
+        task = Task(
+            user_id=user_id,
+            parent_task_id=item.get("parent_task_id"),
+            board_section_id=item.get("board_section_id"),
+            title=item.get("title") or "Untitled",
+            description=item.get("description"),
+            status=_coerce_status(item.get("status", "backlog")),
+            priority=normalize_priority(item.get("priority", 2)),
+            start_date=_parse_date(start_date),
+            due_date=_parse_date(item.get("due_date")),
+            start_time=_parse_time(item.get("start_time")),
+            end_time=_parse_time(item.get("end_time")),
+            recurrence_rule=recurrence_rule,
+            recurrence_end_date=_parse_date(item.get("recurrence_end_date")),
+            list_id=lid,
+        )
+        session.add(task)
+        tasks.append(task)
+        if recurrence_rule and task.parent_task_id is None:
+            recurring.append(task)
+
+    await session.flush()
+
+    if recurring:
+        from app.services.recurring_task_service import expand_task_occurrences
+        for task in recurring:
+            await expand_task_occurrences(session, task)
+
+    return tasks
+
+
 async def get_task(
     session: AsyncSession,
     task_id: UUID,
@@ -221,7 +320,7 @@ ALLOWED_UPDATE_FIELDS = {
     "start_date", "due_date", "start_time", "end_time", "is_all_day", "estimated_minutes",
     "recurrence_rule", "recurrence_end_date", "sort_order",
     "parent_task_id", "is_archived", "board_section_id", "board_order",
-    "list_id",
+    "list_id", "reminder_enabled",
 }
 
 
@@ -323,11 +422,13 @@ async def delete_task(session: AsyncSession, task_id: UUID, user_id: UUID) -> bo
 
 async def delete_tasks_batch(session: AsyncSession, task_ids: list[UUID], user_id: UUID) -> int:
     """Soft-delete many owned tasks (and their descendants) in one pass."""
-    owned: list[UUID] = []
-    for tid in task_ids:
-        task = await get_task(session, tid, user_id)
-        if task is not None:
-            owned.append(task.id)
+    task_ids = [t for t in task_ids if t is not None]
+    if not task_ids:
+        return 0
+    result = await session.execute(
+        select(Task).where(task_access_condition(user_id), Task.id.in_(task_ids), active_condition())
+    )
+    owned = [t.id for t in result.scalars().all()]
     if not owned:
         return 0
     affected = await _apply_deleted(session, owned, deleted=True)
@@ -345,11 +446,13 @@ async def restore_task(session: AsyncSession, task_id: UUID, user_id: UUID) -> b
 
 async def restore_tasks_batch(session: AsyncSession, task_ids: list[UUID], user_id: UUID) -> int:
     """Restore many trashed tasks (and their descendants) in one pass."""
-    owned: list[UUID] = []
-    for tid in task_ids:
-        task = await get_task(session, tid, user_id, include_trashed=True)
-        if task is not None:
-            owned.append(task.id)
+    task_ids = [t for t in task_ids if t is not None]
+    if not task_ids:
+        return 0
+    result = await session.execute(
+        select(Task).where(task_access_condition(user_id), Task.id.in_(task_ids), Task.deleted_at.isnot(None))
+    )
+    owned = [t.id for t in result.scalars().all()]
     if not owned:
         return 0
     await _apply_deleted(session, owned, deleted=False)
@@ -611,18 +714,24 @@ async def search_tasks(
         ranked = [(row[0], float(row[1])) for row in rows]
     except Exception:
         # pg_trgm missing or dialect unsupported -> plain substring fallback.
+        # Build the LIKE pattern in Python (bound parameter) instead of using
+        # SQL concat(): concat() is a Postgres/SQLite-3.44+ function, so a SQL
+        # `concat('%', q, '%')` raises "no such function: concat" on older
+        # SQLite (e.g. the CI Python's bundled SQLite) right here in the
+        # fallback. A bound pattern works identically on every dialect.
+        like = f"%{query}%"
         stmt = (
             select(Task)
             .where(
                 task_access_condition(user_id),
                 active_condition(),
                 or_(
-                    Task.title.ilike(func.concat('%', query, '%')),
-                    Task.description.ilike(func.concat('%', query, '%')),
+                    Task.title.ilike(like),
+                    Task.description.ilike(like),
                     Task.id.in_(
                         select(TaskTag.task_id)
                         .join(Tag, Tag.id == TaskTag.tag_id)
-                        .where(Tag.name.ilike(func.concat('%', query, '%')))
+                        .where(Tag.name.ilike(like))
                     ),
                 ),
             )

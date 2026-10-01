@@ -253,7 +253,9 @@ export function useAIChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [backgroundWorking, setBackgroundWorking] = useState(false);
   const [turnPhase, setTurnPhase] = useState<string | null>(null);
-  const { chatMessages, addChatMessage, setChatMessages } = useAppStore();
+  const chatMessages = useAppStore((s) => s.chatMessages);
+  const addChatMessage = useAppStore((s) => s.addChatMessage);
+  const setChatMessages = useAppStore((s) => s.setChatMessages);
   const sessionIdRef = useRef<string>(getStoredSessionId());
   const abortRef = useRef<AbortController | null>(null);
   const undoStackRef = useRef<Array<{ type: string; data: unknown }>>([]);

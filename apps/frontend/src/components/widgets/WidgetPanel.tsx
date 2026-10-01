@@ -94,7 +94,7 @@ function CalendarWidget() {
               key={d}
               className={`text-xs py-0.5 rounded ${
                 isToday(d)
-                  ? "gradient-bg text-[var(--on-gradient)] font-bold shadow-glow"
+                  ? "gradient-bg text-[var(--on-gradient)] font-bold"
                   : "text-primary hover:bg-hover"
               }`}
             >
@@ -204,7 +204,7 @@ function HabitsWidget() {
               onClick={() => toggleHabit(habit)}
               className={`h-8 w-8 rounded-full border-2 flex items-center justify-center text-xs font-medium transition-all ${
                 isDone
-                  ? "bg-accent border-accent text-white"
+                  ? "bg-accent border-accent text-[var(--on-gradient)]"
                   : "border-border text-secondary hover:border-accent"
               }`}
               title={habit}

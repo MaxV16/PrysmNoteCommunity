@@ -9,7 +9,7 @@ interface TaskLinksProps {
 }
 
 export function TaskLinks({ links, taskId }: TaskLinksProps) {
-  const { tasks } = useAppStore();
+  const tasks = useAppStore((s) => s.tasks);
 
   const getTaskTitle = (id: string) => {
     if (id === taskId) return "(this task)";

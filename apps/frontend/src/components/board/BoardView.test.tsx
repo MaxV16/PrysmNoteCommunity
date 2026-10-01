@@ -16,6 +16,9 @@ vi.mock("@/stores/app-store", () => {
   const appStore = (selector?: (s: unknown) => unknown) => {
     const state = {
       tasks: h.tasks,
+      lists: [] as unknown[],
+      tags: [] as unknown[],
+      activeListId: null,
       setSelectedTaskId: h.setSelectedTaskId,
       setTasks: h.setTasks,
       selectedTaskIds: [],
@@ -27,6 +30,9 @@ vi.mock("@/stores/app-store", () => {
   };
   appStore.getState = () => ({
     tasks: h.tasks,
+    lists: [] as unknown[],
+    tags: [] as unknown[],
+    activeListId: null,
     setSelectedTaskId: h.setSelectedTaskId,
     setTasks: h.setTasks,
     selectedTaskIds: [],
@@ -191,12 +197,22 @@ describe("BoardView", () => {
     expect(screen.getByText("2 of 3 done")).toBeInTheDocument();
   });
 
-  it("toolbar toggles persist per-board preferences", () => {
-    render(<BoardView tasks={[]} />);
-    fireEvent.click(screen.getByTestId("scroll-vertical"));
-    expect(h.setPreference).toHaveBeenCalledWith("board_board_scroll_direction", "vertical");
-    fireEvent.click(screen.getByTestId("layout-side-by-side"));
-    expect(h.setPreference).toHaveBeenCalledWith("board_board_card_layout", "side_by_side");
+  it("filters the board by completion", () => {
+    const active = makeTask("parent-1", { title: "Alpha task" });
+    const done = makeTask("parent-2", { title: "Zeta task", status: "done" });
+    h.tasks = [active, done];
+    render(<BoardView tasks={[active, done]} />);
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.getByText("Zeta task")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("board-filter-active"));
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.queryByText("Zeta task")).toBeNull();
+    fireEvent.click(screen.getByTestId("board-filter-completed"));
+    expect(screen.queryByText("Alpha task")).toBeNull();
+    expect(screen.getByText("Zeta task")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("board-filter-all"));
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.getByText("Zeta task")).toBeInTheDocument();
   });
 
   it("adds a section from the toolbar", () => {
@@ -207,5 +223,44 @@ describe("BoardView", () => {
     // useBoardSections.addSection is mocked; the section appears only after the
     // server round-trip, so just assert the toolbar flow completed without error.
     expect(screen.queryByPlaceholderText("Section name")).not.toBeInTheDocument();
+  });
+
+  it("per-column quick add posts to /tasks/ scoped to the section and refreshes", async () => {
+    h.sections = [
+      { id: "sec-1", kind: "board", title: "Ideas", color: null, status: null, position: 0 },
+    ];
+    h.tasks = [];
+    const { api } = await import("@/lib/api");
+    (api.post as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "new-1" });
+    render(<BoardView tasks={[]} />);
+
+    // The first "+ Add task" belongs to the Ideas section (the second is Unsorted).
+    fireEvent.click(screen.getAllByText("+ Add task")[0]);
+    fireEvent.change(screen.getByPlaceholderText("Task title"), { target: { value: "First task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith(
+        "/tasks/",
+        expect.objectContaining({
+          title: "First task",
+          status: "backlog",
+          board_section_id: "sec-1",
+        })
+      );
+    });
+    expect(h.fetchTasks).toHaveBeenCalled();
+  });
+
+  it("empty-state CTA opens the board-scoped rich create form", () => {
+    h.sections = [
+      { id: "sec-1", kind: "board", title: "Ideas", color: null, status: null, position: 0 },
+    ];
+    h.tasks = [];
+    render(<BoardView tasks={[]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Create a task/i }));
+
+    expect(screen.getByPlaceholderText("What needs to be done?")).toBeInTheDocument();
   });
 });

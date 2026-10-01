@@ -1,3 +1,15 @@
 apps/frontend/src/ee
 apps/frontend/ee
 apps/backend/ee
+
+# Never ship host installs, build output, VCS metadata, or secrets into an image.
+# The Dockerfiles install their own dependencies; a host node_modules in the
+# context only bloats the build (and the CircleCI remote-docker transfer).
+**/node_modules
+**/.next
+**/.git
+**/.DS_Store
+.env
+.env.*
+.deploy-ssh
+backups

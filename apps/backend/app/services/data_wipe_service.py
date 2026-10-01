@@ -27,7 +27,7 @@ from uuid import UUID
 
 from sqlalchemy import Uuid as SATypeUuid
 from sqlalchemy import bindparam, select, text
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Typed bind for the user id so every statement goes through SQLAlchemy's Uuid
@@ -63,6 +63,9 @@ CORE_WIPE_SPECS: list[tuple[str, str]] = [
     ("ai_memories", "user_id = :uid"),
     ("ai_cache", "user_id = :uid"),
     ("ai_usage", "user_id = :uid"),
+    ("financial_transactions", "user_id = :uid"),
+    ("financial_items", "user_id = :uid"),
+    ("api_tokens", "user_id = :uid"),
     ("analytics_events", "user_id = :uid"),
     ("token_blacklist", "user_id = :uid"),
     ("team_members", "user_id = :uid"),
@@ -130,11 +133,17 @@ async def wipe_user_data(
     for spec in _wipe_specs():
         table = spec[0]
         try:
-            if dry_run:
-                n = await _row_count(session, spec, user_id)
-            else:
-                n = await _delete_all(session, spec, user_id)
-        except (OperationalError, ProgrammingError) as exc:
+            # Each spec runs in its own SAVEPOINT. A missing table (e.g. an EE
+            # table absent on a fresh or community database, such as the legacy
+            # ee_accounts table after the accounts feature was removed) aborts
+            # the statement in PostgreSQL; without the savepoint that failure
+            # poisons the whole transaction and every later spec errors out.
+            async with session.begin_nested():
+                if dry_run:
+                    n = await _row_count(session, spec, user_id)
+                else:
+                    n = await _delete_all(session, spec, user_id)
+        except DBAPIError as exc:
             # A table that does not exist (e.g. EE tables absent in a community
             # build) is fine - skip it; anything else must not be swallowed.
             if not _table_missing(exc):

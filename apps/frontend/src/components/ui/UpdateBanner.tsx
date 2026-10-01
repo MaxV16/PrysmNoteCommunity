@@ -12,7 +12,7 @@ export function UpdateBanner() {
   if (!outdated) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-[9999] -translate-x-1/2 pointer-events-none">
+      <div className="fixed bottom-4 left-1/2 z-[9999] -translate-x-1/2 pointer-events-none max-md:bottom-24">
       <div className="pointer-events-auto flex items-center gap-3 rounded-xl border border-accent/40 bg-elevated px-4 py-2.5 text-sm shadow-lg slide-up">
         <span className="text-secondary">A new update is available.</span>
         <button

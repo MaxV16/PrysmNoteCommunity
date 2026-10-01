@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { FOREGROUND_REFRESH_EVENT } from "@/hooks/useForegroundRefresh";
 import type {
   TMDBResult,
   WatchlistItem,
@@ -12,7 +13,9 @@ import type {
 } from "@/types/watchlist";
 
 export interface WatchlistAddPayload {
-  tmdb_id: number;
+  // Optional for manual entries: the backend synthesizes a stable negative id
+  // when it is omitted (and tries a TMDB title search first when configured).
+  tmdb_id?: number;
   media_type: WatchlistMediaType;
   title?: string;
   release_year?: number | null;
@@ -44,6 +47,13 @@ export function useWatchlist() {
 
   useEffect(() => {
     void fetchItems();
+  }, [fetchItems]);
+
+  // Cross-device sync: an item added on another device appears on return.
+  useEffect(() => {
+    const onRefresh = () => void fetchItems();
+    window.addEventListener(FOREGROUND_REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(FOREGROUND_REFRESH_EVENT, onRefresh);
   }, [fetchItems]);
 
   const search = useCallback(async (query: string): Promise<TMDBResult[]> => {

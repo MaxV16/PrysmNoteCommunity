@@ -13,7 +13,7 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.watchlist import WatchlistItem
 from app.services import tmdb_service, watchlist_service
@@ -60,7 +60,9 @@ WATCHLIST_SYSTEM_NOTE = (
     "WATCHLIST: You can manage the user's Shows & Movies watchlist (TMDB-backed movie/TV "
     "tracking). Decode watchlist intent in plain language: \"add X to my watchlist\" -> "
     "search_titles to find the exact title, then add_watchlist_item with the tmdb_id and "
-    "media_type returned; \"what am I watching / what's on my list\" -> list_watchlist "
+    "media_type returned. If search_titles returns no results, add_watchlist_item with just "
+    "media_type and title (a manual entry), never tell the user you cannot add it; \"what am I "
+    "watching / what's on my list\" -> list_watchlist "
     "(optionally filtering by status plan_to_watch / watching / watched); \"mark Severance "
     "watched\" -> update_watchlist_item with status=\"watched\"; \"rate it 9\" -> "
     "update_watchlist_item with rating 9; \"remove X from my watchlist\" is DESTRUCTIVE - "
@@ -80,7 +82,7 @@ WATCHLIST_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_titles",
-            "description": "Search movies and TV shows by title (TMDB multi-search). Returns the top matches with tmdb_id, media_type (movie or tv), title, release_year and poster_url. Use this FIRST whenever the user wants to add something to their watchlist so you can pass the correct tmdb_id and media_type to add_watchlist_item.",
+            "description": "Search movies and TV shows by title (TMDB multi-search). Returns the top matches with tmdb_id, media_type (movie or tv), title, release_year and poster_url. Use this FIRST whenever the user wants to add something to their watchlist so you can pass the correct tmdb_id and media_type to add_watchlist_item. When it returns no results, still call add_watchlist_item with media_type and title (a manual entry is created).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -108,20 +110,20 @@ WATCHLIST_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "add_watchlist_item",
-            "description": "Add a movie or TV show to the user's watchlist. Pass tmdb_id and media_type from search_titles; title/release_year/poster_path are optional manual fallbacks. status defaults to plan_to_watch. rating is 1-10. Returns the serialized item or an error if it is already on the watchlist.",
+            "description": "Add a movie or TV show to the user's watchlist. Pass tmdb_id and media_type from search_titles when available; if search returns nothing (or there is no search access), pass media_type and title only and the item is added as a manual entry with a synthesized id. status defaults to plan_to_watch. rating is 1-10. Returns the serialized item or an error if it is already on the watchlist.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "tmdb_id": {"type": "integer"},
+                    "tmdb_id": {"type": "integer", "description": "optional; omit for a manual entry when search finds nothing"},
                     "media_type": {"type": "string", "enum": ["movie", "tv"]},
-                    "title": {"type": "string"},
+                    "title": {"type": "string", "description": "required when tmdb_id is omitted"},
                     "release_year": {"type": "integer"},
                     "poster_path": {"type": "string"},
                     "status": {"type": "string", "enum": ["plan_to_watch", "watching", "watched"]},
                     "rating": {"type": "integer", "minimum": 1, "maximum": 10},
                     "notes": {"type": "string"},
                 },
-                "required": ["tmdb_id", "media_type"],
+                "required": ["media_type"],
             },
         },
     },
@@ -129,7 +131,7 @@ WATCHLIST_TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "update_watchlist_item",
-            "description": "Update an existing watchlist item (status, rating 1-10, notes, watched_at YYYY-MM-DD). Use when the user marks something watched, rates it, or edits its notes. Only include fields that changed.",
+            "description": "Update an existing watchlist item (status, rating 1-10, notes, watched_at YYYY-MM-DD). Use when the user marks something watched, rates it, or edits its notes. Only include fields that changed; pass null for rating, notes or watched_at to clear them.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -198,19 +200,38 @@ async def _add_watchlist_item(args: dict, user_id: str, session) -> dict:
     media_type = str(args.get("media_type") or "").strip()
     if media_type not in VALID_MEDIA_TYPES:
         return {"error": "media_type must be movie or tv"}
-    try:
-        tmdb_id = int(args.get("tmdb_id"))
-    except (TypeError, ValueError):
-        return {"error": "tmdb_id is required and must be an integer"}
+    title = str(args.get("title") or "").strip()
+    raw_tmdb_id = args.get("tmdb_id")
+    if raw_tmdb_id is not None:
+        try:
+            raw_tmdb_id = int(raw_tmdb_id)
+        except (TypeError, ValueError):
+            return {"error": "tmdb_id must be an integer when provided"}
+    if raw_tmdb_id is None and not title:
+        return {"error": "title is required when tmdb_id is not provided"}
+
+    tmdb_id, resolved_title, search_poster, search_year = await watchlist_service.resolve_add_identity(
+        media_type, title, raw_tmdb_id
+    )
+    resolved_title = (resolved_title or title).strip()
     status = _clean_status(args.get("status")) or "plan_to_watch"
     rating = _rating(args)
 
-    duplicate = await session.execute(
-        select(WatchlistItem.id).where(
-            WatchlistItem.user_id == UUID(user_id),
-            WatchlistItem.tmdb_id == tmdb_id,
+    if watchlist_service.is_synthetic(tmdb_id):
+        duplicate = await session.execute(
+            select(WatchlistItem.id).where(
+                WatchlistItem.user_id == UUID(user_id),
+                WatchlistItem.media_type == media_type,
+                func.lower(WatchlistItem.title) == resolved_title.lower(),
+            )
         )
-    )
+    else:
+        duplicate = await session.execute(
+            select(WatchlistItem.id).where(
+                WatchlistItem.user_id == UUID(user_id),
+                WatchlistItem.tmdb_id == tmdb_id,
+            )
+        )
     if duplicate.scalar_one_or_none():
         return {"error": "Already on your watchlist", "code": 409}
 
@@ -218,9 +239,9 @@ async def _add_watchlist_item(args: dict, user_id: str, session) -> dict:
         user_id=UUID(user_id),
         tmdb_id=tmdb_id,
         media_type=media_type,
-        title=str(args.get("title") or "").strip(),
-        poster_path=args.get("poster_path"),
-        release_year=args.get("release_year"),
+        title=resolved_title,
+        poster_path=args.get("poster_path") or search_poster,
+        release_year=args.get("release_year") if args.get("release_year") is not None else search_year,
         status=status,
         rating=rating,
         notes=args.get("notes"),
@@ -254,10 +275,14 @@ async def _update_watchlist_item(args: dict, user_id: str, session) -> dict:
     if status:
         item.status = status
     if "rating" in args:
-        rating = _rating(args)
-        if rating is None:
-            return {"error": "rating must be an integer between 1 and 10"}
-        item.rating = rating
+        if args.get("rating") is None:
+            # Explicit null clears the rating (matches the REST PATCH).
+            item.rating = None
+        else:
+            rating = _rating(args)
+            if rating is None:
+                return {"error": "rating must be an integer between 1 and 10"}
+            item.rating = rating
     if "notes" in args:
         item.notes = args.get("notes")
     if "watched_at" in args:

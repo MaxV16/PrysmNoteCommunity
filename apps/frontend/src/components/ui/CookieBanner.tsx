@@ -33,7 +33,7 @@ export function CookieBanner() {
   if (!visible) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-[9998] w-[360px] max-w-[calc(100%-2rem)]">
+      <div className="fixed bottom-4 right-4 z-30 w-[360px] max-w-[calc(100%-2rem)] max-md:bottom-24">
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 text-sm shadow-lg">
         <p className="text-secondary">
           We use only essential cookies to keep you signed in and secure. We do not use

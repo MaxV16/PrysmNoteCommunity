@@ -5,6 +5,7 @@ import {
   ONBOARDING_STEPS,
   useOnboardingTour,
 } from "@/hooks/useOnboardingTour";
+import { minOverlayTop } from "@/lib/desktop-bridge";
 
 interface Rect {
   top: number;
@@ -94,8 +95,12 @@ export function OnboardingTour() {
     const h = card.offsetHeight;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
+    // Keep the card clear of the desktop window controls (macOS traffic lights
+    // live inside the top-left of the window when the shell uses hiddenInset).
+    const minTop = minOverlayTop(16);
     let top = rect.bottom + 12;
-    if (top + h + 16 > vh) top = Math.max(16, rect.top - h - 12);
+    if (top + h + 16 > vh) top = Math.max(minTop, rect.top - h - 12);
+    top = Math.max(minTop, top);
     const left = Math.min(Math.max(16, rect.left), Math.max(16, vw - w - 16));
     setTooltipPos({ top, left });
   }, [step, rect]);

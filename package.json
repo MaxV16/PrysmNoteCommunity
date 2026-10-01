@@ -12,6 +12,14 @@
     "smoke:api": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/api-smoke.mjs",
     "smoke:ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke.mjs",
     "smoke:ui-mobile": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke-mobile.mjs",
+    "smoke:timeline": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-infinite-smoke.mjs",
+    "smoke:timeline-drag": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-drag-smoke.mjs",
+    "smoke:timeline-pan": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-pan-smoke.mjs",
+    "smoke:timeline-touch": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-touch-smoke.mjs",
+    "smoke:marketing": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/marketing-menu-smoke.mjs",
+    "smoke:marketing-links": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/marketing-links-smoke.mjs",
+    "smoke:marketing-mobile": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/marketing-mobile-smoke.mjs",
+    "smoke:404": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/not-found-smoke.mjs",
     "build:desktop": "node scripts/build-desktop.mjs"
   },
   "overrides": {

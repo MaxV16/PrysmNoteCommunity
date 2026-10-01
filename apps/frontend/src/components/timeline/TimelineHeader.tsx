@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
+import { todayStart } from "@/lib/dates";
 import { DAY_HEADER_HEIGHT } from "./constants";
 
 interface TimelineHeaderProps {
@@ -8,25 +9,30 @@ interface TimelineHeaderProps {
   dayWidth?: number;
 }
 
-export function TimelineHeader({ days, dayWidth = 120 }: TimelineHeaderProps) {
+/**
+ * Day/date header strip. Memoized and keyed by SLICE INDEX, not by date: when
+ * the rendered slice shifts, the 260 cells are patched in place (text and
+ * `data-is-today` update) instead of being unmounted and recreated, which was a
+ * ~150ms freeze every time the slice moved.
+ */
+export const TimelineHeader = memo(function TimelineHeader({ days, dayWidth = 120 }: TimelineHeaderProps) {
   const dayRows = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = todayStart();
     return days.map((day) => {
       const d = new Date(day);
       d.setHours(0, 0, 0, 0);
       const isToday = d.getTime() === today.getTime();
       const dayName = d.toLocaleDateString("en-US", { weekday: "short" });
       const dayNum = d.getDate();
-      return { dayName, dayNum, isToday, key: d.toISOString() };
+      return { dayName, dayNum, isToday };
     });
   }, [days]);
 
   return (
     <div className="flex border-b border-border bg-surface sticky top-0 z-20 shrink-0" style={{ width: "100%", minWidth: "max-content", height: DAY_HEADER_HEIGHT }}>
-      {dayRows.map(({ dayName, dayNum, isToday, key }) => (
+      {dayRows.map(({ dayName, dayNum, isToday }, index) => (
         <div
-          key={key}
+          key={`hdr-${index}`}
           data-day-header
           data-is-today={isToday ? "true" : "false"}
           className="flex flex-col items-center justify-center py-3"
@@ -44,4 +50,4 @@ export function TimelineHeader({ days, dayWidth = 120 }: TimelineHeaderProps) {
       ))}
     </div>
   );
-}
+});

@@ -134,7 +134,7 @@ export function MediaCard({ item, region, onUpdate, onRemove, fetchProviders }: 
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as WatchlistStatus)}
-                className="w-full rounded-lg border border-border bg-elevated px-2 py-1.5 text-primary outline-none focus:border-accent [&>option]:bg-surface [&>option]:text-primary"
+                className="w-full rounded-lg border border-border bg-elevated px-2 py-1.5 text-xs text-primary focus:border-accent focus:outline-none [&>option]:bg-surface [&>option]:text-primary"
               >
                 {STATUSES.map((s) => (
                   <option key={s} value={s}>
@@ -149,7 +149,7 @@ export function MediaCard({ item, region, onUpdate, onRemove, fetchProviders }: 
               <select
                 value={rating === null ? "" : String(rating)}
                 onChange={(e) => setRating(e.target.value ? Number(e.target.value) : null)}
-                className="w-full rounded-lg border border-border bg-elevated px-2 py-1.5 text-primary outline-none focus:border-accent [&>option]:bg-surface [&>option]:text-primary"
+                className="w-full rounded-lg border border-border bg-elevated px-2 py-1.5 text-xs text-primary focus:border-accent focus:outline-none [&>option]:bg-surface [&>option]:text-primary"
               >
                 <option value="">No rating</option>
                 {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (

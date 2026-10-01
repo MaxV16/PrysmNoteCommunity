@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { api } from "@/lib/api";
 import { track } from "@/lib/track";
 import Link from "next/link";
 import { OAuthButtons } from "@/components/auth/OAuthButtons";
+import { AuthThemeToggle } from "@/components/auth/AuthThemeToggle";
+import { FormStatus } from "@/components/ui/FormStatus";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 
 const SSO_ERROR_MESSAGES: Record<string, string> = {
@@ -27,6 +30,10 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [registered, setRegistered] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [resending, setResending] = useState(false);
+  const [resent, setResent] = useState(false);
+  const [resendError, setResendError] = useState("");
+  const [resendCooldownUntil, setResendCooldownUntil] = useState(0);
   // Bumped on each failed submit: the siteverify token is single-use, so the
   // widget is remounted to mint a fresh one before the user retries.
   const [submitAttempt, setSubmitAttempt] = useState(0);
@@ -34,9 +41,27 @@ export default function RegisterPage() {
   const router = useRouter();
 
   useEffect(() => {
+    track("register_viewed");
     const e = new URLSearchParams(window.location.search).get("error");
     if (e && e in SSO_ERROR_MESSAGES) setSsoError(e as keyof typeof SSO_ERROR_MESSAGES);
   }, []);
+
+  const handleResendVerification = async () => {
+    if (resending || Date.now() < resendCooldownUntil) return;
+    setResending(true);
+    setResent(false);
+    setResendError("");
+    try {
+      await api.post("/auth/resend-verification", { email });
+      setResent(true);
+      // Respect the mail rate limit: keep the button quiet for a minute.
+      setResendCooldownUntil(Date.now() + 60_000);
+    } catch {
+      setResendError("Couldn't resend the verification email. Please try again.");
+    } finally {
+      setResending(false);
+    }
+  };
 
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -77,7 +102,8 @@ export default function RegisterPage() {
 
   if (registered) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-base p-4">
+      <div className="relative flex min-h-dvh items-center justify-center bg-base p-4">
+        <AuthThemeToggle />
         <div className="w-full max-w-sm scale-in">
           <div className="card p-8 relative overflow-hidden text-center">
             <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
@@ -93,12 +119,25 @@ export default function RegisterPage() {
               Click it to confirm your email - then you can sign in.
             </p>
             <p className="mt-4 text-xs text-muted">
-              Didn&apos;t get it? Check spam, or go to the{" "}
-              <Link href="/login" className="text-accent hover:text-accent-hover font-medium">
-                sign in
-              </Link>{" "}
-              page to resend.
+              Didn&apos;t get it? Check spam, then resend it below.
             </p>
+            {resendError && (
+              <FormStatus variant="error" className="mt-3">
+                {resendError}
+              </FormStatus>
+            )}
+            <button
+              type="button"
+              onClick={handleResendVerification}
+              disabled={resending || Date.now() < resendCooldownUntil}
+              className="mt-3 text-xs font-medium text-accent hover:text-accent-hover disabled:opacity-50"
+            >
+              {resent
+                ? "Verification email sent"
+                : resending
+                  ? "Sending..."
+                  : "Resend verification email"}
+            </button>
           </div>
         </div>
       </div>
@@ -106,12 +145,13 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-base p-4">
+    <div className="relative flex min-h-dvh items-center justify-center bg-base p-4">
+      <AuthThemeToggle />
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 float">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                 <circle cx="12" cy="7" r="4"/>
@@ -122,14 +162,14 @@ export default function RegisterPage() {
           </div>
 
           {error && (
-            <div className="mb-4 rounded-lg bg-danger/10 px-4 py-2.5 text-sm text-danger">
+            <FormStatus variant="error" className="mb-4">
               {error}
-            </div>
+            </FormStatus>
           )}
           {ssoError && !error && (
-            <div className="mb-4 rounded-lg bg-warning/10 px-4 py-2.5 text-sm text-warning">
+            <FormStatus variant="warning" className="mb-4">
               {SSO_ERROR_MESSAGES[ssoError]}
-            </div>
+            </FormStatus>
           )}
 
           <OAuthButtons />
@@ -189,6 +229,17 @@ export default function RegisterPage() {
             >
               {loading ? "Creating account..." : "Create Account"}
             </button>
+            <p className="text-center text-[11px] leading-relaxed text-muted">
+              By creating an account you agree to the{" "}
+              <Link href="/terms-of-service" className="text-accent hover:text-accent-hover">
+                Terms of Service
+              </Link>{" "}
+              and{" "}
+              <Link href="/privacy-policy" className="text-accent hover:text-accent-hover">
+                Privacy Policy
+              </Link>
+              .
+            </p>
           </form>
 
           <p className="mt-6 text-center text-xs text-muted">

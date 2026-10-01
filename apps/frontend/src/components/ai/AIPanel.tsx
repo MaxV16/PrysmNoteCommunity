@@ -14,6 +14,7 @@ import { getItem, setItem } from "@/lib/local-storage";
 import { decryptString } from "@/lib/crypto-utils";
 import { useApiKeys } from "@/hooks/useApiKeys";
 import { api } from "@/lib/api";
+import { track } from "@/lib/track";
 import type { WorkspaceView } from "@/components/layout/AppShell";
 
 
@@ -34,6 +35,14 @@ interface AIEntitlement {
 
 const CHAT_HISTORY_KEY = "prysm_ai_chat_history";
 const ACTIVE_CHAT_KEY = "prysm_ai_active_chat";
+const UPSELL_DISMISS_KEY = "prysm_ai_upsell_dismissed_at";
+const UPSELL_DISMISS_MS = 14 * 24 * 60 * 60 * 1000;
+
+const AI_EXAMPLE_PROMPTS = [
+  "Plan my week from a quick brain dump",
+  "What should I focus on today?",
+  "Move everything I missed to tomorrow",
+];
 
 interface ChatPanelProps {
   onClose: () => void;
@@ -248,9 +257,52 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
     timestamp: s.timestamp,
   }));
 
-  // Free tier: no AI at all (no PrysmAI, no BYOK). Gate the panel with an
-  // upgrade prompt; the community build has no gate and always sees BYOK.
+  // Free tier: no AI at all (no PrysmAI, no BYOK). Show a value-first,
+  // dismissible prompt instead of a hard lock. The community build has no gate
+  // and always sees BYOK.
   const aiLocked = entitlement?.mode === "none";
+  const [upsellDismissed, setUpsellDismissed] = useState(false);
+  const [upsellExpanded, setUpsellExpanded] = useState(false);
+  const upsellShownRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(UPSELL_DISMISS_KEY);
+      const ts = raw ? Number(raw) : 0;
+      if (Number.isFinite(ts) && ts > 0 && Date.now() - ts < UPSELL_DISMISS_MS) {
+        setUpsellDismissed(true);
+      }
+    } catch {
+      /* storage unavailable: treat as not dismissed */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!aiLocked || upsellDismissed || upsellShownRef.current) return;
+    upsellShownRef.current = true;
+    track("trial_prompt_shown");
+  }, [aiLocked, upsellDismissed]);
+
+  const dismissUpsell = useCallback(() => {
+    setUpsellDismissed(true);
+    setUpsellExpanded(false);
+    try {
+      localStorage.setItem(UPSELL_DISMISS_KEY, String(Date.now()));
+    } catch {
+      /* storage unavailable: keep the in-memory choice */
+    }
+  }, []);
+
+  const upsellCta = (
+    <a
+      href="/settings?tab=premium"
+      onClick={() => track("upgrade_clicked", { source: "ai_panel", variant: "trial" })}
+      className="rounded-xl btn btn-gradient px-5 py-2.5 text-xs font-semibold shadow-glow"
+    >
+      Start 14-day free trial
+    </a>
+  );
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-surface">
@@ -282,21 +334,67 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
       />
 
       {aiLocked ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
-          <div className="gradient-bg flex h-14 w-14 items-center justify-center rounded-2xl text-2xl float shadow-glow">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--on-gradient)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        upsellDismissed && !upsellExpanded ? (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6">
+            <div className="flex w-full max-w-sm items-center gap-3 rounded-xl border border-border bg-elevated px-4 py-3">
+              <div className="gradient-bg flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--on-gradient)]">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-primary">AI chat is on paid plans</p>
+                <p className="text-[11px] text-muted">Unlock PrysmAI or your own key.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUpsellExpanded(true)}
+                className="shrink-0 text-[11px] font-semibold text-accent hover:text-accent-hover"
+              >
+                See how
+              </button>
+            </div>
           </div>
-          <p className="text-sm font-semibold text-primary">AI is a paid feature</p>
-          <p className="text-xs text-muted">
-            Start the 14-day free trial for hosted PrysmAI, or upgrade to any plan for PrysmAI or your own API key.
-          </p>
-          <a
-            href="/settings?tab=premium"
-            className="mt-1 rounded-xl btn btn-gradient px-5 py-2.5 text-xs font-semibold shadow-glow"
-          >
-            Start free trial / View plans
-          </a>
-        </div>
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+            <div className="gradient-bg flex h-14 w-14 items-center justify-center rounded-2xl text-2xl">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--on-gradient)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            </div>
+            <p className="mt-3 text-sm font-semibold text-primary">Turn words into a plan</p>
+            <p className="mt-1 text-xs text-muted">
+              Ask in plain language and PrysmAI creates, finds, reschedules or completes your
+              tasks. Start the 14-day free trial, or use your own OpenAI, Gemini, DeepSeek or
+              OpenRouter key on any plan.
+            </p>
+            <div className="mt-4 flex w-full max-w-sm flex-col gap-2">
+              {AI_EXAMPLE_PROMPTS.map((example) => (
+                <div
+                  key={example}
+                  className="rounded-xl border border-border bg-elevated px-3 py-2 text-left text-[11px] text-secondary"
+                >
+                  &ldquo;{example}&rdquo;
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-col items-center gap-2">
+              {upsellCta}
+              <div className="flex items-center gap-4">
+                <a
+                  href="/settings?tab=premium"
+                  onClick={() => track("upgrade_clicked", { source: "ai_panel", variant: "plans" })}
+                  className="text-[11px] font-medium text-accent hover:text-accent-hover"
+                >
+                  See plans
+                </a>
+                <button
+                  type="button"
+                  onClick={dismissUpsell}
+                  className="text-[11px] text-muted hover:text-secondary"
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+          </div>
+        )
       ) : (
         <></>
       )}

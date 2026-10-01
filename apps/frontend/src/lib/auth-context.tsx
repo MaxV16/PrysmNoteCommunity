@@ -1,10 +1,15 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
 import type { User } from "@/types/user";
 import { clearUserData } from "@/lib/clear-user-data";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+
+// Seeding the user from a persisted snapshot before paint lets a returning
+// visitor skip the full-screen spinner; the network check below still runs and
+// clears the snapshot if the session is gone.
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 interface AuthContextValue {
   user: User | null;
@@ -30,12 +35,34 @@ export class EmailNotVerifiedError extends Error {
 // re-login to the same account. Re-login after a session expiry (or a container
 // restart) must not wipe your saved AI provider keys.
 const USER_ID_KEY = "prysm_user_id";
+const USER_SNAPSHOT_KEY = "prysm_user_snapshot";
 
 function getStoredUserId(): string | null {
   try {
     return localStorage.getItem(USER_ID_KEY);
   } catch {
     return null;
+  }
+}
+
+function readUserSnapshot(): User | null {
+  try {
+    const raw = localStorage.getItem(USER_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as User | null;
+    if (!parsed || typeof parsed !== "object" || !parsed.id) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function rememberUserSnapshot(user: User | null): void {
+  try {
+    if (user) localStorage.setItem(USER_SNAPSHOT_KEY, JSON.stringify(user));
+    else localStorage.removeItem(USER_SNAPSHOT_KEY);
+  } catch {
+    /* storage unavailable */
   }
 }
 
@@ -51,16 +78,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  useIsoLayoutEffect(() => {
+    const snapshot = readUserSnapshot();
+    if (snapshot) {
+      setUser(snapshot);
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch(`${API_URL}/auth/me`, { credentials: "include" });
         if (res.ok) {
-          setUser(await res.json());
+          const me = (await res.json()) as User;
+          rememberUserSnapshot(me);
+          setUser(me);
         } else {
           await fetch(`${API_URL}/auth/refresh`, { method: "POST", credentials: "include" }).catch(() => {});
           const retry = await fetch(`${API_URL}/auth/me`, { credentials: "include" });
-          if (retry.ok) setUser(await retry.json());
+          if (retry.ok) {
+            const me = (await retry.json()) as User;
+            rememberUserSnapshot(me);
+            setUser(me);
+          } else {
+            rememberUserSnapshot(null);
+            setUser(null);
+          }
         }
       } catch {
       }
@@ -89,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearUserData();
     }
     rememberUser(data.id);
+    rememberUserSnapshot(data as User);
     setUser(data as User);
   }, []);
 
@@ -128,6 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearUserData();
       }
       rememberUser(data.id);
+      rememberUserSnapshot(data as User);
       setUser(data as User);
       return { requiresVerification: false };
     },
@@ -138,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await fetch(`${API_URL}/auth/logout`, { method: "POST", credentials: "include" }).catch(() => {});
     clearUserData();
     localStorage.removeItem(USER_ID_KEY);
+    rememberUserSnapshot(null);
     setUser(null);
   }, []);
 
@@ -146,15 +193,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (res.ok) {
       const meRes = await fetch(`${API_URL}/auth/me`, { credentials: "include" });
       if (meRes.ok) {
-        setUser(await meRes.json());
+        const me = (await meRes.json()) as User;
+        rememberUserSnapshot(me);
+        setUser(me);
         return true;
       }
     }
     return false;
   }, []);
 
+  const value = useMemo(
+    () => ({ user, loading, login, register, logout, refreshSession }),
+    [user, loading, login, register, logout, refreshSession]
+  );
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshSession }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

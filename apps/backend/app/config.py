@@ -4,7 +4,6 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     database_url: str = ""
-    db_password: str = ""
     # Optional separate connection for system/background jobs (recurring-task
     # expansion, calendar pull). Uses a BYPASSRLS non-superuser role so those
     # jobs can process all users' data while the request path (database_url)
@@ -112,6 +111,8 @@ class Settings(BaseSettings):
     github_client_id: str = ""
     github_client_secret: str = ""
     github_redirect_uri: str = "http://localhost:3000/settings"
+
+
     oauth_redirect_uri: str = "http://localhost:3000/api/auth/oauth/google/callback"
     # Where the Google Calendar OAuth popup returns after consent. MUST match
     # the redirect URI registered in the Google Cloud Console for the OAuth
@@ -119,7 +120,35 @@ class Settings(BaseSettings):
     calendar_redirect_uri: str = ""
     app_origin: str = "http://localhost:3000"
 
+    # WebAuthn passkeys (core feature, all users). `rp_id` is the registrable
+    # domain a passkey is bound to; leave blank to derive it from app_origin
+    # (never from the request Host, which a client controls). Deriving the
+    # registrable domain lets one passkey work on both prysmnote.com and
+    # staging.prysmnote.com. `webauthn_origins` is a comma list of accepted
+    # origins; blank falls back to app_origin.
+    webauthn_rp_id: str = ""
+    webauthn_rp_name: str = "Prysm Note"
+    webauthn_origins: str = ""
 
+    @property
+    def resolved_webauthn_rp_id(self) -> str:
+        if self.webauthn_rp_id:
+            return self.webauthn_rp_id
+        from urllib.parse import urlparse
+
+        host = (urlparse(self.app_origin).hostname or "localhost").lower()
+        if host in ("localhost", "127.0.0.1", "::1"):
+            return "localhost"
+        parts = host.split(".")
+        # Registrable domain (last two labels) - correct for our two-label
+        # domains. Set WEBAUTHN_RP_ID explicitly for a multi-label public suffix.
+        return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+    @property
+    def resolved_webauthn_origins(self) -> list[str]:
+        if self.webauthn_origins:
+            return [o.strip().rstrip("/") for o in self.webauthn_origins.split(",") if o.strip()]
+        return [self.app_origin.rstrip("/")]
 
     # Google Calendar background pull cadence (seconds) and how many users'
     # pulls may run concurrently in the background loop (each pull runs off the
@@ -176,10 +205,17 @@ class Settings(BaseSettings):
 
     # First-party product analytics: raw events are aggregated into
     # analytics_daily and pruned after this many days (aggregates are kept
-    # forever). Internal analysis reads through the BYPASSRLS system role.
-    analytics_retention_days: int = 90
-    analytics_flush_interval: int = 5  # seconds between queue drains
+    # forever). Anonymous events (no user_id) carry no long-term value, so they
+    # are dropped sooner. Internal analysis reads through the BYPASSRLS role.
+    analytics_retention_days: int = 30
+    analytics_anon_retention_days: int = 7
+    analytics_flush_interval: int = 5  # max seconds an idle queue waits before a flush
     analytics_rollup_interval: int = 3600  # seconds between rollup passes
+
+    # Premium AI data growth bounds: expired response-cache rows are deleted by
+    # the hourly maintenance loop, and per-call usage rows are kept for roughly
+    # 13 months (enough for year-over-year allowance analysis) before pruning.
+    ai_usage_retention_days: int = 400
 
     # Trusted-proxy handling. When running behind Cloudflare/nginx (production),
     # uvicorn must be started with --proxy-headers and this forwarded-allow-ips
@@ -192,6 +228,16 @@ class Settings(BaseSettings):
     # files (GIT_SHA=<sha>). Exposed via /api/health so the frontend can compare
     # it against its baked NEXT_PUBLIC_GIT_SHA and show the update banner.
     git_sha: str = ""
+
+    # Multi-worker guard. The backend owns in-process background loops (recurring
+    # expansion, notifications, calendar pull, analytics, watchlist, cleanup).
+    # When more than one uvicorn worker runs, only ONE may execute those loops or
+    # they duplicate (double emails, double calendar pulls). Workers elect a
+    # single leader with a PostgreSQL advisory lock at startup; a follower serves
+    # HTTP only. Set to false to disable loops entirely on the web tier (e.g. a
+    # dedicated worker process) without changing code. Defaults to enabled so
+    # single-worker dev/CI behaves exactly as before.
+    run_background_loops: bool = True
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

@@ -64,6 +64,21 @@ describe("TaskBar", () => {
       </DndContext>
     );
     const bar = container.querySelector("[data-task-bar]") as HTMLElement;
-    expect(bar.style.opacity).toBe("0.5");
+    expect(bar.style.opacity).toBe("0.65");
+  });
+
+  it("keeps the lane-provided width when no drag has happened", () => {
+    // Regression: the drag engine's preview cleanup must not wipe the React-set
+    // percent width on mount (that collapsed long bars so they never intersected
+    // the viewport).
+    const task = makeTask({ title: "Long span" });
+    const { container } = render(
+      <DndContext>
+        <TaskBar task={task} style={{ left: "15%", top: 0, width: "85%" }} />
+      </DndContext>
+    );
+    const bar = container.querySelector("[data-task-bar]") as HTMLElement;
+    expect(bar.style.width).toBe("85%");
+    expect(bar.style.transform).toBe("");
   });
 });

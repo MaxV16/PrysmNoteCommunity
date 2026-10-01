@@ -49,7 +49,8 @@ describe("useAIChat refresh-on-abort", () => {
     });
 
     // Even though the reader errored mid-stream, the timeline refresh must run.
-    expect(apiGet).toHaveBeenCalledWith("/tasks/");
+    // The store snapshot is paged, so the first page carries limit/offset.
+    expect(apiGet).toHaveBeenCalledWith(expect.stringContaining("/tasks/"));
   });
 
   it("removes the empty assistant placeholder when the stream is aborted", async () => {

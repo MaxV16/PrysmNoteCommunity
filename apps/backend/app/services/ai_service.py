@@ -72,18 +72,21 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_tasks",
-            "description": "Search tasks by query string and optional date/priority/list filters. Returns every match (up to 250) with title, date, priority, status and description snippet. The user cannot see ids - identify tasks to the user by title + date + description, never by id. If the result has a \"truncated\": true field, only the first part of the matches was returned and \"omitted\" says how many more exist - re-run this same search after acting on the shown ones to fetch the rest (relevant for sweeping all matching tasks). To collect ALL tasks matching a query (e.g. 'delete all tasks called work'), call with the query and NO date filters.",
+            "description": "Search tasks by query string and optional date/priority/list filters. Returns parent tasks (not subtasks) by default - up to 250 matches with title, date, priority, status and description snippet. To include subtasks in results, set include_subtasks=true. The user cannot see ids - identify tasks to the user by title + date + description, never by id. If the result has a \"truncated\": true field, only the first part of the matches was returned and \"omitted\" says how many more exist - re-run this same search after acting on the shown ones to fetch the rest (relevant for sweeping all matching tasks). To collect ALL tasks matching a query (e.g. 'delete all tasks called work'), call with the query and NO date filters. The \"Inbox\" smart list is NOT a stored list: it is every task with no start_date and no due_date, so pass undated=true for it (NEVER search for the text \"inbox\" - that matches nothing). To scope to a named list, pass list_name (resolved case-insensitively) instead of list_id.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "search query"},
+                    "query": {"type": "string", "description": "optional search query; omit it to list by scope only (e.g. undated=true or a list_name)"},
                     "date_from": {"type": "string", "description": "YYYY-MM-DD optional start date filter"},
                     "date_to": {"type": "string", "description": "YYYY-MM-DD optional end date filter"},
                     "priority_min": {"type": "integer", "description": "minimum priority (1-5)"},
                     "priority_max": {"type": "integer", "description": "maximum priority (1-5)"},
                     "list_id": {"type": "string", "description": "optional list id to filter by"},
+                    "list_name": {"type": "string", "description": "optional list name (case-insensitive). Use this instead of list_id when the user names a list, and \"Inbox\" for undated tasks."},
+                    "undated": {"type": "boolean", "description": "true returns only tasks with NO start_date and NO due_date - this is exactly the Inbox / unscheduled list"},
+                    "include_subtasks": {"type": "boolean", "description": "if true, include subtasks in results; default false returns only parent tasks"},
                 },
-                "required": ["query"],
+                "required": [],
             },
         },
     },
@@ -106,6 +109,7 @@ TOOL_DEFINITIONS = [
                     "description": {"type": "string"},
                     "estimated_minutes": {"type": "integer", "description": "estimated time in minutes"},
                     "list_id": {"type": "string", "description": "task list id to put the task in (optional; defaults to the current/default list)"},
+                    "reminder_enabled": {"type": "boolean", "description": "set true only when the user asks to be reminded about this task (reminders are off by default)"},
                 },
                 "required": ["title"],
             },
@@ -115,7 +119,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "update_task",
-            "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} - do NOT delete the task. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date, start_time (HH:MM), end_time (HH:MM), list_id.",
+            "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} - do NOT delete the task. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date, start_time (HH:MM), end_time (HH:MM), list_id, reminder_enabled (true to remind the user about this task; reminders are off by default).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -149,6 +153,25 @@ TOOL_DEFINITIONS = [
                     "task_ids": {"type": "array", "items": {"type": "string"}, "description": "list of task ids to delete"},
                 },
                 "required": ["task_ids"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_matching_tasks",
+            "description": "Move EVERY task matching a scope to the Trash in ONE call (soft delete, restorable for 14 days). Use this for any scoped bulk delete: a list (\"delete all tasks in the Inbox\"), a date (\"delete everything on 2026-09-20\"), or a keyword (\"delete all fuel allowance tasks\"). It selects the tasks on the server, so you never have to search, collect ids and batch-delete yourself - this is the fast, reliable path. The Inbox is not a stored list: pass undated=true for it. ONLY call after the user has EXPLICITLY confirmed the deletion. Returns the real deleted_count plus the titles and dates that were trashed, so report exactly what happened. Never use this for tasks the user called done - mark those status='done' with update_task instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "optional text query; omit it to match every task in the scope"},
+                    "date_from": {"type": "string", "description": "YYYY-MM-DD optional start of the date range"},
+                    "date_to": {"type": "string", "description": "YYYY-MM-DD optional end of the date range"},
+                    "list_id": {"type": "string", "description": "optional list id to scope the deletion"},
+                    "list_name": {"type": "string", "description": "optional list name to scope the deletion (case-insensitive); use \"Inbox\" for undated tasks"},
+                    "undated": {"type": "boolean", "description": "true deletes only tasks with NO start_date and NO due_date (the Inbox)"},
+                },
+                "required": [],
             },
         },
     },
@@ -557,7 +580,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "rename_list",
-            "description": "Rename a task list.",
+            "description": "Rename a task list. The default 'My Tasks' list cannot be renamed.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -572,7 +595,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "delete_list",
-            "description": "Delete a task list. Its tasks are NOT deleted: they move to the user's default 'My Tasks' list.",
+            "description": "Delete a task list. Its tasks are NOT deleted: they move to the user's default 'My Tasks' list. The default 'My Tasks' list itself cannot be deleted.",
             "parameters": {
                 "type": "object",
                 "properties": {"list_id": {"type": "string"}},
@@ -580,9 +603,35 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "organize_timeline_into_sections",
+            "description": (
+                "AI-group the user's dated tasks into short timeline topic sections "
+                "(e.g. 'Work', 'Errands', 'Health') and pin each task to its topic. "
+                "Use when the user asks to auto-sort, organize, group, or tidy their "
+                "timeline. This uses the user's own AI access, so only run it when "
+                "asked. Already-organized tasks are left alone unless force=true. "
+                "A single run sorts up to a large per-run budget; if the result "
+                "has remaining > 0, tell the user how many tasks are left and that "
+                "running it again finishes them."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "force": {
+                        "type": "boolean",
+                        "description": "Re-classify tasks that are already in a section. Default false.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
-# Private build only: append finance tools (accounts / cash-flow projection) to
+# Private build only: append finance tools (income/expense items / cash-flow projection) to
 # the agent's toolset when the EE package is present. Defaults stay defined so
 # the community build (which strips the try/except block) still has safe no-ops.
 _FINANCE_TOOL_DEFINITIONS: list = []
@@ -617,6 +666,27 @@ _QUADRANT_SYSTEM_NOTE: str = ""
 _FOCUS_TOOL_DEFINITIONS: list = []
 _FOCUS_TOOL_HANDLERS: dict = {}
 _FOCUS_SYSTEM_NOTE: str = ""
+
+# Private build only: append GitHub AI tools (premium-gated repo/issue access
+# and task<->issue linking). Same guarded premium pattern as finance/OpenClaw;
+# joined into ee_tool_names() so free users lose them.
+_GITHUB_TOOL_DEFINITIONS: list = []
+_GITHUB_TOOL_HANDLERS: dict = {}
+_GITHUB_SYSTEM_NOTE: str = ""
+
+# Private build only: append the workflow-rule tools (task events -> Slack post
+# or GitHub issue). Same guarded premium pattern as the GitHub block above.
+_WORKFLOW_TOOL_DEFINITIONS: list = []
+_WORKFLOW_TOOL_HANDLERS: dict = {}
+_WORKFLOW_SYSTEM_NOTE: str = ""
+
+# Private build only: append the Slack team tools (post to a channel, create a
+# channel and invite people, DM a teammate, post a digest, share a task into a
+# thread, read replies, search, react, and report the roster). Same guarded
+# premium pattern as the blocks above.
+_SLACK_TOOL_DEFINITIONS: list = []
+_SLACK_TOOL_HANDLERS: dict = {}
+_SLACK_SYSTEM_NOTE: str = ""
 
 # Private build only: append the premium "how to use" feature guide (finance,
 # idea engine + OpenClaw setup, AI Connect/MCP, server voice) to the system
@@ -682,6 +752,18 @@ def focus_tool_names() -> set[str]:
     return {t.get("function", {}).get("name") for t in _FOCUS_TOOL_DEFINITIONS if t.get("function", {}).get("name")}
 
 
+def github_tool_names() -> set[str]:
+    return {t.get("function", {}).get("name") for t in _GITHUB_TOOL_DEFINITIONS if t.get("function", {}).get("name")}
+
+
+def workflow_tool_names() -> set[str]:
+    return {t.get("function", {}).get("name") for t in _WORKFLOW_TOOL_DEFINITIONS if t.get("function", {}).get("name")}
+
+
+def slack_tool_names() -> set[str]:
+    return {t.get("function", {}).get("name") for t in _SLACK_TOOL_DEFINITIONS if t.get("function", {}).get("name")}
+
+
 def ee_tool_names() -> set[str]:
     # Countdown tools are deliberately absent: countdowns are free-capped, so
     # free users keep those definitions (see tools_for_user).
@@ -690,6 +772,9 @@ def ee_tool_names() -> set[str]:
         | openclaw_tool_names()
         | quadrant_tool_names()
         | focus_tool_names()
+        | github_tool_names()
+        | workflow_tool_names()
+        | slack_tool_names()
     )
 
 
@@ -708,11 +793,18 @@ _TOOL_REFUSAL_PATTERNS = re.compile(
     r"(?:"
     r"don't have the necessary tools|"
     r"don't have (?:access|any tools|a tool|the tools|tools to|tools for)|"
+    r"don't have the (?:necessary |required |needed |proper |sufficient )?(?:access|tools?|permissions?|ability|capability)|"
+    r"i (?:do not|don'?t) have (?:the )?(?:access|tools?|permissions?|ability|capability)|"
+    r"(?:can'?t|cannot|not able to|unable to) (?:post|send|share|message|dm|invite|comment|react|stand ?up)|"
     r"cannot assist|"
     r"can't assist|"
     r"as an ai|"
     r"not able to|"
-    r"i'm (?:just |merely )?an ai|"
+    r"was(?:n'?t| not) able to|"
+    r"unable to (?:do|help|assist|complete|perform|process|find|locate|update|delete|remove|create|add|change|schedule|access)|"
+    r"(?:could not|couldn'?t) (?:do|help|complete|perform|process|find|locate|update|delete|remove|create|add|change|schedule|access)|"
+    r"failed to (?:do|complete|perform|process|find|locate|update|delete|remove|create|add|change|schedule|access)|"
+    r"i'?m (?:just |merely )?an ai|"
     r"i (?:am |'m )?not (?:able|capable|equipped|designed)|"
     r"i cannot (?:call|execute|use|access) tools|"
     r"no (?:tools?|functions?) (?:available|defined|provided)"
@@ -727,7 +819,14 @@ _HALLUCINATED_ACTION_PATTERNS = re.compile(
     r"|"
     r"(?:i'?ve )?(?:created|deleted|removed|scheduled|completed|added|marked)"
     r"|"
-    r"(?:let me|i will|going to|i'll) (?:create|delete|remove|schedule|complete|add|mark)"
+    r"(?:let me|i will|going to|i'?ll|i'?m going to)\s+"
+    r"(?:(?:try|attempt|start|begin|go ahead and|now)\s+)?"
+    r"(?:"
+    r"creat(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|"
+    r"schedul(?:e|es|ed|ing)|complet(?:e|es|ed|ing)|updat(?:e|es|ed|ing)|"
+    r"chang(?:e|es|ed|ing)|reschedul(?:e|es|ed|ing)|cancell?(?:s|ed|ing)?|"
+    r"add(?:s|ed|ing)?|mark(?:s|ed|ing)?|mov(?:e|es|ed|ing)"
+    r")\b"
     r")",
     re.IGNORECASE,
 )
@@ -736,7 +835,10 @@ _ACTION_KEYWORDS = re.compile(
     r"\b(?:"
     r"delete|remove|create|schedule|add|update|mark|complete|finish|"
     r"find|search|move|reschedule|cancel|change|rename|"
-    r"remind|notify|duplicate|split|merge"
+    r"remind|notify|duplicate|split|merge|"
+    r"post|send|share|dm|message|standup|stand|digest|slack|"
+    r"github|pull request|pr|issue|review|invite|react|comment|"
+    r"triage|repository|repo|channel"
     r")\b",
     re.IGNORECASE,
 )
@@ -797,9 +899,20 @@ def _needs_tool_retry(content: str, user_message: str) -> bool:
 # reroute to the finance tools (see runner loop in ai_turn_runner.py).
 MONEY_NUDGE = (
     "MONEY NUDGE: The user's message is about money (income, bills, debts, amounts). "
-    "Use add_financial_item / add_account and run_cashflow_projection instead of "
+    "Use add_financial_item and run_cashflow_projection instead of "
     "creating tasks for money statements. Re-issue your tool calls using the finance tools."
 )
+
+# Injected when the model answered an action request (post a standup, open a PR,
+# share a task) with plain text and no tool call. A BYOK turn has no hosting
+# chain to bump to, so without this nudge the refusal is returned to the user.
+TOOL_NUDGE = (
+    "TOOL NUDGE: The user asked you to DO something and you have tools for it. "
+    "Do not reply that you cannot do it, that it is not possible, or that you lack "
+    "access or permissions. Call the right tool now, and only write your text "
+    "answer after the tool has run, reporting what it returned."
+)
+
 
 # System-prompt block (premium only): money statements are FINANCE, not tasks.
 MONEY_RULE = (
@@ -807,7 +920,7 @@ MONEY_RULE = (
     "- Income, expenses, bills, debts, loans, amounts and their cadence (income 1,100 EUR/month, "
     "a 2,500 EUR bank loan every 3 months, rent) are FINANCE: call add_financial_item "
     "(direction income/expense, amount, start_date, frequency_unit/frequency_interval, principal "
-    "for loans) or add_account, then run_cashflow_projection. Do NOT create tasks for money statements.\n"
+    "for loans), then run_cashflow_projection. Do NOT create tasks for money statements.\n"
     "- Appointments and reminders (\"mechanic at 2\", \"remind me to pay rent\") are tasks: "
     "create_task / add_event / update_task.\n"
     "- If a statement could be either and you cannot tell, ask ONE clarifying question "
@@ -850,13 +963,15 @@ DECISION RULES:
 - If the user asks to find tasks, use search_tasks.
 - If the user asks to move a task, use reschedule_task. If they ask to edit fields, use update_task.
 - BOARD PLACEMENT: `status` is the source of truth for kanban status columns. Board "sections" are UI placement only - a task pinned to a free section keeps its status and still appears in other views by its status. When the user talks about moving a task between kanban columns or board groups, treat that as a scheduling/status concern (reschedule_task/update_task) or just acknowledge it; do not create or delete tasks because of a section move.
+- TIMELINE AUTO-SORT: when the user asks to auto-sort, organize, group, or tidy their timeline into topics, call `organize_timeline_into_sections`. It uses the user's own AI access and can take a moment; only run it when the user asks. Pass force=true only when they want everything re-grouped from scratch (already-organized tasks are otherwise left as-is).
+- REMINDERS: reminders are per-task and OFF by default. Set `reminder_enabled: true` (create_task) or `reminder_enabled` in update_task fields ONLY when the user explicitly asks to be reminded about that task ("remind me", "don't let me forget"). Never turn reminders on unless asked.
 - Never end the turn after doing only read-only searches when the user asked you to CREATE something. Finish the job.
 
 DON'T FABRICATE SUCCESS: When the user asked you to CREATE or SCHEDULE a task (or several), never claim "Done!" / "I've created it" / "scheduled!" in your final reply unless your tool call actually returned `"created": true` (or `"created_count": N` for batch). If you did not make a successful create call, you have NOT created anything - do NOT affirm a schedule that doesn't exist. Instead, end the turn asking the ONE clarifying question you need (date, title, or priority) so you can then actually create it. A confirmation of a non-created schedule is a bug.
 
 COMPLETING VS DELETING:
 - If the user says a task is "done", "complete", "completed", "finished", "marked off", or asks to check it off, COMPLETE it - call update_task with fields status = "done". NEVER delete a task the user said is done.
-- Deleting a task moves it to the Trash, where it sits for 14 days and CAN be restored (restore_task). When the user asks you to delete, do NOT delete in that same turn. First reply listing the EXACT tasks you will delete (title + date), then ask them to confirm. Only call delete_task in a LATER turn once the user has explicitly confirmed (e.g. "yes delete it", "go ahead", "delete them").
+- Deleting a task moves it to the Trash, where it sits for 14 days and CAN be restored (restore_task). When the user asks you to delete, do NOT delete in that same turn. First reply listing the EXACT tasks you will delete (title + date), then ask them to confirm. Only call delete_task in a LATER turn once the user has explicitly confirmed (e.g. "yes delete it", "go ahead", "delete them"). When the confirmed request is a SCOPE rather than a hand-picked list (a list, a date, the Inbox, or a keyword sweep), execute it with delete_matching_tasks instead of collecting ids.
 - If the user immediately regrets a deletion ("undo that delete", "restore it", "I deleted the wrong one"), call restore_task for that task.
 - NEVER claim a task was deleted unless delete_task returned `"deleted": true`, and NEVER claim a task was completed unless update_task returned `"updated": true`. If a tool returns an error (e.g. "Task not found", "Invalid task_id format"), do NOT pretend the delete/complete happened - report the failure and retry with the correct id.
 
@@ -874,6 +989,16 @@ BULK DELETION - catch EVERYTHING in one sweep:
 - To collect all tasks matching a description (e.g. "delete all tasks called work"), run search_tasks ONCE with the query and NO date filters so you see the full universe (search returns up to 250 matches).
 - A search result can be TOO LARGE to return at once. If it contains "truncated": true, the listed tasks are only the FIRST PART and "omitted" tells you how many more matches exist. Treat that like any partial view: act on the listed ones (or report them), then re-run the same search to fetch the next part, and repeat until a search no longer returns "truncated".
 - After batch_delete_tasks returns, VERIFY: run search_tasks AGAIN with the same query (no date filters). If any matches remain (weekends, Mondays, date-less ones, anything), batch_delete them too. Only then report the final real total deleted. Never claim "all deleted" while matches remain.
+
+INBOX, UNSCHEDULED AND LIST NAMES:
+- The "Inbox" smart list is NOT a stored list - it is every task with NO start_date and NO due_date. When the user says "inbox", "unscheduled", "no date" or "someday", pass undated=true (and list_name="Inbox" if that reads more naturally). NEVER search for the text "inbox": that matches no titles, which is exactly why such requests used to come back empty.
+- To scope to a named list, pass list_name to search_tasks / delete_matching_tasks (it resolves case-insensitively; you do NOT need list_lists first). Use list_id only when you already have one.
+- You CAN delete tasks in the Inbox, on a date, or in a named list. Never tell the user a scoped delete is not possible.
+
+SCOPED BULK DELETE (prefer this over id juggling):
+- For any scoped "delete all X" - a list ("delete all tasks in the Inbox"), a date ("delete everything on 2026-09-20"), or a keyword ("delete all fuel allowance tasks") - call delete_matching_tasks ONCE with the scope filters and NO ids. It selects and soft-deletes every match server-side and returns the real deleted_count plus the titles it trashed, so it is both faster (one tool call instead of search -> ids -> batch_delete) and more reliable.
+- If it reports deleted_count = 250, matches may remain: call it again with the same scope and repeat until fewer come back.
+- Fall back to search_tasks -> batch_delete_tasks only when you must hand-pick a subset of matches.
 
 TOOL USAGE TIPS:
 - Use complete_task to mark a task done; use update_task with status="done" as an equivalent. Never delete a task the user just said is done.
@@ -935,6 +1060,7 @@ ALWAYS:
 - Use reschedule_task when moving tasks, not just update_task.
 - When creating or rescheduling a task onto a specific date, check that date for conflicts (list_tasks_by_date_range) and warn the user if the day is already crowded or a higher-priority/medical task is scheduled.
 - To view a task's subtasks call get_subtasks; to add/update/delete/reorder them use the matching subtask tools. To rewrite a long description into a checklist use convert_description_to_subtasks; to collapse a checklist back into prose use convert_subtasks_to_description.
+- search_tasks returns only parent tasks by default; pass include_subtasks=true to include subtasks in results.
 - Use get_task_details to inspect any task (with its links, tags and subtasks) before manipulating it.
 - Be concise and decisive.
 
@@ -1018,10 +1144,12 @@ REPLY FORMATTING (always follow):
     # earlier chat was about, so a task-heavy history can never drift the model
     # into answering "list my financial items" without the money tools.
     system_content += (
-        "\n\nFEATURE TOOLS: Tools for finance (accounts/expenses/income), "
-        "countdowns, the quadrant view, habits, and your watchlist are always "
+        "\n\nFEATURE TOOLS: Tools for finance (income/expenses/debts), "
+        "countdowns, the quadrant view, habits, your watchlist, and your "
+        "connected GitHub (repositories/issues) are always "
         "available to you in this session. If the user asks about money, a "
-        "countdown, a quadrant, a habit, or a show/movie, call the matching "
+        "countdown, a quadrant, a habit, a show/movie, or a GitHub repo/issue, "
+        "call the matching "
         "tool immediately regardless of what the earlier chat was about. Never "
         "answer such a question without checking data via a tool first."
     )
@@ -1038,6 +1166,12 @@ REPLY FORMATTING (always follow):
         system_content += "\n\n" + _QUADRANT_SYSTEM_NOTE
     if include_finance and _FOCUS_SYSTEM_NOTE:
         system_content += "\n\n" + _FOCUS_SYSTEM_NOTE
+    if include_finance and _GITHUB_SYSTEM_NOTE:
+        system_content += "\n\n" + _GITHUB_SYSTEM_NOTE
+    if include_finance and _SLACK_SYSTEM_NOTE:
+        system_content += "\n\n" + _SLACK_SYSTEM_NOTE
+    if include_finance and _WORKFLOW_SYSTEM_NOTE:
+        system_content += "\n\n" + _WORKFLOW_SYSTEM_NOTE
     system_content += "\n\n" + PYRSM_FEATURE_GUIDE
     if include_finance and _PREMIUM_GUIDE_TEXT:
         system_content += "\n\n" + _PREMIUM_GUIDE_TEXT
@@ -1125,7 +1259,7 @@ async def execute_tool_calls(
             return _time(hour, minute, second)
         except ValueError:
             return None
-    from app.services.task_service import create_task, search_tasks, get_task
+    from app.services.task_service import create_task, create_tasks_bulk, search_tasks, get_task
 
     def _safe_uuid(value):
         """Tolerantly parse a task id the model handed over.
@@ -1149,6 +1283,88 @@ async def execute_tool_calls(
             return UUID(compact)
         except (ValueError, TypeError, AttributeError):
             return None
+
+    async def _resolve_list_id_by_name(list_name):
+        """Resolve a list the user named (case-insensitive) to its id."""
+        from app.models.task_list import TaskList
+
+        needle = (list_name or "").strip().lower()
+        if not needle:
+            return None
+        rows = (
+            await session.execute(
+                select(TaskList).where(TaskList.user_id == UUID(user_id))
+            )
+        ).scalars().all()
+        for row in rows:
+            if row.name and row.name.strip().lower() == needle:
+                return row.id
+        for row in rows:
+            if row.name and needle in row.name.strip().lower():
+                return row.id
+        return None
+
+    _INBOX_ALIASES = ("inbox", "unscheduled", "no date", "no dates", "someday")
+
+    def _is_inbox_alias(name):
+        return bool(name) and str(name).strip().lower() in _INBOX_ALIASES
+
+    async def _scoped_tasks(
+        query=None,
+        date_from=None,
+        date_to=None,
+        list_id=None,
+        list_name=None,
+        undated=False,
+        limit=None,
+        include_subtasks=False,
+    ):
+        """Select the user's live tasks matching a scope (no text ranking).
+
+        Returns (tasks, unmatched_list_name, undated_applied). `undated` filters
+        to tasks with no start_date and no due_date - the Inbox smart list, which
+        is NOT a stored list.
+        """
+        from sqlalchemy import or_
+
+        stmt = select(Task).where(
+            Task.user_id == UUID(user_id),
+            Task.deleted_at.is_(None),
+        )
+        if not include_subtasks:
+            stmt = stmt.where(Task.parent_task_id.is_(None))
+        needle = (query or "").strip()
+        if needle:
+            like = f"%{needle}%"
+            stmt = stmt.where(or_(Task.title.ilike(like), Task.description.ilike(like)))
+        from_d = _parse_date_arg(date_from) if date_from else None
+        to_d = _parse_date_arg(date_to) if date_to else None
+        if from_d or to_d:
+            start = from_d or to_d
+            end = to_d or from_d
+            stmt = stmt.where(
+                or_(
+                    (Task.start_date >= start) & (Task.start_date <= end),
+                    (Task.due_date >= start) & (Task.due_date <= end),
+                    (Task.start_date <= start) & (Task.due_date >= end),
+                )
+            )
+        list_uuid = _safe_uuid(list_id) if list_id else None
+        unmatched_name = None
+        if list_uuid is None and list_name:
+            list_uuid = await _resolve_list_id_by_name(list_name)
+            if list_uuid is None:
+                unmatched_name = list_name
+        applied_undated = False
+        if list_uuid is not None:
+            stmt = stmt.where(Task.list_id == list_uuid)
+        elif undated or _is_inbox_alias(unmatched_name):
+            stmt = stmt.where(Task.start_date.is_(None), Task.due_date.is_(None))
+            applied_undated = True
+            unmatched_name = None
+        stmt = stmt.order_by(Task.created_at.desc(), Task.id.desc()).limit(limit or TOOL_SEARCH_MAX)
+        rows = (await session.execute(stmt)).scalars().all()
+        return rows, unmatched_name, applied_undated
 
     results = []
 
@@ -1177,22 +1393,20 @@ async def execute_tool_calls(
                 priority_min = args.get("priority_min")
                 priority_max = args.get("priority_max")
                 list_arg = args.get("list_id")
+                list_name = args.get("list_name")
+                undated = bool(args.get("undated"))
+                include_subtasks = bool(args.get("include_subtasks"))
 
                 from sqlalchemy import or_
                 q_lower = (query or "").lower().strip()
-                rank_expr = func.greatest(
-                    func.similarity(func.lower(Task.title), q_lower),
-                    func.similarity(func.lower(func.coalesce(Task.description, "")), q_lower),
-                ).label("rank")
-                try:
-                    stmt = select(Task, rank_expr).where(
-                        Task.user_id == UUID(user_id),
-                        Task.deleted_at.is_(None),
-                        or_(
-                            func.lower(Task.title) % q_lower,
-                            func.lower(func.coalesce(Task.description, "")) % q_lower,
-                        ),
-                    )
+
+                resolved_list = _safe_uuid(list_arg) if list_arg else None
+                if resolved_list is None and list_name:
+                    resolved_list = await _resolve_list_id_by_name(list_name)
+                    if resolved_list is None and _is_inbox_alias(list_name):
+                        undated = True
+
+                def _scope_filters(stmt):
                     if date_from:
                         stmt = stmt.where(Task.start_date >= _parse_date_arg(date_from))
                     if date_to:
@@ -1201,36 +1415,60 @@ async def execute_tool_calls(
                         stmt = stmt.where(Task.priority >= priority_min)
                     if priority_max is not None:
                         stmt = stmt.where(Task.priority <= priority_max)
-                    if list_arg:
-                        list_uuid = _safe_uuid(list_arg)
-                        if list_uuid is not None:
-                            stmt = stmt.where(Task.list_id == list_uuid)
-                    stmt = stmt.order_by(rank_expr.desc()).limit(TOOL_SEARCH_MAX)
-                    task_rank_rows = (await session.execute(stmt)).all()
-                    tasks = [t for t, _r in task_rank_rows]
-                except Exception:
-                    stmt = select(Task).where(
-                        Task.user_id == UUID(user_id),
-                        Task.deleted_at.is_(None),
-                        or_(
-                            Task.title.ilike(func.concat('%', query, '%')),
-                            Task.description.ilike(func.concat('%', query, '%')),
-                        ),
+                    if resolved_list is not None:
+                        stmt = stmt.where(Task.list_id == resolved_list)
+                    if undated:
+                        stmt = stmt.where(Task.start_date.is_(None), Task.due_date.is_(None))
+                    if not include_subtasks:
+                        stmt = stmt.where(Task.parent_task_id.is_(None))
+                    return stmt
+
+                if not q_lower:
+                    scoped, _unmatched, _applied = await _scoped_tasks(
+                        date_from=date_from,
+                        date_to=date_to,
+                        list_id=list_arg,
+                        list_name=list_name,
+                        undated=undated,
+                        include_subtasks=include_subtasks,
                     )
-                    if date_from:
-                        stmt = stmt.where(Task.start_date >= _parse_date_arg(date_from))
-                    if date_to:
-                        stmt = stmt.where(Task.start_date <= _parse_date_arg(date_to))
-                    if priority_min is not None:
-                        stmt = stmt.where(Task.priority >= priority_min)
-                    if priority_max is not None:
-                        stmt = stmt.where(Task.priority <= priority_max)
-                    if list_arg:
-                        list_uuid = _safe_uuid(list_arg)
-                        if list_uuid is not None:
-                            stmt = stmt.where(Task.list_id == list_uuid)
-                    stmt = stmt.limit(TOOL_SEARCH_MAX)
-                    tasks = (await session.execute(stmt)).scalars().all()
+                    tasks = [
+                        t for t in scoped
+                        if (priority_min is None or t.priority >= priority_min)
+                        and (priority_max is None or t.priority <= priority_max)
+                    ]
+                else:
+                    rank_expr = func.greatest(
+                        func.similarity(func.lower(Task.title), q_lower),
+                        func.similarity(func.lower(func.coalesce(Task.description, "")), q_lower),
+                    ).label("rank")
+                    try:
+                        stmt = select(Task, rank_expr).where(
+                            Task.user_id == UUID(user_id),
+                            Task.deleted_at.is_(None),
+                            or_(
+                                func.lower(Task.title) % q_lower,
+                                func.lower(func.coalesce(Task.description, "")) % q_lower,
+                            ),
+                        )
+                        stmt = _scope_filters(stmt)
+                        stmt = stmt.order_by(rank_expr.desc()).limit(TOOL_SEARCH_MAX)
+                        task_rank_rows = (await session.execute(stmt)).all()
+                        tasks = [t for t, _r in task_rank_rows]
+                    except Exception:
+                        # SQL concat() is not portable (missing on SQLite < 3.44);
+                        # build the LIKE pattern as a bound parameter instead.
+                        like = f"%{query}%"
+                        stmt = select(Task).where(
+                            Task.user_id == UUID(user_id),
+                            Task.deleted_at.is_(None),
+                            or_(
+                                Task.title.ilike(like),
+                                Task.description.ilike(like),
+                            ),
+                        )
+                        stmt = _scope_filters(stmt)
+                        tasks = (await session.execute(stmt.limit(TOOL_SEARCH_MAX))).scalars().all()
                 found = [{"id": str(t.id), "title": t.title, "status": t.status.value if t.status else None,
                           "priority": t.priority, "start_date": str(t.start_date) if t.start_date else None,
                           "due_date": str(t.due_date) if t.due_date else None,
@@ -1250,7 +1488,7 @@ async def execute_tool_calls(
                     select(Task).where(
                         Task.user_id == UUID(user_id),
                         Task.deleted_at.is_(None),
-                        Task.title.ilike(func.concat('%', title[:30], '%')),
+                        Task.title.ilike(f"%{title[:30]}%"),
                         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                     ).limit(3)
                 )
@@ -1284,6 +1522,9 @@ async def execute_tool_calls(
                     recurrence_end_date=args.get("recurrence_end_date"),
                     list_id=_safe_uuid(args.get("list_id")),
                 )
+
+                if args.get("reminder_enabled"):
+                    task.reminder_enabled = True
 
                 # Conflict enrichment: after creating a dated task, surface any
                 # overlapping tasks on the same day so the model can warn the user
@@ -1485,6 +1726,72 @@ async def execute_tool_calls(
                         "note": "Tasks were moved to the Trash (restorable for 14 days).",
                     }),
                 })
+
+            elif name == "delete_matching_tasks":
+                query = args.get("query")
+                date_from = args.get("date_from")
+                date_to = args.get("date_to")
+                list_arg = args.get("list_id")
+                list_name = args.get("list_name")
+                undated = bool(args.get("undated"))
+
+                has_scope = bool(
+                    (query or "").strip()
+                    or date_from
+                    or date_to
+                    or list_arg
+                    or list_name
+                    or undated
+                )
+                if not has_scope:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({
+                            "error": "Refusing to delete: no scope given. Pass a query, a date range, list_id/list_name, or undated=true."
+                        }),
+                    })
+                else:
+                    scoped, unmatched_name, _applied = await _scoped_tasks(
+                        query=query,
+                        date_from=date_from,
+                        date_to=date_to,
+                        list_id=list_arg,
+                        list_name=list_name,
+                        undated=undated,
+                    )
+                    if unmatched_name:
+                        results.append({
+                            "tool_call_id": tc.get("id"),
+                            "role": "tool",
+                            "content": json.dumps({
+                                "error": f"No list named '{unmatched_name}' was found, so nothing was deleted.",
+                                "deleted_count": 0,
+                            }),
+                        })
+                    else:
+                        targets = [t for t in scoped if t.parent_task_id is None]
+                        ids = [t.id for t in targets]
+                        deleted = 0
+                        if ids:
+                            from app.services.task_service import delete_tasks_batch as _soft_delete_batch
+                            deleted = await _soft_delete_batch(session, ids, UUID(user_id))
+                        note = "Tasks were moved to the Trash (restorable for 14 days)."
+                        if len(ids) >= TOOL_SEARCH_MAX:
+                            note += " More matches may remain: call delete_matching_tasks again with the same scope."
+                        results.append({
+                            "tool_call_id": tc.get("id"),
+                            "role": "tool",
+                            "content": json.dumps({
+                                "deleted_count": deleted,
+                                "failed_count": max(0, len(ids) - deleted),
+                                "deleted_titles": [
+                                    {"title": t.title, "start_date": str(t.start_date) if t.start_date else None}
+                                    for t in targets[:50]
+                                ],
+                                "note": note,
+                            }),
+                        })
 
             elif name == "get_task_details":
                 task_id = args.get("task_id")
@@ -2127,25 +2434,28 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         "content": json.dumps({"error": "Too many tasks in one batch (max 50)"}),
                     })
                     continue
-                created = []
-                for t_data in batch:
-                    title = str(t_data.get("title", "Untitled")).strip()[:500] or "Untitled"
-
-                    task = await create_task(
-                        session,
-                        user_id=UUID(user_id),
-                        title=title,
-                        description=t_data.get("description"),
-                        start_date=t_data.get("start_date"),
-                        due_date=t_data.get("due_date"),
-                        start_time=t_data.get("start_time"),
-                        end_time=t_data.get("end_time"),
-                        priority=t_data.get("priority", 2),
-                        recurrence_rule=t_data.get("recurrence_rule"),
-                        recurrence_end_date=t_data.get("recurrence_end_date"),
-                        list_id=_safe_uuid(t_data.get("list_id")),
-                    )
-                    created.append({"id": str(task.id), "title": task.title})
+                created_tasks = await create_tasks_bulk(
+                    session,
+                    UUID(user_id),
+                    [
+                        {
+                            "title": str(t_data.get("title", "Untitled")).strip()[:500] or "Untitled",
+                            "description": t_data.get("description"),
+                            "start_date": t_data.get("start_date"),
+                            "due_date": t_data.get("due_date"),
+                            "start_time": t_data.get("start_time"),
+                            "end_time": t_data.get("end_time"),
+                            "priority": t_data.get("priority", 2),
+                            "recurrence_rule": t_data.get("recurrence_rule"),
+                            "recurrence_end_date": t_data.get("recurrence_end_date"),
+                            "list_id": _safe_uuid(t_data.get("list_id")),
+                        }
+                        for t_data in batch
+                    ],
+                )
+                created = [
+                    {"id": str(task.id), "title": task.title} for task in created_tasks
+                ]
 
                 results.append({
                     "tool_call_id": tc.get("id"),
@@ -2419,7 +2729,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]),
                         or_(
                             func.lower(Task.title).contains(query.lower()),
-                            func.lower(Task.title).ilike(func.concat('%', query, '%')),
+                            func.lower(Task.title).ilike(f"%{query}%"),
                         ),
                     ]
                     if date_arg:
@@ -2524,6 +2834,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
 
             elif name == "rename_list":
                 from app.models.task_list import TaskList
+                from app.services.task_service import is_default_list_name
                 list_id = args.get("list_id")
                 name = (args.get("name") or "").strip()[:200]
                 if not name:
@@ -2552,6 +2863,12 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         "role": "tool",
                         "content": json.dumps({"error": "List not found"}),
                     })
+                elif is_default_list_name(lst.name):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "The default 'My Tasks' list cannot be renamed."}),
+                    })
                 else:
                     lst.name = name
                     await session.flush()
@@ -2563,6 +2880,7 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
 
             elif name == "delete_list":
                 from app.models.task_list import TaskList
+                from app.services.task_service import is_default_list_name
                 list_id = args.get("list_id")
                 list_uuid = _safe_uuid(list_id)
                 if list_uuid is None:
@@ -2583,6 +2901,12 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         "role": "tool",
                         "content": json.dumps({"error": "List not found"}),
                     })
+                elif is_default_list_name(lst.name):
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "The default 'My Tasks' list cannot be deleted."}),
+                    })
                 else:
                     from app.services.task_service import default_list_id
                     from sqlalchemy import update as _sa_update
@@ -2600,6 +2924,32 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                         "content": json.dumps({"deleted": True, "list_id": list_id, "note": "Its tasks were moved to the default 'My Tasks' list."}),
                     })
 
+            elif name == "organize_timeline_into_sections":
+                from app.models.user import User as _User
+                from app.services.timeline_organizer import organize_timeline
+
+                uid = _safe_uuid(user_id)
+                user_obj = await session.get(_User, uid) if uid else None
+                if user_obj is None:
+                    results.append({
+                        "tool_call_id": tc.get("id"),
+                        "role": "tool",
+                        "content": json.dumps({"error": "User not found"}),
+                    })
+                    continue
+                try:
+                    payload = await organize_timeline(
+                        session, user_obj, provider=None, force=bool(args.get("force", False))
+                    )
+                except Exception as exc:
+                    detail = getattr(exc, "detail", None) or str(exc)
+                    payload = {"error": str(detail)}
+                results.append({
+                    "tool_call_id": tc.get("id"),
+                    "role": "tool",
+                    "content": json.dumps(payload),
+                })
+
             else:
                 handler = _FINANCE_TOOL_HANDLERS.get(name)
                 if handler is None:
@@ -2614,14 +2964,21 @@ Return exactly a JSON array of strings, nothing else. Example: ["Research and de
                     handler = _QUADRANT_TOOL_HANDLERS.get(name)
                 if handler is None:
                     handler = _FOCUS_TOOL_HANDLERS.get(name)
+                if handler is None:
+                    handler = _GITHUB_TOOL_HANDLERS.get(name)
+                if handler is None:
+                    handler = _WORKFLOW_TOOL_HANDLERS.get(name)
+                if handler is None:
+                    handler = _SLACK_TOOL_HANDLERS.get(name)
                 if handler is not None:
                     payload = await handler(args, user_id, session)
                     if isinstance(payload, dict) and payload.get("error"):
-                        # Surface the cause plus a hint so the user (and the
-                        # model) knows a fresh chat often fixes it.
+                        # Surface the cause (a validation error explains itself)
+                        # plus which tool failed, so the model can correct the
+                        # call instead of blindly retrying.
                         payload["error"] = (
-                            f"{payload['error']} (If you still have trouble, "
-                            "please open a new chat.)"
+                            f"{payload['error']} (tool: {name}. If you still have "
+                            "trouble, please open a new chat.)"
                         )
                     results.append({
                         "tool_call_id": tc.get("id"),

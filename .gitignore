@@ -5,7 +5,6 @@
 # Real prod/live secret files (never commit); keep *.example templates tracked.
 .env.prod
 .env.production
-.env.staging
 
 # Database backups (real data - never commit)
 backups/
@@ -48,17 +47,23 @@ Thumbs.db
 # Electron
 electron/out/
 
-# Desktop release artifacts (built locally or in CI; pushed to R2, never committed)
-ee/apps/desktop/release/
 
-apps/frontend/src/ee
+
 
 # Kilo agent plans
 .kilo/
+plans/
+.plans/
+
+# opencode local tooling (semantic-search + codebase-index artifacts/config)
+.opencode/
 
 # Turborepo artifacts
 .turbo/
 apps/frontend/.turbo/
+
+# Rust build output
+/apps/backend-rust/target/
 
 # deploy ssh key
 .deploy-ssh/

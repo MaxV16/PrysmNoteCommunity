@@ -38,6 +38,21 @@ export function byBoardOrder(a: Task, b: Task): number {
   return a.board_order - b.board_order;
 }
 
+export type BoardSort = "manual" | "tag";
+
+export function byTagOrder(a: Task, b: Task): number {
+  const aTag = a.tags?.[0]?.name?.trim().toLowerCase() ?? "";
+  const bTag = b.tags?.[0]?.name?.trim().toLowerCase() ?? "";
+  if (aTag && !bTag) return -1;
+  if (!aTag && bTag) return 1;
+  const byTag = aTag.localeCompare(bTag);
+  return byTag !== 0 ? byTag : byBoardOrder(a, b);
+}
+
+export function boardComparator(sort: BoardSort): (a: Task, b: Task) => number {
+  return sort === "tag" ? byTagOrder : byBoardOrder;
+}
+
 /** Which section (or null for Unsorted) a task currently lives in, if any. */
 export function sectionOfTask(
   task: Task,

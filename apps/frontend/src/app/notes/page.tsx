@@ -8,6 +8,8 @@ import { useUiModule } from "@/lib/ui-module-registry";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { NotesOverlay } from "@/components/notes/NoteWindow";
 import { NotesSection } from "@/components/sidebar/NotesSection";
+import { StickyBoardProvider } from "@/components/sticky/StickyNoteBoard";
+
 
 
 function NotesWorkspace() {
@@ -93,7 +95,9 @@ function NotesWorkspace() {
 export default function NotesPage() {
   return (
     <Suspense fallback={null}>
-        <NotesWorkspace />
+        <StickyBoardProvider>
+          <NotesWorkspace />
+        </StickyBoardProvider>
     </Suspense>
   );
 }

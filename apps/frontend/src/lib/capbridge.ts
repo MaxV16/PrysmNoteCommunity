@@ -1,5 +1,7 @@
 "use client";
 
+import { runBackHandler } from "@/lib/back-nav";
+
 /**
  * Thin typed wrapper around the Capacitor native bridge (`window.Capacitor`,
  * injected by the Capacitor runtime into the WebView even when it loads the
@@ -7,14 +9,35 @@
  * plain browser/PWA `window.Capacitor` is undefined and every call is a safe
  * no-op.
  *
- * CRITICAL: the `@capacitor/*` npm packages live in `ee/apps/mobile` (and only
- * there), so this core module must NEVER statically import them - the core
+ * CRITICAL: the `@capacitor/*` npm packages live only in the private native app
+ * shell, so this core module must NEVER statically import them - the core
  * frontend build would fail. It talks to the plugins through the
  * runtime-injected globals instead; the plugins are registered on the native
- * side via `ee/apps/mobile/package.json` + `capacitor.config.ts`.
+ * side by the shell's package.json + capacitor.config.ts.
  */
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+
+/**
+ * Login-CSRF guard: the nonce for the SSO flow this app started. The backend
+ * echoes it on the `com.prysmnote.app://` deep link and we reject any link that
+ * does not carry it, so a stray/malicious deep link cannot sign the app into an
+ * account the user did not authenticate as.
+ */
+let pendingSsoNonce: string | null = null;
+
+/** URL-safe random nonce (matches the backend's NONCE_RE: [A-Za-z0-9_-]{1,64}). */
+function randomNonce(): string {
+  const bytes = new Uint8Array(24);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
 interface CapPlugin {
   addListener: (eventName: string, listener: (event: Record<string, unknown>) => void) => Promise<unknown>;
@@ -40,11 +63,6 @@ function getCapBridge(): CapBridge | null {
   return c;
 }
 
-/** True when running inside the Capacitor WebView (not the browser/PWA/Electron). */
-export function isNative(): boolean {
-  return getCapBridge() !== null;
-}
-
 /**
  * Start the SSO flow in the system browser instead of the WebView. Google
  * prohibits OAuth sign-in inside embedded webviews, so the backend issues a
@@ -58,7 +76,8 @@ export async function openMobileSso(provider: "google" | "github"): Promise<bool
   const c = getCapBridge();
   const browser = c?.Plugins?.Browser;
   if (!c || !browser?.open) return false;
-  const url = `${API_URL}/auth/oauth/${provider}/start?redirect=mobile`;
+  pendingSsoNonce = randomNonce();
+  const url = `${API_URL}/auth/oauth/${provider}/start?redirect=mobile&nonce=${encodeURIComponent(pendingSsoNonce)}`;
   await browser.open({ url });
   return true;
 }
@@ -69,6 +88,10 @@ function exchangeMobileCode(url: string): void {
     if (parsed.protocol !== "com.prysmnote.app:") return;
     const code = parsed.searchParams.get("code");
     if (!code) return;
+    // Only accept the deep link for the flow this app started (login-CSRF).
+    const nonce = parsed.searchParams.get("nonce") ?? "";
+    if (!pendingSsoNonce || nonce !== pendingSsoNonce) return;
+    pendingSsoNonce = null;
     // Loading this inside the WebView sets the session cookies there, then
     // 307s to the app root so the app is authenticated on resume.
     window.location.href = `${window.location.origin}/api/auth/mobile/exchange?code=${encodeURIComponent(code)}`;
@@ -91,8 +114,12 @@ export function initCapbridge(): void {
     exchangeMobileCode(String(event?.url ?? ""));
   });
 
-  // Hardware/systems back button: history back when possible, else background the app.
+  // Hardware/systems back button: first let the in-app back stack close the
+  // top-most overlay or leave a workspace, then fall back to history back, then
+  // background the app. Without the in-app step, back exited the app even when a
+  // modal/drawer or a non-timeline workspace was open.
   void c.Plugins.App.addListener("backButton", () => {
+    if (runBackHandler()) return;
     if (window.history.length > 1) {
       window.history.back();
     } else if (c.Plugins.App.exitApp) {

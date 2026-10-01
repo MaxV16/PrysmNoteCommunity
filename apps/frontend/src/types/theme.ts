@@ -1,6 +1,6 @@
 import tokens from "@/design-tokens.json";
 
-export type ThemeName = "dark" | "light" | "dracula" | "nord" | "monokai" | "slate" | "coffee" | "solarized" | "github-dark" | "tokyo" | "custom";
+export type ThemeName = "dark" | "light" | "dracula" | "nord" | "monokai" | "slate" | "coffee" | "solarized" | "github-dark" | "tokyo" | "ocean" | "forest" | "sunset" | "custom";
 
 export interface ThemeColors {
   base: string;

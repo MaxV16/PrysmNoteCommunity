@@ -10,6 +10,7 @@ export const MODULE_IDS = [
   "filterBar",
   "tagList",
   "teamSection",
+  "githubSection",
   "themeSelector",
   "viewTimeline",
   "viewKanban",
@@ -17,6 +18,7 @@ export const MODULE_IDS = [
   "viewList",
   "viewBoard",
   "habits",
+  "finance",
   "watchlist",
 ] as const;
 

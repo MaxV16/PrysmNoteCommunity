@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
 export interface NotificationPrefs {
+  inapp_reminders: boolean;
+  reminder_time: string;
   email_reminders: boolean;
   due_alerts: boolean;
   email_digest: boolean;
@@ -12,7 +14,9 @@ export interface NotificationPrefs {
 }
 
 export const DEFAULT_PREFS: NotificationPrefs = {
-  email_reminders: true,
+  inapp_reminders: true,
+  reminder_time: "20:00",
+  email_reminders: false,
   due_alerts: true,
   email_digest: false,
   push_enabled: false,
@@ -25,6 +29,67 @@ export function setSoundLocal(value: boolean) {
   try {
     localStorage.setItem(SOUND_KEY, JSON.stringify(value));
   } catch {}
+}
+
+/** True when this environment can show a real system notification. */
+export function notificationsSupported(): boolean {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+/** Current Notification permission, or "unsupported" when the API is missing. */
+export function notificationPermission(): NotificationPermission | "unsupported" {
+  if (!notificationsSupported()) return "unsupported";
+  return Notification.permission;
+}
+
+/**
+ * Ask for notification permission (call from a user gesture). Returns true when
+ * notifications are allowed. Never throws.
+ */
+export async function requestNotificationPermission(): Promise<boolean> {
+  if (!notificationsSupported()) return false;
+  try {
+    const perm = await Notification.requestPermission();
+    return perm === "granted";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Deliver a reminder as a real system notification. Best-effort: returns false
+ * (and does nothing) when permission is missing, so callers keep the in-app
+ * card as the always-on fallback.
+ *
+ * Prefer the service worker registration: `new Notification(...)` throws or is
+ * ignored on Android Chrome/Brave and is unsupported on iOS/WebKit, while
+ * `ServiceWorkerRegistration.showNotification` is the supported path there.
+ */
+export async function showSystemNotification(title: string, body: string): Promise<boolean> {
+  if (notificationPermission() !== "granted") return false;
+
+  if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg && "showNotification" in reg) {
+        await reg.showNotification(title, { body, tag: "prysm-reminder" });
+        return true;
+      }
+    } catch {}
+  }
+
+  try {
+    const notification = new Notification(title, { body, tag: "prysm-reminder" });
+    notification.onclick = () => {
+      try {
+        window.focus();
+        notification.close();
+      } catch {}
+    };
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function registerServiceWorker(): Promise<boolean> {

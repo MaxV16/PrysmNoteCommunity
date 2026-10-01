@@ -8,12 +8,14 @@ import { TaskForm } from "@/components/tasks/TaskForm";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 import { useTasks } from "@/hooks/useTasks";
+import { useVisibleTasks } from "@/hooks/useVisibleTasks";
 import { useToast } from "@/lib/toast-context";
 import { useLongPress } from "@/lib/use-long-press";
 import { api } from "@/lib/api";
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
 import { taskTimeLabel } from "@/lib/task-time";
 import { calendarOffset, weekdayHeaders } from "@/lib/dates";
+import { toLocalDateString } from "@/lib/utils";
 
 const PRIORITY_COLORS = TIER_COLORS;
 
@@ -80,25 +82,27 @@ function CalendarDayCell({
         onOpenDayMenu(e, ds);
       }}
     >
-      <span
-        className={`inline-flex items-center justify-center text-xs font-medium w-6 h-6 rounded-full mb-0.5 ${
-          isToday ? "gradient-bg text-[var(--on-gradient)] shadow-glow" : "text-secondary"
-        }`}
-      >
-        {d}
-      </span>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onDayNewTask(d);
-        }}
-        aria-label={`Add task on ${ds}`}
-        className="pointer-coarse:opacity-100 absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-elevated text-secondary opacity-0 transition-opacity hover:bg-hover hover:text-primary group-hover:opacity-100"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-      </button>
+      <div className="flex items-start justify-between gap-1">
+        <span
+          className={`inline-flex items-center justify-center text-xs font-medium w-6 h-6 rounded-full ${
+            isToday ? "gradient-bg text-[var(--on-gradient)]" : "text-secondary"
+          }`}
+        >
+          {d}
+        </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDayNewTask(d);
+          }}
+          aria-label={`Add task on ${ds}`}
+          className="pointer-coarse:opacity-100 -mr-0.5 -mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-elevated text-secondary opacity-0 transition-opacity hover:bg-hover hover:text-primary group-hover:opacity-100"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+      </div>
       <div className="space-y-0.5">
         {dayTasks.slice(0, maxShown).map((task) => (
           <div
@@ -131,8 +135,8 @@ function CalendarDayCell({
               selectedTaskIds.includes(task.id) ? "ring-1 ring-accent" : ""
             }`}
             style={{
-              backgroundColor: (PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E") + "22",
-              borderLeft: `2px solid ${PRIORITY_COLORS[normalizePriority(task.priority)] || "#9E9E9E"}`,
+              backgroundColor: `color-mix(in srgb, ${PRIORITY_COLORS[normalizePriority(task.priority)] || "var(--text-muted)"} 24%, transparent)`,
+              borderLeft: `2px solid ${PRIORITY_COLORS[normalizePriority(task.priority)] || "var(--text-muted)"}`,
               color: "var(--text-primary)",
             }}
           >
@@ -162,7 +166,7 @@ function CalendarDayCell({
 }
 
 export function CalendarView() {
-  const tasks = useAppStore((s) => s.tasks);
+  const tasks = useVisibleTasks();
   const activeListId = useAppStore((s) => s.activeListId);
   const setSelectedTaskId = useAppStore((s) => s.setSelectedTaskId);
   const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
@@ -220,8 +224,6 @@ export function CalendarView() {
   const tasksByDate = useMemo(() => {
     const map: Record<string, Task[]> = {};
     for (const task of tasks) {
-      if (task.is_archived || task.status === "done" || task.status === "cancelled") continue;
-      if (activeListId && task.list_id !== activeListId) continue;
       const dates = new Set<string>();
       if (task.start_date) dates.add(task.start_date);
       if (task.due_date) dates.add(task.due_date);
@@ -245,7 +247,7 @@ export function CalendarView() {
       });
     }
     return map;
-  }, [tasks, activeListId]);
+  }, [tasks]);
 
   const prevMonth = () => setViewDate(new Date(year, month - 1, 1));
   const nextMonth = () => setViewDate(new Date(year, month + 1, 1));
@@ -313,8 +315,8 @@ export function CalendarView() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-base">
-      <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2 shrink-0">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-base">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-4 py-2 shrink-0">
         <div className="flex items-center gap-2">
           <button onClick={prevMonth} className="btn bg-elevated px-3 py-1.5 text-xs text-secondary hover:bg-hover">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -337,7 +339,7 @@ export function CalendarView() {
                 value={moveDays}
                 onChange={(e) => setMoveDays(Number(e.target.value))}
                 aria-label="Move selected tasks by days"
-                className="w-14 rounded-md border border-border bg-surface px-1.5 py-0.5 text-xs text-primary outline-none focus:border-accent"
+                className="input-field w-14 text-xs"
               />
               <span className="text-[10px] text-muted">days</span>
               <button
@@ -421,7 +423,7 @@ export function CalendarView() {
         <TaskForm
           onSubmit={handleCreateTask}
           onCancel={() => { setShowTaskForm(false); setFormDefaultDate(null); }}
-          defaultDate={formDefaultDate?.toISOString().split("T")[0]}
+            defaultDate={formDefaultDate ? toLocalDateString(formDefaultDate) : undefined}
         />
       </Modal>
 

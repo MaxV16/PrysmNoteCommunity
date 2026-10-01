@@ -10,7 +10,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.config import settings
 from app.models.watchlist import WatchlistItem
@@ -33,16 +33,18 @@ async def refresh_due_items(session_factory) -> int:
         return 0
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=REFRESH_INTERVAL_SECONDS)
-    due_ids = []
     async with session_factory() as session:
-        result = await session.execute(select(WatchlistItem.id, WatchlistItem.metadata_fetched_at))
-        for item_id, fetched_at in result.all():
-            fetched = fetched_at
-            if fetched is not None and fetched.tzinfo is None:
-                # SQLite returns naive datetimes for TIMESTAMPTZ; treat as UTC.
-                fetched = fetched.replace(tzinfo=timezone.utc)
-            if fetched is None or fetched < cutoff:
-                due_ids.append(item_id)
+        # Filter the due check in SQL so the query returns only the stale items
+        # instead of loading every row's timestamp and filtering in Python.
+        result = await session.execute(
+            select(WatchlistItem.id).where(
+                or_(
+                    WatchlistItem.metadata_fetched_at.is_(None),
+                    WatchlistItem.metadata_fetched_at < cutoff,
+                )
+            )
+        )
+        due_ids = [row[0] for row in result.all()]
 
     refreshed = 0
     semaphore = asyncio.Semaphore(REFRESH_CONCURRENCY)

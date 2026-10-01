@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { FormStatus } from "@/components/ui/FormStatus";
+import { AuthThemeToggle } from "@/components/auth/AuthThemeToggle";
 
 export default function ResetPasswordPage({
   searchParams,
@@ -55,12 +57,13 @@ export default function ResetPasswordPage({
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-base p-4">
+    <div className="relative flex min-h-dvh items-center justify-center bg-base p-4">
+      <AuthThemeToggle />
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 float">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 11l3 3L22 4"/>
                 <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
@@ -71,20 +74,20 @@ export default function ResetPasswordPage({
           </div>
 
           {status === "ok" && (
-            <div className="mb-4 rounded-lg bg-success/10 px-4 py-2.5 text-sm text-success">
+            <FormStatus variant="success" className="mb-4">
               Password updated. Redirecting you to sign in...
-            </div>
+            </FormStatus>
           )}
           {status === "error" && error && (
-            <div className="mb-4 rounded-lg bg-danger/10 px-4 py-2.5 text-sm text-danger">
+            <FormStatus variant="error" className="mb-4">
               {error}
-            </div>
+            </FormStatus>
           )}
 
           {!token && status !== "ok" && (
-            <div className="rounded-lg bg-warning/10 px-4 py-2.5 text-sm text-warning">
+            <FormStatus variant="warning">
               This link is missing its reset token - it may be truncated. Request a new reset link.
-            </div>
+            </FormStatus>
           )}
 
           {status !== "ok" && (

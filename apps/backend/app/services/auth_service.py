@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -16,6 +17,16 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, password_hash: str) -> bool:
     return checkpw(password.encode(), password_hash.encode())
+
+
+async def hash_password_async(password: str) -> str:
+    """Hash on a worker thread: bcrypt is CPU-bound and blocks the event loop."""
+    return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(password: str, password_hash: str) -> bool:
+    """Verify on a worker thread so a slow bcrypt never stalls the loop."""
+    return await asyncio.to_thread(verify_password, password, password_hash)
 
 
 def create_access_token(user_id: str, token_version: int = 0) -> str:
@@ -44,7 +55,7 @@ async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
 async def create_user(session: AsyncSession, email: str, password: str, display_name: str | None = None) -> User:
     user = User(
         email=email,
-        password_hash=hash_password(password),
+        password_hash=await hash_password_async(password),
         display_name=display_name,
     )
     session.add(user)

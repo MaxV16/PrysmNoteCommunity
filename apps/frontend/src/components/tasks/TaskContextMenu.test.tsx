@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     fetchTasks: vi.fn().mockResolvedValue(undefined),
     showToast: vi.fn(),
     addNoteWithContent: vi.fn(),
+    open: vi.fn(),
     openNotesWindow: vi.fn(),
     useUiModule: vi.fn(() => true),
     useAppStore,
@@ -40,7 +41,7 @@ vi.mock("@/lib/toast-context", () => ({
 }));
 
 vi.mock("@/components/sticky/StickyNoteBoard", () => ({
-  useStickyBoard: () => ({ addNoteWithContent: mocks.addNoteWithContent }),
+  useStickyBoard: () => ({ addNoteWithContent: mocks.addNoteWithContent, open: mocks.open }),
 }));
 
 vi.mock("@/stores/app-store", () => ({
@@ -173,11 +174,11 @@ describe("TaskContextMenu - empty-area menu", () => {
     expect(onNewTask).toHaveBeenCalledWith({ section: { id: "sec-1", title: "In Progress" } });
   });
 
-  it("New note opens the notes window", () => {
+  it("New note opens a sticky note", () => {
     render(
       <TaskContextMenu menu={{ kind: "empty" }} onClose={vi.fn()} onNewTask={vi.fn()} />
     );
     fireEvent.click(screen.getByText("New note"));
-    expect(mocks.openNotesWindow).toHaveBeenCalled();
+    expect(mocks.open).toHaveBeenCalled();
   });
 });

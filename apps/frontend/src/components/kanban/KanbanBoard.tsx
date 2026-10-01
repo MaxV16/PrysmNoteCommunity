@@ -6,7 +6,8 @@ import {
   DragEndEvent,
   DragOverlay,
   DragStartEvent,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   closestCorners,
@@ -14,14 +15,9 @@ import {
 import { api } from "@/lib/api";
 import { useAppStore } from "@/stores/app-store";
 import { useTasks } from "@/hooks/useTasks";
+import { useVisibleTasks } from "@/hooks/useVisibleTasks";
 import { useBoardSections } from "@/hooks/useBoardSections";
-import { usePreferencesStore } from "@/stores/preferences-store";
-import {
-  PREF_BOARD_KANBAN_LAYOUT,
-  PREF_BOARD_KANBAN_SCROLL,
-  type CardLayout,
-  type ScrollDirection,
-} from "@/lib/preferences";
+import { type CardLayout } from "@/lib/preferences";
 import {
   applyBoardDrop,
   applyBoardGroupDrop,
@@ -43,24 +39,20 @@ export function KanbanBoard() {
   const tasks = useAppStore((s) => s.tasks);
   const setTasks = useAppStore((s) => s.setTasks);
   const activeListId = useAppStore((s) => s.activeListId);
+  const visibleTasks = useVisibleTasks();
   const { fetchTasks } = useTasks();
   const { sections, addSection, renameSection, removeSection } =
     useBoardSections("kanban");
 
-  const scrollDirection = usePreferencesStore(
-    (s) => (s.prefs[PREF_BOARD_KANBAN_SCROLL] as ScrollDirection) || "horizontal"
-  );
-  const cardLayout = usePreferencesStore(
-    (s) => (s.prefs[PREF_BOARD_KANBAN_LAYOUT] as CardLayout) || "stacked"
-  );
-  const setPreference = usePreferencesStore((s) => s.setPreference);
+  const cardLayout: CardLayout = "stacked";
 
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
   const [scopedCreate, setScopedCreate] = useState<BoardSection | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } })
   );
 
   const tasksBySection = useMemo(() => {
@@ -68,14 +60,25 @@ export function KanbanBoard() {
     for (const section of sections) {
       map.set(
         section.id,
-        sectionTasks(tasks, section)
-          .filter((t) => !t.is_archived)
-          .filter((t) => !activeListId || t.list_id === activeListId)
-          .sort(byBoardOrder)
+        sectionTasks(visibleTasks, section).sort(byBoardOrder)
       );
     }
     return map;
-  }, [tasks, sections, activeListId]);
+  }, [visibleTasks, sections]);
+
+  const childrenByParent = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    for (const t of tasks) {
+      if (!t.parent_task_id) continue;
+      const bucket = map.get(t.parent_task_id);
+      if (bucket) bucket.push(t);
+      else map.set(t.parent_task_id, [t]);
+    }
+    for (const bucket of map.values()) {
+      bucket.sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+    }
+    return map;
+  }, [tasks]);
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
@@ -147,10 +150,9 @@ export function KanbanBoard() {
 
   const handleRemoveColumn = useCallback(
     (section: BoardSection) => {
-      if (sections.length <= 1) return; // keep at least one section
       void removeSection(section.id);
     },
-    [sections.length, removeSection]
+    [removeSection]
   );
 
   const refetchTasks = useCallback(() => {
@@ -188,19 +190,11 @@ export function KanbanBoard() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <KanbanToolbar
-        scrollDirection={scrollDirection}
-        cardLayout={cardLayout}
-        onScrollDirectionChange={(d) => setPreference(PREF_BOARD_KANBAN_SCROLL, d)}
-        onCardLayoutChange={(l) => setPreference(PREF_BOARD_KANBAN_LAYOUT, l)}
-        onAddSection={(title) => void addSection({ title, color: "#9E9E9E" })}
+        onAddSection={(title) => void addSection({ title, color: "var(--text-muted)" })}
       />
 
       <div
-        className={`min-h-0 flex-1 ${
-          scrollDirection === "horizontal"
-            ? "flex flex-row items-start gap-4 overflow-x-auto px-4 py-4"
-            : "flex flex-col items-start gap-4 overflow-y-auto px-4 py-4"
-        }`}
+        className="flex min-h-0 flex-1 flex-row items-start gap-4 overflow-x-auto px-4 py-4"
         style={{ overscrollBehaviorX: "contain", WebkitOverflowScrolling: "touch" }}
         onPointerDown={(e) => {
           const target = e.target as HTMLElement;
@@ -219,6 +213,7 @@ export function KanbanBoard() {
               key={section.id}
               section={section}
               tasks={tasksBySection.get(section.id) ?? []}
+              subtasksByParent={childrenByParent}
               cardLayout={cardLayout}
               onRefetch={refetchTasks}
               onRename={(title) => void renameSection(section.id, title)}

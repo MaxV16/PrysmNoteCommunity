@@ -1,20 +1,23 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, Uuid, event, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, Uuid, event, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
 
 
 class UserNotificationPrefs(Base):
-    """Per-user notification preferences (email reminders, daily digest, push,
-    sound). One row per user, created on first read by the API.
+    """Per-user notification preferences (in-app + optional email reminders,
+    daily digest, push, sound). One row per user, created on first read by the
+    API. In-app reminders are the default; email is an opt-in extra.
     """
 
     __tablename__ = "user_notification_prefs"
 
     user_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    email_reminders: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    inapp_reminders: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("TRUE"), nullable=False)
+    reminder_time: Mapped[str] = mapped_column(String(5), default="20:00", server_default=text("'20:00'"), nullable=False)
+    email_reminders: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("FALSE"), nullable=False)
     due_alerts: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     email_digest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     push_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -28,6 +31,9 @@ class PushSubscription(Base):
     """
 
     __tablename__ = "push_subscriptions"
+    __table_args__ = (
+        Index("ix_push_subscriptions_user", "user_id"),
+    )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     user_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -44,6 +50,10 @@ class NotificationLog(Base):
     """
 
     __tablename__ = "notification_logs"
+    __table_args__ = (
+        Index("ix_notification_logs_user_task_kind", "user_id", "task_id", "kind"),
+        Index("ix_notification_logs_kind_sent", "kind", "sent_at"),
+    )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     user_id: Mapped[str] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)

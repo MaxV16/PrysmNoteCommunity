@@ -9,7 +9,7 @@ from app.models.base import Base
 class UserToken(Base):
     __tablename__ = "user_tokens"
     __table_args__ = (
-        Index("ix_user_tokens_provider", "provider"),
+        Index("ix_user_tokens_user_provider", "user_id", "provider"),
     )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())

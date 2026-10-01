@@ -8,8 +8,10 @@ import { SidebarNav } from "@/components/sidebar/SidebarNav";
 import { TagList } from "@/components/sidebar/TagList";
 import { ThemeMenu } from "@/components/sidebar/ThemeMenu";
 import { BrandMark } from "@/components/ui/BrandMark";
-import { openNotesWindow } from "@/lib/notes";
+import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
+import { useIsMobileOS } from "@/lib/use-is-mobile-os";
 import { track } from "@/lib/track";
+import { useAppStore } from "@/stores/app-store";
 import type { WorkspaceView } from "@/components/layout/AppShell";
 
 interface SidebarLeftProps {
@@ -23,14 +25,16 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
   const { user, logout } = useAuth();
   const { toggleTheme } = useTheme();
   const tagsOn = useUiModule("tagList");
-  const financeOn = false;
+  const financeOn = useUiModule("finance");
   const watchlistOn = useUiModule("watchlist");
   const habitsOn = useUiModule("habits");
   const quadrantOn = false;
   const focusOn = false;
   const countdownOn = false;
-  const notesOn = useUiModule("stickyNotes");
+  const isMobileOS = useIsMobileOS();
+  const notesOn = useUiModule("stickyNotes") && !isMobileOS;
   const router = useRouter();
+  const { addNoteWithContent } = useStickyBoard();
 
   const handleLogout = () => {
     logout();
@@ -51,7 +55,12 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
         <div className="my-1 h-px w-8 bg-border" />
         <div className="flex flex-1 flex-col items-center gap-1">
           <button
-            onClick={() => onSelectView("timeline")}
+            onClick={() => {
+              const s = useAppStore.getState();
+              s.setNavFilter(null);
+              s.setActiveListId(null);
+              onSelectView("timeline");
+            }}
             aria-label="Timeline"
             className={`icon-btn mt-1 ${view === "timeline" ? "bg-accent/15 text-accent" : ""}`}
             title="Timeline"
@@ -120,7 +129,7 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
           )}
           {notesOn && (
             <button
-              onClick={() => { track("feature_used", { feature: "notes" }); openNotesWindow(); }}
+              onClick={() => { track("feature_used", { feature: "notes" }); addNoteWithContent("", ""); }}
               aria-label="New note"
               className="icon-btn"
               title="New note"
@@ -148,8 +157,8 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
         <div className="flex items-center gap-2">
           <BrandMark size={28} />
           <div className="leading-tight">
-            <h1 className="text-sm font-bold gradient-text">Prysm Note</h1>
-            <span className="text-[10px] text-muted">AI Task Manager</span>
+            <h1 className="text-sm font-bold text-primary">Prysm Note</h1>
+            <span className="text-[10px] text-muted">Tasks &amp; plans</span>
           </div>
         </div>
         <button

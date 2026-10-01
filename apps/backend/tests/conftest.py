@@ -227,6 +227,14 @@ async def client(test_user: User):
 
     app.dependency_overrides[get_db] = _get_test_db
 
+    # The passkey sign-in endpoint looks a credential up before any user context
+    # exists, so it uses the BYPASSRLS system session in production; run it on
+    # the same test session here (RLS is inert on SQLite and context-scoped on
+    # PostgreSQL).
+    from app.database import get_system_db
+
+    app.dependency_overrides[get_system_db] = _get_test_db
+
     async def override_get_current_user():
         return test_user
 

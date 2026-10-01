@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { BrandMark } from "@/components/ui/BrandMark";
+import { AuthThemeToggle } from "@/components/auth/AuthThemeToggle";
 import Link from "next/link";
 
 export default function VerifyEmailPage() {
@@ -40,11 +41,12 @@ export default function VerifyEmailPage() {
   }, [router]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-base p-4">
+    <div className="relative flex min-h-dvh items-center justify-center bg-base p-4">
+      <AuthThemeToggle />
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden text-center">
           <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
-          <div className="mb-6 flex justify-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
             <BrandMark size={32} />
           </div>
 

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import {
   loadPreferencesFromServer,
   savePreference,
@@ -37,3 +38,11 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
     });
   },
 }));
+
+/** Shallow selector hook to subscribe to a single preference key without
+ * re-rendering when other keys change. */
+export function usePreference<T>(key: string, fallback: T): T {
+  return usePreferencesStore(
+    useShallow((s) => (key in s.prefs ? (s.prefs[key] as T) : fallback))
+  );
+}
