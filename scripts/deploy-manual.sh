@@ -98,7 +98,7 @@ ENV_FILE=.env.prod
 sed -i '/^GIT_SHA=/d' "$ENV_FILE" 2>/dev/null || true
 printf 'GIT_SHA=%s\n' "$SHA" >> "$ENV_FILE"
 
-docker build -f deploy/docker/backend.prod.Dockerfile -t "ghcr.io/$OWNER/prysmnote-backend:latest" .
+docker build -f deploy/docker/backend-rust.prod.Dockerfile -t "ghcr.io/$OWNER/prysmnote-backend:latest" .
 docker build -f deploy/docker/frontend.prod.Dockerfile \
   --build-arg NEXT_PUBLIC_API_URL=/api \
   --build-arg NEXT_PUBLIC_GIT_SHA="$SHA" \
