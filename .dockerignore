@@ -1,6 +1,5 @@
 apps/frontend/src/ee
 apps/frontend/ee
-apps/backend/ee
 apps/backend-rust/target
 
 # Never ship host installs, build output, VCS metadata, or secrets into an image.

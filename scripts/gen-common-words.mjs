@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Regenerates the checked-in word-set artifacts from scripts/words.txt:
 //   - apps/frontend/src/lib/common-words.ts    (packed string + Set)
-//   - apps/backend/app/services/common_words.py (frozenset)
+//   - apps/backend-rust/crates/core/src/common_words.rs (const slice)
 //
 // Usage: node scripts/gen-common-words.mjs
 //
@@ -30,7 +30,7 @@ const ROOT = path.resolve(__dirname, "..");
 
 const WORDS_FILE = path.join(__dirname, "words.txt");
 const TS_OUT = path.join(ROOT, "apps/frontend/src/lib/common-words.ts");
-const PY_OUT = path.join(ROOT, "apps/backend/app/services/common_words.py");
+const RUST_OUT = path.join(ROOT, "apps/backend-rust/crates/core/src/common_words.rs");
 
 const EXCLUDED = new Set(["tom", "fin", "lo"]);
 
@@ -62,11 +62,14 @@ const TS_HEADER = [
   "// for the exact source, filtering, hygiene exclusions and app-term additions.",
 ].join("\n");
 
-const PY_HEADER = [
-  "# GENERATED FILE - DO NOT EDIT BY HAND.",
-  "# Regenerate with: node scripts/gen-common-words.mjs",
-  "# Source: scripts/words.txt (Oxford 3000, Apache-2.0) - see that script",
-  "# for the exact source, filtering, hygiene exclusions and app-term additions.",
+const RUST_HEADER = [
+  "//! Common English word list for AI text cleanup, generated from",
+  "//! `scripts/words.txt` (Oxford 3000, Apache-2.0, plus app-term additions)",
+  "//! by `node scripts/gen-common-words.mjs`. Used by [`crate::ai_text`] to",
+  "//! rejoin fragmented words and split merged words without welding two real",
+  "//! words together.",
+  "//!",
+  "//! GENERATED FILE - DO NOT EDIT BY HAND.",
 ].join("\n");
 
 function fail(msg) {
@@ -121,17 +124,17 @@ const tsBody = [
 ].join("\n");
 fs.writeFileSync(TS_OUT, `${tsBody}`);
 
-// --- Python module (frozenset literal) ---
-const pyLines = [PY_HEADER, "", '"""Common English words used by AI text clean-up (word-split rejoin)."""', "", "COMMON_WORDS = frozenset({"];
-for (const line of wrapWords(words, 10)) {
-  pyLines.push(`    ${line
+// --- Rust module (const slice of &str) ---
+const rustLines = [RUST_HEADER, "", "/// The dictionary word set.", "pub const COMMON_WORDS: &[&str] = &["];
+for (const line of wrapWords(words, 8)) {
+  rustLines.push(`    ${line
     .split(" ")
     .map((w) => `"${w}"`)
     .join(", ")},`);
 }
-pyLines.push("})", "");
-fs.writeFileSync(PY_OUT, pyLines.join("\n"));
+rustLines.push("];", "");
+fs.writeFileSync(RUST_OUT, rustLines.join("\n"));
 
 console.log(
-  `gen-common-words: wrote ${words.length} words -> common-words.ts (${fs.statSync(TS_OUT).size} bytes), common_words.py (${fs.statSync(PY_OUT).size} bytes)`
+  `gen-common-words: wrote ${words.length} words -> common-words.ts (${fs.statSync(TS_OUT).size} bytes), common_words.rs (${fs.statSync(RUST_OUT).size} bytes)`
 );

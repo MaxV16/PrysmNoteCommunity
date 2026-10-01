@@ -1,0 +1,37 @@
+[package]
+name = "prysm-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axum.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+bcrypt.workspace = true
+fernet.workspace = true
+base64.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+jsonwebtoken.workspace = true
+sqlx.workspace = true
+webauthn-rs-core.workspace = true
+serde_cbor.workspace = true
+url.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+tokio-stream.workspace = true
+csv.workspace = true
+chrono-tz.workspace = true
+rrule.workspace = true
+redis.workspace = true
+lettre.workspace = true
+regex.workspace = true
+openssl.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tower.workspace = true

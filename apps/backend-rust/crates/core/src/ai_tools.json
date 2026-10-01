@@ -1,0 +1,1205 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "search_tasks",
+      "description": "Search tasks by query string and optional date/priority/list filters. Returns parent tasks (not subtasks) by default - up to 250 matches with title, date, priority, status and description snippet. To include subtasks in results, set include_subtasks=true. The user cannot see ids - identify tasks to the user by title + date + description, never by id. If the result has a \"truncated\": true field, only the first part of the matches was returned and \"omitted\" says how many more exist - re-run this same search after acting on the shown ones to fetch the rest (relevant for sweeping all matching tasks). To collect ALL tasks matching a query (e.g. 'delete all tasks called work'), call with the query and NO date filters. The \"Inbox\" smart list is NOT a stored list: it is every task with no start_date and no due_date, so pass undated=true for it (NEVER search for the text \"inbox\" - that matches nothing). To scope to a named list, pass list_name (resolved case-insensitively) instead of list_id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "optional search query; omit it to list by scope only (e.g. undated=true or a list_name)"
+          },
+          "date_from": {
+            "type": "string",
+            "description": "YYYY-MM-DD optional start date filter"
+          },
+          "date_to": {
+            "type": "string",
+            "description": "YYYY-MM-DD optional end date filter"
+          },
+          "priority_min": {
+            "type": "integer",
+            "description": "minimum priority (1-5)"
+          },
+          "priority_max": {
+            "type": "integer",
+            "description": "maximum priority (1-5)"
+          },
+          "list_id": {
+            "type": "string",
+            "description": "optional list id to filter by"
+          },
+          "list_name": {
+            "type": "string",
+            "description": "optional list name (case-insensitive). Use this instead of list_id when the user names a list, and \"Inbox\" for undated tasks."
+          },
+          "undated": {
+            "type": "boolean",
+            "description": "true returns only tasks with NO start_date and NO due_date - this is exactly the Inbox / unscheduled list"
+          },
+          "include_subtasks": {
+            "type": "boolean",
+            "description": "if true, include subtasks in results; default false returns only parent tasks"
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_task",
+      "description": "Create a new task. IMPORTANT: if the user mentions a date/time or relative day (tomorrow, next Monday, Friday, etc.), resolve it to an exact ISO date using TODAY'S DATE and ALWAYS pass it in start_date (and due_date if relevant). Do not create date-less tasks when the user gave a date. When a specific date is used, first call list_tasks_by_date_range for that date to flag conflicts in your reply (medical/priority-5 tasks outrank regular meetings). TITLE vs DESCRIPTION: keep title SHORT and actionable (a concise noun-phrase, ~6 words max, e.g. \"Buy supplies\"). Put ALL supporting detail, item/vendor specifics and context into description. NEVER silently drop user detail.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "start_date": {
+            "type": "string",
+            "description": "YYYY-MM-DD. REQUIRED whenever the user mentions a date."
+          },
+          "due_date": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "start_time": {
+            "type": "string",
+            "description": "HH:MM 24h clock, e.g. \"14:00\" for 2pm. REQUIRED when the user names a clock time (\"at 2\", \"2pm\", \"9-12\" - use start_time for the start, end_time for the end of a range)."
+          },
+          "end_time": {
+            "type": "string",
+            "description": "HH:MM 24h clock for the end of a time range (\"9-12\" -> start_time 09:00, end_time 12:00)."
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "recurrence_rule": {
+            "type": "string",
+            "description": "RRULE string"
+          },
+          "recurrence_end_date": {
+            "type": "string",
+            "description": "YYYY-MM-DD when this recurrence stops; omit for an endless repeat"
+          },
+          "description": {
+            "type": "string"
+          },
+          "estimated_minutes": {
+            "type": "integer",
+            "description": "estimated time in minutes"
+          },
+          "list_id": {
+            "type": "string",
+            "description": "task list id to put the task in (optional; defaults to the current/default list)"
+          },
+          "reminder_enabled": {
+            "type": "boolean",
+            "description": "set true only when the user asks to be reminded about this task (reminders are off by default)"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_task",
+      "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} - do NOT delete the task. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date, start_time (HH:MM), end_time (HH:MM), list_id, reminder_enabled (true to remind the user about this task; reminders are off by default).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "object",
+            "description": "fields to update, e.g. {\"status\": \"done\"} to mark complete"
+          }
+        },
+        "required": [
+          "task_id",
+          "fields"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_task",
+      "description": "Move a task to the Trash (soft delete). Deleting is NOT permanent: the task sits in the Trash for 14 days (restore_task brings it back), then is purged automatically. ONLY call this after the user has EXPLICITLY confirmed deletion (e.g. 'yes delete it', 'go ahead', 'delete them'). When the user first asks to delete, DO NOT call this - reply listing exactly what you will delete and ask for confirmation. If the user said a task is 'done'/'completed'/'finished', use update_task with status='done' instead (never delete).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "batch_delete_tasks",
+      "description": "Move MULTIPLE tasks to the Trash at once (pass a list of task_ids). SOFT delete: they sit in the Trash for 14 days and can be restored with restore_task. ONLY call after the user has EXPLICITLY confirmed deletion of all of them. It returns exact deleted_count and failed_count (with the ids that failed), so report the real numbers in your reply - never claim everything was deleted unless deleted_count equals the number you intended to delete. After a bulk delete, re-run search_tasks with the same query to catch any remaining matches and delete them too, so 'delete all X' really deletes all of them. If the user said the tasks are 'done'/'completed', mark them status='done' via update_task instead (never delete).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "list of task ids to delete"
+          }
+        },
+        "required": [
+          "task_ids"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_matching_tasks",
+      "description": "Move EVERY task matching a scope to the Trash in ONE call (soft delete, restorable for 14 days). Use this for any scoped bulk delete: a list (\"delete all tasks in the Inbox\"), a date (\"delete everything on 2026-09-20\"), or a keyword (\"delete all fuel allowance tasks\"). It selects the tasks on the server, so you never have to search, collect ids and batch-delete yourself - this is the fast, reliable path. The Inbox is not a stored list: pass undated=true for it. ONLY call after the user has EXPLICITLY confirmed the deletion. Returns the real deleted_count plus the titles and dates that were trashed, so report exactly what happened. Never use this for tasks the user called done - mark those status='done' with update_task instead.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "optional text query; omit it to match every task in the scope"
+          },
+          "date_from": {
+            "type": "string",
+            "description": "YYYY-MM-DD optional start of the date range"
+          },
+          "date_to": {
+            "type": "string",
+            "description": "YYYY-MM-DD optional end of the date range"
+          },
+          "list_id": {
+            "type": "string",
+            "description": "optional list id to scope the deletion"
+          },
+          "list_name": {
+            "type": "string",
+            "description": "optional list name to scope the deletion (case-insensitive); use \"Inbox\" for undated tasks"
+          },
+          "undated": {
+            "type": "boolean",
+            "description": "true deletes only tasks with NO start_date and NO due_date (the Inbox)"
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_task_details",
+      "description": "Get full task details with links, tags, subtasks",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "link_tasks",
+      "description": "Link two tasks with a relationship type",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "link_type": {
+            "type": "string",
+            "enum": [
+              "depends_on",
+              "related",
+              "blocks",
+              "duplicates"
+            ]
+          }
+        },
+        "required": [
+          "source_id",
+          "target_id",
+          "link_type"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "check_calendar",
+      "description": "Check calendar density for a date range",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date_from": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "date_to": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "date_from",
+          "date_to"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "suggest_subtasks",
+      "description": "Get AI-generated subtask suggestions for a task",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "detect_conflicts",
+      "description": "Detect scheduling conflicts for a dated task with priority information. Priority 1 (high/medical/health) always outranks lower-priority tasks. Lower priority numbers are MORE important (1=high, 2=medium, 3=low). Use this to check whether a task clashes with existing higher-priority tasks before finalizing a schedule and to surface clashes in your reply.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "reschedule_task",
+      "description": "Reschedule a task to a new date/time with conflict checking",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "new_start_date": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "new_due_date": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "reason": {
+            "type": "string",
+            "description": "reason for rescheduling"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_tasks_by_date_range",
+      "description": "List all tasks in a date range with their priorities",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date_from": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          },
+          "date_to": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "date_from",
+          "date_to"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "suggest_best_time",
+      "description": "Analyze calendar and suggest the best free time slot for scheduling",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "desired_date": {
+            "type": "string",
+            "description": "YYYY-MM-DD preferred date"
+          },
+          "duration_hours": {
+            "type": "number",
+            "description": "estimated duration in hours"
+          },
+          "min_priority_to_consider": {
+            "type": "integer",
+            "description": "minimum priority of existing tasks to consider as conflicts (default: 3)"
+          }
+        },
+        "required": [
+          "desired_date",
+          "duration_hours"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_upcoming_deadlines",
+      "description": "Get tasks approaching their due dates, sorted by urgency",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "days_ahead": {
+            "type": "integer",
+            "description": "number of days to look ahead (default: 7)"
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "batch_create_tasks",
+      "description": "Create multiple tasks at once (for compound commands). Keep each title short and actionable (~6 words); put supporting detail into that task's description.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "start_date": {
+                  "type": "string"
+                },
+                "due_date": {
+                  "type": "string"
+                },
+                "start_time": {
+                  "type": "string",
+                  "description": "HH:MM 24h clock, e.g. \"14:00\" for 2pm. Required when the user names a clock time (\"at 2\", \"2pm\", \"9-12\")."
+                },
+                "end_time": {
+                  "type": "string",
+                  "description": "HH:MM 24h clock for the end of a time range."
+                },
+                "priority": {
+                  "type": "integer"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "full detail/context/notes for the task"
+                },
+                "recurrence_rule": {
+                  "type": "string",
+                  "description": "RRULE string for recurring tasks, e.g. FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR. Occurrences are expanded automatically."
+                },
+                "recurrence_end_date": {
+                  "type": "string",
+                  "description": "YYYY-MM-DD when this recurrence stops; omit for an endless repeat"
+                },
+                "list_id": {
+                  "type": "string",
+                  "description": "task list id (optional; defaults to the current/default list)"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        },
+        "required": [
+          "tasks"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "add_event",
+      "description": "Record a dated commitment or life event from a day diary, voice note, or free-form narrative (an appointment, meeting, booking, purchase like 'I bought tickets on Ticketmaster', a party, travel, a goal, an errand, etc.). Resolve EVERY relative date mentioned ('the 25th', 'next week', 'this Friday', 'tomorrow', 'next month') to an exact YYYY-MM-DD using TODAY'S DATE before calling, and ALWAYS pass start_date. When the user gives a clock time ('at 2', '6pm', '9-12'), pass start_time (and end_time for ranges) as HH:MM. Put ALL remaining context - location/venue, vendor or source (e.g. Ticketmaster, a store), people involved, and the why - into description. Use this ONLY for scheduling additions; for cancellations/backing out of something use cancel_task_by_keywords. When the user narrates a whole day with several events, call add_event once per discrete commitment (you may batch by issuing several calls in one turn).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "short actionable noun-phrase (~6 words max)"
+          },
+          "start_date": {
+            "type": "string",
+            "description": "YYYY-MM-DD event date. REQUIRED whenever a date is implied."
+          },
+          "due_date": {
+            "type": "string",
+            "description": "YYYY-MM-DD optional end date"
+          },
+          "start_time": {
+            "type": "string",
+            "description": "HH:MM 24h clock, e.g. \"14:00\" for 2pm. Required when the user names a clock time (\"at 2\", \"2pm\", \"9-12\")."
+          },
+          "end_time": {
+            "type": "string",
+            "description": "HH:MM 24h clock for the end of a time range."
+          },
+          "description": {
+            "type": "string",
+            "description": "ALL context: location, vendor/source, people, the why (clock times go in start_time/end_time, not here)"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "recurrence_rule": {
+            "type": "string",
+            "description": "RRULE string if the commitment recurs"
+          }
+        },
+        "required": [
+          "title",
+          "start_date"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "cancel_task_by_keywords",
+      "description": "Cancel existing task(s) for when the user says they cancelled or backed out of a commitment ('I cancelled the dinner on the 25th', 'I withdrew from the race', 'the dentist visit is off'). Matches open tasks by keyword phrase and, when the user mentions a date, that exact date. This is NON-destructive: matching tasks are marked status='cancelled', NEVER deleted. Returns the exact tasks matched so you report which were cancelled; if nothing matches, say so and ask which task they mean - never invent a cancellation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "title/keyword phrase to match against open tasks"
+          },
+          "date": {
+            "type": "string",
+            "description": "YYYY-MM-DD optional specific date the cancelled commitment was on"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_subtasks",
+      "description": "List the subtasks (child tasks) of a task, with status, priority and order",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_subtask",
+      "description": "Create a subtask (child task) under a parent task",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "title"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_subtask",
+      "description": "Update a subtask's title, status or priority",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "subtask_id": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "backlog",
+                  "todo",
+                  "in_progress",
+                  "done",
+                  "cancelled"
+                ]
+              },
+              "priority": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "required": [
+          "task_id",
+          "subtask_id",
+          "fields"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_subtask",
+      "description": "Delete a subtask (child task) of a parent task",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "subtask_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "subtask_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "reorder_subtasks",
+      "description": "Reorder a task's subtasks by providing the ordered subtask ids",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "ordered_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "task_id",
+          "ordered_ids"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "convert_description_to_subtasks",
+      "description": "Split a task's description into subtasks (one per bullet/line), clearing the description",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "convert_subtasks_to_description",
+      "description": "Collapse a task's subtasks back into a markdown description, deleting the subtasks",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "complete_task",
+      "description": "Mark a task as done/complete (sets status to done). Use this when the user says a task is done, finished, or completed. This is NOT a delete.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "duplicate_task",
+      "description": "Create a copy of an existing task (same title, description, priority, dates, recurrence, tags). Returns the new task.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_tags",
+      "description": "List all the user's tags with their id and name. Use before referencing a tag by name.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "add_tag_to_task",
+      "description": "Add a tag to a task by tag name. If a tag with that name does not exist yet, it is created. Use list_tags first to see existing tags.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "tag_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "tag_name"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_task_stats",
+      "description": "Return counts of the user's tasks grouped by status (backlog, todo, in_progress, done, cancelled) and the total.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "restore_task",
+      "description": "Restore a deleted task from the Trash back into the normal views (undoes a delete). Use when the user says 'undo the delete', 'restore that task', or regrets deleting something. Task browsing is done in the trash view of the app; this tool restores by task id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_list",
+      "description": "Create a new task list (collection) for organizing tasks. Returns the new list id and name.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "short list name, e.g. 'Work', 'Groceries'"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_lists",
+      "description": "List all the user's task lists with their id and name. Use before referencing a list by name so you can pass its id.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "rename_list",
+      "description": "Rename a task list. The default 'My Tasks' list cannot be renamed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "list_id",
+          "name"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_list",
+      "description": "Delete a task list. Its tasks are NOT deleted: they move to the user's default 'My Tasks' list. The default 'My Tasks' list itself cannot be deleted.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "list_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "organize_timeline_into_sections",
+      "description": "AI-group the user's dated tasks into short timeline topic sections (e.g. 'Work', 'Errands', 'Health') and pin each task to its topic. Use when the user asks to auto-sort, organize, group, or tidy their timeline. This uses the user's own AI access, so only run it when asked. Already-organized tasks are left alone unless force=true. A single run sorts up to a large per-run budget; if the result has remaining > 0, tell the user how many tasks are left and that running it again finishes them.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "description": "Re-classify tasks that are already in a section. Default false."
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_titles",
+      "description": "Search movies and TV shows by title (TMDB multi-search). Returns the top matches with tmdb_id, media_type (movie or tv), title, release_year and poster_url. Use this FIRST whenever the user wants to add something to their watchlist so you can pass the correct tmdb_id and media_type to add_watchlist_item. When it returns no results, still call add_watchlist_item with media_type and title (a manual entry is created).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "title to search for"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_watchlist",
+      "description": "List the user's watchlist items (optionally filtered by status: plan_to_watch, watching, watched). Each item has id, title, media_type, status, rating, notes and poster_url.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "plan_to_watch",
+              "watching",
+              "watched"
+            ]
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "add_watchlist_item",
+      "description": "Add a movie or TV show to the user's watchlist. Pass tmdb_id and media_type from search_titles when available; if search returns nothing (or there is no search access), pass media_type and title only and the item is added as a manual entry with a synthesized id. status defaults to plan_to_watch. rating is 1-10. Returns the serialized item or an error if it is already on the watchlist.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tmdb_id": {
+            "type": "integer",
+            "description": "optional; omit for a manual entry when search finds nothing"
+          },
+          "media_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "description": "required when tmdb_id is omitted"
+          },
+          "release_year": {
+            "type": "integer"
+          },
+          "poster_path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "plan_to_watch",
+              "watching",
+              "watched"
+            ]
+          },
+          "rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_type"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_watchlist_item",
+      "description": "Update an existing watchlist item (status, rating 1-10, notes, watched_at YYYY-MM-DD). Use when the user marks something watched, rates it, or edits its notes. Only include fields that changed; pass null for rating, notes or watched_at to clear them.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "plan_to_watch",
+              "watching",
+              "watched"
+            ]
+          },
+          "rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "notes": {
+            "type": "string"
+          },
+          "watched_at": {
+            "type": "string",
+            "description": "YYYY-MM-DD"
+          }
+        },
+        "required": [
+          "item_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "remove_watchlist_item",
+      "description": "Permanently remove an item from the user's watchlist. DESTRUCTIVE: require explicit user confirmation before calling. Never remove an item the user merely said they watched - update its status to watched instead.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_habits",
+      "description": "List the user's habits with their current streak. Use whenever the user asks about their habits, streaks, or tracking progress.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_habit",
+      "description": "Create a new habit tracker. frequency is daily, weekly or monthly; target_count is how many completions count per period (default 1); color is an optional hex string.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ]
+          },
+          "target_count": {
+            "type": "integer",
+            "description": "default 1"
+          },
+          "color": {
+            "type": "string",
+            "description": "optional hex color like #4FC3F7"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_habit",
+      "description": "Update an existing habit's title, frequency, target_count or color. Only include fields that changed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "habit_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ]
+          },
+          "target_count": {
+            "type": "integer"
+          },
+          "color": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "habit_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_habit",
+      "description": "Permanently delete a habit and its entire log history. DESTRUCTIVE: require explicit user confirmation before calling. Never delete a habit the user merely said they are skipping - confirm first.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "habit_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "habit_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "toggle_habit_log",
+      "description": "Log today's completion for a habit (toggles: logging an already-logged day removes it). Use when the user says they did/completed a habit today. Returns logged, the updated streak and the date.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "habit_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "habit_id"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_habit_logs",
+      "description": "List the completion log dates for a habit, optionally filtered by a date range (YYYY-MM-DD).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "habit_id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string",
+            "description": "YYYY-MM-DD, optional"
+          },
+          "to": {
+            "type": "string",
+            "description": "YYYY-MM-DD, optional"
+          }
+        },
+        "required": [
+          "habit_id"
+        ]
+      }
+    }
+  }
+]

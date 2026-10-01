@@ -14,7 +14,7 @@ docker-compose up
 
 ### Option 2: Local Development
 
-**Prerequisites:** Node.js 20+, Python 3.11+, PostgreSQL 16 with pgvector
+**Prerequisites:** Node.js 20+, Rust 1.83+, PostgreSQL 16 with pgvector
 
 ```bash
 # 1. Setup
@@ -26,11 +26,10 @@ npm run launch
 
 ### Option 3: Manual
 
-**Backend:**
+**Backend (Rust):**
 ```bash
-cd apps/backend
-pip install -e .
-uvicorn app.main:app --reload --port 8000
+cd apps/backend-rust
+cargo run -p prysm-server   # serves on :8000, provisions the schema on first boot
 ```
 
 **Frontend:**
@@ -109,8 +108,8 @@ Key variables in `.env`:
 
 Generate keys:
 ```bash
-python -c "import secrets; print(secrets.token_hex(32))"
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+openssl rand -hex 32   # JWT_SECRET_KEY
+openssl rand -base64 32   # ENCRYPTION_KEY (44-char Fernet key)
 ```
 
 ## Architecture
@@ -119,7 +118,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 prysm-note/
 ├── apps/
 │   ├── frontend/        # Next.js 15 App Router + Tailwind CSS
-│   └── backend/         # FastAPI + SQLAlchemy (async) + PostgreSQL/pgvector
+│   └── backend-rust/    # Rust (axum + sqlx) + PostgreSQL/pgvector
 ├── docker/              # Dockerfiles + DB init scripts
 ├── scripts/             # Launch & setup scripts
 ├── docker-compose.yml
@@ -413,9 +412,9 @@ docker compose up
 ### Code Conventions
 
 - **Frontend**: TypeScript strict, Tailwind CSS utility classes, Zustand for state
-- **Backend**: Python 3.12+, type hints, async/await, Pydantic v2 schemas
+- **Backend**: Rust (axum + tokio + sqlx), serde schemas
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `chore:`)
-- **Tests**: Vitest (frontend) + pytest (backend) required before merge
+- **Tests**: Vitest (frontend) + `cargo test` (backend) required before merge
 - **Icons**: Hand-coded inline SVGs - no icon libraries
 - **Sounds**: Web Audio API synthesis - no audio files
 
@@ -424,7 +423,7 @@ docker compose up
 ```bash
 npm run build                    # Must compile
 npm test                         # Frontend tests
-cd apps/backend && pytest -v     # Backend tests
+cd apps/backend-rust && cargo test   # Backend tests
 npm run smoke:api                # API smoke check
 npm run smoke:ui                 # UI smoke check
 ```

@@ -1,0 +1,81 @@
+//! Community feature guide injected into the AI system prompt.
+//!
+//! Plain-text, user-facing "how do I use X" documentation for every open-core
+//! feature. The model answers how-to questions from this guide instead of
+//! hallucinating steps. Pure constants, no imports (kept import-free so it can
+//! never create a circular import with the chat service).
+//!
+//! Mirrors Python `services/feature_guide.py` verbatim.
+
+pub const PYRSM_FEATURE_GUIDE: &str = r#"FEATURE GUIDE. When the user asks HOW to do something in Prysm Note, how a feature works, or what is possible, answer from the guide below with concrete steps. Base answers only on what is documented here. If a topic is not covered, or is a Premium-only area you have no docs for, say you do not have documentation for it and never invent steps or endpoints.
+
+TASKS: Create tasks with the quick-add box or the + button, and edit or complete them from the timeline or the task detail. Dates, due dates, priority (1 high, 2 medium, 3 low) and descriptions are set when creating or editing. Tasks can carry a start time and end time ("at 2pm"): the time shows as a chip on the timeline and timed tasks are stacked above untimed ones, earlier times above later times. When you tell the AI about an appointment with a clock time, it saves the time on the task rather than only in the description. Repeating tasks use a recurrence rule and the copies expand automatically (they keep the template's time). Add subtasks or checklists inside a task, and rename, reorder or delete each subtask from the list. Opening a task shows its description on top and the full subtask checklist right below it, all on one page; there are no tabs to switch between them, and the subtask header counts how many are done. Attach tags, and link related tasks. Duplicate a task to copy it; reschedule by dragging or by editing its date. Tasks live in statuses (backlog, todo, in progress, done, cancelled); kanban columns and board sections are just different views of that status. Deleting a task moves it to the Trash instead of removing it permanently: a toast lets you undo right away, and the Trash keeps it for 14 days (restore it there, or it is removed after that). The AI can do all of this directly, and the AI remembers that delete still requires your confirmation first.
+
+FORMATTING DESCRIPTIONS AND SUBTASKS: Descriptions and subtask titles are markdown. While editing a description a formatting toolbar sits above the text box: bold, italic, strikethrough, headings, bullet, numbered and checkbox lists, quote, code block and link. Press a button to wrap the selected text (or insert a placeholder), then save with the Done button, by tapping outside, or with Cmd/Ctrl+Enter; Escape discards the edit. The T button in the task footer opens the description editor directly, subtask titles show their formatting as you type them, and the same toolbar appears behind a subtask's T button. In the AI chat an emoji button next to Send inserts an emoji at the cursor. Character limits are generous (task and subtask names up to 5000 characters, descriptions up to 100000, tags up to 50), and every limited field shows a small counter as you near its limit; it turns red and states exactly how many characters you are over if you pass it, and the field cannot be saved while it is over.
+
+LISTS: The Lists section in the sidebar organizes tasks into separate collections (for example Work and Personal). Every account starts with a default "My Tasks" list, and new tasks land there unless you pick another list. Click a list to see only its tasks ("All Tasks" shows everything). Create, rename and delete lists from the sidebar; deleting a list keeps its tasks and moves them to "My Tasks". The "My Tasks" list is permanent: it is the home for new tasks and for tasks whose list was deleted, so it cannot be renamed or deleted. Tasks can be assigned to a list when creating or editing them, and the AI can create and manage lists too. Lists can be grouped into named sections: use the section button next to the Lists heading to add one (for example Work or Personal), then drag lists into it by their drag handle. Drag a section header to reorder sections, click a section's chevron to collapse or expand it, and rename or delete a section from its header; deleting a section keeps its lists. Lists that are not in a section stay in the ungrouped area, and dragging a list out of every section returns it there. The "Inbox" smart list is not a stored list: it gathers every task that has no start date and no due date, so unscheduled items can be reviewed and cleared in one place.
+
+TRASH: Deleted tasks are not lost. They move to the Trash, shown in the sidebar with a count badge. From the Trash you can restore a task (or several) or delete it forever; empty trash clears everything at once. Trashed tasks are kept for 14 days, then removed automatically. The AI can restore a wrongly-deleted task if you ask right away.
+
+FILTERS: Use the funnel button next to search to narrow the current view by status, priority, date range, tasks without a date, or tags. Active filters show a count badge and can be cleared all at once. Filters combine with the sidebar views and search. The sidebar smart lists (Today, Next 7 Days, All Tasks, Completed) apply in every view, not just the timeline, and your last smart list, list, tag and search are remembered the next time you open the app.
+
+VIEWS: Timeline is the default view (day, week or month). Switch views from the top toolbar: Kanban (columns by status), Calendar (month grid), List (table with inline editing) and Board (sticky notes grouping tasks). In the Board view you can add a task straight into any column with the + Add task button at the bottom of that column, from the toolbar + New, or from the empty board; the task is filed into that column's section. The default view is stored in Settings, and each view can be toggled on or off. When you open a list, the view you last used for that list is restored; otherwise the default view from Settings is used. The timeline scrolls endlessly in both directions: drag the canvas, scroll with the wheel, or use the period arrows to page a screen at a time, and the canvas keeps extending so any past or future date can be reached.
+
+TIMELINE SECTIONS: The timeline can group tasks into swimlane sections. A fixed column on the left lists each section with a chevron to collapse or expand that section and a count of its tasks. Sections belong to the list you are viewing: each list keeps its own, and a new list starts with none until you add one (there are no auto-created placeholders). The chevron at the top of the column collapses the whole column to a slim rail that still shows each section's color dot, chevron and count, and a chevron on the rail expands it back to the full labels; the choice is remembered, and on a phone the rail is the default so the canvas keeps its width. Drag a task bar in any direction: sideways moves the task to another day, and up or down puts it in the section whose lane you drop it on. Dropping it on the ungrouped area takes it out of its section. Empty groups show a drop hint. Right-click a section header to rename it, move it up or down, or delete it, and use the + Add Section button at the bottom of the column to create a new one. Tasks that are not in a section stay in the ungrouped area at the bottom. Dropping a task on a collapsed section expands it automatically, so the task never vanishes. Drag on empty canvas space to pan the timeline in any direction, sideways or up and down; a horizontal trackpad swipe or shift+wheel pans too; grabbing a task bar moves that task instead. Hover a task bar to highlight it, and its title is always readable even when it spans many days. If your timeline is one big pile, group it with sections: add a section from the column, then drag task bars into the lane you want, and rename, reorder or delete sections like any other.
+
+DATE AND TIME: Settings, then Date & Time controls how dates and times are shown. Pick the week start day, a 12-hour or 24-hour clock, a date format, and your timezone from the list (or press Detect to use this device's zone). The timezone is saved to your account, so due dates, reminders and calendar times stay correct on every device.
+
+APPEARANCE AND THEMES: Settings, then Appearance chooses how the app looks. Pick a built-in theme from the grid (including the newer Ocean Depth, Forest Canopy and Sunset Glow), a font, and a background preset; the sidebar theme menu switches the theme quickly too. To build your own, press Create Custom Theme and set each color, then Apply Custom Theme. The editor also has a Restore defaults button that puts the colors back to the default theme. Export saves your theme as a JSON file so you can keep it or share it, and Import loads one (from a file or pasted text): an imported theme is checked before it is applied, so a malformed or unsafe file is rejected instead of breaking the app.
+
+PROJECTS, FILTERS AND TAGS: The sidebar organizes everything. Projects group related tasks, the filter bar narrows what you see (status, priority, date, assignee), and tags label tasks across projects. Click a tag or project in the sidebar to focus it.
+
+SEARCH: Use the search box in the top bar to find tasks by title or description. You can also just ask the AI, for example "find my tasks for next week".
+
+SHOWS AND MOVIES: The Shows & Movies section in the sidebar is a personal watchlist. Search a title to add it, mark items as watching or watched, rate them 1-10, and remove ones you no longer care about (removal asks for confirmation). The AI can search and manage this list too.
+
+HABITS: The Habits section tracks daily and weekly habits. Create a tracker for a habit you want to build, then log each day (or week) you complete it. Missed days are fine: the tracker keeps going. The AI can create, list, update, log and delete habits for you: try "log my water today" or "add a habit to read daily".
+
+TEAMS: The Collaborate area lets you invite other people by email. Teams turn a task list into a shared workspace: members can be assigned tasks, and the whole team sees the same projects and tasks. Leave a team or remove a member from the team settings.
+
+CALENDAR SYNC: Connect a Google account in Settings: Prysm Note imports your Google Calendar events so they appear in the timeline and calendar views, and tasks can be pushed back. New events are pulled automatically in the background.
+
+IMPORTS: Import tasks from a CSV file or a TickTick export, and calendar events from an ICS file (Settings, then Import). Each TickTick Folder or List name becomes a Prysm list, so imported tasks stay grouped as they were. Export all data as JSON anytime. Imported tasks arrive with their titles, dates and priorities.
+
+NOTIFICATIONS: Reminders are per-task and OFF by default. Turn on Remind me when creating or editing a task, and only those marked tasks are ever reminded (tasks you did not mark never appear). In Settings, Notifications, choose a reminder time (local time, default 20:00); at that time a persistent card appears bottom-right for marked tasks that are due tomorrow or overdue, including tasks very overdue and far outside the loaded timeline. The stack shows the most urgent few with a +N more line, with Done, Snooze 1h and Open buttons and an optional ping sound. Each task is shown once a day. Email reminders are a separate optional switch (off by default) and still only cover tasks you marked; you can also turn on a daily digest email. A single system notifications switch then delivers reminders as your computer's notifications in the browser (and as native Prysm Note notifications in the desktop app), with the in-app card always there as a fallback.
+
+PASSKEYS: Settings, then Account, has a Security section where you can add a passkey and sign in without a password. Add a passkey on any device with Touch ID, Face ID, Windows Hello or a security key, give it a name, and use "Sign in with a passkey" on the login page next time. You can add more than one passkey, rename them, and remove ones you no longer use; a passkey works for any account, including one you created with Google or GitHub.
+
+AI CHAT: The AI panel is a full assistant: create, schedule, search, reschedule and analyze tasks, plus summarize your day or week. Hosted PrysmAI is on by default; bring your own keys (OpenAI, Gemini, DeepSeek, OpenRouter) under Settings, then AI Keys. Chat history resumes after a refresh, and you can start a fresh conversation anytime.
+
+DESKTOP AND MOBILE: Prysm Note runs everywhere. On a phone or tablet the web app is fully touch-friendly: the bottom bar has four tabs (Today, Chat, Capture and More), and the workspaces that do not fit on a phone live behind More in a sheet, so nothing is clipped. Settings become a drawer, and touching and holding a task picks it up to move and opens an action bar with Done, Duplicate, Delete and Move. Install it like any website from your browser for an app-like experience (PWA): on Android, Chrome, Edge, Opera and Samsung Internet show a one-tap Install prompt. In Brave, tap the three-dot menu, tap "Install and create shortcut" (older builds show "Add to Home screen"), then tap Install app; if the item is missing, open Customize menu and turn it on. Firefox adds it from the menu too (Add to Home screen). On iPhone/iPad every browser installs via Share then Add to Home Screen. Native desktop apps for Windows, macOS and Linux are on the Downloads page (https://prysmnote.com/downloads). On macOS, if the downloaded app says it is damaged, run xattr -cr "/Applications/Prysm Note.app" once and open it again. Your tasks and settings sync across the web, desktop and mobile apps with the same account.
+
+FINANCE: Track money without leaving the app. The Finance workspace (under More on a phone) holds income, one-off expenses, recurring bills and debts or loans, each with an amount, a category, a payee and an optional due date. You can add, edit and delete items and transactions, record a payment against an item (the remaining balance drops, and paying the rest in full closes it), and undo a recorded payment to restore the balance. The Debts view lists everything still owed. You can also just tell the AI things like "I pay 40 euros for internet every month" or "record a 200 euro payment on the car loan", and it updates Finance for you instead of creating tasks.
+
+AI CONNECT (MCP): Connect an external AI app (VS Code, Cursor, Claude, Kilo and any other MCP client) to your Prysm Note data. Open Settings, then AI Connect, and create a Personal Access Token: it is shown once and only a hash is stored. Copy the endpoint URL and add it to your AI app with the token as a bearer value (an http mcpServers entry); ready-to-copy configs for each supported app are on the /docs page. Create one token per app so you can revoke them individually at any time, and revoking stops access immediately. The connection exposes your tasks, watchlist and habits. In VS Code, Cursor and Kilo you can also sign in through the browser instead of copying a token.
+
+SYNC ACROSS DEVICES: Tasks, timeline sections, reminders, habits, shows, countdowns and finance live on the server, so every device sees the same data. When you return to the app (or leave it open) it refreshes automatically within about a minute, and a section or task you delete on one device stays deleted, so you do not have to reload manually."#;
+
+/// The feature guide for injection into the AI system prompt.
+pub fn feature_guide() -> &'static str {
+    PYRSM_FEATURE_GUIDE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guide_has_the_header_and_ends_with_sync_section() {
+        assert!(PYRSM_FEATURE_GUIDE.starts_with("FEATURE GUIDE."));
+        assert_eq!(feature_guide(), PYRSM_FEATURE_GUIDE);
+        assert!(PYRSM_FEATURE_GUIDE.ends_with("reload manually."));
+    }
+
+    #[test]
+    fn guide_has_no_em_dashes_and_documents_core_sections() {
+        assert!(!PYRSM_FEATURE_GUIDE.contains('\u{2014}'));
+        for section in ["TASKS:", "LISTS:", "TRASH:", "VIEWS:", "HABITS:", "AI CHAT:"] {
+            assert!(PYRSM_FEATURE_GUIDE.contains(section), "missing {section}");
+        }
+    }
+}
