@@ -1,5 +1,13 @@
 /* Prysm Note service worker - Web Push notifications plus an offline shell. */
-const CACHE_VERSION = "prysm-v2";
+// The app registers `/sw.js?v=<build-sha>` (see src/lib/service-worker.ts), so
+// each release installs a fresh worker and the cache namespace changes with it.
+// The activate handler below then drops every previous release's caches, which
+// is what stops a stale app shell/RSC from surviving a deploy. Parsing the
+// version here (instead of a hand-bumped constant) means a release can never
+// forget to invalidate its caches. Falls back to "dev" in local builds.
+const BUILD_VERSION =
+  new URL(self.location.href).searchParams.get("v") || "dev";
+const CACHE_VERSION = `prysm-${BUILD_VERSION}`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const APP_SHELL = "/";

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { ensureServiceWorker } from "@/lib/service-worker";
 
 export interface NotificationPrefs {
   inapp_reminders: boolean;
@@ -93,13 +94,7 @@ export async function showSystemNotification(title: string, body: string): Promi
 }
 
 export async function registerServiceWorker(): Promise<boolean> {
-  if (typeof window === "undefined" || !("serviceWorker" in navigator)) return false;
-  try {
-    await navigator.serviceWorker.register("/sw.js");
-    return true;
-  } catch {
-    return false;
-  }
+  return (await ensureServiceWorker()) !== null;
 }
 
 /**

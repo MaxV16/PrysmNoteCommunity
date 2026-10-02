@@ -2,18 +2,28 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
 import { ensureCsrf, getCsrfToken, CSRF_HEADER } from "./csrf";
 
-let refreshPromise: Promise<boolean> | null = null;
+let refreshPromise: Promise<RefreshOutcome> | null = null;
 
-async function doRefresh(): Promise<boolean> {
+/**
+ * Outcome of a token refresh. `unauthenticated` means the server explicitly
+ * rejected the refresh cookie (the session is really over); `transient` covers a
+ * network error, a 5xx or a 429 - a deploy-window blip that must NOT sign the
+ * user out.
+ */
+type RefreshOutcome = "ok" | "unauthenticated" | "transient";
+
+async function doRefresh(): Promise<RefreshOutcome> {
   try {
     const res = await fetch(`${API_URL}/auth/refresh`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
     });
-    return res.ok;
+    if (res.ok) return "ok";
+    if (res.status === 401 || res.status === 403) return "unauthenticated";
+    return "transient";
   } catch {
-    return false;
+    return "transient";
   }
 }
 
@@ -79,11 +89,18 @@ async function request<T>(
       refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
     }
     const refreshed = await refreshPromise;
-    if (refreshed) {
+    if (refreshed === "ok") {
       return request<T>(path, options, true);
     }
-    window.location.href = "/login";
-    throw new Error("Session expired");
+    if (refreshed === "unauthenticated") {
+      window.location.href = "/login";
+      throw new Error("Session expired");
+    }
+    // Transient refresh failure (backend restarting, 5xx, offline): keep the
+    // session and surface a retryable error instead of a forced re-login.
+    throw new Error(
+      "The server was unavailable or the request took too long. Please try again."
+    );
   }
 
   if (!res.ok) {

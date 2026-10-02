@@ -16,6 +16,21 @@ const STORAGE_KEY = "prysm_git_sha";
 // "a new bundle was deployed" check, which does not need 30s granularity.
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 
+// A running bundle that references a chunk the new deploy has replaced fails to
+// load it ("Loading chunk N failed", "Failed to fetch dynamically imported
+// module"). Today Next.js surfaces this as a broken screen rather than a
+// reload, so the banner is the safe recovery: reload to the fresh build.
+const CHUNK_ERROR_RE =
+  /Loading chunk [^ ]+ failed|Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module/i;
+
+function isChunkLoadError(value: unknown): boolean {
+  if (!value) return false;
+  if (typeof value === "string") return CHUNK_ERROR_RE.test(value);
+  const err = value as { name?: unknown; message?: unknown };
+  if (err.name === "ChunkLoadError") return true;
+  return typeof err.message === "string" && CHUNK_ERROR_RE.test(err.message);
+}
+
 function readStoredSha(): string {
   if (typeof window === "undefined") return "";
   try {
@@ -86,6 +101,39 @@ export function useAppVersion() {
     const id = setInterval(check, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [user, check]);
+
+  // A stale chunk after a deploy cannot finish loading the old bundle. Rather
+  // than leave the user on a broken screen (or let the app silently thrash),
+  // surface the update banner so the reload is explicit and keeps the session.
+  // Only genuine chunk-load failures qualify; unrelated errors are ignored.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onError = (event: Event) => {
+      // Capture phase also receives resource errors. A failed `/_next/static/`
+      // script is the fingerprint of a chunk the new deploy has replaced, even
+      // when the browser reports it on the element rather than as a runtime
+      // error; check it before the generic ErrorEvent shape.
+      const target = event.target as (HTMLElement & { src?: unknown }) | null;
+      if (target && target !== (event.currentTarget as unknown)) {
+        const src = typeof target.src === "string" ? target.src : "";
+        if (src.includes("/_next/static/")) {
+          setOutdated(true);
+          return;
+        }
+      }
+      const e = event as ErrorEvent;
+      if (isChunkLoadError(e.error) || isChunkLoadError(e.message)) setOutdated(true);
+    };
+    const onRejection = (event: PromiseRejectionEvent) => {
+      if (isChunkLoadError(event.reason)) setOutdated(true);
+    };
+    window.addEventListener("error", onError, true);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError, true);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
 
   // Cache-busting reload: a plain location.reload() may re-serve the cached
   // HTML (and its old chunk hashes). Navigating with a fresh query param forces

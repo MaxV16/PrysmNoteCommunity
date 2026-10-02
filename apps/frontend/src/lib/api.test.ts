@@ -154,6 +154,27 @@ describe("api", () => {
     window.location.href = originalLocation.href;
   });
 
+  it("keeps the session (no redirect) when refresh fails transiently", async () => {
+    document.cookie = "access_token=expired-token";
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: { href: "/app" },
+    });
+
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ detail: "Unauthorized" }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 503 });
+
+    await expect(api.get("/tasks")).rejects.toThrow(/server was unavailable/i);
+    // A backend restart mid-deploy must not bounce the user to the login page.
+    expect(window.location.href).toBe("/app");
+  });
+
   it("throws on non-ok response with detail", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,

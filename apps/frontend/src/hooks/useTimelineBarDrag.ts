@@ -159,6 +159,21 @@ function clearHighlight(el: HTMLElement | null) {
 }
 
 /**
+ * One-shot compositor-only pulse when a dragged bar lands in its new slot. Runs
+ * imperatively on the element (no React render), so a drop stays cheap; the
+ * class is removed on a timer so it can replay on the next drop and never keeps
+ * an animation alive.
+ */
+function settleBar(el: HTMLElement | null) {
+  if (!el) return;
+  el.classList.remove("animate-bar-settle");
+  // Force a style flush so re-adding the class restarts a just-finished pulse.
+  void el.offsetWidth;
+  el.classList.add("animate-bar-settle");
+  window.setTimeout(() => el.classList.remove("animate-bar-settle"), 320);
+}
+
+/**
  * Whether the drop should change the task's section.
  *
  * A lane drop targets that lane's section; the ungrouped lane clears the pin,
@@ -245,8 +260,10 @@ export function useTimelineBarDrag(
     const offset = s.offsetPx;
     if (s.mode === "move") {
       // Both axes so the bar follows the cursor; the lane it is over sets the
-      // section, and the x offset sets the days.
-      const transform = `translate3d(${offset}px, ${s.offsetYPx}px, 0)`;
+      // section, and the x offset sets the days. A tiny compositor-only scale
+      // lifts the bar under the finger/cursor, so the grab reads as tactile
+      // without touching layout.
+      const transform = `translate3d(${offset}px, ${s.offsetYPx}px, 0) scale(1.03)`;
       if (transform !== s.lastTransform) {
         s.el.style.transform = transform;
         s.lastTransform = transform;
@@ -623,6 +640,7 @@ export function useTimelineBarDrag(
         // has re-rendered the bar at its committed date, so there is no flash.
         // A drag that actually moved swallows its trailing click; a plain
         // touch hold (no movement) must not, or it would eat the action-bar tap.
+        if (committed) settleBar(s.el);
         if (committed || s.hasMoved) armClickSuppressor();
       } else {
         resetPreview(s.el);

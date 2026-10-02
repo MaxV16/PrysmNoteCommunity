@@ -306,6 +306,12 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
   @keyframes pop { 0% { transform: scale(0.82); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
   .animate-pop { animation: pop var(--dur-base, 180ms) var(--ease-spring, ease-out); }
 
+  /* Task bar "settle": a single compositor-only pulse after a timeline drag
+     drops the bar into its new day/slot, so the move reads as a landing instead
+     of a jump. One-shot, transform-only, no layout, no idle cost. */
+  @keyframes barSettle { 0% { transform: scale(1.05); } 100% { transform: scale(1); } }
+  .animate-bar-settle { animation: barSettle var(--dur-base, 180ms) var(--ease-spring, ease-out); }
+
   /* Respect the OS "reduce motion" setting: drop the decorative loops (which
      also burn CPU/battery on low-end devices) and make the entrance
      animations effectively instant. Layout and color are unchanged. */
@@ -313,6 +319,7 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
     .float,
     .animate-glow,
     .animate-pulse-subtle,
+    .animate-bar-settle,
     .animate-pop {
       animation: none;
     }

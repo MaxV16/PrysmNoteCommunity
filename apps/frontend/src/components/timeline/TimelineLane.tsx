@@ -153,6 +153,9 @@ const TimelineTaskBar = memo(function TimelineTaskBar({
  */
 export const TimelineLane = memo(function TimelineLane({ tasks, days, dayWidth = 120, onTaskClick, onDayDoubleClick, onDayAdd, onTaskContextMenu, onDayContextMenu, rowHeight, dragDisabled, selectMode, sectionId = null, sectionLabel = null }: TimelineLaneProps) {
   const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
+  // O(1) membership per bar instead of an O(n) `includes` scan per bar (which
+  // is O(n^2) across a lane) on every selection change or parent render.
+  const selectedSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
   const { positioned, height } = useMemo(() => computeLaneLayout(tasks, days), [tasks, days]);
   const laneHeight = rowHeight ?? height;
 
@@ -199,7 +202,7 @@ export const TimelineLane = memo(function TimelineLane({ tasks, days, dayWidth =
             onTaskClick={onTaskClick}
             onTaskContextMenu={onTaskContextMenu}
             dragDisabled={dragDisabled}
-            selected={selectedTaskIds.includes(task.id)}
+            selected={selectedSet.has(task.id)}
             selectMode={selectMode}
           />
         ))}

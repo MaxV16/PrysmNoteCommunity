@@ -37,6 +37,7 @@ import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { refreshTasksPreservingWindow } from "@/hooks/useTasks";
 import { registerBackHandler } from "@/lib/back-nav";
 import { useFilterPersistence } from "@/hooks/useFilterPersistence";
+import { ensureServiceWorker } from "@/lib/service-worker";
 
 // The chat panel pulls in react-markdown + a large tool/voice surface; keep it
 // out of the initial workspace bundle and load it only when the user opens it.
@@ -314,11 +315,10 @@ export function AppShell() {
   // Restore + persist the smart-list / list / tag / search filter across reloads.
   useFilterPersistence(prefsHydrated);
 
-  // Service worker registration for PWA offline support.
+  // Service worker registration for PWA offline support. The URL carries the
+  // build SHA so a new release installs a fresh worker and evicts old caches.
   useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
-    }
+    void ensureServiceWorker();
   }, []);
 
   return (

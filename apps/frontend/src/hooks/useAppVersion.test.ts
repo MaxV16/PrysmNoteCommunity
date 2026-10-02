@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 
 const auth = vi.hoisted(() => ({ user: { id: "u1" } as { id: string } | null }));
 vi.mock("@/lib/auth-context", () => ({
@@ -91,5 +91,55 @@ describe("useAppVersion", () => {
     expect(assignMock).not.toHaveBeenCalled();
     expect(String(replaceMock.mock.calls[0][0])).toContain("v=");
     expect(localStorage.getItem("prysm_git_sha")).toBe("sha-new");
+  });
+
+  it("shows the banner on a stale chunk load error even when versions match", async () => {
+    const useAppVersion = await loadHook("sha-1");
+    mockFetch("sha-1");
+    const { result } = renderHook(() => useAppVersion());
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(result.current.outdated).toBe(false);
+
+    act(() => {
+      const err = new Error("Loading chunk 123 failed.");
+      err.name = "ChunkLoadError";
+      window.dispatchEvent(new ErrorEvent("error", { error: err, message: err.message }));
+    });
+
+    await waitFor(() => expect(result.current.outdated).toBe(true));
+  });
+
+  it("ignores unrelated runtime errors", async () => {
+    const useAppVersion = await loadHook("sha-1");
+    mockFetch("sha-1");
+    const { result } = renderHook(() => useAppVersion());
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(result.current.outdated).toBe(false);
+
+    act(() => {
+      window.dispatchEvent(
+        new ErrorEvent("error", { error: new Error("Some unrelated failure"), message: "Some unrelated failure" })
+      );
+    });
+
+    expect(result.current.outdated).toBe(false);
+  });
+
+  it("shows the banner when a hashed Next chunk script fails to load", async () => {
+    const useAppVersion = await loadHook("sha-1");
+    mockFetch("sha-1");
+    const { result } = renderHook(() => useAppVersion());
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(result.current.outdated).toBe(false);
+
+    act(() => {
+      const script = document.createElement("script");
+      script.src = "http://localhost/_next/static/chunks/old-build.js";
+      document.body.appendChild(script);
+      script.dispatchEvent(new Event("error"));
+      script.remove();
+    });
+
+    await waitFor(() => expect(result.current.outdated).toBe(true));
   });
 });

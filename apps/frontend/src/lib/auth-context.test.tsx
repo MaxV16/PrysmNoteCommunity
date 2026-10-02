@@ -74,6 +74,49 @@ describe("useAuth", () => {
     });
   });
 
+  it("keeps the seeded user when /me fails with a transient 5xx", async () => {
+    localStorage.setItem(
+      "prysm_user_snapshot",
+      JSON.stringify({ id: "9", email: "seed@test.com" })
+    );
+    mockFetch.mockResolvedValue({ ok: false, status: 503 });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.user).toEqual({ id: "9", email: "seed@test.com" });
+    expect(localStorage.getItem("prysm_user_snapshot")).not.toBeNull();
+  });
+
+  it("keeps the seeded user when the refresh call fails transiently after a 401", async () => {
+    localStorage.setItem(
+      "prysm_user_snapshot",
+      JSON.stringify({ id: "9", email: "seed@test.com" })
+    );
+    mockFetch
+      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({ ok: false, status: 503 });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.user).toEqual({ id: "9", email: "seed@test.com" });
+  });
+
+  it("clears the seeded user on an explicit 401 when refresh is rejected", async () => {
+    localStorage.setItem(
+      "prysm_user_snapshot",
+      JSON.stringify({ id: "9", email: "seed@test.com" })
+    );
+    mockFetch.mockResolvedValue({ ok: false, status: 401 });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.user).toBeNull();
+    expect(localStorage.getItem("prysm_user_snapshot")).toBeNull();
+  });
+
   it("login sets user on success", async () => {
     // Mount: /me fails
     mockFetch.mockResolvedValue({ ok: false, status: 401 });
