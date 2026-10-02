@@ -164,10 +164,27 @@ pub fn classify_inactivity(
     }
 }
 
+/// How the sweep delivers an inactivity warning. Production uses `Real`;
+/// tests can force a delivery result without a configured mail provider.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WarningDelivery {
+    /// Send through the configured Brevo/SMTP transport.
+    #[default]
+    Real,
+    /// Report success without sending (tests only).
+    SimulateSuccess,
+    /// Report failure without sending (tests only).
+    SimulateFailure,
+}
+
 /// Outcome counters from one sweep pass (logged by the loop).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SweepReport {
     pub warned: usize,
+    /// Warnings that could not be delivered this pass. The user is left
+    /// unwarned so the next sweep retries; a provider outage can never start a
+    /// grace clock for someone who was never notified.
+    pub warning_failed: usize,
     pub cleared: usize,
     pub deleted: usize,
 }
@@ -180,6 +197,16 @@ pub async fn inactivity_sweep(
     pool: &PgPool,
     settings: &Settings,
     now: DateTime<Utc>,
+) -> Result<SweepReport, sqlx::Error> {
+    inactivity_sweep_with(pool, settings, now, WarningDelivery::Real).await
+}
+
+/// Run one sweep with an injectable warning transport (see [`WarningDelivery`]).
+pub async fn inactivity_sweep_with(
+    pool: &PgPool,
+    settings: &Settings,
+    now: DateTime<Utc>,
+    delivery: WarningDelivery,
 ) -> Result<SweepReport, sqlx::Error> {
     let warning_days = settings.inactivity_warning_days();
     let grace_days = settings.inactivity_grace_days();
@@ -197,7 +224,24 @@ pub async fn inactivity_sweep(
     .fetch_all(pool)
     .await?;
     for (user_id, email_addr) in to_warn {
-        let _ = email::send_inactivity_warning(settings, &email_addr, grace_days).await;
+        // Only start the grace clock once the warning has actually been
+        // delivered. If the provider is down we leave the user unwarned and
+        // retry next sweep, so an email outage can never delete someone who was
+        // never notified.
+        let delivered = match delivery {
+            WarningDelivery::Real => {
+                email::send_inactivity_warning(settings, &email_addr, grace_days).await
+            }
+            WarningDelivery::SimulateSuccess => true,
+            WarningDelivery::SimulateFailure => false,
+        };
+        if !delivered {
+            tracing::warn!(
+                "inactivity warning to {email_addr} could not be delivered; will retry next sweep"
+            );
+            report.warning_failed += 1;
+            continue;
+        }
         sqlx::query("UPDATE users SET inactivity_warned_at = $2 WHERE id = $1")
             .bind(user_id)
             .bind(now)
@@ -245,8 +289,9 @@ pub async fn inactivity_loop(pool: PgPool, settings: Settings, interval: Duratio
     loop {
         match inactivity_sweep(&pool, &settings, Utc::now()).await {
             Ok(report) => tracing::info!(
-                "account inactivity sweep: warned={} cleared={} deleted={}",
+                "account inactivity sweep: warned={} failed={} cleared={} deleted={}",
                 report.warned,
+                report.warning_failed,
                 report.cleared,
                 report.deleted
             ),
@@ -417,6 +462,14 @@ mod tests {
             .unwrap();
     }
 
+    /// Serializes the sweep tests: a sweep scans and mutates every user, so two
+    /// of them sharing the table concurrently would interfere (one test's
+    /// successful warning could arm the deletion path for another's user).
+    fn sweep_lock() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+    }
+
     /// Live-Postgres coverage of the time-based sweep, driven with an injected
     /// `now` so it is deterministic and needs no env changes.
     #[tokio::test]
@@ -424,6 +477,7 @@ mod tests {
         let Some(state) = live_state().await else {
             return;
         };
+        let _guard = sweep_lock().lock().await;
         crate::schema::ensure_schema(&state.pool, &state.system_pool)
             .await
             .expect("provision");
@@ -442,7 +496,9 @@ mod tests {
             .await
             .unwrap();
 
-        let report = inactivity_sweep(&state.pool, &settings, now).await.unwrap();
+        let report = inactivity_sweep_with(&state.pool, &settings, now, WarningDelivery::SimulateSuccess)
+            .await
+            .unwrap();
         assert!(report.warned >= 1);
         let warned_at: Option<DateTime<Utc>> =
             sqlx::query_scalar("SELECT inactivity_warned_at FROM users WHERE id = $1")
@@ -453,9 +509,10 @@ mod tests {
         assert!(warned_at.is_some(), "A must be marked warned");
 
         // 31 days later, still inactive -> deleted (grace is 30).
-        let report = inactivity_sweep(&state.pool, &settings, now + chrono::Duration::days(31))
-            .await
-            .unwrap();
+        let report =
+            inactivity_sweep_with(&state.pool, &settings, now + chrono::Duration::days(31), WarningDelivery::SimulateSuccess)
+                .await
+                .unwrap();
         assert!(report.deleted >= 1);
         let gone: bool = sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM users WHERE id = $1)")
             .bind(a.id)
@@ -479,7 +536,9 @@ mod tests {
         .await
         .unwrap();
 
-        let report = inactivity_sweep(&state.pool, &settings, now).await.unwrap();
+        let report = inactivity_sweep_with(&state.pool, &settings, now, WarningDelivery::SimulateSuccess)
+            .await
+            .unwrap();
         assert!(report.cleared >= 1);
         let still_there: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
@@ -499,6 +558,80 @@ mod tests {
         sqlx::query("DELETE FROM users WHERE id = $1").bind(b.id).execute(&state.pool).await.unwrap();
         sqlx::query("DELETE FROM account_deletions WHERE email_hash = $1")
             .bind(email_hash(&a_email))
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    }
+
+    /// A warning that cannot be delivered must NOT start the grace clock and
+    /// must never lead to deletion, even long after the grace window; a later
+    /// successful delivery warns normally.
+    #[tokio::test]
+    async fn undeliverable_warning_never_deletes() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let _guard = sweep_lock().lock().await;
+        crate::schema::ensure_schema(&state.pool, &state.system_pool)
+            .await
+            .expect("provision");
+        let settings = (*state.settings).clone();
+        let now = Utc::now();
+
+        let email = format!("rust-lifecycle-undeliverable-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "hash", None)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE users SET last_active_at = $2 WHERE id = $1")
+            .bind(user.id)
+            .bind(now - chrono::Duration::days(400))
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        // Provider down: no warning is recorded, so no grace clock starts.
+        let report =
+            inactivity_sweep_with(&state.pool, &settings, now, WarningDelivery::SimulateFailure)
+                .await
+                .unwrap();
+        assert!(report.warning_failed >= 1);
+        let warned: Option<DateTime<Utc>> =
+            sqlx::query_scalar("SELECT inactivity_warned_at FROM users WHERE id = $1")
+                .bind(user.id)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert!(warned.is_none(), "failed delivery must not start the grace clock");
+
+        // Even 90 days later (well past the 30-day grace) the unnotified user
+        // is still present, because no warning ever landed.
+        let _ =
+            inactivity_sweep_with(&state.pool, &settings, now + chrono::Duration::days(90), WarningDelivery::SimulateFailure)
+                .await
+                .unwrap();
+        let still_there: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)")
+            .bind(user.id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert!(still_there, "an unnotified user must never be deleted");
+
+        // A later successful delivery warns and starts the clock.
+        let report =
+            inactivity_sweep_with(&state.pool, &settings, now + chrono::Duration::days(90), WarningDelivery::SimulateSuccess)
+                .await
+                .unwrap();
+        assert!(report.warned >= 1);
+        let warned: Option<DateTime<Utc>> =
+            sqlx::query_scalar("SELECT inactivity_warned_at FROM users WHERE id = $1")
+                .bind(user.id)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert!(warned.is_some(), "successful delivery must start the grace clock");
+
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user.id)
             .execute(&state.pool)
             .await
             .unwrap();
