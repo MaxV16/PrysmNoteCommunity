@@ -45,7 +45,7 @@ function TabButton({
         {icon}
       </span>
       <span
-        className={`w-full truncate text-center text-[9px] leading-tight ${
+        className={`w-full truncate text-center text-[10px] leading-tight ${
           active ? "font-semibold text-accent" : "text-muted"
         }`}
       >

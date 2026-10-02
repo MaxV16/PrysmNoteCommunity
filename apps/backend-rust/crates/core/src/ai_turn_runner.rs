@@ -340,7 +340,10 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
     let mut client = build_turn_client(state, job, 0)?;
     let mut content = String::new();
     let mut tool_calls: Option<Value> = None;
-    let mut tools_ran = false;
+    // True once a mutating tool call actually committed (a payload with no
+    // error). Only then may the model narrate the action as done; a failed or
+    // read-only tool call must not let a hallucinated success slip through.
+    let mut action_succeeded = false;
     let mut money_nudged = false;
     let mut tool_nudged = false;
     let mut current_model_index = 0usize;
@@ -428,7 +431,6 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
             "content": content,
             "tool_calls": calls,
         }));
-        tools_ran = true;
 
         let start_info: Vec<Value> = calls
             .as_array()
@@ -447,7 +449,11 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
         job.send(TurnEvent::ToolStart(Value::Array(start_info)));
 
         let call_list = calls.as_array().cloned().unwrap_or_default();
-        let tool_results = ai_execute::execute_tool_calls(state, user_id, &call_list).await;
+        let (tool_results, round_action_succeeded) =
+            ai_execute::execute_tool_calls_outcome(state, user_id, &call_list).await;
+        if round_action_succeeded {
+            action_succeeded = true;
+        }
         let contents: Vec<String> = tool_results
             .iter()
             .map(|r| {
@@ -493,7 +499,7 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
     };
 
     // 5. Final answer: stream it for real.
-    let force_honest = unmet_action(&content, &job.user_message, tools_ran);
+    let force_honest = unmet_action(&content, &job.user_message, action_succeeded);
     let mut streamed = String::new();
 
     if force_honest {
@@ -921,9 +927,12 @@ pub async fn maybe_extract_memories(
 // Pure helpers (ported decision logic)
 // ---------------------------------------------------------------------------
 
-/// True when an action-y turn only narrated an action it never took.
-pub fn unmet_action(content: &str, user_message: &str, tools_ran: bool) -> bool {
-    if tools_ran || content.is_empty() {
+/// True when an action-y turn only narrated an action it never actually
+/// committed. `action_succeeded` must be true only when a mutating tool call
+/// really persisted a change; a failed or read-only tool call cannot excuse a
+/// success narration.
+pub fn unmet_action(content: &str, user_message: &str, action_succeeded: bool) -> bool {
+    if action_succeeded || content.is_empty() {
         return false;
     }
     ai_tools::has_hallucinated_action(content) && ai_tools::needs_tool_retry(content, user_message)
@@ -1240,6 +1249,14 @@ mod tests {
         assert!(!unmet_action("Let me try deleting it", "delete the task", true));
         assert!(!unmet_action("It is sunny today", "what is the weather", false));
         assert!(!unmet_action("", "delete the task", false));
+    }
+
+    /// A failed (or read-only) tool call must not excuse a success narration:
+    /// this is the "AI says it created the task but nothing was saved" bug.
+    #[test]
+    fn unmet_action_flags_success_narration_without_committed_action() {
+        assert!(unmet_action("I've created the task for you:", "testing", false));
+        assert!(!unmet_action("I've created the task for you:", "testing", true));
     }
 
     #[test]

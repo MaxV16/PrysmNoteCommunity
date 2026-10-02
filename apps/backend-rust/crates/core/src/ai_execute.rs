@@ -55,6 +55,20 @@ pub(crate) async fn execute_tool_calls(
     user_id: Uuid,
     tool_calls: &[Value],
 ) -> Vec<Value> {
+    execute_tool_calls_outcome(state, user_id, tool_calls).await.0
+}
+
+/// Outcome-aware variant of [`execute_tool_calls`]. The returned bool is true
+/// when at least one mutating tool call actually committed (a payload with no
+/// `error`), so the turn runner can tell a real side effect from a failed call
+/// that the model might still narrate as success. Each successful mutation also
+/// publishes the per-user change event an HTTP mutation would, so `GET
+/// /api/events` fans it out to the same tab, other tabs and other devices.
+pub(crate) async fn execute_tool_calls_outcome(
+    state: &AppState,
+    user_id: Uuid,
+    tool_calls: &[Value],
+) -> (Vec<Value>, bool) {
     let truncated = tool_calls.len() > MAX_TOOL_CALLS_PER_ROUND;
     let calls = if truncated {
         &tool_calls[..MAX_TOOL_CALLS_PER_ROUND]
@@ -63,6 +77,8 @@ pub(crate) async fn execute_tool_calls(
     };
 
     let mut results: Vec<Value> = Vec::new();
+    let mut action_succeeded = false;
+    let ee_names = crate::ai_tools::ee_tool_names();
 
     for tc in calls {
         let call_id = tc.get("id").cloned().unwrap_or(Value::Null);
@@ -96,8 +112,26 @@ pub(crate) async fn execute_tool_calls(
             }
         };
 
+        let resource = crate::ai_tools::mutation_resource(name);
+        // Core mutating tools are mapped precisely; EE mutating tools are not
+        // known to core, so an EE tool name counts as a write too. Read-only
+        // EE tools still publish a harmless generic refresh signal.
+        let is_write = resource.is_some() || ee_names.iter().any(|n| n == name);
         match dispatch(state, user_id, name, &args).await {
             Ok(payloads) => {
+                let committed = payloads.iter().any(|p| !payload_is_error(p));
+                if committed {
+                    if let Some(res) = resource {
+                        state.events.publish(user_id, res);
+                    } else if is_write {
+                        // EE tools are mapped by the extension crate; a generic
+                        // signal still lets the client refresh every view.
+                        state.events.publish(user_id, "sync");
+                    }
+                }
+                if committed && is_write {
+                    action_succeeded = true;
+                }
                 for payload in payloads {
                     results.push(tool_message(call_id.clone(), Value::String(payload)));
                 }
@@ -137,7 +171,16 @@ pub(crate) async fn execute_tool_calls(
         results.push(tool_message(last_id, Value::String(payload)));
     }
 
-    results
+    (results, action_succeeded)
+}
+
+/// True when a tool result payload carries a non-null `error` field. Non-JSON
+/// payloads (the "Invalid arguments" fallback) count as failures.
+fn payload_is_error(payload: &str) -> bool {
+    match serde_json::from_str::<Value>(payload) {
+        Ok(Value::Object(obj)) => obj.get("error").map(|e| !e.is_null()).unwrap_or(false),
+        _ => true,
+    }
 }
 
 fn tool_message(call_id: Value, content: Value) -> Value {
@@ -747,6 +790,20 @@ async fn ilike_search(
     rows.iter().map(Task::from_row).collect()
 }
 
+/// Normalize a date argument to `YYYY-MM-DD`, dropping junk. The create service
+/// validates strictly, so a stray "tomorrow" must not abort the whole insert
+/// (Python's `_parse_date` returned None for the same reason).
+fn norm_date_arg(args: &Value, key: &str) -> Option<String> {
+    parse_date_arg(arg_str(args, key)).map(|d| d.format("%Y-%m-%d").to_string())
+}
+
+/// Normalize a clock argument to `HH:MM:SS`, accepting convenience forms
+/// ("2pm", "14:00", "9"). The model is told HH:MM, but it often emits "2pm";
+/// passing that straight to the strict service 422s and drops the whole task.
+fn norm_time_arg(args: &Value, key: &str) -> Option<String> {
+    parse_time_arg(arg_str(args, key)).map(|t| t.format("%H:%M:%S").to_string())
+}
+
 fn build_create_request(
     args: &Value,
     title: &str,
@@ -760,12 +817,12 @@ fn build_create_request(
         description: arg_str(args, "description").map(|s| s.to_string()),
         status: "backlog".to_string(),
         priority: task::normalize_priority(Some(priority)) as i64,
-        start_date: arg_str(args, "start_date").map(|s| s.to_string()),
-        due_date: arg_str(args, "due_date").map(|s| s.to_string()),
-        start_time: arg_str(args, "start_time").map(|s| s.to_string()),
-        end_time: arg_str(args, "end_time").map(|s| s.to_string()),
+        start_date: norm_date_arg(args, "start_date"),
+        due_date: norm_date_arg(args, "due_date"),
+        start_time: norm_time_arg(args, "start_time"),
+        end_time: norm_time_arg(args, "end_time"),
         recurrence_rule: arg_str(args, "recurrence_rule").map(|s| s.to_string()),
-        recurrence_end_date: arg_str(args, "recurrence_end_date").map(|s| s.to_string()),
+        recurrence_end_date: norm_date_arg(args, "recurrence_end_date"),
         estimated_minutes: arg_i64(args, "estimated_minutes").map(|v| v as i32),
         tag_ids: None,
         list_id: args.get("list_id").and_then(safe_uuid),
@@ -2784,6 +2841,165 @@ mod tests {
         assert_eq!(detail_payload["id"], task_id);
         assert_eq!(detail_payload["title"], "AI Rust task");
         assert_eq!(detail_payload["priority"], 1);
+
+        for sql in ["DELETE FROM tasks WHERE user_id = $1", "DELETE FROM lists WHERE user_id = $1", "DELETE FROM users WHERE id = $1"] {
+            sqlx::query(sql)
+                .bind(user.id)
+                .execute(&state.pool)
+                .await
+                .expect("cleanup");
+        }
+    }
+
+    #[test]
+    fn payload_is_error_only_for_error_objects() {
+        assert!(payload_is_error("{\"error\":\"Task not found\"}"));
+        assert!(!payload_is_error("{\"created\":true}"));
+        // Non-JSON (the "Invalid arguments" fallback) counts as a failure.
+        assert!(payload_is_error("Invalid arguments"));
+    }
+
+    #[test]
+    fn build_create_request_normalizes_clock_and_date_junk() {
+        // "2pm" must be coerced to 14:00:00 instead of aborting the insert.
+        let req = build_create_request(
+            &json!({ "title": "Testing", "start_date": "2026-10-03", "start_time": "2pm" }),
+            "Testing",
+            None,
+        );
+        assert_eq!(req.start_date.as_deref(), Some("2026-10-03"));
+        assert_eq!(req.start_time.as_deref(), Some("14:00:00"));
+        // Junk dates are dropped (like Python), never passed to the strict validator.
+        let req = build_create_request(
+            &json!({ "title": "Testing", "start_date": "tomorrow", "start_time": "sometime" }),
+            "Testing",
+            None,
+        );
+        assert_eq!(req.start_date, None);
+        assert_eq!(req.start_time, None);
+    }
+
+    /// The exact reported case: "stuff to do tmr at 2pm" then "testing". A
+    /// convenience clock time must persist a real task with the right day/time.
+    #[tokio::test]
+    async fn create_task_with_convenience_clock_time_persists() {
+        let Some(state) = live_state() else {
+            return;
+        };
+        let email = format!("rust-ai-clock-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .expect("create user");
+
+        let tomorrow = (Utc::now() + Duration::days(1))
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        let create_args = json!({
+            "title": "Testing",
+            "start_date": tomorrow,
+            "start_time": "2pm",
+        });
+        let created = execute_tool_calls(
+            &state,
+            user.id,
+            &[json!({
+                "id": "c1",
+                "function": { "name": "create_task", "arguments": serde_json::to_string(&create_args).unwrap() },
+            })],
+        )
+        .await;
+        let payload = first_content(&created);
+        assert_eq!(payload["created"], true, "create_task must succeed: {payload}");
+        let task_id = Uuid::parse_str(payload["task"]["id"].as_str().unwrap()).unwrap();
+
+        let (stored_date, stored_time): (Option<NaiveDate>, Option<NaiveTime>) =
+            sqlx::query_as("SELECT start_date, start_time FROM tasks WHERE id = $1 AND user_id = $2")
+                .bind(task_id)
+                .bind(user.id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("read back task");
+        assert_eq!(stored_date, NaiveDate::parse_from_str(&tomorrow, "%Y-%m-%d").ok());
+        assert_eq!(stored_time, NaiveTime::from_hms_opt(14, 0, 0));
+
+        for sql in ["DELETE FROM tasks WHERE user_id = $1", "DELETE FROM lists WHERE user_id = $1", "DELETE FROM users WHERE id = $1"] {
+            sqlx::query(sql)
+                .bind(user.id)
+                .execute(&state.pool)
+                .await
+                .expect("cleanup");
+        }
+    }
+
+    /// AI tool mutations run in a background task and must publish the same
+    /// per-user change event an HTTP mutation would, so the SSE stream (and
+    /// every other tab/device) refreshes without a manual reload.
+    #[tokio::test]
+    async fn ai_tool_mutation_publishes_change_event() {
+        let Some(state) = live_state() else {
+            return;
+        };
+        let email = format!("rust-ai-event-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .expect("create user");
+
+        let mut rx = state.events.subscribe();
+        let args = json!({ "title": "Event task" });
+        let (_, committed) = execute_tool_calls_outcome(
+            &state,
+            user.id,
+            &[json!({
+                "id": "c1",
+                "function": { "name": "create_task", "arguments": serde_json::to_string(&args).unwrap() },
+            })],
+        )
+        .await;
+        assert!(committed, "a successful create_task must report a committed action");
+
+        let event = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv())
+            .await
+            .expect("a change event must be published")
+            .expect("event bus open");
+        assert_eq!(event.user_id, user.id);
+        assert_eq!(event.resource, "tasks");
+
+        for sql in ["DELETE FROM tasks WHERE user_id = $1", "DELETE FROM lists WHERE user_id = $1", "DELETE FROM users WHERE id = $1"] {
+            sqlx::query(sql)
+                .bind(user.id)
+                .execute(&state.pool)
+                .await
+                .expect("cleanup");
+        }
+    }
+
+    /// A failed mutation must not report a committed action, so the turn runner
+    /// can force the honest "nothing was saved" reply.
+    #[tokio::test]
+    async fn failed_mutation_reports_no_committed_action() {
+        let Some(state) = live_state() else {
+            return;
+        };
+        let email = format!("rust-ai-fail-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .expect("create user");
+        // A whitespace-only title is rejected by validate_create, so create_task
+        // fails deterministically and must report no committed action.
+        let args = json!({ "title": "   " });
+        let (results, committed) = execute_tool_calls_outcome(
+            &state,
+            user.id,
+            &[json!({
+                "id": "c1",
+                "function": { "name": "create_task", "arguments": serde_json::to_string(&args).unwrap() },
+            })],
+        )
+        .await;
+        assert!(!committed);
+        let payload = first_content(&results);
+        assert!(payload.get("error").is_some());
 
         for sql in ["DELETE FROM tasks WHERE user_id = $1", "DELETE FROM lists WHERE user_id = $1", "DELETE FROM users WHERE id = $1"] {
             sqlx::query(sql)

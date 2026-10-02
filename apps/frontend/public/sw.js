@@ -47,6 +47,18 @@ self.addEventListener("activate", (event) => {
           .map((key) => caches.delete(key))
       );
       await self.clients.claim();
+      // Move every already-open tab onto the new bundle promptly. A page is
+      // never auto-reloaded, so after a deploy it keeps running the OLD JS
+      // until the user reloads; the client reacts to this message by showing
+      // the refresh prompt at once instead of waiting for its next version
+      // poll. This only signals - it never reloads a page or ends a session.
+      const clientList = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      for (const client of clientList) {
+        client.postMessage({ type: "SW_UPDATED" });
+      }
     })()
   );
 });

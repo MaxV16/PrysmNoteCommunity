@@ -45,6 +45,8 @@ describe("useAppVersion", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    // Remove any fake service worker so it cannot leak across cases.
+    delete (navigator as unknown as { serviceWorker?: unknown }).serviceWorker;
   });
 
   it("does not show the banner when the running bundle matches the deployed version", async () => {
@@ -141,5 +143,112 @@ describe("useAppVersion", () => {
     });
 
     await waitFor(() => expect(result.current.outdated).toBe(true));
+  });
+});
+
+describe("useAppVersion - service worker handoff and foreground check", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    auth.user = { id: "u1" };
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: { href: "http://localhost/app", replace: vi.fn(), assign: vi.fn() },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    delete (navigator as unknown as { serviceWorker?: unknown }).serviceWorker;
+  });
+
+  function mockServiceWorker(controlled: boolean) {
+    const sw = new EventTarget() as EventTarget & { controller: unknown };
+    sw.controller = controlled ? {} : null;
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: sw,
+    });
+    return sw;
+  }
+
+  // First /version matches the running bundle (no banner); later calls report a
+  // new deploy, so only the event under test can move the client to outdated.
+  function mockVersionThenBump(initial: string, next: string) {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ version: initial }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ version: next }) });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("shows the refresh prompt immediately when the service worker reports an update", async () => {
+    const useAppVersion = await loadHook("sha-1");
+    const fetchMock = mockVersionThenBump("sha-1", "sha-2");
+    const sw = mockServiceWorker(true);
+
+    const { result } = renderHook(() => useAppVersion());
+    await waitFor(() => expect(result.current.outdated).toBe(false));
+
+    act(() => {
+      sw.dispatchEvent(
+        new MessageEvent("message", { data: { type: "SW_UPDATED" } })
+      );
+    });
+
+    await waitFor(() => expect(result.current.outdated).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-checks when a new controller takes over an already-controlled page", async () => {
+    const useAppVersion = await loadHook("sha-1");
+    const fetchMock = mockVersionThenBump("sha-1", "sha-2");
+    const sw = mockServiceWorker(true);
+
+    const { result } = renderHook(() => useAppVersion());
+    await waitFor(() => expect(result.current.outdated).toBe(false));
+
+    act(() => {
+      sw.dispatchEvent(new Event("controllerchange"));
+    });
+
+    await waitFor(() => expect(result.current.outdated).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores the first controller takeover on an uncontrolled page", async () => {
+    const useAppVersion = await loadHook("sha-1");
+    const fetchMock = mockVersionThenBump("sha-1", "sha-2");
+    const sw = mockServiceWorker(false);
+
+    const { result } = renderHook(() => useAppVersion());
+    await waitFor(() => expect(result.current.outdated).toBe(false));
+
+    act(() => {
+      sw.dispatchEvent(new Event("controllerchange"));
+    });
+
+    // The initial claim is not a release: no extra /version call, no banner.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.outdated).toBe(false);
+  });
+
+  it("re-checks /version when the tab returns to the foreground", async () => {
+    const useAppVersion = await loadHook("sha-1");
+    const fetchMock = mockVersionThenBump("sha-1", "sha-2");
+
+    const { result } = renderHook(() => useAppVersion());
+    await waitFor(() => expect(result.current.outdated).toBe(false));
+
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(result.current.outdated).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

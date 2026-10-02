@@ -38,17 +38,17 @@ function Icon({ name }: { name: string }) {
 
 export function AIEmptyState({ onSuggest }: AIEmptyStateProps) {
   return (
-    <div className="flex h-full flex-col items-center justify-center px-6 py-10 text-center">
+    <div className="flex h-full flex-col items-center justify-center px-4 py-6 text-center sm:px-6 sm:py-10">
       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent/10 text-accent">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
         </svg>
       </div>
-      <h2 className="mt-5 text-lg font-semibold text-primary">What can I help you organize?</h2>
-      <p className="mt-2 max-w-xs text-sm leading-relaxed text-secondary">
+      <h2 className="mt-4 text-base font-semibold text-primary sm:mt-5 sm:text-lg">What can I help you organize?</h2>
+      <p className="mt-2 max-w-xs text-xs leading-relaxed text-secondary sm:text-sm">
         Create tasks, schedule events, review your week, or analyze your finances.
       </p>
-      <div className="mt-7 grid w-full max-w-sm grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="mt-5 grid w-full max-w-sm grid-cols-1 gap-2 sm:mt-7 sm:grid-cols-2">
         {SUGGESTIONS.map((s) => (
           <button
             key={s.label}

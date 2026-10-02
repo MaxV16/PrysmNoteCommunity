@@ -325,7 +325,15 @@ async fn handle_message(state: &AppState, user_id: Uuid, msg: &Value) -> Option<
             } else {
                 let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
                 match call_tool(state, user_id, name, &args).await {
-                    Ok(v) => rpc_ok(&id, tool_success(v)),
+                    Ok(v) => {
+                        // MCP mutations bypass the HTTP event middleware, so
+                        // publish here to keep SSE clients in sync (same as the
+                        // in-app AI tool path).
+                        if let Some(resource) = crate::ai_tools::mutation_resource(name) {
+                            state.events.publish(user_id, resource);
+                        }
+                        rpc_ok(&id, tool_success(v))
+                    }
                     Err(e) => rpc_ok(&id, tool_error(&e)),
                 }
             }
@@ -1136,6 +1144,7 @@ mod tests {
         assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 21);
 
         // tools/call create_task
+        let mut event_rx = state.events.subscribe();
         let (status, bytes) = post(json!({
             "jsonrpc":"2.0","id":3,"method":"tools/call",
             "params":{"name":"create_task","arguments":{"title":"MCP integration task"}}
@@ -1151,6 +1160,14 @@ mod tests {
         assert_eq!(payload["created"], true);
         assert_eq!(payload["task"]["title"], "MCP integration task");
         let task_id = payload["task"]["id"].as_str().unwrap().to_string();
+
+        // An MCP mutation must publish the change event the SSE stream fans out.
+        let event = tokio::time::timeout(std::time::Duration::from_millis(500), event_rx.recv())
+            .await
+            .expect("MCP create must publish a change event")
+            .expect("event bus open");
+        assert_eq!(event.user_id, user.id);
+        assert_eq!(event.resource, "tasks");
 
         // tools/call get_task_details sees it
         let (status, bytes) = post(json!({

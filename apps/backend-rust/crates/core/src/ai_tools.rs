@@ -77,6 +77,27 @@ pub async fn ee_dispatch(
     tools.call(state, user_id, name, args).await
 }
 
+/// Map a CORE mutating tool name to the change-bus resource it affects, so a
+/// successful AI or MCP tool call can publish the same `GET /api/events`
+/// signal an HTTP mutation would. Read-only tools and EE tools return `None`.
+pub fn mutation_resource(tool_name: &str) -> Option<&'static str> {
+    match tool_name {
+        "create_task" | "update_task" | "delete_task" | "batch_delete_tasks"
+        | "delete_matching_tasks" | "reschedule_task" | "batch_create_tasks" | "add_event"
+        | "cancel_task_by_keywords" | "complete_task" | "duplicate_task" | "restore_task"
+        | "add_tag_to_task" | "create_subtask" | "update_subtask" | "delete_subtask"
+        | "reorder_subtasks" | "convert_description_to_subtasks"
+        | "convert_subtasks_to_description" | "link_tasks" => Some("tasks"),
+        "organize_timeline_into_sections" => Some("board_sections"),
+        "create_list" | "rename_list" | "delete_list" => Some("lists"),
+        "add_watchlist_item" | "update_watchlist_item" | "remove_watchlist_item" => {
+            Some("watchlist")
+        }
+        "create_habit" | "update_habit" | "delete_habit" | "toggle_habit_log" => Some("habits"),
+        _ => None,
+    }
+}
+
 /// Enterprise-only tool names. The private build appends these definitions and
 /// overrides this list; the community core ships none of them.
 pub fn ee_tool_names() -> Vec<String> {
@@ -326,5 +347,20 @@ mod tests {
     fn hallucinated_action_is_flagged() {
         assert!(has_hallucinated_action("I've created the task for you."));
         assert!(has_hallucinated_action("Done! I scheduled it."));
+    }
+
+    #[test]
+    fn mutation_resource_covers_writes_only() {
+        assert_eq!(mutation_resource("create_task"), Some("tasks"));
+        assert_eq!(mutation_resource("add_event"), Some("tasks"));
+        assert_eq!(mutation_resource("delete_task"), Some("tasks"));
+        assert_eq!(mutation_resource("create_habit"), Some("habits"));
+        assert_eq!(mutation_resource("add_watchlist_item"), Some("watchlist"));
+        assert_eq!(mutation_resource("create_list"), Some("lists"));
+        // Read-only tools must never publish a change signal.
+        assert_eq!(mutation_resource("search_tasks"), None);
+        assert_eq!(mutation_resource("list_tags"), None);
+        assert_eq!(mutation_resource("get_task_details"), None);
+        assert_eq!(mutation_resource("unknown_tool"), None);
     }
 }

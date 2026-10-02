@@ -99,8 +99,61 @@ export function useAppVersion() {
     if (!user) return;
     void check();
     const id = setInterval(check, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    // A cheap prompt on return to the foreground: no new timer, just one
+    // /version fetch when the tab becomes visible or focused, so the refresh
+    // prompt appears promptly after a deploy that happened while the tab was
+    // hidden. The focus + visibility pair collapses into a single request.
+    let lastForegroundCheck = 0;
+    const onForeground = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - lastForegroundCheck < 2000) return;
+      lastForegroundCheck = now;
+      void check();
+    };
+    const onVisibility = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        onForeground();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onForeground);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onForeground);
+    };
   }, [user, check]);
+
+  // Service worker handoff: a fresh worker takes control of an already-open tab
+  // via skipWaiting + clients.claim, but the tab is NOT reloaded, so it keeps
+  // executing the OLD bundle. That is exactly the window in which a just-fixed
+  // bug can still run. React to the handoff immediately by re-checking /version
+  // so the refresh prompt shows at once rather than up to POLL_INTERVAL_MS
+  // later. The signal only triggers a check - it never reloads or ends a
+  // session; the reload stays an explicit user action.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
+    const sw = navigator.serviceWorker;
+    // On first load the worker claims the page through clients.claim(), which
+    // fires controllerchange even though nothing was replaced. Only an already
+    // controlled page swapping controllers means a real new release.
+    const hadController = Boolean(sw.controller);
+    const onMessage = (event: MessageEvent) => {
+      if (event.data && (event.data as { type?: string }).type === "SW_UPDATED") {
+        void check();
+      }
+    };
+    const onControllerChange = () => {
+      if (hadController) void check();
+    };
+    sw.addEventListener("message", onMessage);
+    sw.addEventListener("controllerchange", onControllerChange);
+    return () => {
+      sw.removeEventListener("message", onMessage);
+      sw.removeEventListener("controllerchange", onControllerChange);
+    };
+  }, [check]);
 
   // A stale chunk after a deploy cannot finish loading the old bundle. Rather
   // than leave the user on a broken screen (or let the app silently thrash),

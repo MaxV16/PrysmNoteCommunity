@@ -335,7 +335,7 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
 
       {aiLocked ? (
         upsellDismissed && !upsellExpanded ? (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 sm:px-6">
             <div className="flex w-full max-w-sm items-center gap-3 rounded-xl border border-border bg-elevated px-4 py-3">
               <div className="gradient-bg flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--on-gradient)]">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
@@ -354,7 +354,7 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
             </div>
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 text-center sm:px-6">
             <div className="gradient-bg flex h-14 w-14 items-center justify-center rounded-2xl text-2xl">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--on-gradient)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </div>
@@ -401,7 +401,7 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
 
       {!aiLocked && (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
             {chatMessages.length === 0 ? (
               <div className="flex h-full flex-col">
                 <div className="mx-auto max-w-sm rounded-xl border border-border/70 bg-elevated px-4 py-3 text-center text-xs leading-relaxed text-secondary">
@@ -415,7 +415,7 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
                 </div>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 {chatMessages.map((msg, idx) => (
                   <ChatMessage
                     key={msg.id}
@@ -465,7 +465,7 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
               </span>
             </div>
           )}
-          <p className="px-4 pb-2.5 text-center text-[10px] leading-relaxed text-muted">
+          <p className="px-3 pb-2 text-center text-[10px] leading-relaxed text-muted sm:px-4 sm:pb-2.5">
             PrysmAI is an AI assistant; check important details. Hosted models vary by region and are selected for efficiency and accuracy, with zero data retention. Replies are not retained.
           </p>
         </>

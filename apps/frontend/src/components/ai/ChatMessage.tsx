@@ -44,14 +44,14 @@ export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
   const hasBody = showTyping || Boolean(message.content && message.content.trim());
 
   return (
-    <div className={`flex gap-2.5 ${isUser ? "justify-end" : "justify-start"} slide-up`}>
+    <div className={`flex gap-2 sm:gap-2.5 ${isUser ? "justify-end" : "justify-start"} slide-up`}>
       {!isUser && (
         <Avatar name="AI" size="sm" className="shrink-0 mt-0.5 ring-0" />
       )}
-      <div className="flex flex-col gap-0.5 max-w-[85%]">
+      <div className="flex max-w-[88%] flex-col gap-0.5 sm:max-w-[85%]">
         {hasBody && (
           <div
-            className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
+            className={`rounded-2xl px-3 py-2 text-sm leading-relaxed sm:px-3.5 sm:py-2.5 ${
               isUser
                 ? "gradient-bg text-[var(--on-gradient)] rounded-br-md"
                 : "bg-elevated text-primary rounded-bl-md"

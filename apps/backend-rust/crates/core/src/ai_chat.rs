@@ -316,6 +316,9 @@ async fn chat(
     let mut content = String::new();
     let mut tool_calls: Option<Value> = None;
     let mut nudged = false;
+    // True once a mutating tool call actually committed; used below so a failed
+    // (or read-only) tool call cannot be narrated as a completed action.
+    let mut action_succeeded = false;
 
     for round in 0..ai_turn_runner::MAX_TOOL_ROUNDS {
         let model = chain_list.get(current_model_index).cloned();
@@ -371,7 +374,11 @@ async fn chat(
 
         messages.push(json!({"role": "assistant", "content": content, "tool_calls": calls}));
         let call_list = calls.as_array().cloned().unwrap_or_default();
-        let tool_results = ai_execute::execute_tool_calls(&state, user.user_id, &call_list).await;
+        let (tool_results, round_action_succeeded) =
+            ai_execute::execute_tool_calls_outcome(&state, user.user_id, &call_list).await;
+        if round_action_succeeded {
+            action_succeeded = true;
+        }
         messages.extend(tool_results);
 
         if round == ai_turn_runner::MAX_TOOL_ROUNDS - 1 {
@@ -394,6 +401,14 @@ async fn chat(
     }
 
     content = ai_text::normalize_reply_markdown(&ai_text::strip_text_tool_calls(&content));
+
+    // Never persist (or return) a hallucinated success: if the model narrated an
+    // action that no mutating tool committed, replace it with the honest reply.
+    if ai_turn_runner::unmet_action(&content, &req.message, action_succeeded) {
+        content = "I could not make that change, so nothing was saved. \
+Tell me the exact item and what you want changed and I will do it."
+            .to_string();
+    }
 
     {
         let mut tx = state.pool.begin().await.map_err(db_error)?;

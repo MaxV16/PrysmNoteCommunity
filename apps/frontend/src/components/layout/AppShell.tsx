@@ -398,7 +398,7 @@ export function AppShell() {
                 data-ai-dock
                 className={
                   smallScreen
-                    ? "absolute inset-y-0 right-0 z-30 w-[min(22rem,92vw)] shadow-lg"
+                    ? "absolute inset-y-0 right-0 z-30 w-[min(22rem,92vw)] pt-safe pb-safe shadow-lg"
                     : "relative h-full min-h-0 w-[22.5rem] shrink-0 border-l border-border"
                 }
               >
