@@ -15,6 +15,31 @@ const targetArg = process.argv.slice(2).find((a) => /^--(mac|win|linux|dir)$/.te
 const target = targetArg ? targetArg.slice(2) : null;
 const isMacBuild = process.platform === "darwin" && (!target || target === "mac");
 
+// GitHub maps an ABSENT secret to an EMPTY STRING, not "unset", and
+// electron-builder then treats CSC_LINK="" as a certificate path: it resolves
+// relative to the project dir and dies with "<project dir> not a file". Drop
+// any signing variable that is present but blank so a credential-less CI run
+// builds cleanly; real values pass through untouched.
+const SIGNING_ENV = [
+  "CSC_LINK",
+  "CSC_KEY_PASSWORD",
+  "CSC_NAME",
+  "WIN_CSC_LINK",
+  "WIN_CSC_KEY_PASSWORD",
+  "APPLE_ID",
+  "APPLE_APP_SPECIFIC_PASSWORD",
+  "APPLE_TEAM_ID",
+  "APPLE_API_KEY",
+  "APPLE_API_KEY_ID",
+  "APPLE_API_ISSUER",
+  "APPLE_KEYCHAIN_PROFILE",
+];
+for (const name of SIGNING_ENV) {
+  if (name in process.env && process.env[name].trim() === "") {
+    delete process.env[name];
+  }
+}
+
 // macOS signing policy:
 // electron-builder only signs when a Developer ID certificate is available
 // (CSC_LINK / CSC_NAME) and never falls back to ad-hoc signing on its own. An
