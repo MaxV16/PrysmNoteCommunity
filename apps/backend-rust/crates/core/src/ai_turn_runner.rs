@@ -1134,6 +1134,12 @@ pub fn friendly_llm_error(err: &LlmError, provider: &str) -> String {
     let lower = raw.to_lowercase();
 
     if lower.contains("http 401") || lower.contains("unauthorized") || lower.contains("authentication") {
+        // Hosted PrysmAI uses a server-side provider key the user never sees or
+        // manages, so a 401 there is our configuration problem, not theirs.
+        if provider == "prysmai" {
+            return "PrysmAI is temporarily unavailable right now. Please try again later."
+                .to_string();
+        }
         return "Your AI API key was rejected by the provider. Check the key in Settings.".to_string();
     }
     if lower.contains("http 429") || lower.contains("rate limit") {
@@ -1207,6 +1213,25 @@ mod tests {
             extract_applied_actions(&results),
             vec!["Added \"A\"".to_string(), "Added \"B\"".to_string()]
         );
+    }
+
+    #[test]
+    fn friendly_llm_error_is_honest_for_hosted_prysmai_401() {
+        let err = LlmError::Response(
+            "HTTP 401: {\"error\":{\"message\":\"Invalid API key\"}}".to_string(),
+        );
+        let msg = friendly_llm_error(&err, "prysmai");
+        // The user does not own the hosted key, so never point them at Settings.
+        assert!(!msg.to_lowercase().contains("settings"));
+        assert!(!msg.to_lowercase().contains("your ai api key"));
+        assert!(msg.contains("temporarily unavailable"));
+    }
+
+    #[test]
+    fn friendly_llm_error_keeps_settings_copy_for_byok_401() {
+        let err = LlmError::Response("HTTP 401: unauthorized".to_string());
+        let msg = friendly_llm_error(&err, "openrouter");
+        assert!(msg.contains("Check the key in Settings"));
     }
 
     #[test]

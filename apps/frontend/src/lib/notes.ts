@@ -25,6 +25,7 @@ interface ServerNote extends Omit<StickyNote, "zIndex"> {
 
 export const NOTES_STORAGE_KEY = "prysm_sticky_notes";
 export const NOTES_SYNCED_KEY = "prysm_sticky_notes_synced";
+export const NOTES_DELETED_KEY = "prysm_sticky_notes_deleted";
 export const NOTE_COLORS = [
   "#fbbf24",
   "#f87171",
@@ -101,10 +102,37 @@ function saveSyncedIds(ids: Set<string>): void {
   } catch {}
 }
 
+/**
+ * Durable tombstones for locally deleted notes. A deleted id stays here until a
+ * server snapshot confirms it is gone, so a stale GET (taken before the DELETE
+ * landed) or a note re-posted by another window can never resurrect it.
+ */
+function loadDeletedIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(NOTES_DELETED_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? new Set(parsed.filter((x): x is string => typeof x === "string"))
+      : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDeletedIds(ids: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(NOTES_DELETED_KEY, JSON.stringify([...ids]));
+  } catch {}
+}
+
 // --- Reactive module store (shared by sidebar + note windows) ---------------
 type Listener = () => void;
 
-let notes: StickyNote[] = loadNotes();
+const deletedIds = loadDeletedIds();
+let notes: StickyNote[] = loadNotes().filter((n) => !deletedIds.has(n.id));
 const listeners = new Set<Listener>();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -134,8 +162,9 @@ async function pushToServer(id: string) {
     if (!note) {
       // Note was deleted locally. Always tell the server so the deletion reaches
       // the other devices; the API returns 404 when it is already gone, which
-      // the outer catch swallows.
-      if (unsyncedDeletes.has(id) || knownServerIds.has(id)) {
+      // the outer catch swallows. The tombstone in `deletedIds` stays put until
+      // a later sync confirms the server no longer has it.
+      if (unsyncedDeletes.has(id) || knownServerIds.has(id) || deletedIds.has(id)) {
         await api.delete(`/notes/${encodeURIComponent(id)}`);
       }
       knownServerIds.delete(id);
@@ -236,22 +265,26 @@ export async function syncNotesFromServer(): Promise<void> {
     const server = await api.get<ServerNote[]>("/notes/").catch(() => null);
     if (!server) return;
 
-    // Push offline deletions and remember them so the snapshot below (taken
-    // before the deletes) cannot bring them back.
-    const deleted = new Set(unsyncedDeletes);
-    for (const id of deleted) {
+    // Push pending offline deletions. The durable `deletedIds` tombstones
+    // (retired only once the server confirms the note is gone, further below)
+    // keep the snapshot we just took, which was captured before these deletes
+    // landed, from bringing the notes back.
+    for (const id of unsyncedDeletes) {
       await api.delete(`/notes/${encodeURIComponent(id)}`).catch(() => {});
       knownServerIds.delete(id);
     }
     unsyncedDeletes.clear();
 
-    const serverNotes = server.filter((s) => !deleted.has(s.id));
+    const serverNotes = server.filter((s) => !deletedIds.has(s.id));
     const serverIds = new Set(serverNotes.map((n) => n.id));
-    const localById = new Map(notes.map((n) => [n.id, n]));
+    // Ignore any tombstoned note that a stale cross-window reload put back into
+    // the local array, so it is never re-posted.
+    const localNotes = notes.filter((n) => !deletedIds.has(n.id));
+    const localById = new Map(localNotes.map((n) => [n.id, n]));
     const previouslySynced = new Set(knownServerIds);
 
     const pushed = new Set<string>();
-    for (const local of notes) {
+    for (const local of localNotes) {
       if (serverIds.has(local.id)) continue;
       if (previouslySynced.has(local.id)) continue; // deleted on another device
       await api.post("/notes/", serverPayload(local)).catch(() => {});
@@ -269,9 +302,17 @@ export async function syncNotesFromServer(): Promise<void> {
         open: local?.open ?? s.open,
       };
     });
-    for (const local of notes) {
+    for (const local of localNotes) {
       if (pushed.has(local.id)) merged.push(local);
     }
+
+    // Retire a tombstone only once the server snapshot confirms the note is
+    // gone. Until then it must survive so a stale snapshot stays filtered.
+    const serverAllIds = new Set(server.map((n) => n.id));
+    for (const id of [...deletedIds]) {
+      if (!serverAllIds.has(id)) deletedIds.delete(id);
+    }
+    saveDeletedIds(deletedIds);
 
     notes = merged;
     knownServerIds = new Set([...serverIds, ...pushed]);
@@ -306,8 +347,20 @@ if (typeof window !== "undefined") {
   });
   window.addEventListener("storage", (e) => {
     if (e.key === NOTES_STORAGE_KEY) {
-      notes = loadNotes();
+      // Apply local tombstones on reload so a stale cross-window write cannot
+      // resurrect a note this window already deleted.
+      notes = loadNotes().filter((n) => !deletedIds.has(n.id));
       emit();
+    } else if (e.key === NOTES_DELETED_KEY) {
+      // Another window deleted a note: adopt its tombstones durably and drop
+      // any local copy so it disappears here too.
+      for (const id of loadDeletedIds()) deletedIds.add(id);
+      saveDeletedIds(deletedIds);
+      const next = notes.filter((n) => !deletedIds.has(n.id));
+      if (next.length !== notes.length) {
+        notes = next;
+        emit();
+      }
     }
   });
   // Reconcile with the server when the app returns to the foreground so a note
@@ -379,8 +432,11 @@ export function minimizeNote(id: string) {
 export function deleteNote(id: string) {
   // Always record the deletion so it reaches the server and the other devices,
   // even for a note that was never pushed (created offline, deleted before the
-  // debounced push ran).
+  // debounced push ran). The durable tombstone is written synchronously so a
+  // concurrent sync, a stale snapshot, or another window cannot resurrect it.
   unsyncedDeletes.add(id);
+  deletedIds.add(id);
+  saveDeletedIds(deletedIds);
   knownServerIds.delete(id);
   saveSyncedIds(knownServerIds);
   mutate(notes.filter((n) => n.id !== id));

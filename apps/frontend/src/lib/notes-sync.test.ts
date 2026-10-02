@@ -11,6 +11,7 @@ vi.mock("@/lib/api", () => ({
 
 const NOTES_KEY = "prysm_sticky_notes";
 const SYNCED_KEY = "prysm_sticky_notes_synced";
+const DELETED_KEY = "prysm_sticky_notes_deleted";
 
 const sample = (id: string) => ({
   id,
@@ -58,6 +59,41 @@ describe("notes server sync", () => {
 
     expect(api.delete).toHaveBeenCalledWith("/notes/a");
     expect(notes.getNotes()).toHaveLength(0);
+  });
+
+  it("does not resurrect a note when a stale snapshot arrives after the debounced DELETE ran", async () => {
+    vi.useFakeTimers();
+    try {
+      localStorage.setItem(NOTES_KEY, JSON.stringify([sample("e")]));
+      localStorage.setItem(SYNCED_KEY, JSON.stringify(["e"]));
+      const { api, notes } = await freshModule();
+      api.delete.mockResolvedValue({});
+      // The snapshot is stale: it still contains the note the user just deleted.
+      api.get.mockResolvedValue([{ ...sample("e"), sort: 0, updated_at: null }]);
+      api.post.mockResolvedValue({});
+
+      notes.deleteNote("e");
+      // Let the debounced push perform the DELETE and clear the in-memory
+      // pending-delete queue, which is what used to drop the only guard.
+      await vi.advanceTimersByTimeAsync(700);
+      expect(api.delete).toHaveBeenCalledWith("/notes/e");
+      expect(notes.getNotes()).toHaveLength(0);
+
+      // A sync now receives a snapshot that still lists the deleted note.
+      await notes.syncNotesFromServer();
+
+      expect(notes.getNotes()).toHaveLength(0);
+      expect(api.post).not.toHaveBeenCalled();
+      expect(localStorage.getItem(DELETED_KEY)).toContain("e");
+
+      // Simulate a reload that races the debounced localStorage write: the old
+      // notes blob is still present, but the durable tombstone must win.
+      localStorage.setItem(NOTES_KEY, JSON.stringify([sample("e")]));
+      const reloaded = await freshModule();
+      expect(reloaded.notes.getNotes()).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("drops a note deleted on another device instead of re-posting it", async () => {
