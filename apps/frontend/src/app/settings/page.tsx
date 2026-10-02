@@ -161,14 +161,13 @@ const TAB_GROUPS: TabGroup[] = [
     ],
   },
   {
-    label: "App Customization",
+    label: "Customization",
     tabs: [
       { id: "features", label: "Features", svg: "M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5" },
       { id: "smart-list", label: "Smart List", svg: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8" },
       { id: "notifications", label: "Notifications", svg: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" },
       { id: "date-time", label: "Date & Time", svg: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2" },
       { id: "appearance", label: "Appearance", svg: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z" },
-      { id: "more", label: "More", svg: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" },
     ],
   },
   {
@@ -181,6 +180,12 @@ const TAB_GROUPS: TabGroup[] = [
       { id: "sticky-note", label: "Sticky Note", svg: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" },
       { id: "widgets", label: "Desktop Widgets", svg: "M3 3h18v18H3V3z M3 9h18 M9 3v18" },
       { id: "ai-keys", label: "AI Keys", svg: "M7 11V7a5 5 0 0 1 10 0v4 M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z" },
+    ],
+  },
+  {
+    label: "Advanced",
+    tabs: [
+      { id: "more", label: "More", svg: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" },
       { id: "shortcuts", label: "Shortcuts", svg: "M12 8V4 M8 12H4 M12 16v4 M16 12h4 M12 2v2 M12 22v-2 M2 12h2 M22 12h-2" },
       { id: "about", label: "About", svg: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 16v-4 M12 8h.01" },
     ],
@@ -877,37 +882,38 @@ export default function SettingsPage() {
           )}
 
 
-
-          {/* === FEATURES === */}
+          {/* === FEATURES (core toggles + EE UI modules) === */}
           {activeTab === "features" && (
-            <section className="card p-6 space-y-5">
-              <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5" />
-                  </svg>
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-primary">Features</h2>
-                  <p className="text-sm text-muted">Toggle app modules on or off</p>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {[
-                  { label: "Calendar View", desc: "Timeline and calendar layout", value: calendarOn, set: setCalendarOn },
-                  { label: "Kanban Board", desc: "Drag-and-drop board view", value: kanbanOn, set: setKanbanOn },
-                  { label: "Habit Tracker", desc: "Daily habit tracking with streaks", value: habitsOn, set: setHabitsOn },
-                ].map((f) => (
-                  <div key={f.label} className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
-                    <div>
-                      <p className="text-sm text-secondary">{f.label}</p>
-                      <p className="text-xs text-muted">{f.desc}</p>
-                    </div>
-                    <Toggle value={f.value} onChange={f.set} />
+            <>
+              <section className="card p-6 space-y-5">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5" />
+                    </svg>
                   </div>
-                ))}
-              </div>
-            </section>
+                  <div>
+                    <h2 className="text-lg font-bold text-primary">Features</h2>
+                    <p className="text-sm text-muted">Toggle app modules on or off</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {[
+                    { label: "Calendar View", desc: "Timeline and calendar layout", value: calendarOn, set: setCalendarOn },
+                    { label: "Kanban Board", desc: "Drag-and-drop board view", value: kanbanOn, set: setKanbanOn },
+                    { label: "Habit Tracker", desc: "Daily habit tracking with streaks", value: habitsOn, set: setHabitsOn },
+                  ].map((f) => (
+                    <div key={f.label} className="flex items-center justify-between rounded-xl bg-elevated px-4 py-3 border border-border">
+                      <div>
+                        <p className="text-sm text-secondary">{f.label}</p>
+                        <p className="text-xs text-muted">{f.desc}</p>
+                      </div>
+                      <Toggle value={f.value} onChange={f.set} />
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </>
           )}
 
           {/* === SMART LIST === */}

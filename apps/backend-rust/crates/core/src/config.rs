@@ -285,29 +285,33 @@ impl Settings {
         env_bool("PRYSM_AI_ZDR", true)
     }
 
-    /// EU / DeepSeek-blocklisted-region model chain (most preferred first).
+    /// EU / EEA / UK and unknown-region model chain (most preferred first).
     ///
-    /// DeepSeek is blocked for EU/EEA/UK countries, so this chain uses the
-    /// tool-capable non-DeepSeek model only. No `:free` models anywhere.
+    /// The EU/EEA/UK and missing-header regions use the EU-compliant,
+    /// tool-capable model only. No `:free` models anywhere.
     pub fn prysm_ai_eu_chain(&self) -> String {
         env::var("PRYSM_AI_EU_CHAIN")
             .unwrap_or_else(|_| crate::llm::PRYSMAI_EU_MODEL.to_string())
     }
 
-    /// DeepSeek model chain for non-blocklisted, non-restricted countries:
-    /// the tool-capable DeepSeek primary, then the compliant EU model as the
-    /// fallback. No `:free` models anywhere.
+    /// Primary hosted model chain for non-restricted regions: the fast
+    /// tool-capable primary, then the fast fallback, then the EU-compliant
+    /// model as the last resort. No `:free` models anywhere. The env var keeps
+    /// its historical `DEEPSEEK` name for compatibility with deployed env
+    /// files, but no DeepSeek model is used anymore.
     pub fn prysm_ai_deepseek_chain(&self) -> String {
         env::var("PRYSM_AI_DEEPSEEK_CHAIN").unwrap_or_else(|_| {
             format!(
-                "{},{}",
+                "{},{},{}",
                 crate::llm::PRYSMAI_MODEL,
+                crate::llm::PRYSMAI_FALLBACK_MODEL,
                 crate::llm::PRYSMAI_EU_MODEL
             )
         })
     }
 
-    /// Countries where the DeepSeek chain must not serve (EU/EEA + UK default).
+    /// Countries routed to the EU chain instead of the primary chain
+    /// (EU/EEA + UK default).
     pub fn prysm_ai_deepseek_blocked_countries(&self) -> String {
         env::var("PRYSM_AI_DEEPSEEK_BLOCKED_COUNTRIES").unwrap_or_else(|_| {
             "AT,BE,BG,HR,CY,CZ,DK,EE,FI,FR,DE,GR,HU,IE,IT,LV,LT,LU,MT,NL,PL,PT,RO,SK,SI,ES,SE,IS,LI,NO,GB"

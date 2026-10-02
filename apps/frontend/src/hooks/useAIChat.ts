@@ -577,13 +577,24 @@ export function useAIChat() {
         toolBubbleId = null;
       };
 
-      const removeAssistantPlaceholder = () => {
-        // An aborted stream must not leave an empty assistant bubble behind
-        // (ChatMessage would render its TypingIndicator forever). Drop it.
+      const finalizeAbortedAssistant = () => {
+        // Keep whatever the model already streamed and flag it as stopped; only
+        // drop the bubble when nothing arrived, so an empty placeholder never
+        // renders a forever TypingIndicator. A non-empty partial is cached to
+        // localStorage by AIPanel (it saves messages with content).
         const store = useAppStore.getState();
-        store.setChatMessages(
-          store.chatMessages.filter((m) => m.id !== assistantId)
-        );
+        const existing = store.chatMessages.find((m) => m.id === assistantId);
+        if (existing && existing.content.trim()) {
+          store.setChatMessages(
+            store.chatMessages.map((m) =>
+              m.id === assistantId ? { ...m, aborted: true } : m
+            )
+          );
+        } else {
+          store.setChatMessages(
+            store.chatMessages.filter((m) => m.id !== assistantId)
+          );
+        }
       };
 
       // ---- AI undo tracking ----
@@ -712,7 +723,7 @@ export function useAIChat() {
         }
       } catch (err: unknown) {
         if (isAbortError(err)) {
-          removeAssistantPlaceholder();
+          finalizeAbortedAssistant();
           return;
         }
         const msg = err instanceof Error ? err.message : "Failed to fetch";
@@ -832,9 +843,9 @@ export function useAIChat() {
       } catch (err: unknown) {
         streamOk = false;
         if (isAbortError(err)) {
-          // User hit stop / closed the panel: drop the empty placeholder so the
-          // TypingIndicator does not render forever.
-          removeAssistantPlaceholder();
+          // User hit stop / closed the panel: keep the partial reply, mark it
+          // stopped, and drop only an empty placeholder (no forever typing).
+          finalizeAbortedAssistant();
         } else if (err instanceof Error) {
           setAssistant("Sorry, I encountered an error while reading the response. Please try again.");
         }

@@ -20,23 +20,29 @@ pub const GEMINI_MODEL: &str = "gemini-2.0-flash";
 pub const GEMINI_EMBED_MODEL: &str = "text-embedding-004";
 pub const DEEPSEEK_MODEL: &str = "deepseek-chat";
 pub const DEEPSEEK_EMBED_MODEL: &str = "deepseek-embedding";
-pub const OPENROUTER_DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash-0731";
+pub const OPENROUTER_DEFAULT_MODEL: &str = "google/gemini-2.5-flash-lite";
 
-/// Default hosted PrysmAI model. This is the single DeepSeek model id used by
-/// the hosted gateway everywhere: the region default, the non-EU chain's
-/// primary entry, and the region-routing fallback. It supports function/tool
-/// calling and the MCP tool surface, so no `:free` model is ever configured.
-pub const PRYSMAI_MODEL: &str = "deepseek/deepseek-v4-flash-0731";
+/// Default hosted PrysmAI model. A fast, low-latency model used by the hosted
+/// gateway everywhere: the region default, the primary chain's first entry,
+/// and the region-routing fallback. It supports function/tool calling and the
+/// MCP tool surface, so no `:free` model is ever configured. Chosen for speed
+/// and cost after DeepSeek proved too slow; see `deploy/development.md` 7.3e
+/// for the hosted budget math behind the per-plan allowances.
+pub const PRYSMAI_MODEL: &str = "google/gemini-2.5-flash-lite";
 
-/// Hosted EU-chain model. DeepSeek is blocked for EU/EEA/UK countries (see
-/// `prysm_ai_deepseek_blocked_countries`), so the compliant chain must use a
-/// non-DeepSeek model that still supports tool calling. Verified tool-calling
-/// on OpenRouter (see `.env.example`).
+/// Hosted fallback model, used when the primary is unavailable or refuses a
+/// tool call. Cheap, fast, and tool-capable; supports ZDR routing.
+pub const PRYSMAI_FALLBACK_MODEL: &str = "openai/gpt-5-nano";
+
+/// Hosted EU-chain model. The EU/EEA/UK and unknown/missing-header regions use
+/// this EU-compliant, tool-capable model (Mistral, France). Also the last
+/// fallback in the primary chain. Verified tool-calling on OpenRouter.
 pub const PRYSMAI_EU_MODEL: &str = "mistralai/mistral-small-3.2-24b-instruct";
 
 /// Hosted models confirmed to support function/tool calling. Any model placed
 /// in a hosted chain must be on this list; `:free` variants are never used.
-pub const TOOL_CAPABLE_HOSTED_MODELS: &[&str] = &[PRYSMAI_MODEL, PRYSMAI_EU_MODEL];
+pub const TOOL_CAPABLE_HOSTED_MODELS: &[&str] =
+    &[PRYSMAI_MODEL, PRYSMAI_FALLBACK_MODEL, PRYSMAI_EU_MODEL];
 
 /// True when `model` is a known tool-capable hosted model.
 pub fn hosted_model_is_tool_capable(model: &str) -> bool {

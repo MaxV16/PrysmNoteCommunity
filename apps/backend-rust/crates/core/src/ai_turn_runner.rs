@@ -350,7 +350,7 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
 
     for round in 0..MAX_TOOL_ROUNDS {
         if job.cancelled() {
-            finish_cancelled(state, job).await;
+            finish_cancelled(state, job, &content).await;
             return Ok(());
         }
 
@@ -514,6 +514,9 @@ Tell me the exact item and what you want changed and I will do it."
         match client.stream_chat(&messages_value).await {
             Ok(mut rx) => {
                 while let Some(chunk) = rx.recv().await {
+                    if job.cancelled() {
+                        break;
+                    }
                     streamed.push_str(&chunk);
                     job.send(TurnEvent::Token(chunk));
                 }
@@ -543,6 +546,20 @@ Tell me the exact item and what you want changed and I will do it."
                 return Ok(());
             }
         }
+    }
+
+    // Cancelled mid-stream: persist whatever already streamed and stop before
+    // usage/summary so the partial reply survives on the server (matching the
+    // UI, which keeps the partial and marks it stopped).
+    if job.cancelled() {
+        let final_text =
+            ai_text::normalize_reply_markdown(&ai_text::strip_text_tool_calls(&streamed));
+        update_placeholder(state, job, placeholder_id, &final_text).await;
+        if let Ok(mut status) = job.status.lock() {
+            *status = "cancelled".to_string();
+        }
+        job.set_phase("done");
+        return Ok(());
     }
 
     if streamed.trim().is_empty() {
@@ -601,18 +618,25 @@ Please try again or rephrase your request.",
     Ok(())
 }
 
-async fn finish_cancelled(state: &AppState, job: &Arc<TurnJob>) {
+async fn finish_cancelled(state: &AppState, job: &Arc<TurnJob>, partial: &str) {
     if let Ok(mut status) = job.status.lock() {
         *status = "cancelled".to_string();
     }
     job.set_phase("done");
+    // Keep whatever the model already produced; only fall back to the sentinel
+    // when the cancelled round yielded no text at all.
+    let text = if partial.trim().is_empty() {
+        "Interrupted."
+    } else {
+        partial
+    };
     if let Ok(mut tx) = begin_tx(state, job.user_id).await {
         let _ = ai_conversation::insert_conversation(
             &mut *tx,
             job.user_id,
             job.session_id,
             "assistant",
-            "Interrupted.",
+            text,
             None,
         )
         .await;

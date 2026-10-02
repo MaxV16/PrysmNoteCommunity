@@ -4,6 +4,7 @@ export interface ChatMessage {
   content: string;
   tool_calls?: Record<string, unknown>[];
   created_at: string;
+  aborted?: boolean;
 }
 
 export interface AiSuggestion {

@@ -72,3 +72,27 @@ describe("ChatMessage typing indicator (WS3 empty-bubble fix)", () => {
     expect(screen.queryByTestId("typing-indicator")).toBeFalsy();
   });
 });
+
+describe("ChatMessage stopped chip (partial-save fix)", () => {
+  it("renders the partial reply plus a Stopped chip when aborted", () => {
+    render(
+      <ChatMessage
+        message={{ ...makeMessage("Here is the partial answer"), aborted: true }}
+      />
+    );
+    expect(screen.getByText(/partial answer/)).toBeTruthy();
+    expect(screen.getByTestId("stopped-chip")).toBeTruthy();
+  });
+
+  it("never shows the typing indicator on an aborted message", () => {
+    render(
+      <ChatMessage
+        message={{ ...makeMessage(""), aborted: true }}
+        streaming={true}
+        isLast={true}
+      />
+    );
+    expect(screen.queryByTestId("typing-indicator")).toBeFalsy();
+    expect(screen.queryByTestId("stopped-chip")).toBeFalsy();
+  });
+});

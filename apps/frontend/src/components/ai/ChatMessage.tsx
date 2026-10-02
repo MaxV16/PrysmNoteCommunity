@@ -35,7 +35,11 @@ export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
   // instead of an infinite "typing..." (abort/panel-close leaves no bubble
   // behind, but this guard makes the renderer safe regardless).
   const showTyping =
-    message.role === "assistant" && !message.content && streaming && isLast;
+    message.role === "assistant" &&
+    !message.content &&
+    streaming &&
+    isLast &&
+    !message.aborted;
 
   // Empty assistant messages render as a silent gap (no bubble, no typing
   // indicator) unless they are the actively-streamed last message. Whitespace-
@@ -62,7 +66,18 @@ export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
             ) : isUser ? (
               message.content
             ) : (
-              <Markdown>{message.content}</Markdown>
+              <>
+                <Markdown ai>{message.content}</Markdown>
+                {message.aborted && (
+                  <span
+                    className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-hover px-1.5 py-0.5 text-[10px] font-medium text-muted"
+                    data-testid="stopped-chip"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-muted" aria-hidden />
+                    Stopped
+                  </span>
+                )}
+              </>
             )}
           </div>
         )}

@@ -74,6 +74,41 @@ describe("useAIChat refresh-on-abort", () => {
     ).toBe(false);
   });
 
+  it("keeps the partial reply and marks it stopped when the stream aborts after tokens", async () => {
+    const encoder = new TextEncoder();
+    const makeBody = () => {
+      let pulls = 0;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (pulls === 0) {
+            pulls++;
+            controller.enqueue(encoder.encode('event: token\ndata: "partial answer"\n\n'));
+          } else {
+            controller.error(new DOMException("aborted", "AbortError"));
+          }
+        },
+      });
+    };
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/ai/chat/stream")) {
+        return Promise.resolve(new Response(makeBody(), { status: 200 }));
+      }
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+
+    const { result } = renderHook(() => useAIChat());
+    await act(async () => {
+      await result.current.sendMessage("hello");
+    });
+
+    const assistant = useAppStore
+      .getState()
+      .chatMessages.find((m) => m.role === "assistant");
+    expect(assistant).toBeTruthy();
+    expect(assistant?.content).toContain("partial");
+    expect(assistant?.aborted).toBe(true);
+  });
+
   it("preserves far-window tasks loaded by a range fetch across a chat refresh", async () => {
     const { useTasks } = await import("@/hooks/useTasks");
     global.fetch = vi.fn().mockResolvedValue(streamResponse(true));
