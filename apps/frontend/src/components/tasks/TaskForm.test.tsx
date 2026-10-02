@@ -198,6 +198,31 @@ describe("TaskForm", () => {
     );
   });
 
+  it("sends the default medium priority on a create", () => {
+    const onSubmit = vi.fn();
+    render(<TaskForm onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Priority default" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create task/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ priority: 2 }));
+  });
+
+  it("sends a picked high priority on a create instead of dropping it", () => {
+    const onSubmit = vi.fn();
+    render(<TaskForm onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Priority high" },
+    });
+    fireEvent.change(screen.getByDisplayValue("Medium"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: /create task/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ priority: 1 }));
+  });
+
   it("blocks submit with an inline warning when the due date precedes the start date", () => {
     const onSubmit = vi.fn();
     render(<TaskForm onSubmit={onSubmit} onCancel={vi.fn()} />);

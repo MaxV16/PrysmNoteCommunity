@@ -277,4 +277,54 @@ mod tests {
         assert!(needs_tool_retry("I've created the task", "create a task"));
         assert!(!needs_tool_retry("It is sunny today", "what is the weather"));
     }
+
+    /// Battery of real, messy user phrasings: when the model answers with plain
+    /// text (or a refusal) instead of calling a tool, the retry safety net must
+    /// fire so the request is re-driven with the toolset.
+    #[test]
+    fn needs_tool_retry_covers_misspelled_and_abbreviated_requests() {
+        let action_phrases = [
+            "add taks buy milk tomorow",
+            "mark the report done",
+            "remind me pay rent on the 1st",
+            "delete all the work taks",
+            "mark severance watched",
+            "move it to friday",
+            "create a doc ap next tuesday",
+            "update my wrk schedule",
+            "schedule my workout every monday",
+        ];
+        for phrase in action_phrases {
+            assert!(
+                needs_tool_retry("Sure, here is some text instead.", phrase),
+                "expected a tool retry for: {phrase}"
+            );
+        }
+
+        let qa_phrases = [
+            "what is the weather today",
+            "who won the game last night",
+            "explain how recurrence works",
+        ];
+        for phrase in qa_phrases {
+            assert!(
+                !needs_tool_retry("Here is a plain answer.", phrase),
+                "expected no tool retry for: {phrase}"
+            );
+        }
+    }
+
+    #[test]
+    fn refusal_detection_handles_casual_and_typoed_output() {
+        assert!(is_tool_refusal("I don't have the tools for that"));
+        assert!(is_tool_refusal("I cannot assist with that"));
+        assert!(is_tool_refusal("I'm not able to do that"));
+        assert!(!is_tool_refusal("Added Buy milk for tomorrow."));
+    }
+
+    #[test]
+    fn hallucinated_action_is_flagged() {
+        assert!(has_hallucinated_action("I've created the task for you."));
+        assert!(has_hallucinated_action("Done! I scheduled it."));
+    }
 }

@@ -133,7 +133,7 @@ fn default_status() -> String {
 }
 
 fn default_priority() -> i64 {
-    3
+    2
 }
 
 #[derive(Deserialize, Default)]
@@ -558,9 +558,9 @@ fn validate_create(req: CreateTaskRequest) -> Result<NewTask, ApiError> {
     if !task::valid_status(&req.status) {
         return Err(ApiError::Unprocessable(task::invalid_status_message()));
     }
-    if !(1..=5).contains(&req.priority) {
+    if !(1..=3).contains(&req.priority) {
         return Err(ApiError::Unprocessable(
-            "Priority must be between 1 and 5".to_string(),
+            "Priority must be between 1 and 3".to_string(),
         ));
     }
     Ok(NewTask {
@@ -613,9 +613,9 @@ fn validate_update(req: UpdateTaskRequest) -> Result<TaskPatch, ApiError> {
     }
     let priority = match req.priority {
         Some(value) => {
-            if !(1..=5).contains(&value) {
+            if !(1..=3).contains(&value) {
                 return Err(ApiError::Unprocessable(
-                    "Priority must be between 1 and 5".to_string(),
+                    "Priority must be between 1 and 3".to_string(),
                 ));
             }
             Some(task::normalize_priority(Some(value)))
@@ -2487,6 +2487,55 @@ mod tests {
         assert_eq!(remaining, vec![recent], "recent trash must survive");
 
         let _ = old_child;
+        sqlx::query("DELETE FROM tasks WHERE user_id = $1").bind(user.id).execute(&state.pool).await.unwrap();
+        sqlx::query("DELETE FROM users WHERE id = $1").bind(user.id).execute(&state.pool).await.unwrap();
+    }
+
+    /// One priority scale end-to-end: the API accepts only the 3 app tiers
+    /// (1=high, 2=medium, 3=low), a create with no priority lands on the
+    /// intended default (medium, 2), and a picked high survives the round trip.
+    #[tokio::test]
+    async fn priority_is_a_single_three_tier_scale_with_medium_default() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let email = format!("rust-prio-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .unwrap();
+        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
+        let app = router().with_state(state.clone());
+
+        // No priority -> medium (2), matching the UI/timeline default.
+        let res = call(app.clone(), "POST", "/api/tasks", &token, Some(json!({ "title": "Default" }))).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let created = body_json(res).await;
+        assert_eq!(created["priority"], 2);
+        let default_id = created["id"].as_str().unwrap().to_string();
+
+        // Explicit high (1) persists.
+        let res = call(app.clone(), "POST", "/api/tasks", &token, Some(json!({ "title": "High", "priority": 1 }))).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["priority"], 1);
+
+        // Out-of-scale values are rejected with the 3-tier message.
+        let res = call(app.clone(), "POST", "/api/tasks", &token, Some(json!({ "title": "Bad", "priority": 5 }))).await;
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let err = body_json(res).await;
+        assert_eq!(err["detail"], "Priority must be between 1 and 3");
+
+        // The patch path normalizes into the same scale and rejects out-of-range.
+        let res = call(
+            app.clone(),
+            "PATCH",
+            &format!("/api/tasks/{default_id}"),
+            &token,
+            Some(json!({ "priority": 3 })),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["priority"], 3);
+
         sqlx::query("DELETE FROM tasks WHERE user_id = $1").bind(user.id).execute(&state.pool).await.unwrap();
         sqlx::query("DELETE FROM users WHERE id = $1").bind(user.id).execute(&state.pool).await.unwrap();
     }

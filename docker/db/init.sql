@@ -34,10 +34,24 @@ CREATE TABLE IF NOT EXISTS users (
   display_name VARCHAR(100),
   provider VARCHAR(20),
 
+  last_active_at TIMESTAMPTZ,
+  inactivity_warned_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS ix_users_provider ON users(provider);
+
+-- Account deletion audit tombstones (non-personal: id + SHA-256 email hash).
+-- Kept after the user row is deleted so a SAR / DPC query can be answered.
+CREATE TABLE IF NOT EXISTS account_deletions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  email_hash VARCHAR(64) NOT NULL,
+  reason VARCHAR(32) NOT NULL,
+  deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_account_deletions_email_hash ON account_deletions(email_hash);
+CREATE INDEX IF NOT EXISTS ix_account_deletions_user_id ON account_deletions(user_id);
 
 -- API keys table (user-provided LLM keys, encrypted at rest)
 CREATE TABLE IF NOT EXISTS api_keys (

@@ -77,6 +77,7 @@ pub mod habits;
 pub mod imports;
 pub mod jwt;
 pub mod keys;
+pub mod lifecycle;
 pub mod lists;
 pub mod llm;
 pub mod loop_leader;
@@ -206,6 +207,10 @@ pub fn build_router(state: AppState, ee: Option<&dyn EeExtension>) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::publish_events,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::touch_activity,
         ))
         .layer(axum::middleware::from_fn(middleware::body_limit))
         .layer(axum::middleware::from_fn_with_state(

@@ -265,7 +265,9 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
       // Creates preserve the backend default unless the form was opened with an
       // explicit status (a board column); edits always send the picked status.
       status: isEdit || defaultStatus !== undefined ? status : undefined,
-      priority: isEdit ? priority : undefined,
+      // Priority is always sent (create and edit): the picked tier must
+      // survive a create instead of falling through to the backend default.
+      priority,
       tag_ids: selectedTags.length > 0 ? selectedTags : undefined,
       list_id: listId || undefined,
       recurrence_rule: endApplied.recurrence_rule || undefined,

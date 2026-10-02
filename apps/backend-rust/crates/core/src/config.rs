@@ -286,18 +286,24 @@ impl Settings {
     }
 
     /// EU / DeepSeek-blocklisted-region model chain (most preferred first).
+    ///
+    /// DeepSeek is blocked for EU/EEA/UK countries, so this chain uses the
+    /// tool-capable non-DeepSeek model only. No `:free` models anywhere.
     pub fn prysm_ai_eu_chain(&self) -> String {
-        env::var("PRYSM_AI_EU_CHAIN").unwrap_or_else(|_| {
-            "thinkingmachines/inkling:free,google/gemma-4-31b-it:free,mistralai/mistral-small-3.2-24b-instruct"
-                .to_string()
-        })
+        env::var("PRYSM_AI_EU_CHAIN")
+            .unwrap_or_else(|_| crate::llm::PRYSMAI_EU_MODEL.to_string())
     }
 
-    /// DeepSeek model chain for non-blocklisted, non-restricted countries.
+    /// DeepSeek model chain for non-blocklisted, non-restricted countries:
+    /// the tool-capable DeepSeek primary, then the compliant EU model as the
+    /// fallback. No `:free` models anywhere.
     pub fn prysm_ai_deepseek_chain(&self) -> String {
         env::var("PRYSM_AI_DEEPSEEK_CHAIN").unwrap_or_else(|_| {
-            "thinkingmachines/inkling:free,google/gemma-4-31b-it:free,deepseek/deepseek-v4-flash-0731"
-                .to_string()
+            format!(
+                "{},{}",
+                crate::llm::PRYSMAI_MODEL,
+                crate::llm::PRYSMAI_EU_MODEL
+            )
         })
     }
 
@@ -354,6 +360,34 @@ impl Settings {
     /// (fail-open), keeping dev/tests and the community build simple.
     pub fn turnstile_secret_key(&self) -> String {
         env::var("TURNSTILE_SECRET_KEY").unwrap_or_default()
+    }
+
+    /// Days of inactivity before a warning email is sent. Read at call time so
+    /// it stays out of the settings struct and its many test literals.
+    pub fn inactivity_warning_days(&self) -> i64 {
+        env_i64("INACTIVITY_WARNING_DAYS", 365)
+    }
+
+    /// Days after the warning before an account is deleted, if it is still
+    /// inactive. Read at call time.
+    pub fn inactivity_grace_days(&self) -> i64 {
+        env_i64("INACTIVITY_GRACE_DAYS", 30)
+    }
+
+    /// Whether the inactivity lifecycle runs at all. Defaults on in production
+    /// and off elsewhere, so dev/CI never delete seeded accounts. An explicit
+    /// `ACCOUNT_INACTIVITY_ENABLED` overrides the default.
+    pub fn account_inactivity_enabled(&self) -> bool {
+        match env::var("ACCOUNT_INACTIVITY_ENABLED") {
+            Ok(v) if !v.trim().is_empty() => env_bool("ACCOUNT_INACTIVITY_ENABLED", false),
+            _ => self.is_production(),
+        }
+    }
+
+    /// Minimum seconds between per-request `last_active_at` writes for one user
+    /// (`ACTIVITY_TOUCH_INTERVAL_SECONDS`, default one hour).
+    pub fn activity_touch_interval_seconds(&self) -> u64 {
+        env_u64("ACTIVITY_TOUCH_INTERVAL_SECONDS", 3600)
     }
 }
 
@@ -461,5 +495,34 @@ pub(crate) mod tests {
             sample("production").resolved_webauthn_origins(),
             vec!["https://prysmnote.com"]
         );
+    }
+
+    /// Every hosted chain entry must be a tool-capable model and never a
+    /// `:free` variant (which cannot reliably call tools/MCP).
+    #[test]
+    fn hosted_chains_are_tool_capable_without_free_models() {
+        let s = sample("production");
+        for chain in [s.prysm_ai_eu_chain(), s.prysm_ai_deepseek_chain()] {
+            assert!(!chain.contains(":free"), "no :free models allowed: {chain}");
+            for model in chain.split(',').map(str::trim).filter(|m| !m.is_empty()) {
+                assert!(
+                    crate::llm::hosted_model_is_tool_capable(model),
+                    "hosted model {model} is not on the tool-capable allow-list"
+                );
+            }
+        }
+        assert!(s.prysm_ai_eu_chain().contains(crate::llm::PRYSMAI_EU_MODEL));
+        assert!(s
+            .prysm_ai_deepseek_chain()
+            .starts_with(crate::llm::PRYSMAI_MODEL));
+    }
+
+    #[test]
+    fn inactivity_defaults_are_production_only() {
+        std::env::remove_var("ACCOUNT_INACTIVITY_ENABLED");
+        assert!(!sample("development").account_inactivity_enabled());
+        assert!(sample("production").account_inactivity_enabled());
+        assert_eq!(sample("production").inactivity_warning_days(), 365);
+        assert_eq!(sample("production").inactivity_grace_days(), 30);
     }
 }

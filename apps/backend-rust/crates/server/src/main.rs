@@ -134,6 +134,16 @@ async fn main() {
             std::time::Duration::from_secs(prysm_core::watchlist::REFRESH_INTERVAL_SECONDS),
         ));
 
+        // GDPR account inactivity lifecycle: warn accounts inactive for a year,
+        // delete 30 days later if still inactive (system pool, daily).
+        let inactivity_pool = state.system_pool.clone();
+        let inactivity_settings = (*state.settings).clone();
+        tokio::spawn(prysm_core::lifecycle::inactivity_loop(
+            inactivity_pool,
+            inactivity_settings,
+            std::time::Duration::from_secs(24 * 3600),
+        ));
+
         #[cfg(feature = "ee")]
         {
             let workflow_pool = state.system_pool.clone();

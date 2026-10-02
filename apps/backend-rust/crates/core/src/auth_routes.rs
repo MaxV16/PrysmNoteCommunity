@@ -391,6 +391,7 @@ async fn register(
     }
 
     let user_id = created.id.to_string();
+    crate::lifecycle::touch_activity(&state, created.id);
     let access =
         jwt::encode_access(&state.settings.jwt_secret_key, &user_id, created.token_version)
             .map_err(token_error)?;
@@ -442,6 +443,7 @@ async fn login(
     };
 
     let user_id = user.id.to_string();
+    crate::lifecycle::touch_activity(&state, user.id);
     let access = jwt::encode_access(&state.settings.jwt_secret_key, &user_id, user.token_version)
         .map_err(token_error)?;
     let refresh = jwt::encode_refresh(&state.settings.jwt_secret_key, &user_id, user.token_version)
@@ -723,18 +725,15 @@ async fn delete_account(
         .ok_or_else(|| ApiError::Unauthorized("Not authenticated".into()))?;
     let auth_user = auth::authenticate(&state.settings.jwt_secret_key, &token)?;
 
-    // Delete orphaned blacklist rows first, then the user; the user's child rows
-    // are removed by the database's ON DELETE CASCADE (mirrors the Python flow).
-    sqlx::query("DELETE FROM token_blacklist WHERE user_id = $1")
-        .bind(auth_user.user_id)
-        .execute(&state.pool)
-        .await
-        .map_err(db_error)?;
-    sqlx::query("DELETE FROM users WHERE id = $1")
-        .bind(auth_user.user_id)
-        .execute(&state.pool)
-        .await
-        .map_err(db_error)?;
+    // Shared routine: audit tombstone (account_deletions + the EE billing
+    // tombstone) then cascade-delete the user's personal data.
+    crate::lifecycle::delete_user_account(
+        &state.pool,
+        auth_user.user_id,
+        crate::lifecycle::REASON_USER_REQUEST,
+    )
+    .await
+    .map_err(db_error)?;
 
     let [access_cookie, refresh_cookie] = cookies::clear_cookies(state.settings.is_production());
     let mut response = Json(json!({ "status": "deleted" })).into_response();
@@ -856,7 +855,11 @@ mod tests {
             notification_loop_interval: 1800,
             digest_hour: 7,
         };
-        Some(AppState::new(pool, settings))
+        let state = AppState::new(pool, settings);
+        // Apply the additive migrations (account_deletions / user activity
+        // columns) so the delete-account route has its audit table.
+        let _ = crate::schema::ensure_schema(&state.pool, &state.system_pool).await;
+        Some(state)
     }
 
     async fn post_json(app: &Router, uri: &str, body: Value) -> Response {
@@ -1037,6 +1040,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(me.status(), StatusCode::UNAUTHORIZED);
+
+        // The deletion leaves a non-personal audit tombstone; clear it so the
+        // shared smoke database does not accumulate test rows.
+        let _ = sqlx::query("DELETE FROM account_deletions WHERE email_hash = $1")
+            .bind(crate::lifecycle::email_hash(&email))
+            .execute(&state.pool)
+            .await;
     }
 
     #[tokio::test]

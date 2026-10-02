@@ -1298,4 +1298,89 @@ mod tests {
         let text = "[TOOL_CALLS] create_task {\"title\":";
         assert_eq!(strip_text_tool_calls(text), text);
     }
+
+    /// Fake-LLM battery: a canned model output (the kind a real provider emits)
+    /// must parse to the intended tool and normalized args. Covers the inline
+    /// `[TOOL_CALLS]` path the model uses when it cannot emit native tool calls.
+    #[test]
+    fn canned_model_outputs_select_the_intended_tool_and_args() {
+        // (canned assistant output, expected tool, arg key, arg value)
+        let cases: &[(&str, &str, &str, &str)] = &[
+            (
+                "[TOOL_CALLS] create_task {\"title\": \"Buy milk\", \"start_date\": \"2026-10-03\", \"priority\": 2}",
+                "create_task",
+                "title",
+                "Buy milk",
+            ),
+            (
+                "[TOOL_CALLS] complete_task {\"task_id\": \"abc-123\"}",
+                "complete_task",
+                "task_id",
+                "abc-123",
+            ),
+            (
+                "[TOOL_CALLS] update_task {\"task_id\": \"t1\", \"fields\": {\"status\": \"done\"}}",
+                "update_task",
+                "task_id",
+                "t1",
+            ),
+            (
+                "[TOOL_CALLS] add_event {\"title\": \"Doctor appointment\", \"start_date\": \"2026-10-06\", \"start_time\": \"15:00\"}",
+                "add_event",
+                "start_time",
+                "15:00",
+            ),
+            ("[TOOL_CALLS] list_watchlist {}", "list_watchlist", "", ""),
+            (
+                "[TOOL_CALLS] toggle_habit_log {\"habit_id\": \"h1\"}",
+                "toggle_habit_log",
+                "habit_id",
+                "h1",
+            ),
+            (
+                "[TOOL_CALLS] delete_matching_tasks {\"query\": \"work\"}",
+                "delete_matching_tasks",
+                "query",
+                "work",
+            ),
+        ];
+        for (raw, tool, key, val) in cases {
+            let parsed =
+                parse_text_tool_calls(raw).unwrap_or_else(|| panic!("no tool call parsed in {raw}"));
+            assert_eq!(parsed[0]["function"]["name"], *tool, "wrong tool for {raw}");
+            let args: Value =
+                serde_json::from_str(parsed[0]["function"]["arguments"].as_str().unwrap()).unwrap();
+            if !key.is_empty() {
+                assert_eq!(args[*key], *val, "wrong {key} for {raw}");
+            }
+        }
+    }
+
+    #[test]
+    fn multiple_inline_calls_in_one_turn_are_all_parsed() {
+        let raw = "[TOOL_CALLS] create_task {\"title\": \"A\"} \
+                   [TOOL_CALLS] create_task {\"title\": \"B\"} \
+                   [TOOL_CALLS] list_tags {}";
+        let parsed = parse_text_tool_calls(raw).unwrap();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0]["function"]["name"], "create_task");
+        assert_eq!(parsed[2]["function"]["name"], "list_tags");
+    }
+
+    #[test]
+    fn fragmented_multiline_json_is_repaired_before_parsing() {
+        let raw = "[TOOL_CALLS] create_task {\n  \"title\":\n  \"Buy\n  milk\",\n  \"start_date\": \"2026-10-03\"\n}";
+        let parsed = parse_text_tool_calls(raw).expect("fragmented JSON must still parse");
+        assert_eq!(parsed[0]["function"]["name"], "create_task");
+        let args: Value =
+            serde_json::from_str(parsed[0]["function"]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args["start_date"], "2026-10-03");
+    }
+
+    /// A clean prose answer must never be mistaken for a tool call.
+    #[test]
+    fn prose_without_a_marker_yields_no_calls() {
+        assert!(parse_text_tool_calls("I added Buy milk for tomorrow.").is_none());
+        assert!(parse_text_tool_calls("Sure, doing that now.").is_none());
+    }
 }

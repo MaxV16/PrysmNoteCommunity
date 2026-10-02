@@ -21,7 +21,27 @@ pub const GEMINI_EMBED_MODEL: &str = "text-embedding-004";
 pub const DEEPSEEK_MODEL: &str = "deepseek-chat";
 pub const DEEPSEEK_EMBED_MODEL: &str = "deepseek-embedding";
 pub const OPENROUTER_DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash-0731";
-pub const PRYSMAI_MODEL: &str = "thinkingmachines/inkling:free";
+
+/// Default hosted PrysmAI model. This is the single DeepSeek model id used by
+/// the hosted gateway everywhere: the region default, the non-EU chain's
+/// primary entry, and the region-routing fallback. It supports function/tool
+/// calling and the MCP tool surface, so no `:free` model is ever configured.
+pub const PRYSMAI_MODEL: &str = "deepseek/deepseek-v4-flash-0731";
+
+/// Hosted EU-chain model. DeepSeek is blocked for EU/EEA/UK countries (see
+/// `prysm_ai_deepseek_blocked_countries`), so the compliant chain must use a
+/// non-DeepSeek model that still supports tool calling. Verified tool-calling
+/// on OpenRouter (see `.env.example`).
+pub const PRYSMAI_EU_MODEL: &str = "mistralai/mistral-small-3.2-24b-instruct";
+
+/// Hosted models confirmed to support function/tool calling. Any model placed
+/// in a hosted chain must be on this list; `:free` variants are never used.
+pub const TOOL_CAPABLE_HOSTED_MODELS: &[&str] = &[PRYSMAI_MODEL, PRYSMAI_EU_MODEL];
+
+/// True when `model` is a known tool-capable hosted model.
+pub fn hosted_model_is_tool_capable(model: &str) -> bool {
+    TOOL_CAPABLE_HOSTED_MODELS.contains(&model)
+}
 
 /// The four BYOK providers a user can store a key for.
 pub const BYOK_PROVIDERS: [&str; 4] = ["openai", "gemini", "deepseek", "openrouter"];
@@ -544,5 +564,85 @@ mod tests {
         assert_eq!(body["model"], PRYSMAI_MODEL);
         assert_eq!(body["models"][1], "m2");
         assert_eq!(body["provider"]["data_collection"], "deny");
+    }
+
+    #[test]
+    fn the_hosted_default_is_a_tool_capable_non_free_model() {
+        assert!(!PRYSMAI_MODEL.contains(":free"));
+        assert!(hosted_model_is_tool_capable(PRYSMAI_MODEL));
+        assert!(hosted_model_is_tool_capable(PRYSMAI_EU_MODEL));
+        assert!(!hosted_model_is_tool_capable("someone/random:free"));
+    }
+}
+
+/// Opt-in live battery. Ignored by default so CI stays deterministic and needs
+/// no provider key. Run on demand with a real key to validate the model actually
+/// selects the intended tool for messy input:
+///
+/// ```text
+/// PRYSM_AI_LIVE_API_KEY=... cargo test -p prysm-core live_tests -- --ignored --nocapture
+/// ```
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+    use crate::ai_prompt::build_messages;
+    use crate::ai_tools::tool_definitions;
+
+    fn first_tool_name(choice: &Value) -> Option<String> {
+        choice
+            .get("message")
+            .and_then(|m| m.get("tool_calls"))
+            .and_then(|c| c.as_array())
+            .and_then(|calls| calls.first())
+            .and_then(|call| call.get("function"))
+            .and_then(|f| f.get("name"))
+            .and_then(|n| n.as_str())
+            .map(str::to_string)
+    }
+
+    #[tokio::test]
+    #[ignore = "opt-in: hits the real hosted model; needs PRYSM_AI_LIVE_API_KEY (or OPENROUTER_API_KEY)"]
+    async fn live_tool_selection_battery() {
+        let key = std::env::var("PRYSM_AI_LIVE_API_KEY")
+            .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
+            .ok()
+            .filter(|k| !k.trim().is_empty());
+        let Some(key) = key else {
+            eprintln!("skipping live battery: no PRYSM_AI_LIVE_API_KEY/OPENROUTER_API_KEY");
+            return;
+        };
+        let base = std::env::var("PRYSM_AI_LIVE_BASE_URL")
+            .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
+        let model = std::env::var("PRYSM_AI_LIVE_MODEL")
+            .unwrap_or_else(|_| PRYSMAI_MODEL.to_string());
+        let client = LlmClient::prysm_ai(&key, &base, &model, Vec::new(), true);
+        let tools = Value::Array(tool_definitions().to_vec());
+
+        // (messy user phrasing, acceptable tool names)
+        let cases: &[(&str, &[&str])] = &[
+            ("add taks buy milk tomorow", &["create_task", "batch_create_tasks", "add_event"]),
+            ("marks the report done", &["update_task", "complete_task"]),
+            ("remind me pay rent on the 1st", &["create_task", "add_event"]),
+            ("wat am i wating", &["list_watchlist"]),
+            ("did my workout", &["toggle_habit_log"]),
+        ];
+        let mut failures = Vec::new();
+        for (prompt, expected) in cases {
+            let messages = Value::Array(build_messages(&[], prompt, None, None, None, false));
+            match client.chat(&messages, Some(&tools), None, None).await {
+                Ok(response) => {
+                    let choice = LlmClient::first_choice(&response);
+                    match first_tool_name(&choice) {
+                        Some(name) if expected.contains(&name.as_str()) => {
+                            println!("OK   {prompt:?} -> {name}");
+                        }
+                        Some(name) => failures.push(format!("{prompt:?} -> {name} (expected {expected:?})")),
+                        None => failures.push(format!("{prompt:?} -> no tool call")),
+                    }
+                }
+                Err(err) => failures.push(format!("{prompt:?} -> error: {err}")),
+            }
+        }
+        assert!(failures.is_empty(), "live tool-selection failures:\n{}", failures.join("\n"));
     }
 }

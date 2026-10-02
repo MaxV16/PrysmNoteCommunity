@@ -386,6 +386,23 @@ pub async fn publish_events(State(state): State<AppState>, req: Request, next: N
     res
 }
 
+/// Record `last_active_at` for any successful authenticated request. Kept
+/// separate from the event publisher so plain reads (which do not publish) still
+/// count as activity. The write is throttled and fire-and-forget, so it never
+/// adds latency to the request.
+pub async fn touch_activity(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let headers = req.headers().clone();
+    let res = next.run(req).await;
+    if res.status().is_success() {
+        if let Some(token) = auth::token_from_headers(&headers) {
+            if let Ok(user) = auth::authenticate(&state.settings.jwt_secret_key, &token) {
+                crate::lifecycle::touch_activity(&state, user.user_id);
+            }
+        }
+    }
+    res
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

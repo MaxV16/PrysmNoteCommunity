@@ -78,6 +78,36 @@ pub async fn send_welcome_email(settings: &Settings, to_address: &str, display_n
     send_email(settings, to_address, WELCOME_SUBJECT, &body, None).await
 }
 
+/// Subject of the inactivity warning (sent before an inactive account is
+/// scheduled for deletion).
+pub const INACTIVITY_SUBJECT: &str = "[Prysm Note] Your account will be deleted unless you sign in";
+
+/// Body of the inactivity warning. Brand-neutral, dash-free, no personal name.
+pub fn inactivity_body(app_origin: &str, grace_days: i64) -> String {
+    let origin = app_origin.trim_end_matches('/');
+    format!(
+        "Hi,\n\n\
+We noticed you have not signed in to Prysm Note for a while. To keep the service \n\
+lean and protect your data, we delete accounts that have been inactive for a long \n\
+period.\n\n\
+Your account is now scheduled for deletion. If you would like to keep it, simply \n\
+sign in within the next {grace_days} days and nothing will be removed:\n\n\
+{origin}/login\n\n\
+Signing in from any device (including the desktop or mobile app) counts as \n\
+activity and keeps the account active. If you do nothing, your account and the \n\
+data stored in it will be deleted at the end of that window.\n\n\
+You can also delete your account yourself at any time from Settings, Data.\n\n\
+If you think you received this message by mistake, just sign in and ignore it.\n\n\
+The Prysm Note team\n"
+    )
+}
+
+/// Send the inactivity warning email. Never panics; returns `false` on failure.
+pub async fn send_inactivity_warning(settings: &Settings, to_address: &str, grace_days: i64) -> bool {
+    let body = inactivity_body(&settings.app_origin, grace_days);
+    send_email(settings, to_address, INACTIVITY_SUBJECT, &body, None).await
+}
+
 async fn send_brevo(settings: &Settings, to_address: &str, subject: &str, body: &str, sender: &str) -> bool {
     let payload = serde_json::json!({
         "sender": {"name": "Prysm Note", "email": sender},
@@ -202,5 +232,13 @@ mod tests {
         let settings = config::tests::sample("test");
         assert!(!send_email(&settings, "a@b.com", "s", "b", None).await);
         assert!(!send_welcome_email(&settings, "a@b.com", Some("Ada")).await);
+    }
+
+    #[test]
+    fn inactivity_body_is_dash_free_and_links_to_login() {
+        let body = inactivity_body("https://prysmnote.com/", 30);
+        assert!(!body.contains('\u{2014}'), "no em dashes allowed");
+        assert!(body.contains("https://prysmnote.com/login"));
+        assert!(body.contains("30 days"));
     }
 }

@@ -7,6 +7,7 @@
 //! registry (Redis pub/sub is a later, multi-worker optimization).
 
 use std::convert::Infallible;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use axum::extract::State;
@@ -25,7 +26,9 @@ use crate::error::ApiError;
 use crate::AppState;
 
 /// Resource prefixes whose mutations publish a change event. Match is exact or
-/// `prefix` followed by `/`, mirroring Python's `_RESOURCE_PREFIXES`.
+/// `prefix` followed by `/`, mirroring Python's `_RESOURCE_PREFIXES`. Core
+/// covers every user-scoped mutation surface; the extension crate appends its
+/// own prefixes through [`register_extra_prefixes`].
 pub const RESOURCE_PREFIXES: &[(&str, &str)] = &[
     ("/api/tasks", "tasks"),
     ("/api/tags", "tags"),
@@ -36,13 +39,42 @@ pub const RESOURCE_PREFIXES: &[(&str, &str)] = &[
     ("/api/watchlist", "watchlist"),
     ("/api/habits", "habits"),
     ("/api/finance", "finance"),
+    ("/api/imports", "imports"),
+    ("/api/teams", "teams"),
+    ("/api/calendar", "calendar"),
+    ("/api/notifications", "notifications"),
 ];
+
+/// Extra prefixes contributed by the extension crate at startup. Registered
+/// via [`register_extra_prefixes`]; core itself never names an EE route.
+static EXTRA_PREFIXES: OnceLock<Mutex<Vec<(&'static str, &'static str)>>> = OnceLock::new();
+
+fn extra_prefixes() -> &'static Mutex<Vec<(&'static str, &'static str)>> {
+    EXTRA_PREFIXES.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Append extension-owned resource prefixes (private build only). Idempotent:
+/// repeated calls accumulate, so a late registration is never lost.
+pub fn register_extra_prefixes(extra: &[(&'static str, &'static str)]) {
+    if let Ok(mut list) = extra_prefixes().lock() {
+        list.extend_from_slice(extra);
+    }
+}
+
+/// Iterate the core prefixes followed by any extension-registered ones.
+fn all_prefixes() -> impl Iterator<Item = (&'static str, &'static str)> {
+    let extra = extra_prefixes()
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default();
+    RESOURCE_PREFIXES.iter().copied().chain(extra)
+}
 
 /// Map a request path to its resource name, or `None` when it is not a watched
 /// mutation surface.
 pub fn match_resource(path: &str) -> Option<&'static str> {
-    for (prefix, resource) in RESOURCE_PREFIXES {
-        if path == *prefix || path.starts_with(&format!("{prefix}/")) {
+    for (prefix, resource) in all_prefixes() {
+        if path == prefix || path.starts_with(&format!("{prefix}/")) {
             return Some(resource);
         }
     }
@@ -130,6 +162,28 @@ mod tests {
         assert_eq!(match_resource("/api/habits"), Some("habits"));
         assert_eq!(match_resource("/api/health"), None);
         assert_eq!(match_resource("/api/auth/login"), None);
+    }
+
+    /// Imported task batches and team/calendar/notification writes must publish
+    /// too, so another device converges without waiting for the slow interval.
+    #[test]
+    fn core_covers_every_user_scoped_mutation_surface() {
+        assert_eq!(match_resource("/api/imports/tasks"), Some("imports"));
+        assert_eq!(match_resource("/api/teams/abc/tasks"), Some("teams"));
+        assert_eq!(match_resource("/api/calendar/pull"), Some("calendar"));
+        assert_eq!(match_resource("/api/notifications"), Some("notifications"));
+    }
+
+    #[test]
+    fn extension_prefixes_are_matched_after_registration() {
+        assert_eq!(match_resource("/api/widgets"), None);
+        register_extra_prefixes(&[("/api/widgets", "widgets")]);
+        assert_eq!(match_resource("/api/widgets"), Some("widgets"));
+        assert_eq!(match_resource("/api/widgets/42"), Some("widgets"));
+        // Registering twice must not lose the earlier entry.
+        register_extra_prefixes(&[("/api/gadgets", "gadgets")]);
+        assert_eq!(match_resource("/api/widgets"), Some("widgets"));
+        assert_eq!(match_resource("/api/gadgets/active"), Some("gadgets"));
     }
 
     #[tokio::test]

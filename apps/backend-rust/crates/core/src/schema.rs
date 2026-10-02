@@ -19,27 +19,58 @@ const PROVISION_LOCK_KEY: i64 = 0x7072_7973_6d73_6368; // "prysm sch"
 
 const CORE_SCHEMA_SQL: &str = include_str!("../sql/core_schema.sql");
 
+/// Idempotent additive migrations, applied on every boot after the initial
+/// bootstrap check. On a fresh database these are no-ops (the bootstrap already
+/// created the columns/table); on an existing database (production, which the
+/// old backend provisioned) they add the inactivity lifecycle columns and the
+/// audit table. Every statement is `IF NOT EXISTS`, so reruns are safe and
+/// multi-worker boots are serialized by the advisory lock below.
+const CORE_MIGRATIONS_SQL: &str = r#"
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS last_active_at timestamp with time zone;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS inactivity_warned_at timestamp with time zone;
+
+CREATE TABLE IF NOT EXISTS public.account_deletions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    email_hash character varying(64) NOT NULL,
+    reason character varying(32) NOT NULL,
+    deleted_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_account_deletions_email_hash ON public.account_deletions USING btree (email_hash);
+CREATE INDEX IF NOT EXISTS ix_account_deletions_user_id ON public.account_deletions USING btree (user_id);
+"#;
+
 /// Provisions the core schema on a fresh database.
 ///
-/// Runs the embedded bootstrap DDL only when `public.users` is absent, so it is
-/// a cheap no-op once the schema exists. Tries the system role pool first (the
-/// provisioning role owns the tables) and falls back to the app pool.
+/// Runs the embedded bootstrap DDL only when `public.users` is absent (tries the
+/// system role pool first, the provisioning role in some deployments, then the
+/// app pool), then applies the idempotent additive migrations. The migrations
+/// run as the **app** role: on production the app role owns the tables and
+/// `zz-init-roles.sh` grants the system role access to objects the app role
+/// creates, so new tables/columns are usable by both. Running them as the system
+/// role would leave new objects system-owned and the app role without access.
 pub async fn ensure_schema(pool: &PgPool, system_pool: &PgPool) -> Result<(), sqlx::Error> {
-    match provision(system_pool).await {
-        Ok(()) => Ok(()),
+    match bootstrap(system_pool).await {
+        Ok(()) => {}
         Err(err) => {
             tracing::warn!("schema bootstrap via the system pool failed ({err}); retrying on the app pool");
-            provision(pool).await
+            bootstrap(pool).await?;
+        }
+    }
+    match migrate(pool).await {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            tracing::warn!("schema migrations via the app pool failed ({err}); retrying on the system pool");
+            migrate(system_pool).await
         }
     }
 }
 
-async fn provision(pool: &PgPool) -> Result<(), sqlx::Error> {
+/// Create the full bootstrap schema only when `public.users` is absent.
+async fn bootstrap(pool: &PgPool) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(PROVISION_LOCK_KEY)
-        .execute(&mut *tx)
-        .await?;
+    lock(&mut tx).await?;
     let exists: bool = sqlx::query_scalar("SELECT to_regclass('public.users') IS NOT NULL")
         .fetch_one(&mut *tx)
         .await?;
@@ -48,4 +79,20 @@ async fn provision(pool: &PgPool) -> Result<(), sqlx::Error> {
         sqlx::raw_sql(CORE_SCHEMA_SQL).execute(&mut *tx).await?;
     }
     tx.commit().await
+}
+
+/// Apply the idempotent additive migrations on every boot.
+async fn migrate(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    lock(&mut tx).await?;
+    sqlx::raw_sql(CORE_MIGRATIONS_SQL).execute(&mut *tx).await?;
+    tx.commit().await
+}
+
+async fn lock(tx: &mut sqlx::PgConnection) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(PROVISION_LOCK_KEY)
+        .execute(&mut *tx)
+        .await?;
+    Ok(())
 }

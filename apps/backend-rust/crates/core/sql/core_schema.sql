@@ -690,8 +690,23 @@ CREATE TABLE public.users (
     provider character varying(20),
     email_verified boolean DEFAULT false NOT NULL,
     token_version integer DEFAULT 0 NOT NULL,
+    last_active_at timestamp with time zone,
+    inactivity_warned_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: account_deletions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.account_deletions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    email_hash character varying(64) NOT NULL,
+    reason character varying(32) NOT NULL,
+    deleted_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -1487,6 +1502,10 @@ CREATE INDEX ix_user_tokens_user_provider ON public.user_tokens USING btree (use
 --
 
 CREATE INDEX ix_watchlist_items_user_created ON public.watchlist_items USING btree (user_id, created_at);
+
+CREATE INDEX ix_account_deletions_email_hash ON public.account_deletions USING btree (email_hash);
+
+CREATE INDEX ix_account_deletions_user_id ON public.account_deletions USING btree (user_id);
 
 
 --

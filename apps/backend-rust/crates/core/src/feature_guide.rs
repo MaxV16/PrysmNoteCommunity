@@ -53,7 +53,9 @@ FINANCE: Track money without leaving the app. The Finance workspace (under More 
 
 AI CONNECT (MCP): Connect an external AI app (VS Code, Cursor, Claude, Kilo and any other MCP client) to your Prysm Note data. Open Settings, then AI Connect, and create a Personal Access Token: it is shown once and only a hash is stored. Copy the endpoint URL and add it to your AI app with the token as a bearer value (an http mcpServers entry); ready-to-copy configs for each supported app are on the /docs page. Create one token per app so you can revoke them individually at any time, and revoking stops access immediately. The connection exposes your tasks, watchlist and habits. In VS Code, Cursor and Kilo you can also sign in through the browser instead of copying a token.
 
-SYNC ACROSS DEVICES: Tasks, timeline sections, reminders, habits, shows, countdowns and finance live on the server, so every device sees the same data. When you return to the app (or leave it open) it refreshes automatically within about a minute, and a section or task you delete on one device stays deleted, so you do not have to reload manually."#;
+SYNC ACROSS DEVICES: Tasks, timeline sections, reminders, habits, shows, countdowns and finance live on the server, so every device sees the same data. When you return to the app (or leave it open) it refreshes automatically within about a minute, and a section or task you delete on one device stays deleted, so you do not have to reload manually.
+
+ACCOUNT LIFECYCLE: Your data is yours. You can export everything as JSON and delete your account yourself from Settings, then Data, at any time. To keep the service lean and protect your data, an account that has not been used for a year is sent a reminder email; if it is still unused 30 days later it is deleted, and a private, non-personal audit record is kept so a data request can still be answered. Signing in from any device counts as activity and keeps the account active."#;
 
 /// The feature guide for injection into the AI system prompt.
 pub fn feature_guide() -> &'static str {
@@ -65,16 +67,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn guide_has_the_header_and_ends_with_sync_section() {
+    fn guide_has_the_header_and_ends_with_account_lifecycle() {
         assert!(PYRSM_FEATURE_GUIDE.starts_with("FEATURE GUIDE."));
         assert_eq!(feature_guide(), PYRSM_FEATURE_GUIDE);
-        assert!(PYRSM_FEATURE_GUIDE.ends_with("reload manually."));
+        assert!(PYRSM_FEATURE_GUIDE.ends_with("keeps the account active."));
+        assert!(PYRSM_FEATURE_GUIDE.contains("ACCOUNT LIFECYCLE:"));
     }
 
     #[test]
     fn guide_has_no_em_dashes_and_documents_core_sections() {
         assert!(!PYRSM_FEATURE_GUIDE.contains('\u{2014}'));
-        for section in ["TASKS:", "LISTS:", "TRASH:", "VIEWS:", "HABITS:", "AI CHAT:"] {
+        for section in [
+            "TASKS:",
+            "LISTS:",
+            "TRASH:",
+            "VIEWS:",
+            "HABITS:",
+            "AI CHAT:",
+            "SYNC ACROSS DEVICES:",
+            "ACCOUNT LIFECYCLE:",
+        ] {
             assert!(PYRSM_FEATURE_GUIDE.contains(section), "missing {section}");
         }
     }

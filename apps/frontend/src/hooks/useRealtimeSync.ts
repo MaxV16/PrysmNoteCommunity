@@ -23,6 +23,10 @@ export function useRealtimeSync(onChange: () => void, enabled = true) {
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let source: EventSource | null = null;
+    // The stream also emits `open` after an automatic reconnect; the first
+    // open is the initial connection (the mount fetch already covers it), so
+    // only a later open (i.e. a recovered stream) forces a catch-up refresh.
+    let openedBefore = false;
 
     const schedule = () => {
       if (timer) return;
@@ -32,9 +36,15 @@ export function useRealtimeSync(onChange: () => void, enabled = true) {
       }, REALTIME_DEBOUNCE_MS);
     };
 
+    const onOpen = () => {
+      if (openedBefore) schedule();
+      openedBefore = true;
+    };
+
     try {
       source = new EventSource(`${API_URL}/events`, { withCredentials: true });
       source.addEventListener("change", schedule);
+      source.addEventListener("open", onOpen);
     } catch {
       // EventSource unsupported or blocked; the foreground interval still runs.
       return;
@@ -44,6 +54,7 @@ export function useRealtimeSync(onChange: () => void, enabled = true) {
       if (timer) clearTimeout(timer);
       if (source) {
         source.removeEventListener("change", schedule);
+        source.removeEventListener("open", onOpen);
         source.close();
       }
     };

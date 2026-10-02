@@ -85,8 +85,8 @@ pub fn resolve_ai_chain(
     }
     if chain.is_empty() {
         chain = vec![
-            "thinkingmachines/inkling:free".to_string(),
-            "mistralai/mistral-small-3.2-24b-instruct".to_string(),
+            crate::llm::PRYSMAI_MODEL.to_string(),
+            crate::llm::PRYSMAI_EU_MODEL.to_string(),
         ];
     }
 
@@ -127,6 +127,15 @@ mod tests {
     fn unknown_country_gets_the_eu_chain() {
         let s = settings();
         let (primary, _) = resolve_ai_chain(&s, None).unwrap();
-        assert_eq!(primary, "thinkingmachines/inkling:free");
+        assert_eq!(primary, crate::llm::PRYSMAI_EU_MODEL);
+    }
+
+    #[test]
+    fn deepseek_country_gets_the_tool_capable_deepseek_primary() {
+        let s = settings();
+        let (primary, fallbacks) = resolve_ai_chain(&s, Some("US")).unwrap();
+        assert_eq!(primary, crate::llm::PRYSMAI_MODEL);
+        assert!(!primary.contains(":free"));
+        assert!(fallbacks.iter().all(|m| !m.contains(":free")));
     }
 }

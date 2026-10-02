@@ -116,6 +116,7 @@ pub fn build_messages(
     }
 
     system.push_str(ai_prompts::CORE_BEHAVIOR);
+    system.push_str(ai_prompts::INTENT_AND_CLARIFICATION);
 
     if let Some(ctx) = context {
         if let Some(task) = ctx.get("focused_task").filter(|v| !v.is_null()) {
@@ -261,5 +262,28 @@ mod tests {
         assert_eq!(messages.len(), 1 + CONTEXT_MAX_MESSAGES + 1);
         assert_eq!(messages[1]["content"], "m8");
         assert_eq!(messages.last().unwrap()["content"], "last");
+    }
+
+    #[test]
+    fn includes_intent_decoding_clarification_and_few_shots() {
+        let messages = build_messages(&[], "hi", None, None, None, false);
+        let system = messages[0]["content"].as_str().unwrap();
+        assert!(system.contains("INTENT DECODING AND CLARIFICATION"));
+        assert!(system.contains("ASK EXACTLY ONE SHORT QUESTION"));
+        assert!(system.contains("NEVER invent a task"));
+        // Concrete misspelling/typo few-shot examples the model can imitate.
+        assert!(system.contains("add taks buy milk tomorow"));
+        assert!(system.contains("marks the report done"));
+        assert!(system.contains("wat am i wating"));
+        assert!(system.contains("delete the report"));
+    }
+
+    #[test]
+    fn system_prompt_has_no_em_dashes() {
+        let messages = build_messages(&[], "hi", None, None, None, true);
+        assert!(
+            !messages[0]["content"].as_str().unwrap().contains('\u{2014}'),
+            "the system prompt must never contain an em dash"
+        );
     }
 }

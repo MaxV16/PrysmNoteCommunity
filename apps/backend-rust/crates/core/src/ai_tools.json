@@ -21,11 +21,11 @@
           },
           "priority_min": {
             "type": "integer",
-            "description": "minimum priority (1-5)"
+            "description": "minimum priority (1=high, 2=medium, 3=low)"
           },
           "priority_max": {
             "type": "integer",
-            "description": "maximum priority (1-5)"
+            "description": "maximum priority (1=high, 2=medium, 3=low)"
           },
           "list_id": {
             "type": "string",
@@ -52,7 +52,7 @@
     "type": "function",
     "function": {
       "name": "create_task",
-      "description": "Create a new task. IMPORTANT: if the user mentions a date/time or relative day (tomorrow, next Monday, Friday, etc.), resolve it to an exact ISO date using TODAY'S DATE and ALWAYS pass it in start_date (and due_date if relevant). Do not create date-less tasks when the user gave a date. When a specific date is used, first call list_tasks_by_date_range for that date to flag conflicts in your reply (medical/priority-5 tasks outrank regular meetings). TITLE vs DESCRIPTION: keep title SHORT and actionable (a concise noun-phrase, ~6 words max, e.g. \"Buy supplies\"). Put ALL supporting detail, item/vendor specifics and context into description. NEVER silently drop user detail.",
+      "description": "Create a new task. IMPORTANT: if the user mentions a date/time or relative day (tomorrow, next Monday, Friday, etc.), resolve it to an exact ISO date using TODAY'S DATE and ALWAYS pass it in start_date (and due_date if relevant). Do not create date-less tasks when the user gave a date. When a specific date is used, first call list_tasks_by_date_range for that date to flag conflicts in your reply (medical/priority-1 tasks outrank regular meetings). TITLE vs DESCRIPTION: keep title SHORT and actionable (a concise noun-phrase, ~6 words max, e.g. \"Buy supplies\"). Put ALL supporting detail, item/vendor specifics and context into description. NEVER silently drop user detail.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -78,7 +78,8 @@
           "priority": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 5
+            "maximum": 3,
+            "description": "1=high, 2=medium, 3=low (lower is more important; use 1 for medical/health)"
           },
           "recurrence_rule": {
             "type": "string",
@@ -516,7 +517,8 @@
           "priority": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 5
+            "maximum": 3,
+            "description": "1=high, 2=medium, 3=low (lower is more important)"
           },
           "recurrence_rule": {
             "type": "string",

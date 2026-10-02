@@ -51,6 +51,27 @@ describe("app-store", () => {
     useAppStore.getState().setTasks([]);
   });
 
+  it("mergeTasks is idempotent (re-applying a change never duplicates a row)", () => {
+    const task = { id: "dup", title: "Once", status: "todo", updated_at: "2026-01-01T00:00:00Z" } as any;
+    useAppStore.getState().setTasks([]);
+    useAppStore.getState().mergeTasks([task]);
+    useAppStore.getState().mergeTasks([task]);
+    useAppStore.getState().mergeTasks([task]);
+    expect(useAppStore.getState().tasks.filter((t) => t.id === "dup")).toHaveLength(1);
+    useAppStore.getState().setTasks([]);
+  });
+
+  it("mergeTasks reconciles an optimistic write with the newer server copy", () => {
+    const optimistic = { id: "opt", title: "Draft", status: "todo" } as any;
+    const server = { id: "opt", title: "Draft", status: "done", updated_at: "2026-02-02T00:00:00Z" } as any;
+    useAppStore.getState().setTasks([optimistic]);
+    useAppStore.getState().mergeTasks([server]);
+    const rows = useAppStore.getState().tasks.filter((t) => t.id === "opt");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("done");
+    useAppStore.getState().setTasks([]);
+  });
+
   it("setTags updates tags", () => {
     const tags = [{ id: "1", name: "urgent", color: "#ff0000" }];
     useAppStore.getState().setTags(tags);
