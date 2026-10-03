@@ -509,6 +509,16 @@ Tell me the exact item and what you want changed and I will do it."
         for chunk in ai_text::chunk_text(&streamed, CHUNK_SIZE) {
             job.send(TurnEvent::Token(chunk));
         }
+    } else if tool_calls.is_none() && !content.trim().is_empty() {
+        // Fast path: no tool call was needed and the non-streaming round
+        // already produced the complete answer. Reuse it instead of paying for
+        // a second, redundant model round-trip, which roughly halves
+        // time-to-first-token for plain questions. Emit it as chunks so the
+        // reply still renders progressively.
+        streamed = content.clone();
+        for chunk in ai_text::chunk_text(&streamed, CHUNK_SIZE) {
+            job.send(TurnEvent::Token(chunk));
+        }
     } else {
         let messages_value = Value::Array(messages.clone());
         match client.stream_chat(&messages_value).await {

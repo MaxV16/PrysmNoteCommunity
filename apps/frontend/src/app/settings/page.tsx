@@ -132,21 +132,10 @@ function SettingsNav({
 type SettingsTab =
   | "account"
   | "features"
-  | "smart-list"
-  | "notifications"
-  | "date-time"
-  | "appearance"
-  | "more"
+  | "preferences"
   | "integrations"
-  | "import"
-  | "collaborate"
-  | "sticky-note"
   | "widgets"
-  | "ai-keys"
-  | "shortcuts"
-  | "about"
-  | "finance"
-  | "mcp";
+  | "advanced";
 
 interface TabGroup {
   label: string;
@@ -164,36 +153,20 @@ const TAB_GROUPS: TabGroup[] = [
     label: "Customization",
     tabs: [
       { id: "features", label: "Features", svg: "M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5" },
-      { id: "smart-list", label: "Smart List", svg: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8" },
-      { id: "notifications", label: "Notifications", svg: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" },
-      { id: "date-time", label: "Date & Time", svg: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2" },
-      { id: "appearance", label: "Appearance", svg: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z" },
+      { id: "preferences", label: "Preferences", svg: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" },
     ],
   },
   {
     label: "Integrations & Extras",
     tabs: [
       { id: "integrations", label: "Integrations", svg: "M13 2L3 14h9l-1 8 10-12h-9l1-8z" },
-      { id: "finance", label: "Finance", svg: "M3 3h18v18H3V3z M3 9h18 M9 3v18" },
-      { id: "mcp", label: "AI Connect", svg: "M13 2L3 14h9l-1 8 10-12h-9l1-8z M7 14l4-4 3 3 5-6" },
-      { id: "collaborate", label: "Collaborate", svg: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75" },
-      { id: "sticky-note", label: "Sticky Note", svg: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" },
-      { id: "widgets", label: "Desktop Widgets", svg: "M3 3h18v18H3V3z M3 9h18 M9 3v18" },
-      { id: "ai-keys", label: "AI Keys", svg: "M7 11V7a5 5 0 0 1 10 0v4 M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z" },
+      { id: "widgets", label: "Widgets", svg: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" },
     ],
   },
   {
     label: "Advanced",
     tabs: [
-      { id: "more", label: "More", svg: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" },
-      { id: "shortcuts", label: "Shortcuts", svg: "M12 8V4 M8 12H4 M12 16v4 M16 12h4 M12 2v2 M12 22v-2 M2 12h2 M22 12h-2" },
-      { id: "about", label: "About", svg: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 16v-4 M12 8h.01" },
-    ],
-  },
-  {
-    label: "Data",
-    tabs: [
-      { id: "import", label: "Import", svg: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M17 8 12 3 7 8 M12 3v12" },
+      { id: "advanced", label: "Advanced", svg: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" },
     ],
   },
 ];
@@ -469,7 +442,7 @@ export default function SettingsPage() {
     if (typeof window === "undefined") return;
     const token = new URLSearchParams(window.location.search).get("invite");
     if (!token) return;
-    setActiveTab("collaborate");
+    setActiveTab("integrations");
     (async () => {
       try {
         await api.post(`/teams/invites/${encodeURIComponent(token)}/accept`);
@@ -477,7 +450,7 @@ export default function SettingsPage() {
       } catch (e) {
         setInviteMsg(e instanceof Error ? e.message : "Could not accept the invite.");
       }
-      window.history.replaceState({}, "", "/settings?tab=collaborate");
+      window.history.replaceState({}, "", "/settings?tab=integrations");
     })();
   }, []);
 
@@ -486,14 +459,14 @@ export default function SettingsPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const tab = new URLSearchParams(window.location.search).get("tab");
-    if (tab === "finance") setActiveTab("finance");
+    if (tab === "finance") setActiveTab("integrations");
   }, []);
 
   // Deep-link from the marketing AI Connect docs: /settings?tab=mcp
   useEffect(() => {
     if (typeof window === "undefined") return;
     const tab = new URLSearchParams(window.location.search).get("tab");
-    if (tab === "mcp") setActiveTab("mcp");
+    if (tab === "mcp") setActiveTab("integrations");
   }, []);
 
   // Integrations tab: explicit deep-links (including the GitHub sub-views,
@@ -917,7 +890,7 @@ export default function SettingsPage() {
           )}
 
           {/* === SMART LIST === */}
-          {activeTab === "smart-list" && (
+          {activeTab === "features" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
@@ -947,7 +920,7 @@ export default function SettingsPage() {
           )}
 
           {/* === NOTIFICATIONS === */}
-          {activeTab === "notifications" && (
+          {activeTab === "preferences" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
@@ -1061,7 +1034,7 @@ export default function SettingsPage() {
           )}
 
           {/* === DATE & TIME === */}
-          {activeTab === "date-time" && (
+          {activeTab === "preferences" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
@@ -1134,7 +1107,7 @@ export default function SettingsPage() {
           )}
 
           {/* === APPEARANCE === */}
-          {activeTab === "appearance" && (
+          {activeTab === "preferences" && (
             <section className="card p-6 space-y-6">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
@@ -1350,7 +1323,7 @@ export default function SettingsPage() {
           )}
 
           {/* === MORE (Advanced) === */}
-          {activeTab === "more" && (
+          {activeTab === "advanced" && (
             <section className="space-y-5">
               <div className="card p-6 space-y-5">
                 <div className="flex items-center gap-4">
@@ -1410,7 +1383,7 @@ export default function SettingsPage() {
           )}
 
           {/* === IMPORT === */}
-          {activeTab === "import" && (
+          {activeTab === "advanced" && (
             <>
               <ImportPanel />
               <section className="card p-6 space-y-3">
@@ -1448,13 +1421,13 @@ export default function SettingsPage() {
           )}
 
           {/* === FINANCE === */}
-          {activeTab === "finance" && <FinanceSettings />}
+          {activeTab === "integrations" && <FinanceSettings />}
 
           {/* === AI CONNECT (MCP) === */}
-          {activeTab === "mcp" && <McpSettings />}
+          {activeTab === "integrations" && <McpSettings />}
 
           {/* === COLLABORATE === */}
-              {activeTab === "collaborate" && (
+              {activeTab === "integrations" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
@@ -1490,7 +1463,7 @@ export default function SettingsPage() {
           )}
 
           {/* === STICKY NOTE === */}
-          {activeTab === "sticky-note" && (
+          {activeTab === "widgets" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
@@ -1560,7 +1533,7 @@ export default function SettingsPage() {
           )}
 
           {/* === AI KEYS === */}
-          {activeTab === "ai-keys" && (
+          {activeTab === "integrations" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
@@ -1638,7 +1611,7 @@ export default function SettingsPage() {
           )}
 
           {/* === SHORTCUTS === */}
-          {activeTab === "shortcuts" && (
+          {activeTab === "advanced" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
@@ -1663,7 +1636,7 @@ export default function SettingsPage() {
           )}
 
           {/* === ABOUT === */}
-          {activeTab === "about" && (
+          {activeTab === "advanced" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
                 <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
