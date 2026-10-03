@@ -82,8 +82,13 @@ async function fetchStatus(retried = false): Promise<SubscriptionStatus> {
  * so the fetch 404s and we degrade to the free tier (no premium features). In the
  * EE build an active subscription returns `active: true` and `isPremium` follows.
  * The `refresh()` callback re-fetches so a user can upgrade without a full reload.
+ *
+ * Pass the authenticated user id as `authKey`: the root-layout provider mounts
+ * once (often before a client-side login finishes), so without a dependency the
+ * status would stay "free" for the whole session after an SPA login even though
+ * the server already sees the subscription. Changing the key re-fetches.
  */
-export function useSubscription(): SubscriptionValue {
+export function useSubscription(authKey?: string | null): SubscriptionValue {
   const [sub, setSub] = useState<SubscriptionStatus>(FREE_SUBSCRIPTION);
   const [loading, setLoading] = useState(true);
 
@@ -99,6 +104,19 @@ export function useSubscription(): SubscriptionValue {
 
   useEffect(() => {
     void refresh();
+  }, [refresh, authKey]);
+
+  useEffect(() => {
+    const onFocus = () => { void refresh(); };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [refresh]);
 
   return useMemo(
