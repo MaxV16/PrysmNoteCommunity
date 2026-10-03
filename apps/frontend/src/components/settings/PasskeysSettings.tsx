@@ -47,8 +47,24 @@ export function PasskeysSettings() {
   useEffect(() => {
     setSupported(isWebAuthnSupported());
     void load();
-    // The desktop app hands registration to the system browser; when the app
-    // regains focus the passkey list should reflect the new credential.
+    // The desktop app hands registration to the system browser and opens
+    // /settings?tab=account&passkey=register. Open the add dialog so the user
+    // starts the ceremony with a real click (WebAuthn needs user activation,
+    // so create() must not run on load), then strip the param.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("passkey") === "register") {
+        setNewName("");
+        setAddOpen(true);
+        params.delete("passkey");
+        const qs = params.toString();
+        window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+      }
+    } catch {
+      /* no window/history (SSR) */
+    }
+    // When the app regains focus after the system-browser hand-off, the passkey
+    // list should reflect the new credential.
     const onFocus = () => void load();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);

@@ -1,8 +1,9 @@
 import { beforeAll, afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { DateRecurrencePopover } from "./DateRecurrencePopover";
+import { toLocalDateString } from "@/lib/utils";
 
-const today = new Date().toISOString().split("T")[0];
+const today = toLocalDateString(new Date());
 
 beforeAll(() => {
   // jsdom may not provide rAF; the popover uses it only to re-position.

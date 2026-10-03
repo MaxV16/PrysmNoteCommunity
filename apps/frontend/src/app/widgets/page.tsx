@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { calendarOffset, weekdayHeaders } from "@/lib/dates";
+import { calendarOffset, weekdayHeaders, todayISO } from "@/lib/dates";
 import { api } from "@/lib/api";
 import type { Task } from "@/types/task";
 import type { Habit } from "@/types/habit";
@@ -58,7 +58,7 @@ export default function WidgetsPage() {
   }, []);
 
   const activeTasks = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled").length;
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayISO();
   const dueTodayTasks = tasks.filter((t) => t.due_date === today);
   const dueToday = dueTodayTasks.length;
 

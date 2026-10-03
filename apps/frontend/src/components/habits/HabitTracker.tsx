@@ -1,5 +1,7 @@
 "use client";
 
+import { toLocalDateString } from "@/lib/utils";
+
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function getLast7Days(): Date[] {
@@ -13,7 +15,7 @@ function getLast7Days(): Date[] {
 }
 
 function dateStr(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return toLocalDateString(d);
 }
 
 interface HabitTrackerProps {

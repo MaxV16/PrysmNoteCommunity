@@ -13,6 +13,7 @@ import {
   type RecurrenceEnd,
   type RecurrenceFrequency,
 } from "@/lib/recurrence";
+import { parseLocalDate, toLocalDateString } from "@/lib/utils";
 
 interface DateRecurrencePopoverProps {
   open: boolean;
@@ -28,15 +29,19 @@ interface DateRecurrencePopoverProps {
 
 type View = "main" | "recurrence" | "custom";
 
+function todayLocal(): string {
+  return toLocalDateString(new Date());
+}
+
 function addDays(iso: string, days: number): string {
-  const d = new Date(iso);
+  const d = parseLocalDate(iso);
   d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
+  return toLocalDateString(d);
 }
 
 function weekdayFromIso(iso: string): string {
   const codes = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
-  return codes[(new Date(iso).getDay() + 6) % 7];
+  return codes[(parseLocalDate(iso).getDay() + 6) % 7];
 }
 
 interface RecurrencePreset {
@@ -163,7 +168,7 @@ export function DateRecurrencePopover({
     };
   }, [open, onClose, triggerRef, view]);
 
-  const anchorDate = due || start || new Date().toISOString().split("T")[0];
+  const anchorDate = due || start || todayLocal();
 
   // Custom recurrence draft state.
   const [custom, setCustom] = useState<{
@@ -181,7 +186,7 @@ export function DateRecurrencePopover({
     const { recurrence_rule, recurrence_end_date } = applyEnd(ruleValue || "", end);
     // A repeat needs a date to anchor the series: when a rule is applied with no
     // date picked, default it to today so the template is visible and expandable.
-    const todayIso = new Date().toISOString().split("T")[0];
+    const todayIso = todayLocal();
     const committedStart = ruleValue ? (start || todayIso) : start;
     const committedDue = ruleValue ? (due || start || todayIso) : due;
     onChange(committedStart, committedDue, recurrence_rule || null, recurrence_end_date);
@@ -196,16 +201,16 @@ export function DateRecurrencePopover({
   };
 
   const quickActions: { label: string; build: () => string }[] = [
-    { label: "Today", build: () => new Date().toISOString().split("T")[0] },
-    { label: "Tomorrow", build: () => addDays(new Date().toISOString().split("T")[0], 1) },
-    { label: "+7 Days", build: () => addDays(new Date().toISOString().split("T")[0], 7) },
+    { label: "Today", build: () => todayLocal() },
+    { label: "Tomorrow", build: () => addDays(todayLocal(), 1) },
+    { label: "+7 Days", build: () => addDays(todayLocal(), 7) },
     {
       label: "Next Week",
       build: () => {
         const today = new Date();
         const day = today.getDay(); // 0=Sun..6=Sat
         const daysUntilNextMon = day === 0 ? 1 : 8 - day;
-        return addDays(today.toISOString().split("T")[0], daysUntilNextMon);
+        return addDays(toLocalDateString(today), daysUntilNextMon);
       },
     },
   ];
@@ -227,7 +232,7 @@ export function DateRecurrencePopover({
         )}
         {view === "recurrence" && (
           <RecurrenceView
-            date={due || start || new Date().toISOString().split("T")[0]}
+            date={due || start || todayLocal()}
             rule={rule}
             setRule={setRule}
             end={end}
@@ -341,8 +346,8 @@ function MainView({
   onOpenRecurrence: () => void;
   quickActions: { label: string; build: () => string }[];
 }) {
-  const startStr = startDate || new Date().toISOString().split("T")[0];
-  const dueStr = dueDate || startDate || new Date().toISOString().split("T")[0];
+  const startStr = startDate || todayLocal();
+  const dueStr = dueDate || startDate || todayLocal();
   const summary = describeRule(rule);
 
   const handleQuickAction = (iso: string) => {
