@@ -722,7 +722,20 @@ export default function SettingsPage() {
     (t) => t.status === "done" && t.completed_at && new Date(t.completed_at) >= weekStart
   ).length;
 
-  if (!user) return <div className="flex h-dvh items-center justify-center bg-base" />;
+  if (!user) {
+    // A full page load (notably an OAuth return to /settings?code=...) resolves
+    // the session asynchronously. Show a spinner instead of an empty full-height
+    // div, which read to users as the app "blanking out" after reconnecting.
+    return (
+      <div className="flex h-dvh items-center justify-center bg-base">
+        <div
+          className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-accent"
+          role="status"
+          aria-label="Loading settings"
+        />
+      </div>
+    );
+  }
 
   const getKeyByProvider = (provider: string) => keys.find((k) => k.provider === provider);
 
