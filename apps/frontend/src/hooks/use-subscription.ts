@@ -27,18 +27,46 @@ export const FREE_SUBSCRIPTION: SubscriptionStatus = {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 /**
+ * Silently refresh the 15-minute access-token cookie so a status read can retry
+ * once after a 401. Mirrors `doRefresh` in lib/api.ts, but never redirects: this
+ * provider mounts in the root layout (including /login and /register), so a hard
+ * redirect here would bounce the auth pages.
+ */
+async function silentRefresh(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Fetch subscription status WITHOUT the shared API helper's 401→/login redirect.
  * This provider mounts in the root layout (including /login and /register), so it
  * must be silent: a 401/404 (logged-out user, or community build without the EE
  * endpoint) simply means "free". Redirecting here caused an infinite reload
  * bounce on the auth pages.
+ *
+ * A 401 for a LOGGED-IN user usually just means the short-lived access-token
+ * cookie expired: refresh it once and retry, otherwise a premium user would be
+ * stuck on the free tier for the whole session (trial banner reappears, the
+ * Collaborate tab and Integrations panel stay locked).
  */
-async function fetchStatus(): Promise<SubscriptionStatus> {
+async function fetchStatus(retried = false): Promise<SubscriptionStatus> {
   try {
     const res = await fetch(`${API_URL}/ee/billing/status`, {
       credentials: "include",
       headers: { "Content-Type": "application/json" },
     });
+    if (res.status === 401 && !retried) {
+      const refreshed = await silentRefresh();
+      if (refreshed) return fetchStatus(true);
+    }
     if (!res.ok) return FREE_SUBSCRIPTION;
     const data = await res.json();
     return { ...FREE_SUBSCRIPTION, ...data };

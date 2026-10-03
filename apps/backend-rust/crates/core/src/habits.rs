@@ -126,6 +126,7 @@ async fn habit_json(
         .map(|row| row.try_get::<NaiveDate, _>("completed_at").unwrap())
         .collect();
     let streak = compute_streak(&dates);
+    let completed_today = dates.contains(&Utc::now().date_naive());
 
     Ok(json!({
         "id": id.to_string(),
@@ -134,6 +135,7 @@ async fn habit_json(
         "target_count": target_count,
         "color": color,
         "streak": streak,
+        "completed_today": completed_today,
         "created_at": created_at.to_rfc3339(),
     }))
 }
@@ -187,6 +189,7 @@ pub(crate) async fn svc_list_habits(
                 "target_count": row.try_get::<i32, _>("target_count").unwrap(),
                 "color": row.try_get::<Option<String>, _>("color").unwrap(),
                 "streak": compute_streak(&dates),
+                "completed_today": dates.contains(&Utc::now().date_naive()),
                 "created_at": created_at.map(|d| d.to_rfc3339()).unwrap_or_default(),
             })
         })

@@ -76,6 +76,20 @@ interface RequestOptionsJson {
   userVerification?: UserVerificationRequirement;
 }
 
+/**
+ * The backend serializes webauthn-rs `CreationChallengeResponse` /
+ * `RequestChallengeResponse`, which wrap the browser options under a
+ * `publicKey` key. Unwrap that before handing options to `navigator.credentials`.
+ */
+interface CreationChallengeResponse {
+  publicKey: CreationOptionsJson;
+}
+
+interface RequestChallengeResponse {
+  publicKey: RequestOptionsJson;
+  mediation?: string;
+}
+
 export function isWebAuthnSupported(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -170,9 +184,9 @@ function serializeAssertion(credential: PublicKeyCredential): Record<string, unk
 /** Register a new passkey for the signed-in user. Returns the created row. */
 export async function registerPasskey(name?: string): Promise<PasskeySummary> {
   if (!isWebAuthnSupported()) throw new Error("Passkeys are not supported in this browser.");
-  const options = await api.post<CreationOptionsJson>("/auth/passkey/register/options");
+  const response = await api.post<CreationChallengeResponse>("/auth/passkey/register/options");
   const credential = (await navigator.credentials.create({
-    publicKey: decodeCreationOptions(options),
+    publicKey: decodeCreationOptions(response.publicKey),
   })) as PublicKeyCredential | null;
   if (!credential) throw new Error("Passkey registration was cancelled.");
   return api.post<PasskeySummary>("/auth/passkey/register/verify", {
@@ -190,9 +204,9 @@ export async function loginWithPasskey(
   desktopNonce?: string
 ): Promise<{ redirect?: string } & Record<string, unknown>> {
   if (!isWebAuthnSupported()) throw new Error("Passkeys are not supported in this browser.");
-  const options = await postPublic<RequestOptionsJson>("/auth/passkey/login/options", {});
+  const response = await postPublic<RequestChallengeResponse>("/auth/passkey/login/options", {});
   const credential = (await navigator.credentials.get({
-    publicKey: decodeRequestOptions(options),
+    publicKey: decodeRequestOptions(response.publicKey),
   })) as PublicKeyCredential | null;
   if (!credential) throw new Error("Passkey sign-in was cancelled.");
   return postPublic("/auth/passkey/login/verify", {

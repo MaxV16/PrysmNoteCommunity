@@ -5,6 +5,7 @@ export interface Habit {
   target_count: number;
   color: string | null;
   streak: number;
+  completed_today?: boolean;
   created_at: string;
 }
 
