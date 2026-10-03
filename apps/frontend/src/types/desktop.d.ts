@@ -14,6 +14,8 @@ interface PrysmDesktopBridge {
   startSso?: (provider: "google" | "github") => Promise<boolean>;
   /** Starts the passkey ceremony in the system browser (Electron webview limit). */
   startPasskey?: () => Promise<boolean>;
+  /** Opens passkey registration in the system browser (Electron webview limit). */
+  startPasskeyRegister?: () => Promise<boolean>;
   /** Runs an integration OAuth in the system browser and deep-links back. */
   startIntegrationConnect?: (provider: string, url: string) => Promise<boolean>;
   /** Desktop only: show a real OS notification (task reminders, due alerts). */

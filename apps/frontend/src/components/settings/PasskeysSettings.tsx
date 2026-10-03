@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { isWebAuthnSupported, passkeysApi, registerPasskey, type PasskeySummary } from "@/lib/webauthn";
+import { openDesktopPasskeyRegister } from "@/lib/desktop-bridge";
 
 function deviceHint(passkey: PasskeySummary): string {
   if (passkey.transports?.includes("internal")) return "Built-in authenticator";
@@ -46,12 +47,25 @@ export function PasskeysSettings() {
   useEffect(() => {
     setSupported(isWebAuthnSupported());
     void load();
+    // The desktop app hands registration to the system browser; when the app
+    // regains focus the passkey list should reflect the new credential.
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [load]);
 
   const handleAdd = async () => {
     setAdding(true);
     setError("");
     try {
+      // In the Electron app the in-window WebAuthn ceremony cannot complete on
+      // macOS/Windows, so registration is handed to the system browser and we
+      // stop here (the list reloads on focus when the user returns).
+      if (await openDesktopPasskeyRegister()) {
+        setAddOpen(false);
+        setAdding(false);
+        return;
+      }
       await registerPasskey(newName || undefined);
       setAddOpen(false);
       setNewName("");

@@ -685,7 +685,13 @@ export default function SettingsPage() {
   };
 
   const handleOpenWidgets = () => {
-    window.open('/widgets', 'prysm-widgets', 'width=400,height=600');
+    const win = window.open('/widgets', 'prysm-widgets', 'width=400,height=600');
+    // A blocked pop-up (or a webview that ignores window.open) returns null;
+    // fall back to showing the widget dashboard in place so the button always
+    // does something.
+    if (!win) {
+      window.location.href = '/widgets';
+    }
   };
 
   const statuses = ["backlog", "todo", "in_progress", "done", "cancelled"] as const;

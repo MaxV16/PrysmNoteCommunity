@@ -22,6 +22,7 @@ export interface DesktopBridge {
   setTitleBarOverlay?: (options: { color?: string; symbolColor?: string }) => void;
   startSso?: (provider: "google" | "github") => Promise<boolean>;
   startPasskey?: () => Promise<boolean>;
+  startPasskeyRegister?: () => Promise<boolean>;
   /**
    * Desktop only: run an integration OAuth (Slack, GitHub, Gmail, Google
    * Calendar) in the system browser and deep-link back when it finishes.
@@ -176,6 +177,24 @@ export async function openDesktopPasskey(): Promise<boolean> {
   if (!bridge?.startPasskey) return false;
   try {
     return await bridge.startPasskey();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Open passkey REGISTRATION in the system browser from the Electron app. The
+ * in-window `navigator.credentials.create` cannot complete the platform
+ * ceremony on macOS, so the main process opens the account settings page where
+ * the user adds the passkey against the same signed-in session. Returns true
+ * when the bridge handled it; false in a browser/PWA so the in-page ceremony
+ * runs.
+ */
+export async function openDesktopPasskeyRegister(): Promise<boolean> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.startPasskeyRegister) return false;
+  try {
+    return await bridge.startPasskeyRegister();
   } catch {
     return false;
   }
