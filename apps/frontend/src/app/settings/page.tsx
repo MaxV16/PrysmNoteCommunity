@@ -13,6 +13,9 @@ import { ThemeImportExport } from "@/components/settings/ThemeImportExport";
 import { PasskeysSettings } from "@/components/settings/PasskeysSettings";
 import { FinanceSettings } from "@/components/finance/FinanceSettings";
 import { McpSettings } from "@/components/mcp/McpSettings";
+import { Modal } from "@/components/ui/Modal";
+import { WidgetDashboard } from "@/components/widgets/WidgetDashboard";
+import { getDesktopBridge } from "@/lib/desktop-bridge";
 import { useNotificationPrefs, subscribeToPush, unsubscribeFromPush, notificationPermission, requestNotificationPermission, notificationsSupported } from "@/lib/notifications";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { api } from "@/lib/api";
@@ -370,6 +373,7 @@ export default function SettingsPage() {
   const [widgetCalendar, setWidgetCalendar] = useBoolSetting("prysm_widget_calendar", true);
   const [widgetTasks, setWidgetTasks] = useBoolSetting("prysm_widget_tasks", true);
   const [widgetHabits, setWidgetHabits] = useBoolSetting("prysm_widget_habits", true);
+  const [widgetsOpen, setWidgetsOpen] = useState(false);
 
   const [editingCustomTheme, setEditingCustomTheme] = useState(false);
   const [customThemeColors, setCustomThemeColors] = useState<ThemeColors>(() => {
@@ -685,13 +689,16 @@ export default function SettingsPage() {
   };
 
   const handleOpenWidgets = () => {
-    const win = window.open('/widgets', 'prysm-widgets', 'width=400,height=600');
-    // A blocked pop-up (or a webview that ignores window.open) returns null;
-    // fall back to showing the widget dashboard in place so the button always
-    // does something.
-    if (!win) {
-      window.location.href = '/widgets';
+    // The desktop app (and any webview that ignores window.open) can't show a
+    // useful popup, so render the dashboard in-app there. In a normal browser
+    // keep the floating window, falling back to the in-app view if the popup is
+    // blocked.
+    if (getDesktopBridge()) {
+      setWidgetsOpen(true);
+      return;
     }
+    const win = window.open('/widgets', 'prysm-widgets', 'width=400,height=600');
+    if (!win) setWidgetsOpen(true);
   };
 
   const statuses = ["backlog", "todo", "in_progress", "done", "cancelled"] as const;
@@ -1537,6 +1544,10 @@ export default function SettingsPage() {
               </button>
             </section>
           )}
+
+          <Modal isOpen={widgetsOpen} onClose={() => setWidgetsOpen(false)} title="Widgets">
+            <WidgetDashboard />
+          </Modal>
 
           {/* === AI KEYS === */}
           {activeTab === "integrations" && (

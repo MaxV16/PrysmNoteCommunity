@@ -9,6 +9,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const targetArg = process.argv.slice(2).find((a) => /^--(mac|win|linux|dir)$/.test(a));
@@ -62,6 +63,43 @@ if (isMacBuild && !hasMacSigning) {
   ebArgs.push("-c.mac.identity=-");
   console.log("[build:desktop] no macOS signing credentials - ad-hoc signing the app bundle");
 }
+
+// macOS native passkeys (Touch ID): Electron only services platform-authenticator
+// WebAuthn requests after app.configureWebAuthn() is called with a keychain access
+// group that the signing entitlements allow. Both are derived from the Apple Team
+// ID, so we generate them only for a signed macOS build; unsigned/dev builds keep
+// the base entitlements and fall back to the system browser. main.js reads
+// electron/webauthn.json at runtime.
+const electronDir = path.join(root, "ee/apps/desktop/electron");
+const webauthnConfigPath = path.join(electronDir, "webauthn.json");
+const webauthnEntitlementsPath = path.join(root, "ee/apps/desktop/build", "entitlements.webauthn.mac.plist");
+const appleTeamId = (process.env.APPLE_TEAM_ID || "").trim();
+if (isMacBuild && appleTeamId) {
+  const keychainAccessGroup = `${appleTeamId}.com.prysmnote.app.webauthn`;
+  fs.writeFileSync(
+    webauthnConfigPath,
+    `${JSON.stringify({ keychainAccessGroup, promptReason: "verify your identity for Prysm Note" }, null, 2)}\n`
+  );
+  const baseEntitlements = fs.readFileSync(
+    path.join(root, "ee/apps/desktop/build", "entitlements.mac.plist"),
+    "utf8"
+  );
+  const webauthnEntitlements = baseEntitlements.replace(
+    "</dict>",
+    `  <key>keychain-access-groups</key>\n  <array>\n    <string>${keychainAccessGroup}</string>\n  </array>\n</dict>`
+  );
+  fs.writeFileSync(webauthnEntitlementsPath, webauthnEntitlements);
+  ebArgs.push(`-c.mac.entitlements=${webauthnEntitlementsPath}`);
+  ebArgs.push(`-c.mac.entitlementsInherit=${webauthnEntitlementsPath}`);
+  console.log(`[build:desktop] enabling macOS passkeys with keychain group ${keychainAccessGroup}`);
+} else {
+  // A generated config from a previous signed build must never leak into an
+  // unsigned build (main.js would try to use a group the entitlements forbid).
+  try {
+    fs.rmSync(webauthnConfigPath, { force: true });
+  } catch {}
+}
+
 console.log("[build:desktop] running electron-builder" + (target ? ` --${target}` : "") + " (publish disabled: metadata is written, but uploads are handled by the release pipeline)...");
 const eb = spawnSync(
   "npx",

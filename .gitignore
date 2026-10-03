@@ -49,6 +49,9 @@ electron/out/
 
 
 
+# Generated at build time by scripts/build-desktop.mjs for signed macOS builds
+# (native Touch ID passkeys). Never commit: it embeds the Apple Team ID.
+
 
 # Kilo agent plans
 .kilo/

@@ -44,8 +44,10 @@ const CHALLENGE_COOKIE: &str = "webauthn_challenge";
 const CHALLENGE_TTL: i64 = 300;
 /// Maximum passkeys per account (matches the Python backend).
 const MAX_PASSKEYS_PER_USER: usize = 20;
-/// WebAuthn ceremony timeout, 300s (matches the Python backend default).
-const WEBAUTHN_TIMEOUT: Duration = Duration::from_secs(300);
+/// WebAuthn ceremony timeout. Kept short so a device that never responds
+/// (for example a desktop webview without a native authenticator) fails fast
+/// instead of leaving the UI on "Waiting for device..." for five minutes.
+const WEBAUTHN_TIMEOUT: Duration = Duration::from_secs(60);
 
 const CHALLENGE_EXPIRED: &str = "Challenge expired. Please try again.";
 const COULD_NOT_REGISTER: &str = "Could not register this passkey.";

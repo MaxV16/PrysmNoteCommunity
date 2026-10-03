@@ -42,6 +42,28 @@ async function postPublic<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+/**
+ * WebAuthn ceremonies can hang with no prompt at all when the platform has no
+ * usable authenticator (for example the Electron desktop app before native
+ * WebAuthn is enabled). Bound the wait so the caller surfaces a clear error
+ * instead of spinning on "Waiting for device..." until the browser gives up.
+ */
+const CEREMONY_TIMEOUT_MS = 60_000;
+
+async function withCeremonyTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), CEREMONY_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export interface PasskeySummary {
   id: string;
   name: string | null;
@@ -185,9 +207,12 @@ function serializeAssertion(credential: PublicKeyCredential): Record<string, unk
 export async function registerPasskey(name?: string): Promise<PasskeySummary> {
   if (!isWebAuthnSupported()) throw new Error("Passkeys are not supported in this browser.");
   const response = await api.post<CreationChallengeResponse>("/auth/passkey/register/options");
-  const credential = (await navigator.credentials.create({
-    publicKey: decodeCreationOptions(response.publicKey),
-  })) as PublicKeyCredential | null;
+  const credential = (await withCeremonyTimeout(
+    navigator.credentials.create({
+      publicKey: decodeCreationOptions(response.publicKey),
+    }) as Promise<Credential | null>,
+    "No passkey prompt appeared. Update the desktop app or use a browser with Touch ID, Windows Hello or a security key.",
+  )) as PublicKeyCredential | null;
   if (!credential) throw new Error("Passkey registration was cancelled.");
   return api.post<PasskeySummary>("/auth/passkey/register/verify", {
     credential: serializeRegistration(credential),
@@ -205,9 +230,12 @@ export async function loginWithPasskey(
 ): Promise<{ redirect?: string } & Record<string, unknown>> {
   if (!isWebAuthnSupported()) throw new Error("Passkeys are not supported in this browser.");
   const response = await postPublic<RequestChallengeResponse>("/auth/passkey/login/options", {});
-  const credential = (await navigator.credentials.get({
-    publicKey: decodeRequestOptions(response.publicKey),
-  })) as PublicKeyCredential | null;
+  const credential = (await withCeremonyTimeout(
+    navigator.credentials.get({
+      publicKey: decodeRequestOptions(response.publicKey),
+    }) as Promise<Credential | null>,
+    "No passkey prompt appeared. Update the desktop app or use a browser with Touch ID, Windows Hello or a security key.",
+  )) as PublicKeyCredential | null;
   if (!credential) throw new Error("Passkey sign-in was cancelled.");
   return postPublic("/auth/passkey/login/verify", {
     credential: serializeAssertion(credential),
