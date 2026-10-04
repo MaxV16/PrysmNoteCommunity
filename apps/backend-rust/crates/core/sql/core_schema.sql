@@ -675,8 +675,6 @@ CREATE TABLE public.user_tokens (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY public.user_tokens FORCE ROW LEVEL SECURITY;
-
 
 --
 -- Name: users; Type: TABLE; Schema: public; Owner: -
@@ -2257,8 +2255,11 @@ ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 --
 -- Name: user_tokens; Type: ROW SECURITY; Schema: public; Owner: -
 --
-
-ALTER TABLE public.user_tokens ENABLE ROW LEVEL SECURITY;
+-- NOTE: intentionally NOT row-level-secured. OAuth tokens are Fernet-encrypted
+-- at rest and every query scopes by user_id, while core background loops (the
+-- Google Calendar pull) read tokens across users on the app pool with no RLS
+-- context. A policy here would silently return zero rows and break token
+-- refresh/store (and a FORCE with no policy rejects every write).
 
 --
 -- Name: watchlist_items; Type: ROW SECURITY; Schema: public; Owner: -

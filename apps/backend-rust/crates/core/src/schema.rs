@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS public.account_deletions (
 
 CREATE INDEX IF NOT EXISTS ix_account_deletions_email_hash ON public.account_deletions USING btree (email_hash);
 CREATE INDEX IF NOT EXISTS ix_account_deletions_user_id ON public.account_deletions USING btree (user_id);
+
+-- user_tokens must NOT be row-level-secured: OAuth tokens are Fernet-encrypted
+-- and every query scopes by user_id, while core background loops (the calendar
+-- pull) read tokens across users on the app pool with no RLS context. A legacy
+-- FORCE with no matching policy rejected every token write ("new row violates
+-- row-level security policy for table user_tokens"), so clear it on existing
+-- databases; fresh databases no longer enable it at all.
+ALTER TABLE public.user_tokens NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.user_tokens DISABLE ROW LEVEL SECURITY;
 "#;
 
 /// Provisions the core schema on a fresh database.
@@ -95,4 +104,22 @@ async fn lock(tx: &mut sqlx::PgConnection) -> Result<(), sqlx::Error> {
         .execute(&mut *tx)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `user_tokens` must stay outside row-level security: the core calendar
+    /// pull reads tokens across users on the app pool with no RLS context, and
+    /// a legacy FORCE with no policy rejected every token write ("new row
+    /// violates row-level security policy for table user_tokens"), which broke
+    /// GitHub/Slack/email OAuth connects on fresh databases.
+    #[test]
+    fn user_tokens_is_not_row_level_secured() {
+        assert!(!CORE_SCHEMA_SQL.contains("user_tokens ENABLE ROW LEVEL SECURITY"));
+        assert!(!CORE_SCHEMA_SQL.contains("user_tokens FORCE ROW LEVEL SECURITY"));
+        assert!(CORE_MIGRATIONS_SQL.contains("user_tokens NO FORCE ROW LEVEL SECURITY"));
+        assert!(CORE_MIGRATIONS_SQL.contains("user_tokens DISABLE ROW LEVEL SECURITY"));
+    }
 }
