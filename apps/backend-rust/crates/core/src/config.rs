@@ -71,10 +71,13 @@ impl Settings {
                 .to_string()
         });
         let api_rate_limit_enabled = env_bool("API_RATE_LIMIT_ENABLED", true);
+        // The app fans out several requests per page (integrations status alone
+        // is 4 parallel GETs), so the old 120/min default tripped for a single
+        // user doing normal work. 300/min is still a firm per-IP abuse guard.
         let api_rate_limit_per_min = env::var("API_RATE_LIMIT_PER_MIN")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(120);
+            .unwrap_or(300);
         let cors_origins =
             env::var("CORS_ORIGINS").unwrap_or_else(|_| "http://localhost:3000".to_string());
         let notifications_enabled = env_bool("NOTIFICATIONS_ENABLED", false);
@@ -452,7 +455,7 @@ pub(crate) mod tests {
             csrf_enabled: true,
             csrf_allowed_origins: "https://prysmnote.com".into(),
             api_rate_limit_enabled: true,
-            api_rate_limit_per_min: 120,
+            api_rate_limit_per_min: 300,
             cors_origins: "http://localhost:3000".into(),
             notifications_enabled: false,
             vapid_private_key: String::new(),

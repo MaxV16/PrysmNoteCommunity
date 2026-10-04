@@ -57,7 +57,7 @@ async function silentRefresh(): Promise<boolean> {
  * stuck on the free tier for the whole session (trial banner reappears, the
  * Collaborate tab and Integrations panel stay locked).
  */
-async function fetchStatus(retried = false): Promise<SubscriptionStatus> {
+async function fetchStatus(retried = false): Promise<SubscriptionStatus | null> {
   try {
     const res = await fetch(`${API_URL}/ee/billing/status`, {
       credentials: "include",
@@ -67,11 +67,20 @@ async function fetchStatus(retried = false): Promise<SubscriptionStatus> {
       const refreshed = await silentRefresh();
       if (refreshed) return fetchStatus(true);
     }
-    if (!res.ok) return FREE_SUBSCRIPTION;
+    // 401 (logged out), 403 and 404 (community build, no EE billing endpoint)
+    // are authoritative "free": report free and let the caller replace state.
+    if (res.status === 401 || res.status === 403 || res.status === 404) {
+      return FREE_SUBSCRIPTION;
+    }
+    // A 429/5xx is TRANSIENT. Returning FREE here flipped a genuine Premium
+    // user to the locked "Upgrade" panel after a momentary rate limit, so we
+    // return null and the caller keeps the last known status instead.
+    if (!res.ok) return null;
     const data = await res.json();
     return { ...FREE_SUBSCRIPTION, ...data };
   } catch {
-    return FREE_SUBSCRIPTION;
+    // Network error is transient too; keep the last known status.
+    return null;
   }
 }
 
@@ -96,7 +105,9 @@ export function useSubscription(authKey?: string | null): SubscriptionValue {
     setLoading(true);
     try {
       const s = await fetchStatus();
-      setSub(s);
+      // null == transient failure: keep the last known status so a momentary
+      // 429/5xx never locks a Premium user out of their features.
+      if (s) setSub(s);
     } finally {
       setLoading(false);
     }
