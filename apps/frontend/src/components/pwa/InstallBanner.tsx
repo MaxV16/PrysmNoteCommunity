@@ -15,6 +15,27 @@ interface InstallBannerProps {
   autoOpenGuide?: boolean;
 }
 
+/** Remembers that the install prompt was already surfaced, so it shows once ever. */
+const INSTALL_SEEN_KEY = "prysm_pwa_install_seen";
+
+function hasSeenInstallPrompt(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(INSTALL_SEEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markInstallPromptSeen(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(INSTALL_SEEN_KEY, "1");
+  } catch {
+    /* storage unavailable (private mode): the prompt just returns next visit */
+  }
+}
+
 /**
  * Cross-browser PWA install surface.
  *
@@ -30,6 +51,8 @@ export function InstallBanner({ smallScreen = false, autoOpenGuide = false }: In
   const [dismissed, setDismissed] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const autoOpened = useRef(false);
+  // Show at most once ever; an explicit `?install=1` request always opens the guide.
+  const [seen] = useState(hasSeenInstallPrompt);
 
   const { os, browser, guide } = useMemo(() => {
     if (typeof navigator === "undefined") {
@@ -54,10 +77,17 @@ export function InstallBanner({ smallScreen = false, autoOpenGuide = false }: In
     }
   }, [autoOpenGuide, isStandalone]);
 
+  const shouldSurface = !isStandalone && !dismissed && (!seen || autoOpenGuide) && (nativeAvailable || isMobileOS || autoOpenGuide);
+  useEffect(() => {
+    if (shouldSurface) markInstallPromptSeen();
+  }, [shouldSurface]);
+
   if (isStandalone || dismissed) return null;
   // Show when we can offer a native install, on a phone (manual steps), or when
   // the user explicitly asked from the marketing page.
   if (!nativeAvailable && !isMobileOS && !autoOpenGuide) return null;
+  // Once surfaced (or dismissed), never nag again - unless explicitly requested.
+  if (seen && !autoOpenGuide) return null;
 
   return (
     <>
