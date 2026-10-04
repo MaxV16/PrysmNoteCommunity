@@ -140,7 +140,7 @@ describe("api", () => {
     const originalLocation = window.location;
     // @ts-expect-error - mocking location
     delete window.location;
-    window.location = { href: "" } as any;
+    window.location = { href: "", pathname: "/settings", search: "?tab=integrations&connect=github" } as any;
 
     mockFetch.mockResolvedValue({
       ok: false,
@@ -149,7 +149,11 @@ describe("api", () => {
     });
 
     await expect(api.get("/tasks")).rejects.toThrow("Session expired");
-    expect(window.location.href).toBe("/login");
+    // The current path + query survive the bounce, so a deep-linked connect
+    // resumes after sign-in instead of dropping its parameters.
+    expect(window.location.href).toBe(
+      "/login?next=" + encodeURIComponent("/settings?tab=integrations&connect=github"),
+    );
 
     window.location.href = originalLocation.href;
   });

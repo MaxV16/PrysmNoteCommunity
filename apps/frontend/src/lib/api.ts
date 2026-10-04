@@ -93,7 +93,19 @@ async function request<T>(
       return request<T>(path, options, true);
     }
     if (refreshed === "unauthenticated") {
-      window.location.href = "/login";
+      // Preserve the current URL so a deep-linked flow (an integration connect
+      // handed to the system browser, or a returning OAuth callback) resumes
+      // after sign-in instead of dropping its query string. Same-site only; the
+      // login page re-validates and never leaves the app.
+      const here =
+        typeof window !== "undefined" && window.location.pathname
+          ? `${window.location.pathname}${window.location.search || ""}`
+          : "";
+      const target =
+        here && !here.startsWith("/login") && !here.startsWith("/register")
+          ? `/login?next=${encodeURIComponent(here)}`
+          : "/login";
+      window.location.href = target;
       throw new Error("Session expired");
     }
     // Transient refresh failure (backend restarting, 5xx, offline): keep the

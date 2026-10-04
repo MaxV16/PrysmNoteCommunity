@@ -597,12 +597,17 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         );
         try {
           await api.post("/tasks/batch-reschedule", {
-            task_ids: selectedIds,
+            task_ids: Array.from(fieldsByTask.keys()),
             delta_days: days,
           });
-        } catch {
+        } catch (e) {
           store.setTasks(previous);
-          showToast("Could not move the selected tasks.", "error");
+          showToast(
+            e instanceof Error && e.message
+              ? e.message
+              : "Could not move the selected tasks.",
+            "error"
+          );
         }
         return;
       }

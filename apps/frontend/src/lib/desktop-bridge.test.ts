@@ -76,20 +76,27 @@ describe("window controls detection", () => {
 
 describe("integration connect hand-off", () => {
   it("is a no-op in the browser so the normal redirect runs", async () => {
-    expect(await openDesktopIntegrationConnect("slack", "https://api.slack.com/oauth")).toBe(false);
+    expect(await openDesktopIntegrationConnect("slack", "https://prysmnote.com/settings")).toBe(false);
   });
 
-  it("hands the provider url to the desktop shell", async () => {
+  it("hands the app settings url to the desktop shell", async () => {
     const startIntegrationConnect = vi.fn().mockResolvedValue(true);
     vi.stubGlobal("prysmDesktop", { isDesktop: true, startIntegrationConnect });
-    expect(await openDesktopIntegrationConnect("slack", "https://slack.com/oauth")).toBe(true);
-    expect(startIntegrationConnect).toHaveBeenCalledWith("slack", "https://slack.com/oauth");
+    expect(
+      await openDesktopIntegrationConnect("slack", "https://prysmnote.com/settings?tab=integrations")
+    ).toBe(true);
+    expect(startIntegrationConnect).toHaveBeenCalledWith(
+      "slack",
+      "https://prysmnote.com/settings?tab=integrations"
+    );
   });
 
   it("returns false when the shell rejects so the caller can fall back", async () => {
     const startIntegrationConnect = vi.fn().mockRejectedValue(new Error("no bridge"));
     vi.stubGlobal("prysmDesktop", { isDesktop: true, startIntegrationConnect });
-    expect(await openDesktopIntegrationConnect("github", "https://github.com/login/oauth")).toBe(false);
+    expect(
+      await openDesktopIntegrationConnect("github", "https://prysmnote.com/settings?tab=integrations")
+    ).toBe(false);
   });
 });
 

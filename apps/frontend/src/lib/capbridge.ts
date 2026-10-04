@@ -26,6 +26,15 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
  */
 let pendingSsoNonce: string | null = null;
 
+/**
+ * Login-CSRF guard for the integration-connect hand-off. A connect started in
+ * the app opens the settings page in the system browser (Google blocks OAuth in
+ * embedded webviews); when the provider round trip finishes there, that page
+ * deep-links back with this nonce, and the WebView returns to Settings. Reject
+ * any link that does not carry the nonce for the flow this app started.
+ */
+let pendingIntegrationNonce: string | null = null;
+
 /** URL-safe random nonce (matches the backend's NONCE_RE: [A-Za-z0-9_-]{1,64}). */
 function randomNonce(): string {
   const bytes = new Uint8Array(24);
@@ -82,10 +91,52 @@ export async function openMobileSso(provider: "google" | "github"): Promise<bool
   return true;
 }
 
-function exchangeMobileCode(url: string): void {
+/**
+ * Start an integration connect from the mobile app. Opens the app's own
+ * Settings page in the system browser with a `redirect=mobile&connect=<provider>`
+ * marker; that page fetches the provider URL, the consent finishes in the system
+ * browser, and it deep-links back so the WebView can pick the result up.
+ *
+ * Returns true when the native browser was opened (the caller must not fall back
+ * to navigating the WebView itself).
+ */
+export async function openMobileIntegrationConnect(provider: string, appUrl: string): Promise<boolean> {
+  const c = getCapBridge();
+  const browser = c?.Plugins?.Browser;
+  if (!c || !browser?.open) return false;
+  pendingIntegrationNonce = randomNonce();
+  const sep = appUrl.includes("?") ? "&" : "?";
+  const url = `${appUrl}${sep}redirect=mobile&connect=${encodeURIComponent(provider)}&nonce=${encodeURIComponent(pendingIntegrationNonce)}`;
+  await browser.open({ url });
+  return true;
+}
+
+/** True when `url` is the `com.prysmnote.app://integration/callback?...` return deep link. */
+function handleIntegrationDeepLink(parsed: URL): boolean {
+  if (parsed.host !== "integration" && !parsed.pathname.startsWith("/integration")) return false;
+  const nonce = parsed.searchParams.get("nonce") ?? "";
+  if (!pendingIntegrationNonce || nonce !== pendingIntegrationNonce) return true;
+  pendingIntegrationNonce = null;
+  const provider = parsed.searchParams.get("provider") ?? "";
+  const params = new URLSearchParams({ tab: "integrations" });
+  if (provider) params.set("connected", provider);
+  // Reopen the app Settings in the WebView; the credential already lives on the
+  // server, so the row just refreshes.
+  window.location.href = `${window.location.origin}/settings?${params.toString()}`;
+  return true;
+}
+
+
+/**
+ * Handle a `com.prysmnote.app://` deep link: either the integration-connect
+ * return (`://integration/callback`) or the SSO code exchange (`://oauth/...`).
+ * Exported for tests; the app wires it to the native `appUrlOpen` event.
+ */
+export function handleMobileUrl(url: string): void {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "com.prysmnote.app:") return;
+    if (handleIntegrationDeepLink(parsed)) return;
     const code = parsed.searchParams.get("code");
     if (!code) return;
     // Only accept the deep link for the flow this app started (login-CSRF).
@@ -108,10 +159,10 @@ export function initCapbridge(): void {
   const c = getCapBridge();
   if (!c) return;
 
-  // SSO deep link (`com.prysmnote.app://oauth/client?code=...`) after the user
-  // finishes consent in the system browser.
+  // SSO and integration-connect deep links (`com.prysmnote.app://...`) after the
+  // user finishes consent in the system browser.
   void c.Plugins.App.addListener("appUrlOpen", (event) => {
-    exchangeMobileCode(String(event?.url ?? ""));
+    handleMobileUrl(String(event?.url ?? ""));
   });
 
   // Hardware/systems back button: first let the in-app back stack close the
