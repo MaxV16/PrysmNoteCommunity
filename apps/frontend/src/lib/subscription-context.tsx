@@ -30,6 +30,7 @@ export function useSubscriptionContext(): SubscriptionValue {
       ...FREE_SUBSCRIPTION,
       isPremium: false,
       loading: false,
+      resolved: true,
       refresh: async () => {},
     };
   }

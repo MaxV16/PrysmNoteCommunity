@@ -678,12 +678,38 @@ pub async fn pull_and_import_events(
     })
 }
 
+/// Progress sample handed to a [`sync_all_tasks_tracked`] callback after each
+/// task's push attempt, so a background job can expose live status.
+pub struct SyncProgressUpdate {
+    /// Tasks attempted so far (pushed + failed).
+    pub processed: i64,
+    /// Tasks pushed successfully so far.
+    pub pushed: i64,
+    /// Tasks that failed so far.
+    pub failed: i64,
+    /// Total tasks selected for this run.
+    pub total: i64,
+}
+
 /// Push pending local tasks to the primary calendar.
 pub async fn sync_all_tasks(
     pool: &PgPool,
     enc_key: &str,
     user_id: Uuid,
     access_token: &str,
+) -> Value {
+    sync_all_tasks_tracked(pool, enc_key, user_id, access_token, None).await
+}
+
+/// Like [`sync_all_tasks`], but reports progress after every task so a caller
+/// can drive a background job's status endpoint. The callback runs on the sync
+/// task (never across the network calls themselves).
+pub async fn sync_all_tasks_tracked(
+    pool: &PgPool,
+    enc_key: &str,
+    user_id: Uuid,
+    access_token: &str,
+    progress: Option<&(dyn Fn(SyncProgressUpdate) + Send + Sync)>,
 ) -> Value {
     let _ = enc_key;
     let empty = || json!({ "pushed": 0, "failed": 0, "total": 0, "remaining": 0 });
@@ -765,6 +791,14 @@ pub async fn sync_all_tasks(
                     first_error = Some(error_detail(&err));
                 }
             }
+        }
+        if let Some(cb) = progress {
+            cb(SyncProgressUpdate {
+                processed: pushed + failed,
+                pushed,
+                failed,
+                total,
+            });
         }
     }
     json!({

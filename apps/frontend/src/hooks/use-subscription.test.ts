@@ -1,5 +1,5 @@
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { useSubscription } from "./use-subscription";
 
 // Minimal Response stand-in so we do not depend on the environment's fetch types.
@@ -19,6 +19,10 @@ const ACTIVE = {
 };
 
 describe("useSubscription resilience", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -79,5 +83,48 @@ describe("useSubscription resilience", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.isPremium).toBe(false);
+  });
+
+  it("hydrates the cached status so a premium user is unlocked before the network resolves", async () => {
+    localStorage.setItem("prysm_subscription_status:user-cache", JSON.stringify(ACTIVE));
+    // A transient (rate-limited) refresh must not erase the cached premium state.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(res({ detail: "Too many requests" }, 429)));
+
+    const { result } = renderHook(() => useSubscription("user-cache"));
+    await waitFor(() => expect(result.current.resolved).toBe(true));
+    expect(result.current.isPremium).toBe(true);
+  });
+
+  it("reports unresolved (not free) when there is no cache and the first fetch is transient", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(res({ detail: "Too many requests" }, 429)));
+
+    const { result } = renderHook(() => useSubscription("user-unknown"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.resolved).toBe(false);
+  });
+
+  it("ignores a cache entry written for a different user", async () => {
+    localStorage.setItem("prysm_subscription_status:someone-else", JSON.stringify(ACTIVE));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(res({ ...ACTIVE, tier: "free", status: "free", active: false }))
+    );
+
+    const { result } = renderHook(() => useSubscription("user-5"));
+    await waitFor(() => expect(result.current.resolved).toBe(true));
+    expect(result.current.isPremium).toBe(false);
+  });
+
+  it("persists the authoritative status for the next mount", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(res(ACTIVE)));
+
+    const { result } = renderHook(() => useSubscription("user-6"));
+    await waitFor(() => expect(result.current.isPremium).toBe(true));
+    await waitFor(() =>
+      expect(localStorage.getItem("prysm_subscription_status:user-6")).toBeTruthy()
+    );
+    expect(JSON.parse(localStorage.getItem("prysm_subscription_status:user-6") as string).active).toBe(
+      true
+    );
   });
 });

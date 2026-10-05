@@ -13,6 +13,12 @@ export type SubscriptionStatus = {
 export type SubscriptionValue = SubscriptionStatus & {
   isPremium: boolean;
   loading: boolean;
+  /**
+   * True once an authoritative status has been applied (a network response or a
+   * hydrated cache entry). While false the plan is UNKNOWN, not free: consumers
+   * must show a loading state instead of the "Upgrade to Premium" lock.
+   */
+  resolved: boolean;
   refresh: () => Promise<void>;
 };
 
@@ -25,6 +31,40 @@ export const FREE_SUBSCRIPTION: SubscriptionStatus = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+
+/**
+ * Best-effort cache of the last authoritative status so the Integrations page
+ * renders unlocked instantly for a Premium user instead of flashing the lock
+ * while the first status request is in flight. Keyed by authenticated user id so
+ * a login change never shows another user's plan.
+ */
+const SUB_CACHE_KEY = "prysm_subscription_status";
+
+function subscriptionCacheKey(authKey?: string | null): string {
+  return authKey ? `${SUB_CACHE_KEY}:${authKey}` : SUB_CACHE_KEY;
+}
+
+function readCachedStatus(authKey?: string | null): SubscriptionStatus | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(subscriptionCacheKey(authKey));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SubscriptionStatus>;
+    if (typeof parsed?.active !== "boolean" || typeof parsed?.tier !== "string") return null;
+    return { ...FREE_SUBSCRIPTION, ...parsed };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedStatus(authKey: string | null | undefined, status: SubscriptionStatus): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(subscriptionCacheKey(authKey), JSON.stringify(status));
+  } catch {
+    // Storage blocked or full: the cache is best-effort, never fatal.
+  }
+}
 
 /**
  * Silently refresh the 15-minute access-token cookie so a status read can retry
@@ -100,6 +140,22 @@ async function fetchStatus(retried = false): Promise<SubscriptionStatus | null> 
 export function useSubscription(authKey?: string | null): SubscriptionValue {
   const [sub, setSub] = useState<SubscriptionStatus>(FREE_SUBSCRIPTION);
   const [loading, setLoading] = useState(true);
+  const [resolved, setResolved] = useState(false);
+
+  // Hydrate the last authoritative status on mount / user change so a Premium
+  // user's page renders unlocked instantly, before the network call returns.
+  // With no cache for this user we start UNRESOLVED (skeleton), never an
+  // authoritative "free" that would flash the upgrade lock.
+  useEffect(() => {
+    const cached = readCachedStatus(authKey);
+    if (cached) {
+      setSub(cached);
+      setResolved(true);
+    } else {
+      setSub(FREE_SUBSCRIPTION);
+      setResolved(false);
+    }
+  }, [authKey]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -107,11 +163,15 @@ export function useSubscription(authKey?: string | null): SubscriptionValue {
       const s = await fetchStatus();
       // null == transient failure: keep the last known status so a momentary
       // 429/5xx never locks a Premium user out of their features.
-      if (s) setSub(s);
+      if (s) {
+        setSub(s);
+        setResolved(true);
+        writeCachedStatus(authKey, s);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authKey]);
 
   useEffect(() => {
     void refresh();
@@ -131,7 +191,7 @@ export function useSubscription(authKey?: string | null): SubscriptionValue {
   }, [refresh]);
 
   return useMemo(
-    () => ({ ...sub, isPremium: sub.active, loading, refresh }),
-    [sub, loading, refresh]
+    () => ({ ...sub, isPremium: sub.active, loading, resolved, refresh }),
+    [sub, loading, resolved, refresh]
   );
 }
