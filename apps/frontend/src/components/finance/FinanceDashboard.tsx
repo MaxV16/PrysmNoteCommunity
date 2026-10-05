@@ -14,10 +14,12 @@ import {
   daysUntil,
   formatShortDateYear,
   nextDueDate,
+  parseISODate,
   payoffEstimate,
   startOfToday,
   toISODate,
 } from "@/lib/finance-utils";
+
 
 
 interface FinanceDashboardProps {
@@ -85,8 +87,8 @@ function DueBadge({ item }: { item: FinancialItem }) {
 
 export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
   const {
-    items, debts, transactions, summary, loading, error,
-    refresh, createItem, updateItem, deleteItem, recordPayment, payOff, reverseTransaction,
+    items, debts, transactions, receivables, upcomingIncome, summary, loading, error,
+    refresh, createItem, updateItem, deleteItem, recordPayment, payOff, settleItem, linkTask, reverseTransaction,
   } = useFinance();
 
   const currencyCode = useFinanceCurrencyCode();
@@ -124,6 +126,12 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
   const [fIsDebt, setFIsDebt] = useState(false);
   const [fPrincipal, setFPrincipal] = useState("");
   const [fInterest, setFInterest] = useState("");
+  const [fCounterparty, setFCounterparty] = useState("");
+  const [fDueDate, setFDueDate] = useState("");
+  const [fNotes, setFNotes] = useState("");
+  const [fReceivable, setFReceivable] = useState(false);
+  const [receivableMode, setReceivableMode] = useState(false);
+
 
   const hasData = summary.itemCount > 0;
 
@@ -154,7 +162,7 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
   }, [items, query, categoryFilter]);
 
   const expenseItems = useMemo(() => filteredItems.filter((i) => i.direction !== "income"), [filteredItems]);
-  const incomeItems = useMemo(() => filteredItems.filter((i) => i.direction === "income"), [filteredItems]);
+  const incomeItems = useMemo(() => filteredItems.filter((i) => i.direction === "income" && !i.receivable), [filteredItems]);
   const expenseTotal = expenseItems.reduce((s, i) => s + parseFloat(i.amount || "0"), 0);
   const incomeTotal = incomeItems.reduce((s, i) => s + parseFloat(i.amount || "0"), 0);
 
@@ -204,14 +212,26 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
       payload.principal = parseFloat(fPrincipal || fAmount);
       payload.interest_rate = fInterest ? parseFloat(fInterest) : null;
     }
+    if (fCounterparty) payload.counterparty = fCounterparty;
+    if (fDueDate) payload.due_date = fDueDate;
+    if (fNotes) payload.notes = fNotes;
+    payload.receivable = fReceivable;
     try {
-      await createItem(payload);
+      const created = await createItem(payload);
+      if (fReceivable && receivableMode && created?.id) {
+        try {
+          await linkTask(created.id);
+        } catch {
+          // The ledger row exists; a failed task link must not lose the entry.
+        }
+      }
       setFName(""); setFAmount(""); setFEnd(""); setFStart(""); setFRepeatCount(""); setFPrincipal(""); setFInterest("");
+      setFCounterparty(""); setFDueDate(""); setFNotes(""); setFReceivable(false); setReceivableMode(false);
       setMsg({ text: "Item added.", ok: true });
     } catch (e) {
       setMsg({ text: e instanceof Error ? e.message : "Failed to add item", ok: false });
     }
-  }, [fName, fAmount, fDirection, fKind, fStart, fEnd, fUnit, fInterval, fRepeatCount, fIsDebt, fPrincipal, fInterest, createItem, items]);
+  }, [fName, fAmount, fDirection, fKind, fStart, fEnd, fUnit, fInterval, fRepeatCount, fIsDebt, fPrincipal, fInterest, fCounterparty, fDueDate, fNotes, fReceivable, receivableMode, createItem, linkTask, items]);
 
   const handleUpdate = useCallback(async (itemId: string, payload: Record<string, unknown>) => {
     try {
@@ -252,6 +272,25 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
       setMsg({ text: e instanceof Error ? e.message : "Failed to pay off item", ok: false });
     }
   }, [payOff]);
+
+  const handleSettle = useCallback(async (item: FinancialItem) => {
+    const today = toISODate(startOfToday());
+    try {
+      await settleItem(item.id, today);
+      setMsg({ text: `Marked "${item.name}" as received.`, ok: true });
+    } catch (e) {
+      setMsg({ text: e instanceof Error ? e.message : "Failed to mark received", ok: false });
+    }
+  }, [settleItem]);
+
+  const handleLinkTask = useCallback(async (item: FinancialItem) => {
+    try {
+      const res = await linkTask(item.id);
+      setMsg({ text: res.linked_task_id ? "Task created and linked." : "Task linked.", ok: true });
+    } catch (e) {
+      setMsg({ text: e instanceof Error ? e.message : "Failed to create task", ok: false });
+    }
+  }, [linkTask]);
 
   const handleUndoTransaction = useCallback(async (transactionId: string, label: string) => {
     if (!window.confirm(`Remove this payment (${label})? The item's balance will be restored.`)) return;
@@ -301,6 +340,7 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
             {msg.text}
           </div>
         )}
+
 
         {/* Overview */}
         <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -378,7 +418,7 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
                   {["expense", "income"].map((d) => (
                     <button
                       key={d}
-                      onClick={() => setFDirection(d)}
+                      onClick={() => { setFDirection(d); if (d === "expense") setFReceivable(false); }}
                       className={`rounded-full px-3.5 py-1 text-xs transition-colors ${
                         fDirection === d
                           ? "bg-accent font-semibold text-[var(--on-gradient)]"
@@ -390,9 +430,43 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
                   ))}
                 </div>
                 <label className="flex items-center gap-2 text-xs text-secondary">
-                  <input type="checkbox" checked={fIsDebt} onChange={(e) => setFIsDebt(e.target.checked)} className="accent-accent" />
+                  <input type="checkbox" checked={fIsDebt} onChange={(e) => { setFIsDebt(e.target.checked); if (e.target.checked) setFReceivable(false); }} className="accent-accent" />
                   This is a debt / loan
                 </label>
+                <label className="flex items-center gap-2 text-xs text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={fReceivable}
+                    onChange={(e) => { setFReceivable(e.target.checked); if (e.target.checked) { setFDirection("income"); setFIsDebt(false); } }}
+                    className="accent-accent"
+                  />
+                  Money owed to me
+                </label>
+                {fReceivable && (
+                  <label className="flex items-center gap-1.5 text-xs text-secondary">
+                    <input type="checkbox" checked={receivableMode} onChange={(e) => setReceivableMode(e.target.checked)} className="accent-accent" />
+                    Create a &ldquo;get it back&rdquo; task
+                  </label>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] text-muted">Quick preset:</span>
+                {[
+                  { label: "Weekly", unit: "week", interval: "1" },
+                  { label: "Every 2 weeks", unit: "week", interval: "2" },
+                  { label: "Monthly", unit: "month", interval: "1" },
+                  { label: "Quarterly", unit: "month", interval: "3" },
+                  { label: "Yearly", unit: "year", interval: "1" },
+                ].map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => { setFKind("recurring"); setFUnit(p.unit); setFInterval(p.interval); }}
+                    className="rounded-full border border-border bg-base px-2.5 py-0.5 text-[11px] text-secondary transition-colors hover:text-primary"
+                  >
+                    {p.label}
+                  </button>
+                ))}
               </div>
 
               <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
@@ -406,6 +480,11 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
                 )}
                 <input className={fieldCls} placeholder="Start date" type="date" value={fStart} onChange={(e) => setFStart(e.target.value)} />
                 <input className={fieldCls} placeholder="End date (opt)" type="date" value={fEnd} onChange={(e) => setFEnd(e.target.value)} />
+                <input className={fieldCls} placeholder="Who? (person / company)" value={fCounterparty} onChange={(e) => setFCounterparty(e.target.value)} />
+                {fReceivable && (
+                  <input className={fieldCls} placeholder="Owed by date" type="date" value={fDueDate} onChange={(e) => setFDueDate(e.target.value)} aria-label="Owed by date" />
+                )}
+                <input className={fieldCls} placeholder="Note (opt)" value={fNotes} onChange={(e) => setFNotes(e.target.value)} />
                 <select className={fieldCls} value={fKind} onChange={(e) => setFKind(e.target.value)}>
                   <option value="recurring">Recurring</option>
                   <option value="one_off">One-off</option>
@@ -454,6 +533,70 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
         {/* Lists */}
         <div className="mt-4 grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
+            {receivables.length > 0 && (
+              <section className="card p-5">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-semibold text-primary">Owed to me</h2>
+                  <span className="badge bg-elevated text-secondary">{receivables.length}</span>
+                </div>
+                <div className="mt-4 space-y-1.5">
+                  {receivables.map((r) => {
+                    const due = parseISODate(r.due_date);
+                    const d = due ? daysUntil(due) : null;
+                    return (
+                      <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-elevated px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm text-primary">{r.name}</p>
+                          <p className="truncate text-[11px] text-muted">
+                            {r.counterparty ? `from ${r.counterparty}` : "no one named"}
+                            {due ? ` - ${d! < 0 ? `overdue ${Math.abs(d!)}d` : d === 0 ? "due today" : `due in ${d}d`}` : ""}
+                            {r.linked_task_id ? " - task linked" : ""}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold tabular-nums text-success">+{currency(parseFloat(r.amount || "0"))}</span>
+                          {!r.linked_task_id && (
+                            <button onClick={() => void handleLinkTask(r)} className="rounded border border-border bg-base px-2 py-1 text-[11px] text-secondary hover:text-primary" title="Create a task to chase this money">Create task</button>
+                          )}
+                          <button onClick={() => void handleSettle(r)} className={`${btnSecondary} !border-success/30 !text-success`}>Mark received</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-3 text-[11px] text-muted">Money people or companies owe you. Mark it received to log the income, or create a task to chase it.</p>
+              </section>
+            )}
+
+            {upcomingIncome.length > 0 && (
+              <section className="card p-5">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-semibold text-primary">Upcoming income</h2>
+                  <span className="badge bg-elevated text-secondary">{upcomingIncome.length}</span>
+                </div>
+                <div className="mt-4 space-y-1.5">
+                  {upcomingIncome.map((i) => {
+                    const nextStr = i.next_occurrence || i.next_date || i.due_date || i.start_date;
+                    const next = parseISODate(nextStr);
+                    const d = next ? daysUntil(next) : null;
+                    return (
+                      <div key={i.id} className="flex items-center justify-between gap-2 rounded-lg bg-elevated px-3 py-2.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm text-primary">{i.name}</p>
+                          <p className="text-[11px] text-muted">
+                            {next ? formatShortDateYear(next) : "no date"}
+                            {d !== null ? ` - ${d < 0 ? `${Math.abs(d)}d overdue` : d === 0 ? "today" : `in ${d}d`}` : ""}
+                            {i.kind === "recurring" ? " - recurring" : ""}
+                          </p>
+                        </div>
+                        <span className="text-sm font-semibold tabular-nums text-success">+{currency(parseFloat(i.amount || "0"))}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
             <section className="card p-5">
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-semibold text-primary">Income &amp; expenses</h2>
@@ -474,14 +617,14 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
                     {expenseItems.length > 0 && (
                       <ItemGroup title="Expenses" total={expenseTotal} currency={currency} count={expenseItems.length}>
                         {expenseItems.map((i) => (
-                          <ItemRow key={i.id} item={i} onUpdate={handleUpdate} onDelete={handleDelete} onPayOff={handlePayOff} />
+                          <ItemRow key={i.id} item={i} onUpdate={handleUpdate} onDelete={handleDelete} onPayOff={handlePayOff} onSettle={handleSettle} onLinkTask={handleLinkTask} />
                         ))}
                       </ItemGroup>
                     )}
                     {incomeItems.length > 0 && (
                       <ItemGroup title="Income" total={incomeTotal} currency={currency} count={incomeItems.length}>
                         {incomeItems.map((i) => (
-                          <ItemRow key={i.id} item={i} onUpdate={handleUpdate} onDelete={handleDelete} onPayOff={handlePayOff} />
+                          <ItemRow key={i.id} item={i} onUpdate={handleUpdate} onDelete={handleDelete} onPayOff={handlePayOff} onSettle={handleSettle} onLinkTask={handleLinkTask} />
                         ))}
                       </ItemGroup>
                     )}
@@ -571,6 +714,7 @@ export function FinanceDashboard({ onOpenAi }: FinanceDashboardProps) {
         </div>
 
         {/* Cash-flow projection (premium) */}
+
       </div>
     </div>
   );
@@ -623,6 +767,9 @@ function ItemEditor({ item, submitLabel = "Save", onSave, onCancel }: ItemEditor
   const [remaining, setRemaining] = useState(item.remaining_balance ?? "");
   const [interest, setInterest] = useState(item.interest_rate ?? "");
   const [paidOff, setPaidOff] = useState(Boolean(item.paid_off_at));
+  const [counterparty, setCounterparty] = useState(item.counterparty ?? "");
+  const [dueDate, setDueDate] = useState(item.due_date ?? "");
+  const [notes, setNotes] = useState(item.notes ?? "");
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
@@ -637,6 +784,9 @@ function ItemEditor({ item, submitLabel = "Save", onSave, onCancel }: ItemEditor
       frequency_unit: kind === "recurring" ? unit : null,
       frequency_interval: kind === "recurring" ? parseInt(interval || "1", 10) : null,
       repeat_count: kind === "recurring" && repeatCount ? parseInt(repeatCount, 10) : null,
+      counterparty: counterparty || null,
+      due_date: dueDate || null,
+      notes: notes || null,
     };
     if (isDebt) {
       payload.principal = principal !== "" ? parseFloat(String(principal)) : parseFloat(amount || "0");
@@ -693,6 +843,10 @@ function ItemEditor({ item, submitLabel = "Save", onSave, onCancel }: ItemEditor
         </>
       )}
 
+      <input className={fieldCls} style={{ maxWidth: "150px" }} value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder="Who? (opt)" aria-label="Counterparty" />
+      <input className={fieldCls} style={{ maxWidth: "140px" }} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} aria-label="Due date" />
+      <input className={fieldCls} style={{ maxWidth: "180px" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Note (opt)" aria-label="Notes" />
+
       <button onClick={() => void save()} disabled={busy} className={btnPrimary}>{busy ? "Saving..." : submitLabel}</button>
       <button onClick={onCancel} className={btnSecondary}>Cancel</button>
     </div>
@@ -704,9 +858,11 @@ interface ItemRowProps {
   onUpdate: (id: string, payload: Record<string, unknown>) => Promise<void> | void;
   onDelete: (id: string, name: string) => Promise<void> | void;
   onPayOff: (id: string, name: string) => Promise<void> | void;
+  onSettle?: (item: FinancialItem) => Promise<void> | void;
+  onLinkTask?: (item: FinancialItem) => Promise<void> | void;
 }
 
-function ItemRow({ item, onUpdate, onDelete, onPayOff }: ItemRowProps) {
+function ItemRow({ item, onUpdate, onDelete, onPayOff, onSettle, onLinkTask }: ItemRowProps) {
   const [editing, setEditing] = useState(false);
   const currencyCode = useFinanceCurrencyCode();
   const currency = (v: number) => formatMoney(v, currencyCode);
@@ -735,13 +891,17 @@ function ItemRow({ item, onUpdate, onDelete, onPayOff }: ItemRowProps) {
         <div className="min-w-0">
           <p className="truncate text-sm text-primary">{item.name}{isPaidOff ? " ✓" : ""}</p>
           <p className="truncate text-[11px] text-muted">
-            {item.kind === "recurring" ? "recurring" : "one-off"}
+            {item.receivable ? "owed to me" : item.kind === "recurring" ? "recurring" : "one-off"}
+            {item.counterparty ? ` - ${item.counterparty}` : ""}
             {item.frequency_unit ? ` - every ${item.frequency_interval || 1} ${item.frequency_unit}${(item.frequency_interval || 1) > 1 ? "s" : ""}` : item.frequency ? ` - ${item.frequency}` : ""}
             {item.repeat_count ? ` - for ${item.repeat_count}` : ""}
+            {item.due_date ? ` - due ${item.due_date}` : ""}
             {item.start_date ? ` - ${item.start_date}` : ""}
             {item.category ? ` - ${item.category}` : ""}
+            {item.settled_at ? " - received" : ""}
             {isPaidOff ? " - paid" : ""}
           </p>
+          {item.notes ? <p className="truncate text-[11px] text-muted/80">{item.notes}</p> : null}
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -751,6 +911,12 @@ function ItemRow({ item, onUpdate, onDelete, onPayOff }: ItemRowProps) {
         </span>
         <div className="flex items-center gap-1 opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
           <button onClick={() => setEditing(true)} className="rounded border border-border bg-base px-2 py-1 text-[11px] text-secondary hover:text-primary">Edit</button>
+          {item.receivable && !item.settled_at && onSettle && (
+            <button onClick={() => void onSettle(item)} className="rounded border border-success/30 bg-base px-2 py-1 text-[11px] text-success">Received</button>
+          )}
+          {item.receivable && !item.linked_task_id && onLinkTask && (
+            <button onClick={() => void onLinkTask(item)} className="rounded border border-border bg-base px-2 py-1 text-[11px] text-secondary hover:text-primary" title="Create a task to chase this money">Task</button>
+          )}
           {item.principal !== null && item.principal !== undefined && !isPaidOff && (
             <button onClick={() => onPayOff(item.id, item.name)} className="rounded border border-border bg-base px-2 py-1 text-[11px] text-success">Pay off</button>
           )}

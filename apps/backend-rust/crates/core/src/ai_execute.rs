@@ -233,12 +233,32 @@ async fn dispatch(state: &AppState, user_id: Uuid, name: &str, args: &Value) -> 
         "rename_list" => tool_rename_list(state, user_id, args).await,
         "delete_list" => tool_delete_list(state, user_id, args).await,
         "organize_timeline_into_sections" => {
+            let force = arg_bool(args, "force");
+            let provider = arg_str(args, "provider").map(|s| s.to_string());
+            let explicit_id = arg_str(args, "list_id")
+                .filter(|s| !s.is_empty())
+                .and_then(|s| Uuid::parse_str(s).ok());
+            // Scope resolution: an explicit list_id wins, then a `list_name`,
+            // else None which organizes EVERY dated task (the unfiltered
+            // timeline). A named list organizes only that list's own scope.
+            let list_id = if explicit_id.is_some() {
+                explicit_id
+            } else if let Some(name) = arg_str(args, "list_name").filter(|s| !s.trim().is_empty()) {
+                let mut tx = begin(state, user_id).await?;
+                let resolved = resolve_list_id_by_name(&mut *tx, user_id, name)
+                    .await
+                    .map_err(db_err)?;
+                tx.commit().await.map_err(db_err)?;
+                resolved
+            } else {
+                None
+            };
             match board_sections::svc_organize_timeline(
                 state,
                 user_id,
-                None,
-                false,
-                None,
+                provider,
+                force,
+                list_id,
                 &HeaderMap::new(),
             )
             .await

@@ -23,6 +23,13 @@ export interface FinancialItem {
   repeat_count?: number | null;
   frequency_unit?: string | null;
   frequency_interval?: number | null;
+  notes?: string | null;
+  counterparty?: string | null;
+  due_date?: string | null;
+  settled_at?: string | null;
+  receivable?: boolean;
+  linked_task_id?: string | null;
+  next_occurrence?: string | null;
 }
 
 export interface Transaction {
@@ -41,12 +48,29 @@ export interface PaymentResult {
   paid_off?: boolean;
   remaining_balance?: string | null;
   transaction_id?: string;
+  next_date?: string | null;
+  error?: string;
+}
+
+export interface SettleResult {
+  settled?: boolean;
+  item_id?: string;
+  amount?: string;
+  date?: string;
+  error?: string;
+}
+
+export interface LinkTaskResult {
+  linked_task_id?: string;
+  item?: FinancialItem;
   error?: string;
 }
 
 export function useFinance() {
   const [items, setItems] = useState<FinancialItem[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [receivables, setReceivables] = useState<FinancialItem[]>([]);
+  const [upcomingIncome, setUpcomingIncome] = useState<FinancialItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,12 +92,35 @@ export function useFinance() {
     }
   }, []);
 
+  const fetchReceivables = useCallback(async () => {
+    try {
+      const data = await api.get<FinancialItem[]>("/finance/receivables");
+      setReceivables(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load money owed");
+    }
+  }, []);
+
+  const fetchUpcomingIncome = useCallback(async () => {
+    try {
+      const data = await api.get<FinancialItem[]>("/finance/upcoming-income");
+      setUpcomingIncome(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load upcoming income");
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
-    await Promise.allSettled([fetchItems(), fetchTransactions()]);
+    await Promise.allSettled([
+      fetchItems(),
+      fetchTransactions(),
+      fetchReceivables(),
+      fetchUpcomingIncome(),
+    ]);
     setLoading(false);
-  }, [fetchItems, fetchTransactions]);
+  }, [fetchItems, fetchTransactions, fetchReceivables, fetchUpcomingIncome]);
 
   const createItem = useCallback(async (payload: Record<string, unknown>) => {
     const res = await api.post<{ id: string }>("/finance/items", payload);
@@ -108,6 +155,22 @@ export function useFinance() {
     await refresh();
     return res;
   }, [refresh]);
+
+  const settleItem = useCallback(async (itemId: string, date?: string) => {
+    const res = await api.post<SettleResult>(`/finance/items/${itemId}/settle`, {
+      ...(date ? { date } : {}),
+    });
+    await refresh();
+    return res;
+  }, [refresh]);
+
+  const linkTask = useCallback(async (itemId: string, taskId?: string) => {
+    const res = await api.post<LinkTaskResult>(`/finance/items/${itemId}/link-task`, {
+      ...(taskId ? { task_id: taskId } : {}),
+    });
+    await fetchItems();
+    return res;
+  }, [fetchItems]);
 
   const reverseTransaction = useCallback(async (transactionId: string) => {
     const res = await api.delete<{ reversed?: boolean; remaining_balance?: string | null }>(
@@ -165,16 +228,22 @@ export function useFinance() {
     items,
     debts,
     transactions,
+    receivables,
+    upcomingIncome,
     summary,
     loading,
     error,
     refresh,
     fetchItems,
+    fetchReceivables,
+    fetchUpcomingIncome,
     createItem,
     updateItem,
     deleteItem,
     recordPayment,
     payOff,
+    settleItem,
+    linkTask,
     reverseTransaction,
   };
 }

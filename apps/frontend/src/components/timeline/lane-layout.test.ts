@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeLaneLayout } from "./lane-layout";
-import { BAR_HEIGHT, BAR_GAP, TOP_PADDING } from "./constants";
+import { BAR_HEIGHT, BAR_GAP, TOP_PADDING, SECTION_BOTTOM_PADDING } from "./constants";
 import type { Task } from "@/types/task";
 
 function makeTask(partial: Partial<Task>): Task {
@@ -48,7 +48,9 @@ describe("computeLaneLayout", () => {
     const { positioned, maxStack, height } = computeLaneLayout(tasks, days);
     expect(positioned).toHaveLength(1);
     expect(maxStack).toBe(1);
-    expect(height).toBe(TOP_PADDING * 2 + (BAR_HEIGHT + BAR_GAP) - BAR_GAP);
+    expect(height).toBe(
+      TOP_PADDING * 2 + (BAR_HEIGHT + BAR_GAP) - BAR_GAP + SECTION_BOTTOM_PADDING
+    );
   });
 
   it("grows the height with the busiest day's stack", () => {
@@ -59,7 +61,7 @@ describe("computeLaneLayout", () => {
     ];
     const { maxStack, height } = computeLaneLayout(tasks, days);
     expect(maxStack).toBe(3);
-    expect(height).toBe(TOP_PADDING * 2 + 3 * (BAR_HEIGHT + BAR_GAP) - BAR_GAP);
+    expect(height).toBe(TOP_PADDING * 2 + 3 * (BAR_HEIGHT + BAR_GAP) - BAR_GAP + SECTION_BOTTOM_PADDING);
   });
 
   it("is deterministic and independent of input order", () => {
@@ -144,5 +146,18 @@ describe("computeLaneLayout", () => {
     };
     // Two adjacent slices covering the same tasks must agree on their rows.
     expect(rowFor("2026-09-10")).toEqual(rowFor("2026-09-11"));
+  });
+
+  it("still reserves bottom padding when no days are rendered", () => {
+    const { height } = computeLaneLayout([], []);
+    expect(height).toBe(TOP_PADDING * 2 + SECTION_BOTTOM_PADDING);
+  });
+
+  it("reserves section bottom padding below the last bar", () => {
+    const bar = makeTask({ id: "t1", start_date: "2026-08-03", due_date: "2026-08-03" });
+    const barHeight = TOP_PADDING * 2 + (BAR_HEIGHT + BAR_GAP) - BAR_GAP;
+    // One extra row of space sits below the bar for an easy create/drop target.
+    expect(computeLaneLayout([bar], days).height).toBe(barHeight + SECTION_BOTTOM_PADDING);
+    expect(SECTION_BOTTOM_PADDING).toBeGreaterThan(0);
   });
 });

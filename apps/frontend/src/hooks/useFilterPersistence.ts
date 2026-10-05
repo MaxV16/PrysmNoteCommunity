@@ -8,6 +8,8 @@ import {
   PREF_SEARCH_QUERY,
   PREF_SELECTED_TAG,
   getPrefSync,
+  isNavDefault,
+  readDefaultList,
   savePreference,
 } from "@/lib/preferences";
 
@@ -43,6 +45,20 @@ export function useFilterPersistence(enabled = true): void {
     if (list !== MISSING) store.setActiveListId(list || null);
     if (tag !== MISSING) store.setSelectedTagId(tag || null);
     if (query !== MISSING) store.setSearchQuery(query || "");
+
+    // First visit (or cleared state): open the user's chosen default landing.
+    // A returning user keeps exactly where they left, so the default only
+    // applies when neither the nav filter nor the active list was ever saved.
+    if (nav === MISSING && list === MISSING) {
+      const def = readDefaultList();
+      if (isNavDefault(def)) {
+        store.setNavFilter(def as never);
+        store.setActiveListId(null);
+      } else {
+        store.setActiveListId(def);
+        store.setNavFilter(null);
+      }
+    }
   }, [enabled]);
 
   useEffect(() => {

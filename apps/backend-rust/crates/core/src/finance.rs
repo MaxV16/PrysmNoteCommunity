@@ -11,7 +11,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::types::Decimal;
@@ -25,7 +25,8 @@ use crate::{db, AppState};
 
 const ITEM_COLUMNS: &str = "id, user_id, name, direction, amount, kind, start_date, end_date, \
      frequency, next_date, payee, category, principal, remaining_balance, interest_rate, \
-     paid_off_at, repeat_count, frequency_unit, frequency_interval, created_at";
+     paid_off_at, repeat_count, frequency_unit, frequency_interval, notes, counterparty, \
+     due_date, settled_at, receivable, linked_task_id, created_at";
 
 fn db_error(err: sqlx::Error) -> ApiError {
     ApiError::Internal(format!("database error: {err}"))
@@ -51,8 +52,67 @@ fn parse_date_opt(value: &Option<String>) -> Result<Option<NaiveDate>, ApiError>
     }
 }
 
+fn parse_uuid_opt(value: &Option<String>) -> Result<Option<Uuid>, ApiError> {
+    match value {
+        None => Ok(None),
+        Some(raw) if raw.trim().is_empty() => Ok(None),
+        Some(raw) => Uuid::parse_str(raw.trim())
+            .map(Some)
+            .map_err(|_| ApiError::Unprocessable("linked_task_id must be a UUID".to_string())),
+    }
+}
+
 fn dec_opt(value: &Option<f64>) -> Option<Decimal> {
     value.map(dec)
+}
+
+/// The (unit, interval) a recurring item advances by. Prefers the modern
+/// `frequency_unit` + `frequency_interval`, falling back to the legacy
+/// `frequency` enum (weekly/monthly/quarterly/yearly).
+fn item_step(item: &ItemRow) -> Option<(String, i32)> {
+    if let Some(unit) = item.frequency_unit.as_deref() {
+        return Some((unit.to_string(), item.frequency_interval.unwrap_or(1).max(1)));
+    }
+    item.frequency
+        .as_deref()
+        .map(|f| (f.to_string(), 1))
+}
+
+/// Advance a date by `interval` units (day/week/month/quarter/year, plus the
+/// legacy weekly/monthly/quarterly/yearly names). Clamps to the last valid day
+/// of the target month; on overflow returns the input unchanged.
+fn advance_date(date: NaiveDate, unit: &str, interval: i32) -> NaiveDate {
+    let n = interval.max(1);
+    match unit {
+        "day" => date + chrono::Duration::days(n as i64),
+        "week" | "weekly" => date + chrono::Duration::weeks(n as i64),
+        "month" | "monthly" => date
+            .checked_add_months(chrono::Months::new(n as u32))
+            .unwrap_or(date),
+        "quarter" | "quarterly" => date
+            .checked_add_months(chrono::Months::new((n * 3) as u32))
+            .unwrap_or(date),
+        "year" | "yearly" => date.with_year(date.year() + n).unwrap_or(date),
+        _ => date
+            .checked_add_months(chrono::Months::new(n as u32))
+            .unwrap_or(date),
+    }
+}
+
+/// The next occurrence of an item strictly after `after`, or None when the item
+/// does not repeat.
+fn next_occurrence(item: &ItemRow, after: NaiveDate) -> Option<NaiveDate> {
+    if item.kind != "recurring" {
+        return None;
+    }
+    let (unit, interval) = item_step(item)?;
+    let mut next = item.next_date.or(item.start_date).unwrap_or(after);
+    let mut guard = 0;
+    while next <= after && guard < 600 {
+        next = advance_date(next, &unit, interval);
+        guard += 1;
+    }
+    Some(next)
 }
 
 #[derive(sqlx::FromRow)]
@@ -75,6 +135,12 @@ struct ItemRow {
     repeat_count: Option<i32>,
     frequency_unit: Option<String>,
     frequency_interval: Option<i32>,
+    notes: Option<String>,
+    counterparty: Option<String>,
+    due_date: Option<NaiveDate>,
+    settled_at: Option<NaiveDate>,
+    receivable: bool,
+    linked_task_id: Option<Uuid>,
 }
 
 fn date_str(value: Option<NaiveDate>) -> Value {
@@ -111,6 +177,12 @@ fn serialize_item(row: &ItemRow) -> Value {
         "repeat_count": row.repeat_count,
         "frequency_unit": row.frequency_unit,
         "frequency_interval": row.frequency_interval,
+        "notes": row.notes,
+        "counterparty": row.counterparty,
+        "due_date": date_str(row.due_date),
+        "settled_at": date_str(row.settled_at),
+        "receivable": row.receivable,
+        "linked_task_id": row.linked_task_id.map(|u| u.to_string()),
     })
 }
 
@@ -147,6 +219,12 @@ struct ItemPayload {
     repeat_count: Option<i32>,
     frequency_unit: Option<String>,
     frequency_interval: Option<i32>,
+    notes: Option<String>,
+    counterparty: Option<String>,
+    due_date: Option<String>,
+    settled_at: Option<String>,
+    receivable: Option<bool>,
+    linked_task_id: Option<String>,
 }
 
 async fn list_items(
@@ -200,8 +278,9 @@ async fn create_item(
     let row = sqlx::query_as::<_, ItemRow>(&format!(
         "INSERT INTO financial_items (user_id, name, direction, amount, kind, start_date, \
          end_date, frequency, next_date, payee, category, principal, remaining_balance, \
-         interest_rate, paid_off_at, repeat_count, frequency_unit, frequency_interval) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) \
+         interest_rate, paid_off_at, repeat_count, frequency_unit, frequency_interval, \
+         notes, counterparty, due_date, settled_at, receivable, linked_task_id) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) \
          RETURNING {ITEM_COLUMNS}"
     ))
     .bind(user.user_id)
@@ -222,6 +301,12 @@ async fn create_item(
     .bind(payload.repeat_count)
     .bind(&payload.frequency_unit)
     .bind(payload.frequency_interval)
+    .bind(&payload.notes)
+    .bind(&payload.counterparty)
+    .bind(parse_date_opt(&payload.due_date)?)
+    .bind(parse_date_opt(&payload.settled_at)?)
+    .bind(payload.receivable.unwrap_or(false))
+    .bind(parse_uuid_opt(&payload.linked_task_id)?)
     .fetch_one(&mut *conn)
     .await
     .map_err(db_error)?;
@@ -246,12 +331,15 @@ async fn get_item(
 
 fn cast_for(key: &str) -> Option<&'static str> {
     match key {
-        "name" | "direction" | "kind" | "frequency" | "payee" | "category" | "frequency_unit" => {
-            Some("text")
-        }
+        "name" | "direction" | "kind" | "frequency" | "payee" | "category" | "frequency_unit"
+        | "notes" | "counterparty" => Some("text"),
         "amount" | "principal" | "remaining_balance" | "interest_rate" => Some("numeric"),
-        "start_date" | "end_date" | "next_date" | "paid_off_at" => Some("date"),
+        "start_date" | "end_date" | "next_date" | "paid_off_at" | "due_date" | "settled_at" => {
+            Some("date")
+        }
         "repeat_count" | "frequency_interval" => Some("integer"),
+        "receivable" => Some("boolean"),
+        "linked_task_id" => Some("uuid"),
         _ => None,
     }
 }
@@ -604,12 +692,30 @@ async fn record_payment(
         remaining_json = Value::String(new_balance.to_string());
     }
 
+    // A recurring item rolls its due date forward on payment so the next one is
+    // always in the future without the user editing it by hand.
+    let mut next_date_json = Value::Null;
+    if !paid_off {
+        if let Some(next) = next_occurrence(&item, payment_date) {
+            sqlx::query(
+                "UPDATE financial_items SET next_date = $1 WHERE id = $2 AND user_id = $3",
+            )
+            .bind(next)
+            .bind(item.id)
+            .bind(user_id)
+            .execute(&mut *conn)
+            .await?;
+            next_date_json = Value::String(next.format("%Y-%m-%d").to_string());
+        }
+    }
+
     Ok(json!({
         "recorded": true,
         "item_id": item.id.to_string(),
         "transaction_id": txn_id.to_string(),
         "remaining_balance": remaining_json,
         "paid_off": paid_off,
+        "next_date": next_date_json,
     }))
 }
 
@@ -797,6 +903,275 @@ async fn delete_transaction(
     Ok(Json(result))
 }
 
+// ----- receivables + income -----
+
+async fn list_receivables(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+    let mut conn = state.pool.acquire().await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    let rows = sqlx::query_as::<_, ItemRow>(&format!(
+        "SELECT {ITEM_COLUMNS} FROM financial_items WHERE user_id = $1 AND receivable = true \
+         AND settled_at IS NULL ORDER BY due_date ASC NULLS LAST, created_at ASC"
+    ))
+    .bind(user.user_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(db_error)?;
+    Ok(Json(json!(rows.iter().map(serialize_item).collect::<Vec<_>>())))
+}
+
+async fn list_upcoming_income(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+    let mut conn = state.pool.acquire().await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    let rows = sqlx::query_as::<_, ItemRow>(&format!(
+        "SELECT {ITEM_COLUMNS} FROM financial_items WHERE user_id = $1 AND direction = 'income' \
+         AND paid_off_at IS NULL AND settled_at IS NULL ORDER BY created_at ASC"
+    ))
+    .bind(user.user_id)
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(db_error)?;
+
+    let today = chrono::Utc::now().date_naive();
+    let mut upcoming: Vec<(Option<NaiveDate>, Value)> = Vec::new();
+    for row in &rows {
+        let next = if row.kind == "recurring" {
+            next_occurrence(row, today).or(row.next_date).or(row.start_date)
+        } else {
+            row.due_date.or(row.next_date).or(row.start_date)
+        };
+        let mut value = serialize_item(row);
+        if let Value::Object(ref mut map) = value {
+            map.insert("next_occurrence".to_string(), date_str(next));
+        }
+        upcoming.push((next, value));
+    }
+    upcoming.sort_by(|a, b| match (a.0, b.0) {
+        (Some(x), Some(y)) => x.cmp(&y),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    Ok(Json(json!(upcoming.into_iter().map(|(_, v)| v).collect::<Vec<_>>())))
+}
+
+async fn settle_receivable(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    item_id: &str,
+    settle_date: NaiveDate,
+) -> Result<Value, sqlx::Error> {
+    let item = match resolve_item(&mut *conn, user_id, item_id).await? {
+        Resolved::Found(row) => row,
+        Resolved::Failed(err) => return Ok(err),
+    };
+    let outstanding = item
+        .remaining_balance
+        .or(item.principal)
+        .unwrap_or(item.amount);
+    if outstanding > Decimal::ZERO {
+        sqlx::query(
+            "INSERT INTO financial_transactions (user_id, date, amount, counterparty, description, \
+             category, source, item_id) VALUES ($1,$2,$3,$4,$5,$6,'manual',$7)",
+        )
+        .bind(user_id)
+        .bind(settle_date)
+        .bind(outstanding)
+        .bind(&item.counterparty)
+        .bind(format!("Received: {}", item.name))
+        .bind(&item.category)
+        .bind(item.id)
+        .execute(&mut *conn)
+        .await?;
+    }
+    sqlx::query(
+        "UPDATE financial_items SET remaining_balance = $1, settled_at = $2, paid_off_at = $3 \
+         WHERE id = $4 AND user_id = $5",
+    )
+    .bind(Decimal::from_str_exact("0.00").unwrap_or(Decimal::ZERO))
+    .bind(settle_date)
+    .bind(settle_date)
+    .bind(item.id)
+    .bind(user_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(json!({
+        "settled": true,
+        "item_id": item.id.to_string(),
+        "amount": outstanding.to_string(),
+        "date": settle_date.format("%Y-%m-%d").to_string(),
+    }))
+}
+
+async fn settle_route(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(item_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+    let date_raw = body.get("date").and_then(|v| v.as_str()).unwrap_or("");
+    let settle_date = if date_raw.is_empty() {
+        chrono::Utc::now().date_naive()
+    } else {
+        NaiveDate::parse_from_str(date_raw, "%Y-%m-%d")
+            .map_err(|_| ApiError::Unprocessable("date (YYYY-MM-DD) is required".to_string()))?
+    };
+    let mut tx = state.pool.begin().await.map_err(db_error)?;
+    db::set_rls_user(&mut tx, user.user_id, "").await.map_err(db_error)?;
+    let result = settle_receivable(&mut *tx, user.user_id, &item_id, settle_date)
+        .await
+        .map_err(db_error)?;
+    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+        return Err(ApiError::NotFound(err.to_string()));
+    }
+    tx.commit().await.map_err(db_error)?;
+    Ok(Json(result))
+}
+
+/// Build the task that represents a financial item: a one-off "Get X from Y"
+/// for a receivable, or a recurring repayment task (monthly by default) running
+/// until the item's end date for a recurring bill/loan.
+fn build_finance_task(item: &ItemRow) -> crate::tasks::CreateTaskRequest {
+    let counterparty = item.counterparty.clone().filter(|s| !s.trim().is_empty());
+    let title = if item.receivable {
+        match &counterparty {
+            Some(person) => format!("Get {} from {}", item.amount, person),
+            None => format!("Get {} owed to you", item.amount),
+        }
+    } else {
+        format!("Pay {}", item.name)
+    };
+    let due = item.due_date.or(item.next_date).or(item.start_date);
+    let (recurrence_rule, recurrence_end_date) = if item.kind == "recurring" && item.end_date.is_some()
+    {
+        let unit = item
+            .frequency_unit
+            .as_deref()
+            .or(item.frequency.as_deref())
+            .unwrap_or("monthly");
+        let rule = match unit {
+            "day" => "FREQ=DAILY",
+            "week" | "weekly" => "FREQ=WEEKLY",
+            "year" | "yearly" => "FREQ=YEARLY",
+            "quarter" | "quarterly" => "FREQ=MONTHLY;INTERVAL=3",
+            _ => "FREQ=MONTHLY",
+        };
+        (
+            Some(rule.to_string()),
+            item.end_date.map(|d| d.format("%Y-%m-%d").to_string()),
+        )
+    } else {
+        (None, None)
+    };
+    crate::tasks::CreateTaskRequest {
+        title,
+        parent_task_id: None,
+        board_section_id: None,
+        description: item.notes.clone(),
+        status: "backlog".to_string(),
+        priority: 2,
+        start_date: None,
+        due_date: due.map(|d| d.format("%Y-%m-%d").to_string()),
+        start_time: None,
+        end_time: None,
+        recurrence_rule,
+        recurrence_end_date,
+        estimated_minutes: None,
+        tag_ids: None,
+        list_id: None,
+        reminder_enabled: false,
+    }
+}
+
+/// Link a task to a financial item, or create one (a "Get X from Y" task for a
+/// receivable, or a recurring repayment task for a recurring bill/loan) then link
+/// it. Shared by the REST route and the EE finance AI/MCP tools.
+pub async fn svc_link_finance_task(
+    state: &AppState,
+    user_id: Uuid,
+    id: Uuid,
+    task_id: Option<Uuid>,
+) -> Result<Value, ApiError> {
+    let item = {
+        let mut conn = state.pool.acquire().await.map_err(db_error)?;
+        db::set_rls_user(&mut conn, user_id, "").await.map_err(db_error)?;
+        fetch_item(&mut *conn, user_id, id)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| ApiError::NotFound("Item not found".to_string()))?
+    };
+
+    let task_id = match task_id {
+        Some(tid) => {
+            let mut conn = state.pool.acquire().await.map_err(db_error)?;
+            db::set_rls_user(&mut conn, user_id, "").await.map_err(db_error)?;
+            let owned: Option<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM tasks WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
+            )
+            .bind(tid)
+            .bind(user_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(db_error)?;
+            owned.ok_or_else(|| ApiError::NotFound("Task not found".to_string()))?
+        }
+        None => {
+            let created = crate::tasks::svc_create_task(state, user_id, build_finance_task(&item)).await?;
+            let created_id = created
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ApiError::Internal("created task missing id".to_string()))?;
+            require_uuid(created_id)?
+        }
+    };
+
+    let mut tx = state.pool.begin().await.map_err(db_error)?;
+    db::set_rls_user(&mut tx, user_id, "").await.map_err(db_error)?;
+    let row = sqlx::query_as::<_, ItemRow>(&format!(
+        "UPDATE financial_items SET linked_task_id = $1 WHERE id = $2 AND user_id = $3 \
+         RETURNING {ITEM_COLUMNS}"
+    ))
+    .bind(task_id)
+    .bind(id)
+    .bind(user_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
+    Ok(json!({
+        "linked_task_id": task_id.to_string(),
+        "item": serialize_item(&row),
+    }))
+}
+
+async fn link_task(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(item_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+    let id = require_uuid(&item_id)?;
+    let task_id = match body
+        .get("task_id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        Some(raw) => Some(require_uuid(raw)?),
+        None => None,
+    };
+    let value = svc_link_finance_task(&state, user.user_id, id, task_id).await?;
+    Ok(Json(value))
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/finance/items", get(list_items).post(create_item))
@@ -807,6 +1182,10 @@ pub fn router() -> Router<AppState> {
         )
         .route("/api/finance/items/{item_id}/pay", axum::routing::post(pay_item))
         .route("/api/finance/items/{item_id}/pay-off", axum::routing::post(pay_off))
+        .route("/api/finance/items/{item_id}/settle", axum::routing::post(settle_route))
+        .route("/api/finance/items/{item_id}/link-task", axum::routing::post(link_task))
+        .route("/api/finance/receivables", get(list_receivables))
+        .route("/api/finance/upcoming-income", get(list_upcoming_income))
         .route("/api/finance/debts", get(list_debts))
         .route(
             "/api/finance/transactions",
@@ -827,6 +1206,82 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::config::Settings;
+
+    fn sample_item(kind: &str, unit: Option<&str>, interval: Option<i32>) -> ItemRow {
+        ItemRow {
+            id: Uuid::new_v4(),
+            name: "Sample".to_string(),
+            direction: "expense".to_string(),
+            amount: Decimal::new(1000, 2),
+            kind: kind.to_string(),
+            start_date: NaiveDate::from_ymd_opt(2026, 1, 10),
+            end_date: None,
+            frequency: None,
+            next_date: NaiveDate::from_ymd_opt(2026, 1, 10),
+            payee: None,
+            category: None,
+            principal: None,
+            remaining_balance: None,
+            interest_rate: None,
+            paid_off_at: None,
+            repeat_count: None,
+            frequency_unit: unit.map(str::to_string),
+            frequency_interval: interval,
+            notes: None,
+            counterparty: None,
+            due_date: None,
+            settled_at: None,
+            receivable: false,
+            linked_task_id: None,
+        }
+    }
+
+    #[test]
+    fn recurring_items_advance_to_the_next_occurrence() {
+        let item = sample_item("recurring", Some("month"), Some(1));
+        let after = NaiveDate::from_ymd_opt(2026, 1, 10).unwrap();
+        assert_eq!(
+            next_occurrence(&item, after),
+            NaiveDate::from_ymd_opt(2026, 2, 10)
+        );
+
+        let biweekly = sample_item("recurring", Some("week"), Some(2));
+        assert_eq!(
+            next_occurrence(&biweekly, after),
+            NaiveDate::from_ymd_opt(2026, 1, 24)
+        );
+
+        let yearly = sample_item("recurring", Some("year"), Some(1));
+        assert_eq!(
+            next_occurrence(&yearly, after),
+            NaiveDate::from_ymd_opt(2027, 1, 10)
+        );
+    }
+
+    #[test]
+    fn one_off_items_do_not_advance() {
+        let item = sample_item("one_off", Some("month"), Some(1));
+        assert_eq!(next_occurrence(&item, NaiveDate::from_ymd_opt(2026, 1, 10).unwrap()), None);
+    }
+
+    #[test]
+    fn receivable_tasks_are_titled_get_from_and_recur_with_an_end_date() {
+        let mut item = sample_item("recurring", Some("month"), Some(1));
+        item.name = "Car loan".to_string();
+        item.counterparty = Some("Gaby".to_string());
+        item.receivable = true;
+        item.end_date = NaiveDate::from_ymd_opt(2026, 6, 10);
+        let task = build_finance_task(&item);
+        assert!(task.title.contains("Gaby"));
+        assert_eq!(task.recurrence_end_date.as_deref(), Some("2026-06-10"));
+        assert!(task.recurrence_rule.is_some());
+
+        let mut plain = sample_item("recurring", Some("month"), Some(1));
+        plain.name = "Rent".to_string();
+        plain.receivable = false;
+        let task = build_finance_task(&plain);
+        assert_eq!(task.title, "Pay Rent");
+    }
 
     fn live_state() -> Option<AppState> {
         let database_url = std::env::var("DATABASE_URL").ok()?;

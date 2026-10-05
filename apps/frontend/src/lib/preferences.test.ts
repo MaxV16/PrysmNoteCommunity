@@ -5,6 +5,10 @@ import {
   savePreference,
   PREFERENCES_KEY,
   PREF_DEFAULT_VIEW,
+  PREF_DEFAULT_LIST,
+  DEFAULT_LANDING_ALL,
+  readDefaultList,
+  isNavDefault,
 } from "./preferences";
 
 const apiMock = vi.hoisted(() => ({
@@ -76,5 +80,37 @@ describe("preferences", () => {
     apiMock.get.mockRejectedValue(new Error("boom"));
     const result = await loadPreferencesFromServer();
     expect(result).toEqual({ a: 1 });
+  });
+});
+
+describe("default landing list", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("defaults to the All Tasks smart list", () => {
+    expect(readDefaultList()).toBe(DEFAULT_LANDING_ALL);
+    expect(DEFAULT_LANDING_ALL).toBe("all");
+  });
+
+  it("reads a saved list id from the cache", () => {
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ [PREF_DEFAULT_LIST]: "list-123" }));
+    expect(readDefaultList()).toBe("list-123");
+  });
+
+  it("ignores empty or non-string stored values", () => {
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ [PREF_DEFAULT_LIST]: "" }));
+    expect(readDefaultList()).toBe(DEFAULT_LANDING_ALL);
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ [PREF_DEFAULT_LIST]: 42 }));
+    expect(readDefaultList()).toBe(DEFAULT_LANDING_ALL);
+  });
+
+  it("classifies smart-filter values as nav defaults, list ids as not", () => {
+    expect(isNavDefault("all")).toBe(true);
+    expect(isNavDefault("today")).toBe(true);
+    expect(isNavDefault("next7")).toBe(true);
+    expect(isNavDefault("completed")).toBe(true);
+    expect(isNavDefault("list-123")).toBe(false);
+    expect(isNavDefault("")).toBe(false);
   });
 });

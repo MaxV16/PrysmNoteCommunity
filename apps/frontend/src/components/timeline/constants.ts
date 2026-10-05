@@ -5,6 +5,14 @@ export const DAY_HEADER_HEIGHT = 56;
 export const BAR_HEIGHT = 40;
 export const BAR_GAP = 8;
 export const TOP_PADDING = 5;
+/**
+ * Extra space below the last bar in a lane. It keeps a section's empty area a
+ * comfortable double-click / drop target and, because TimelineLane's day overlay
+ * spans the whole lane, lets a user create a task in a section without hitting a
+ * bar. Folded into computeLaneLayout's returned height so the left labels column
+ * stays aligned automatically.
+ */
+export const SECTION_BOTTOM_PADDING = 20;
 /** Height of a collapsed swimlane row on both the label and canvas sides. */
 export const SECTION_HEADER_HEIGHT = 40;
 
@@ -12,7 +20,7 @@ export const SECTION_HEADER_HEIGHT = 40;
  * Minimum rendered lane height. TimelineLane enforces this, so the left labels
  * column must use the same floor or empty lanes desync from their labels.
  */
-export const MIN_LANE_HEIGHT = 48;
+export const MIN_LANE_HEIGHT = 56;
 
 /** Discrete zoom levels for the timeline (multiplier on DAY_WIDTH). */
 export const ZOOM_LEVELS = [1.0, 1.5, 2.0, 3.0] as const;

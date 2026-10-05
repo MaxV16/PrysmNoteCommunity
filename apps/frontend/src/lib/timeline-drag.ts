@@ -87,3 +87,24 @@ export function applyResizeDays(
   const anchor = task.due_date ?? task.start_date ?? toLocalDateString(today);
   return { due_date: shiftIso(anchor, days) };
 }
+
+/**
+ * The start/end dates a resize drag would commit if released now, for the live
+ * badge shown above the bar. Mirrors `applyResizeDays` exactly so the preview
+ * and the drop can never disagree: the bound being dragged moves, the other
+ * bound stays put. Returns null when the task has no date to anchor on.
+ */
+export function resizePreviewRange(
+  task: Task,
+  days: number,
+  side: "left" | "right"
+): { start: string; due: string } | null {
+  const baseStart = task.start_date ?? task.due_date ?? null;
+  const baseDue = task.due_date ?? task.start_date ?? null;
+  if (!baseStart || !baseDue) return null;
+  const changed = applyResizeDays(task, days, side);
+  return {
+    start: changed.start_date ?? baseStart,
+    due: changed.due_date ?? baseDue,
+  };
+}

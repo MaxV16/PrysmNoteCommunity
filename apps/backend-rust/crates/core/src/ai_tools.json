@@ -900,13 +900,17 @@
     "type": "function",
     "function": {
       "name": "organize_timeline_into_sections",
-      "description": "AI-group the user's dated tasks into short timeline topic sections (e.g. 'Work', 'Errands', 'Health') and pin each task to its topic. Use when the user asks to auto-sort, organize, group, or tidy their timeline. This uses the user's own AI access, so only run it when asked. Already-organized tasks are left alone unless force=true. A single run sorts up to a large per-run budget; if the result has remaining > 0, tell the user how many tasks are left and that running it again finishes them.",
+      "description": "AI-group the user's dated tasks into short timeline topic sections (e.g. 'Work', 'Errands', 'Health') and pin each task to its topic. Use when the user asks to auto-sort, organize, group, or tidy their timeline, or to give a list (e.g. 'My Tasks') the same kind of topic sections. This uses the user's own AI access, so only run it when asked. By default this organizes EVERY dated task across all lists; pass list_name to organize just one named list (each list keeps its own separate sections). Already-organized tasks are left alone unless force=true. A single run sorts up to a large per-run budget; if the result has remaining > 0, tell the user how many tasks are left and that running it again finishes them, and relay the result's message field.",
       "parameters": {
         "type": "object",
         "properties": {
           "force": {
             "type": "boolean",
             "description": "Re-classify tasks that are already in a section. Default false."
+          },
+          "list_name": {
+            "type": "string",
+            "description": "Optional. Organize only this named list (case-insensitive; e.g. 'My Tasks'). Omit to organize all dated tasks across every list."
           }
         },
         "required": []

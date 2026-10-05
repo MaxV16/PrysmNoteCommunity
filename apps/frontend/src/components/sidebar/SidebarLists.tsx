@@ -20,10 +20,13 @@ import { useLists } from "@/hooks/useLists";
 import { usePreferencesStore } from "@/stores/preferences-store";
 import {
   PREF_LIST_SECTIONS,
+  PREF_DEFAULT_LIST,
+  readDefaultList,
   readListSections,
   type ListSection,
   type ListSectionsConfig,
 } from "@/lib/preferences";
+import { ContextMenu, ContextMenuItem } from "@/components/ui/ContextMenu";
 import { useToast } from "@/lib/toast-context";
 import { TrashView } from "@/components/trash/TrashView";
 import type { WorkspaceView } from "@/components/layout/AppShell";
@@ -82,22 +85,32 @@ const ListIcon = () => (
   </svg>
 );
 
+const StarIcon = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12 2.5l2.9 6.02 6.6.84-4.85 4.52 1.24 6.62L12 17.9 6.11 20.5l1.24-6.62L2.5 9.36l6.6-.84L12 2.5Z" />
+  </svg>
+);
+
 function ListRow({
   id,
   name,
   count,
   isActive,
+  isDefaultLanding,
   onSelect,
   onRename,
   onDelete,
+  onContextMenu,
 }: {
   id: string;
   name: string;
   count: number;
   isActive: boolean;
+  isDefaultLanding?: boolean;
   onSelect: () => void;
   onRename: (name: string) => Promise<void>;
   onDelete: () => Promise<void>;
+  onContextMenu?: (x: number, y: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(name);
@@ -154,7 +167,16 @@ function ListRow({
   }
 
   return (
-    <div ref={setNodeRef} style={style} className="group flex items-center">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="group flex items-center"
+      onContextMenu={(e) => {
+        if (!onContextMenu) return;
+        e.preventDefault();
+        onContextMenu(e.clientX, e.clientY);
+      }}
+    >
       <button
         {...attributes}
         {...listeners}
@@ -174,6 +196,11 @@ function ListRow({
           <ListIcon />
         </span>
         <span className="min-w-0 flex-1 truncate text-left">{name}</span>
+        {isDefaultLanding && (
+          <span className="shrink-0 text-accent" title="Default landing" aria-label="Default landing">
+            <StarIcon />
+          </span>
+        )}
         {count > 0 && (
           <span className={`badge ml-auto ${isActive ? "bg-accent/20 text-accent" : "bg-elevated text-muted"}`}>
             {count}
@@ -210,9 +237,11 @@ function SectionBlock({
   counts,
   view,
   activeListId,
+  defaultList,
   onSelectList,
   onRenameList,
   onDeleteList,
+  onListContextMenu,
   onRename,
   onDelete,
   onToggleCollapsed,
@@ -222,9 +251,11 @@ function SectionBlock({
   counts: Map<string, number>;
   view: WorkspaceView;
   activeListId: string | null;
+  defaultList: string;
   onSelectList: (id: string) => void;
   onRenameList: (id: string, name: string) => Promise<void>;
   onDeleteList: (id: string) => Promise<void>;
+  onListContextMenu: (id: string, name: string, x: number, y: number) => void;
   onRename: (name: string) => void;
   onDelete: () => void;
   onToggleCollapsed: () => void;
@@ -342,9 +373,11 @@ function SectionBlock({
                 name={list.name}
                 count={counts.get(list.id) || 0}
                 isActive={view === "timeline" && activeListId === list.id}
+                isDefaultLanding={defaultList === list.id}
                 onSelect={() => onSelectList(list.id)}
                 onRename={(name) => onRenameList(list.id, name)}
                 onDelete={() => onDeleteList(list.id)}
+                onContextMenu={(x, y) => onListContextMenu(list.id, list.name, x, y)}
               />
             ))
           )}
@@ -373,6 +406,10 @@ export function SidebarLists({ view, onSelectView }: SidebarListsProps) {
   const setNavFilter = useAppStore((s) => s.setNavFilter);
   const { lists, createList, renameList, deleteList } = useLists();
   const { showToast } = useToast();
+  const rawDefaultList = usePreferencesStore((s) => s.prefs[PREF_DEFAULT_LIST]);
+  const defaultList =
+    typeof rawDefaultList === "string" && rawDefaultList ? rawDefaultList : readDefaultList();
+  const [listMenu, setListMenu] = useState<{ x: number; y: number; id: string; name: string } | null>(null);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [addingSection, setAddingSection] = useState(false);
@@ -418,6 +455,16 @@ export function SidebarLists({ view, onSelectView }: SidebarListsProps) {
     if (view !== "timeline") onSelectView("timeline");
     setNavFilter(null);
     setActiveListId(activeListId === id ? null : id);
+  };
+
+  const handleListContextMenu = (id: string, name: string, x: number, y: number) => {
+    setListMenu({ x, y, id, name });
+  };
+
+  const setDefaultLanding = (id: string, name: string) => {
+    setListMenu(null);
+    usePreferencesStore.getState().setPreference(PREF_DEFAULT_LIST, id);
+    showToast(`"${name}" is now your default list`, "success");
   };
 
   const handleCreate = async () => {
@@ -640,9 +687,11 @@ export function SidebarLists({ view, onSelectView }: SidebarListsProps) {
                   counts={counts}
                   view={view}
                   activeListId={activeListId}
+                  defaultList={defaultList}
                   onSelectList={selectList}
                   onRenameList={renameList}
                   onDeleteList={handleDelete}
+                  onListContextMenu={handleListContextMenu}
                   onRename={(name) => handleRenameSection(section.id, name)}
                   onDelete={() => handleDeleteSection(section.id)}
                   onToggleCollapsed={() => handleToggleCollapsed(section.id)}
@@ -661,9 +710,11 @@ export function SidebarLists({ view, onSelectView }: SidebarListsProps) {
                         name={list.name}
                         count={counts.get(list.id) || 0}
                         isActive={view === "timeline" && activeListId === list.id}
+                        isDefaultLanding={defaultList === list.id}
                         onSelect={() => selectList(list.id)}
                         onRename={(name) => renameList(list.id, name)}
                         onDelete={() => handleDelete(list.id)}
+                        onContextMenu={(x, y) => handleListContextMenu(list.id, list.name, x, y)}
                       />
                     ))
                   )}
@@ -676,9 +727,11 @@ export function SidebarLists({ view, onSelectView }: SidebarListsProps) {
                     name={list.name}
                     count={counts.get(list.id) || 0}
                     isActive={view === "timeline" && activeListId === list.id}
+                    isDefaultLanding={defaultList === list.id}
                     onSelect={() => selectList(list.id)}
                     onRename={(name) => renameList(list.id, name)}
                     onDelete={() => handleDelete(list.id)}
+                    onContextMenu={(x, y) => handleListContextMenu(list.id, list.name, x, y)}
                   />
                 ))
               )}
@@ -708,6 +761,17 @@ export function SidebarLists({ view, onSelectView }: SidebarListsProps) {
           <span className="flex-1 text-left">Trash</span>
         </button>
       </div>
+
+      {listMenu && (
+        <ContextMenu open x={listMenu.x} y={listMenu.y} onClose={() => setListMenu(null)}>
+          <ContextMenuItem
+            disabled={defaultList === listMenu.id}
+            onClick={() => setDefaultLanding(listMenu.id, listMenu.name)}
+          >
+            {defaultList === listMenu.id ? "Default list" : "Set as default"}
+          </ContextMenuItem>
+        </ContextMenu>
+      )}
 
       <TrashView open={trashOpen} onClose={() => setTrashOpen(false)} />
     </>

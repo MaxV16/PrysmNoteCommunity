@@ -827,9 +827,9 @@ async fn load_organize_tasks(
     if list_id.is_some() {
         sql.push_str(&format!(" AND list_id = ${next}"));
         next += 1;
-    } else {
-        sql.push_str(" AND list_id IS NULL");
     }
+    // list_id = None organizes EVERY dated task across all lists (the
+    // unfiltered timeline scope), not only the no-list tasks.
     if !force {
         sql.push_str(" AND board_section_id IS NULL");
     }
@@ -892,7 +892,7 @@ async fn count_organize_remaining(
         "SELECT COUNT(*) FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
          AND is_archived = false AND status <> 'cancelled' \
          AND (start_date IS NOT NULL OR due_date IS NOT NULL) \
-         AND board_section_id IS NULL AND list_id IS NULL"
+         AND board_section_id IS NULL"
     } else {
         "SELECT COUNT(*) FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
          AND is_archived = false AND status <> 'cancelled' \
@@ -930,6 +930,7 @@ pub(crate) async fn svc_organize_timeline(
             "topics": Vec::<String>::new(),
             "skipped": true,
             "remaining": 0,
+            "message": "There are no dated tasks to organize yet.",
         }));
     }
 
@@ -1013,12 +1014,18 @@ pub(crate) async fn svc_organize_timeline(
             ));
         }
         let remaining = count_organize_remaining(state, user_id, list_id).await?;
+        let message = if remaining > 0 {
+            format!("Nothing new to sort right now; {remaining} dated task(s) are still unsorted.")
+        } else {
+            "Everything dated is already sorted.".to_string()
+        };
         return Ok(json!({
             "sections_created": 0,
             "tasks_assigned": 0,
             "topics": Vec::<String>::new(),
             "skipped": true,
             "remaining": remaining,
+            "message": message,
         }));
     }
 
@@ -1109,12 +1116,20 @@ pub(crate) async fn svc_organize_timeline(
     tx.commit().await.map_err(db_error)?;
 
     let remaining = count_organize_remaining(state, user_id, list_id).await?;
+    let message = if remaining > 0 {
+        format!(
+            "Grouped {assigned} task(s) into {created} new section(s). {remaining} dated task(s) are still unsorted; run organize again to continue."
+        )
+    } else {
+        format!("Grouped {assigned} task(s) into {created} new section(s). Everything dated is now sorted.")
+    };
     Ok(json!({
         "sections_created": created,
         "tasks_assigned": assigned,
         "topics": topics_sorted,
         "skipped": false,
         "remaining": remaining,
+        "message": message,
     }))
 }
 

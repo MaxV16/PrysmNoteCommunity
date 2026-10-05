@@ -5,6 +5,7 @@ import {
   applyResizeDays,
   computeDragDays,
   dragOffsetPx,
+  resizePreviewRange,
 } from "./timeline-drag";
 
 const DAY_WIDTH = 120;
@@ -143,5 +144,42 @@ describe("applyResizeDays", () => {
     expect(applyResizeDays(makeTask(), 2, "right", TODAY)).toEqual({
       due_date: "2026-09-18",
     });
+  });
+});
+
+describe("resizePreviewRange", () => {
+  it("moves the start bound for a left resize and keeps the due", () => {
+    expect(
+      resizePreviewRange(
+        makeTask({ start_date: "2026-09-10", due_date: "2026-09-20" }),
+        5,
+        "left"
+      )
+    ).toEqual({ start: "2026-09-15", due: "2026-09-20" });
+  });
+
+  it("moves the due bound for a right resize and keeps the start", () => {
+    expect(
+      resizePreviewRange(
+        makeTask({ start_date: "2026-09-10", due_date: "2026-09-20" }),
+        5,
+        "right"
+      )
+    ).toEqual({ start: "2026-09-10", due: "2026-09-25" });
+  });
+
+  it("fills the missing bound for a start-only or due-only task", () => {
+    expect(resizePreviewRange(makeTask({ start_date: "2026-09-10" }), 4, "right")).toEqual({
+      start: "2026-09-10",
+      due: "2026-09-14",
+    });
+    expect(resizePreviewRange(makeTask({ due_date: "2026-09-10" }), -3, "left")).toEqual({
+      start: "2026-09-07",
+      due: "2026-09-10",
+    });
+  });
+
+  it("returns null when the task has no date to anchor on", () => {
+    expect(resizePreviewRange(makeTask(), 3, "left")).toBeNull();
   });
 });

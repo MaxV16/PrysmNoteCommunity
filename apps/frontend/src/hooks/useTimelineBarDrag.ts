@@ -13,6 +13,7 @@ import type { Task } from "@/types/task";
 import {
   computeDragDays,
   dragOffsetPx,
+  resizePreviewRange,
   type BarDragMode,
 } from "@/lib/timeline-drag";
 
@@ -25,6 +26,20 @@ export interface TimelineBarCommit {
    * null for the implicit Unsorted area. Omitted means "section unchanged".
    */
   sectionId?: string | null;
+}
+
+/**
+ * A short continuity glide played once React has re-rendered the bar at its
+ * committed slot: the inline preview styles are eased to their final values so
+ * the drop lands instead of snapping. The move/resize-left transform subtracts
+ * the snapped distance so the bar's screen position is unbroken at the instant
+ * React moves `left` under it.
+ */
+interface Glide {
+  startTransform: string | null;
+  endTransform: string | null;
+  startWidth: string | null;
+  endWidth: string | null;
 }
 
 export interface TimelineDragContextValue {
@@ -119,6 +134,9 @@ interface DragSession {
   overflowMeasured: boolean;
   dayWidth: number;
   el: HTMLElement;
+  /** The element the pointer is captured on (the handle for a resize, the bar
+   * for a move). `el` is the bar that the preview styles are written to. */
+  captureEl: HTMLElement;
   task: Task;
   mode: BarDragMode;
   sectionIds: ReadonlySet<string>;
@@ -226,6 +244,12 @@ export function useTimelineBarDrag(
   const ref = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<DragSession | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Live start/end dates shown above the bar while a resize handle is dragged.
+  const [resizePreview, setResizePreview] = useState<{ start: string; due: string } | null>(null);
+  const previewSigRef = useRef<string>("");
+  // Set on a committed drop and consumed by the layout effect after React has
+  // re-rendered the bar at its new slot (see `Glide`).
+  const glideRef = useRef<Glide | null>(null);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -294,6 +318,25 @@ export function useTimelineBarDrag(
       s.lastWidth = width;
       previewWidthRef.current = true;
     }
+  }, []);
+
+  // While a resize handle is being dragged, publish the dates the drop would
+  // commit so the bar can show a live badge. Only touched when the whole-day
+  // result actually changes, so a high-rate pointer cannot thrash React.
+  const updateResizePreview = useCallback((s: DragSession) => {
+    if (s.mode === "move") {
+      if (previewSigRef.current !== "") {
+        previewSigRef.current = "";
+        setResizePreview(null);
+      }
+      return;
+    }
+    const days = s.dayWidth > 0 ? Math.round(s.offsetPx / s.dayWidth) : 0;
+    const range = resizePreviewRange(s.task, days, s.mode === "resize-left" ? "left" : "right");
+    const sig = range ? `${range.start}|${range.due}` : "";
+    if (sig === previewSigRef.current) return;
+    previewSigRef.current = sig;
+    setResizePreview(range);
   }, []);
 
   const updateSectionTarget = useCallback((s: DragSession) => {
@@ -395,6 +438,7 @@ export function useTimelineBarDrag(
         s.offsetPx = offsetX;
         s.offsetYPx = offsetY;
         applyPreview(s);
+        updateResizePreview(s);
       }
 
       if (
@@ -407,7 +451,7 @@ export function useTimelineBarDrag(
         updateSectionTarget(s);
       }
     },
-    [applyPreview, updateSectionTarget]
+    [applyPreview, updateSectionTarget, updateResizePreview]
   );
 
   const tick = useCallback(() => {
@@ -446,6 +490,9 @@ export function useTimelineBarDrag(
     if (s.mode !== "move" && s.startWidthPx === 0) {
       s.startWidthPx = s.el.getBoundingClientRect().width;
     }
+    // A leftover glide transition from the previous drop would make this drag
+    // lag behind the pointer, so clear it before writing the first preview.
+    s.el.style.transition = "";
     s.el.style.willChange = "transform";
     s.el.style.zIndex = "100";
     s.el.style.touchAction = "none";
@@ -596,11 +643,11 @@ export function useTimelineBarDrag(
       window.removeEventListener("pointermove", onWindowMove);
       window.removeEventListener("pointerup", onWindowUp);
       window.removeEventListener("pointercancel", onWindowCancel);
-      s.el.removeEventListener("lostpointercapture", onLostCapture);
+      s.captureEl.removeEventListener("lostpointercapture", onLostCapture);
       s.body?.removeEventListener("scroll", onBodyScroll);
       window.removeEventListener("touchmove", preventTouchMove);
       try {
-        s.el.releasePointerCapture(s.pointerId);
+        s.captureEl.releasePointerCapture(s.pointerId);
       } catch {
         // Capture may already be gone (browser-initiated release).
       }
@@ -618,6 +665,9 @@ export function useTimelineBarDrag(
         });
         const sectionChanged = resolveSectionChange(s);
         let committed = false;
+        // The days the drop actually commits (a stationary touch hold bumps by
+        // one), so the glide eases to the exact slot React will render.
+        let commitDaysUsed = days;
         if (sectionChanged) {
           ctxRef.current?.onCommit({
             task: s.task,
@@ -628,6 +678,7 @@ export function useTimelineBarDrag(
           committed = true;
         } else if (days !== 0 || (s.holdToDrag && s.movedAfterHold)) {
           const commitDays = days !== 0 ? days : (s.latestX >= s.startX ? 1 : -1);
+          commitDaysUsed = commitDays;
           ctxRef.current?.onCommit({
             task: s.task,
             mode: s.mode,
@@ -636,13 +687,37 @@ export function useTimelineBarDrag(
           });
           committed = true;
         }
-        // The preview styles are cleared by the layout effect below once React
-        // has re-rendered the bar at its committed date, so there is no flash.
-        // A drag that actually moved swallows its trailing click; a plain
-        // touch hold (no movement) must not, or it would eat the action-bar tap.
-        if (committed) settleBar(s.el);
+        // Hand the preview's final position to the layout effect as a short
+        // glide to the committed slot, so the bar lands instead of snapping.
+        // Only the properties the preview actually wrote are animated.
+        if (committed) {
+          const hasTransform = previewTransformRef.current;
+          const hasWidth = previewWidthRef.current;
+          if (hasTransform || hasWidth) {
+            const snappedPx = commitDaysUsed * s.dayWidth;
+            glideRef.current = {
+              startTransform: hasTransform
+                ? `translate3d(${s.offsetPx - snappedPx}px, ${s.mode === "move" ? s.offsetYPx : 0}px, 0)`
+                : "",
+              endTransform: hasTransform ? "translate3d(0, 0, 0)" : "",
+              startWidth: hasWidth
+                ? `${s.mode === "resize-left" ? s.startWidthPx - s.offsetPx : s.startWidthPx + s.offsetPx}px`
+                : "",
+              endWidth: hasWidth
+                ? `${s.mode === "resize-left" ? s.startWidthPx - snappedPx : s.startWidthPx + snappedPx}px`
+                : "",
+            };
+          }
+        }
+        previewSigRef.current = "";
+        setResizePreview(null);
+        // With a glide running, its transform owns the settle; otherwise fall
+        // back to the compositor-only scale pulse.
+        if (committed && !glideRef.current) settleBar(s.el);
         if (committed || s.hasMoved) armClickSuppressor();
       } else {
+        previewSigRef.current = "";
+        setResizePreview(null);
         resetPreview(s.el);
         // A touch gesture that fell through to a canvas pan started on the bar,
         // so swallow the trailing click that would otherwise open its details.
@@ -692,6 +767,14 @@ export function useTimelineBarDrag(
       // press time does not walk layout repeatedly.
       const rect = body?.getBoundingClientRect();
       const mode = modeRef.current;
+      // Pointer capture stays on the pressed element (the resize handle), but a
+      // resize preview must write to the BAR, so resolve it separately. A move
+      // drag's ref already is the bar.
+      const captureEl = el;
+      const barEl =
+        mode === "move"
+          ? el
+          : ((el.closest("[data-task-bar]") as HTMLElement | null) ?? el);
       const s: DragSession = {
         pointerId: e.pointerId,
         pointerType: e.pointerType || "mouse",
@@ -717,7 +800,8 @@ export function useTimelineBarDrag(
         bodyHasVerticalOverflow: false,
         overflowMeasured: false,
         dayWidth: currentCtx.dayWidth,
-        el,
+        el: barEl,
+        captureEl,
         task: taskRef.current,
         mode,
         sectionIds: currentCtx.sectionIds,
@@ -766,7 +850,7 @@ export function useTimelineBarDrag(
       // Capture so the gesture keeps streaming to us even if the pointer leaves
       // the bar (or the window) mid-drag.
       try {
-        el.setPointerCapture(e.pointerId);
+        captureEl.setPointerCapture(e.pointerId);
       } catch {
         // Older engines without pointer capture still get the window listeners.
       }
@@ -774,7 +858,7 @@ export function useTimelineBarDrag(
       window.addEventListener("pointermove", onWindowMove);
       window.addEventListener("pointerup", onWindowUp);
       window.addEventListener("pointercancel", onWindowCancel);
-      el.addEventListener("lostpointercapture", onLostCapture);
+      captureEl.addEventListener("lostpointercapture", onLostCapture);
       body?.addEventListener("scroll", onBodyScroll);
     },
     [disabled, onWindowMove, onWindowUp, onWindowCancel, onLostCapture, onBodyScroll, disarmClickSuppressor]
@@ -797,6 +881,33 @@ export function useTimelineBarDrag(
   // never wipe the bar's React-set width on mount.
   useIsomorphicLayoutEffect(() => {
     if (dragging) return;
+    // A committed drop parked a glide: React has just re-rendered the bar at its
+    // new slot, so ease the inline preview styles to the values React now owns.
+    // The start transform subtracts the snapped distance, matching React's new
+    // `left`, so the bar's screen position is unbroken at the swap.
+    const glide = glideRef.current;
+    if (glide) {
+      glideRef.current = null;
+      const el = ref.current;
+      if (el) {
+        el.style.transition = "none";
+        if (glide.startTransform) el.style.transform = glide.startTransform;
+        if (glide.startWidth) el.style.width = glide.startWidth;
+        // Flush the start frame so the browser has a from-value to ease from.
+        void el.offsetWidth;
+        el.style.transition =
+          "transform 190ms var(--ease-spring, ease-out), width 190ms var(--ease-spring, ease-out)";
+        if (glide.endTransform) el.style.transform = glide.endTransform;
+        if (glide.endWidth) el.style.width = glide.endWidth;
+        window.setTimeout(() => {
+          // A new drag may have taken over the element; never wipe its preview.
+          if (sessionRef.current) return;
+          el.style.transition = "";
+          resetPreview(el);
+        }, 210);
+      }
+      return;
+    }
     if (!previewTransformRef.current && !previewWidthRef.current) return;
     resetPreview(ref.current);
   }, [dragging, task.start_date, task.due_date, task.board_section_id, resetPreview]);
@@ -809,5 +920,5 @@ export function useTimelineBarDrag(
     [disarmClickSuppressor]
   );
 
-  return { ref, onPointerDown, dragging };
+  return { ref, onPointerDown, dragging, resizePreview };
 }

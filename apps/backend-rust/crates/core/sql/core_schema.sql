@@ -286,6 +286,12 @@ CREATE TABLE public.financial_items (
     repeat_count integer,
     frequency_unit character varying(10),
     frequency_interval integer,
+    notes text,
+    counterparty character varying(200),
+    due_date date,
+    settled_at date,
+    receivable boolean DEFAULT false NOT NULL,
+    linked_task_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -1290,6 +1296,7 @@ CREATE INDEX ix_calendar_events_user_google_cal ON public.calendar_events USING 
 --
 
 CREATE INDEX ix_financial_items_user_created ON public.financial_items USING btree (user_id, created_at);
+CREATE INDEX ix_financial_items_user_due ON public.financial_items USING btree (user_id, due_date);
 
 
 --
@@ -1608,6 +1615,9 @@ ALTER TABLE ONLY public.calendar_events
 
 ALTER TABLE ONLY public.financial_items
     ADD CONSTRAINT financial_items_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.financial_items
+    ADD CONSTRAINT financial_items_linked_task_id_fkey FOREIGN KEY (linked_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
 
 
 --

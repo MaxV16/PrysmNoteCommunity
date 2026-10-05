@@ -27,6 +27,22 @@ export const PREF_NAV_FILTER = "nav_filter";
 export const PREF_ACTIVE_LIST = "active_list";
 export const PREF_SELECTED_TAG = "selected_tag";
 export const PREF_SEARCH_QUERY = "search_query";
+// Default landing: the list (or smart filter) the app opens on a fresh visit
+// that has no saved active-list/nav state. Holds either a real list id or a
+// smart-filter value ("today" | "next7" | "all" | "completed"). Defaults to the
+// built-in "All Tasks" smart list. A returning user keeps where they left.
+export const PREF_DEFAULT_LIST = "default_list";
+export const DEFAULT_LANDING_ALL = "all";
+export const NAV_DEFAULT_VALUES = ["today", "next7", "all", "completed"] as const;
+
+export function readDefaultList(): string {
+  const value = getPrefSync<unknown>(PREF_DEFAULT_LIST, DEFAULT_LANDING_ALL);
+  return typeof value === "string" && value ? value : DEFAULT_LANDING_ALL;
+}
+
+export function isNavDefault(value: string): boolean {
+  return (NAV_DEFAULT_VALUES as readonly string[]).includes(value);
+}
 
 export type ScrollDirection = "horizontal" | "vertical";
 export type CardLayout = "stacked" | "side_by_side";

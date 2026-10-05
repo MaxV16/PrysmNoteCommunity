@@ -48,6 +48,29 @@ CREATE INDEX IF NOT EXISTS ix_account_deletions_user_id ON public.account_deleti
 -- databases; fresh databases no longer enable it at all.
 ALTER TABLE public.user_tokens NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.user_tokens DISABLE ROW LEVEL SECURITY;
+
+-- Finance lite extensions: a free-text note, who it is owed to/from, a due
+-- date, a settled marker and an optional linked task. `receivable` marks money
+-- someone owes the user (see the Owed to me view + the AI receivables tools).
+ALTER TABLE public.financial_items ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE public.financial_items ADD COLUMN IF NOT EXISTS counterparty character varying(200);
+ALTER TABLE public.financial_items ADD COLUMN IF NOT EXISTS due_date date;
+ALTER TABLE public.financial_items ADD COLUMN IF NOT EXISTS settled_at date;
+ALTER TABLE public.financial_items ADD COLUMN IF NOT EXISTS receivable boolean NOT NULL DEFAULT false;
+ALTER TABLE public.financial_items ADD COLUMN IF NOT EXISTS linked_task_id uuid;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'financial_items_linked_task_id_fkey'
+    ) THEN
+        ALTER TABLE public.financial_items
+            ADD CONSTRAINT financial_items_linked_task_id_fkey
+            FOREIGN KEY (linked_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS ix_financial_items_user_due ON public.financial_items USING btree (user_id, due_date);
 "#;
 
 /// Provisions the core schema on a fresh database.

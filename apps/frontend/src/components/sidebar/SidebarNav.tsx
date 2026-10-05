@@ -1,12 +1,19 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useAppStore, type NavFilter } from "@/stores/app-store";
 import type { WorkspaceView } from "@/components/layout/AppShell";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { NotesSection } from "@/components/sidebar/NotesSection";
 import { SidebarLists } from "@/components/sidebar/SidebarLists";
 import { isToday, smartListCounts } from "@/lib/task-filters";
+import { ContextMenu, ContextMenuItem } from "@/components/ui/ContextMenu";
+import { useToast } from "@/lib/toast-context";
+import {
+  PREF_DEFAULT_LIST,
+  readDefaultList,
+} from "@/lib/preferences";
+import { usePreferencesStore } from "@/stores/preferences-store";
 
 interface SidebarNavProps {
   view: WorkspaceView;
@@ -91,11 +98,30 @@ const VIEWS: { label: string; view: WorkspaceView; icon: JSX.Element }[] = [
   },
 ];
 
+const StarIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="M12 2.5l2.9 6.02 6.6.84-4.85 4.52 1.24 6.62L12 17.9 6.11 20.5l1.24-6.62L2.5 9.36l6.6-.84L12 2.5Z" />
+  </svg>
+);
+
 export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsOn, quadrantOn, focusOn, countdownOn }: SidebarNavProps) {
   const tasks = useAppStore((s) => s.tasks);
   const navFilter = useAppStore((s) => s.navFilter);
   const setNavFilter = useAppStore((s) => s.setNavFilter);
   const setActiveListId = useAppStore((s) => s.setActiveListId);
+  const { showToast } = useToast();
+
+  const rawDefaultList = usePreferencesStore((s) => s.prefs[PREF_DEFAULT_LIST]);
+  const defaultList =
+    typeof rawDefaultList === "string" && rawDefaultList ? rawDefaultList : readDefaultList();
+
+  const [defaultMenu, setDefaultMenu] = useState<{ x: number; y: number; value: NavFilter; label: string } | null>(null);
+
+  const setDefaultLanding = (value: NavFilter, label: string) => {
+    setDefaultMenu(null);
+    usePreferencesStore.getState().setPreference(PREF_DEFAULT_LIST, value);
+    showToast(`"${label}" is now your default list`, "success");
+  };
 
   const smartPrefs = {
     today: useLocalBool("prysm_smartlist_today", true),
@@ -137,6 +163,9 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsO
   }, [tasks]);
 
   const visibleFilters = FILTERS.filter((f) => {
+    // "All Tasks" is a permanent, non-hideable entry: it is the built-in
+    // fallback landing and must always be reachable.
+    if (f.filter === "all") return true;
     if (!f.storageKey) return true;
     return smartPrefs[f.filter as keyof typeof smartPrefs];
   });
@@ -165,11 +194,20 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsO
                   setActiveListId(null);
                   setNavFilter(isActive ? null : item.filter);
                 }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setDefaultMenu({ x: e.clientX, y: e.clientY, value: item.filter, label: item.label });
+                }}
                 className={`sidebar-item text-[13px] ${isActive ? "active" : ""}`}
                 aria-current={isActive ? "page" : undefined}
               >
                 <span className="text-secondary group-hover:text-primary">{item.icon}</span>
                 <span className="flex-1 text-left">{item.label}</span>
+                {defaultList === item.filter && (
+                  <span className="ml-1 shrink-0 text-accent" title="Default landing" aria-label="Default landing">
+                    <StarIcon />
+                  </span>
+                )}
                 <span className="ml-auto flex shrink-0 items-center gap-1.5">
                   {item.filter === "today" && todayStats.total > 0 && (
                     <span
@@ -242,6 +280,22 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsO
           );
         })}
       </div>
+
+      {defaultMenu && (
+        <ContextMenu
+          open
+          x={defaultMenu.x}
+          y={defaultMenu.y}
+          onClose={() => setDefaultMenu(null)}
+        >
+          <ContextMenuItem
+            disabled={defaultList === defaultMenu.value}
+            onClick={() => setDefaultLanding(defaultMenu.value, defaultMenu.label)}
+          >
+            {defaultList === defaultMenu.value ? "Default list" : "Set as default"}
+          </ContextMenuItem>
+        </ContextMenu>
+      )}
     </nav>
   );
 }

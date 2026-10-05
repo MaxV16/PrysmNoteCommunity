@@ -1,7 +1,7 @@
 import type { Task } from "@/types/task";
 import { parseLocalDate } from "@/lib/utils";
 import { todayStart } from "@/lib/dates";
-import { BAR_HEIGHT, BAR_GAP, TOP_PADDING } from "./constants";
+import { BAR_HEIGHT, BAR_GAP, TOP_PADDING, SECTION_BOTTOM_PADDING } from "./constants";
 
 export interface PositionedTask {
   task: Task;
@@ -83,7 +83,7 @@ export function computeLaneLayout(tasks: Task[], days: Date[]): {
   height: number;
 } {
   if (days.length === 0) {
-    return { positioned: [], maxStack: 0, height: TOP_PADDING * 2 };
+    return { positioned: [], maxStack: 0, height: TOP_PADDING * 2 + SECTION_BOTTOM_PADDING };
   }
 
   // Day column index for "today", used to place undated (inbox) tasks so they
@@ -167,6 +167,7 @@ export function computeLaneLayout(tasks: Task[], days: Date[]): {
     },
   }));
 
-  const height = TOP_PADDING * 2 + Math.max(1, totalRows) * (BAR_HEIGHT + BAR_GAP) - BAR_GAP;
+  const height =
+    TOP_PADDING * 2 + Math.max(1, totalRows) * (BAR_HEIGHT + BAR_GAP) - BAR_GAP + SECTION_BOTTOM_PADDING;
   return { positioned, maxStack: totalRows, height };
 }

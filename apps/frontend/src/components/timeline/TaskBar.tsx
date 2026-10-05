@@ -1,12 +1,21 @@
 "use client";
 
-import { memo, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
 import { TIER_COLORS, TIER_LABELS, normalizePriority, type PriorityTier } from "@/lib/priority";
 import { taskTimeLabel } from "@/lib/task-time";
+import { parseLocalDate } from "@/lib/utils";
 import { useTimelineBarDrag } from "@/hooks/useTimelineBarDrag";
 import { BAR_HEIGHT } from "./constants";
+
+/** Compact "Mar 5 - Mar 12" label for the live resize preview. */
+function formatResizeRange(start: string, due: string) {
+  const fmt = (iso: string) =>
+    parseLocalDate(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return start === due ? fmt(start) : `${fmt(start)} - ${fmt(due)}`;
+}
 
 interface TaskBarProps {
   task: Task;
@@ -24,29 +33,54 @@ interface TaskBarProps {
  * comfortable 12px hit area, pointer-enabled on both mouse and touch.
  */
 function ResizeHandle({ task, side, disabled }: { task: Task; side: "left" | "right"; disabled?: boolean }) {
-  const { ref, onPointerDown } = useTimelineBarDrag(
+  const { ref, onPointerDown, resizePreview } = useTimelineBarDrag(
     task,
     side === "left" ? "resize-left" : "resize-right",
     disabled
   );
+  // The bar clips its children (overflow: hidden), so the preview badge is
+  // portaled to the body and pinned just above the bar using its live rect.
+  const [badgePos, setBadgePos] = useState<{ top: number; left: number } | null>(null);
+  useEffect(() => {
+    if (!resizePreview || !ref.current) {
+      setBadgePos(null);
+      return;
+    }
+    const r = ref.current.getBoundingClientRect();
+    setBadgePos({ top: r.top - 30, left: r.left + r.width / 2 });
+  }, [resizePreview, ref]);
   return (
-    <div
-      ref={ref}
-      data-resize-handle={side}
-      onPointerDown={onPointerDown}
-      role="separator"
-      aria-orientation="vertical"
-      aria-label={`${side === "left" ? "Resize start" : "Resize end"}`}
-      className="absolute inset-y-0 z-10"
-      style={{
-        [side]: side === "left" ? "-3px" : undefined,
-        right: side === "right" ? "-3px" : undefined,
-        width: 12,
-        cursor: side === "left" ? "w-resize" : "e-resize",
-        touchAction: "none",
-        pointerEvents: "auto",
-      }}
-    />
+    <>
+      <div
+        ref={ref}
+        data-resize-handle={side}
+        onPointerDown={onPointerDown}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={`${side === "left" ? "Resize start" : "Resize end"}`}
+        className="absolute inset-y-0 z-10"
+        style={{
+          [side]: side === "left" ? "-3px" : undefined,
+          right: side === "right" ? "-3px" : undefined,
+          width: 12,
+          cursor: side === "left" ? "w-resize" : "e-resize",
+          touchAction: "none",
+          pointerEvents: "auto",
+        }}
+      />
+      {resizePreview &&
+        badgePos &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-[120] whitespace-nowrap rounded-md border border-border bg-elevated px-2 py-0.5 text-[10px] font-semibold text-primary shadow-lg"
+            style={{ top: badgePos.top, left: badgePos.left, transform: "translateX(-50%)" }}
+          >
+            {formatResizeRange(resizePreview.start, resizePreview.due)}
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 
