@@ -135,6 +135,29 @@ describe("api", () => {
     expect(callCount).toBeGreaterThanOrEqual(3);
   });
 
+  it("sends a JSON body on the refresh request so an empty body cannot be rejected", async () => {
+    document.cookie = "access_token=expired-token";
+
+    let callCount = 0;
+    mockFetch.mockImplementation(async (url: string, _options?: any) => {
+      callCount++;
+      if (url.includes("auth/refresh")) return { ok: true };
+      if (callCount <= 1) {
+        return { ok: false, status: 401, json: () => Promise.resolve({ detail: "Unauthorized" }) };
+      }
+      return { ok: true, json: () => Promise.resolve({ data: "ok" }) };
+    });
+
+    await api.get("/tasks");
+    const refreshCall = mockFetch.mock.calls.find(([url]) => String(url).includes("auth/refresh"));
+    expect(refreshCall).toBeTruthy();
+    const [, opts] = refreshCall as [string, any];
+    expect(opts.method).toBe("POST");
+    // A JSON content-type with an empty body was rejected with a 400 by the
+    // backend, so the refresh now always carries an (empty) JSON object.
+    expect(opts.body).toBe(JSON.stringify({}));
+  });
+
   it("redirects on 401 when refresh fails", async () => {
     document.cookie = "access_token=expired-token";
     const originalLocation = window.location;

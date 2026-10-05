@@ -5,6 +5,7 @@
 //! so the same clients work against either backend. Email verification and the
 //! Turnstile / risk hooks are not ported yet.
 
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::header::SET_COOKIE;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -774,13 +775,22 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 
 /// `POST /api/auth/refresh` - exchange a refresh token for a fresh cookie pair.
 /// The token may arrive as the `refresh_token` cookie or in the JSON body.
+///
+/// The body is read as raw bytes and parsed leniently: some clients send
+/// `Content-Type: application/json` with an empty body (the token lives in the
+/// cookie), and a strict `Json` extractor would reject that with a 400 before
+/// the cookie is ever considered. An empty or malformed body simply means "no
+/// body token".
 async fn refresh(
     State(state): State<AppState>,
     headers: HeaderMap,
-    body: Option<Json<RefreshRequest>>,
+    body: Bytes,
 ) -> Result<Response, ApiError> {
+    let body_token = serde_json::from_slice::<RefreshRequest>(&body)
+        .ok()
+        .and_then(|payload| payload.refresh_token);
     let token = cookie_value(&headers, "refresh_token")
-        .or_else(|| body.and_then(|Json(payload)| payload.refresh_token))
+        .or(body_token)
         .ok_or_else(|| ApiError::Unauthorized("Refresh token required".into()))?;
 
     let unauthorized = || ApiError::Unauthorized("Could not validate credentials".into());
@@ -1080,6 +1090,64 @@ mod tests {
             .unwrap();
         assert_eq!(refreshed.status(), StatusCode::OK);
         assert!(access_cookie(&refreshed).is_some());
+
+        let _ = sqlx::query("DELETE FROM users WHERE email = $1")
+            .bind(&email)
+            .execute(&state.pool)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn refresh_accepts_a_json_content_type_with_an_empty_body() {
+        // Regression: the web client sent `Content-Type: application/json` with
+        // no body. A strict `Json` extractor rejected that with a 400 before the
+        // refresh cookie was read, so every request after the 15-minute access
+        // token expired failed to refresh and nothing saved.
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let app = build_router(state.clone(), None);
+        let email = format!("rust-refresh-empty-{}@test.local", Uuid::new_v4());
+
+        let registered = post_json(
+            &app,
+            "/api/auth/register",
+            json!({ "email": email, "password": "password123" }),
+        )
+        .await;
+        assert_eq!(registered.status(), StatusCode::OK);
+        let refresh = refresh_cookie(&registered).expect("refresh cookie");
+
+        let refreshed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/auth/refresh")
+                    .header("content-type", "application/json")
+                    .header("cookie", refresh)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(refreshed.status(), StatusCode::OK);
+        assert!(access_cookie(&refreshed).is_some());
+
+        // Missing cookie + empty JSON body is a genuine 401, not a 400.
+        let unauth = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/auth/refresh")
+                    .header("content-type", "application/json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
 
         let _ = sqlx::query("DELETE FROM users WHERE email = $1")
             .bind(&email)

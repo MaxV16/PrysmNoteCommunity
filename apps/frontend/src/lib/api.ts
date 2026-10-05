@@ -18,6 +18,10 @@ async function doRefresh(): Promise<RefreshOutcome> {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
+      // An explicit JSON body, because sending `Content-Type: application/json`
+      // with no body made some servers reject the refresh with a 400 instead of
+      // simply reading the refresh cookie. The cookie is still the real token.
+      body: JSON.stringify({}),
     });
     if (res.ok) return "ok";
     if (res.status === 401 || res.status === 403) return "unauthenticated";
