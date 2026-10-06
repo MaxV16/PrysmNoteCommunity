@@ -528,7 +528,7 @@ async fn apply_delete(
            SELECT id FROM tasks WHERE id = $1 AND {access} \
            UNION ALL \
            SELECT t.id FROM tasks t JOIN tree ON t.parent_task_id = tree.id \
-         ) UPDATE tasks SET deleted_at = {value} WHERE id IN (SELECT id FROM tree)"
+         ) UPDATE tasks SET deleted_at = {value}, updated_at = now() WHERE id IN (SELECT id FROM tree)"
     );
     let result = sqlx::query(&sql)
         .bind(root)
@@ -1334,7 +1334,7 @@ async fn batch_delete(
     db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!(
-        "UPDATE tasks SET deleted_at = now() WHERE {access} AND deleted_at IS NULL \
+        "UPDATE tasks SET deleted_at = now(), updated_at = now() WHERE {access} AND deleted_at IS NULL \
          AND id = ANY($2)"
     );
     let result = sqlx::query(&sql)
@@ -1358,7 +1358,7 @@ async fn batch_restore(
     db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!(
-        "UPDATE tasks SET deleted_at = NULL WHERE {access} AND deleted_at IS NOT NULL \
+        "UPDATE tasks SET deleted_at = NULL, updated_at = now() WHERE {access} AND deleted_at IS NOT NULL \
          AND id = ANY($2)"
     );
     let result = sqlx::query(&sql)
@@ -2205,11 +2205,35 @@ mod tests {
         assert_eq!(updated["status"], "done");
 
         // delete (soft) then it disappears from the active list
+        let since = Utc::now();
         let res = call(app.clone(), "DELETE", &format!("/api/tasks/{task_id}"), &token, None).await;
         assert_eq!(res.status(), StatusCode::OK);
         let res = call(app.clone(), "GET", "/api/tasks", &token, None).await;
         let listed = body_json(res).await;
         assert!(!listed.as_array().unwrap().iter().any(|t| t["id"] == task_id));
+
+        // The tombstone must surface in the incremental (updated_since) feed so
+        // other devices drop the task too: soft-delete has to bump updated_at,
+        // not just deleted_at, or nothing past the cursor ever reports it.
+        let since_iso = since.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let res = call(
+            app.clone(),
+            "GET",
+            &format!("/api/tasks?updated_since={since_iso}&include_deleted=true"),
+            &token,
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let changes = body_json(res).await;
+        assert!(
+            changes
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["id"] == task_id && t["deleted_at"].is_string()),
+            "soft-deleted task must appear as a tombstone in the updated_since feed"
+        );
 
         // trash lists it and restore brings it back
         let res = call(app.clone(), "GET", "/api/tasks/trash", &token, None).await;
