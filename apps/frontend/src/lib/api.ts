@@ -139,7 +139,12 @@ async function request<T>(
       // "Request failed" alone tells the user nothing actionable.
       message = statusFallback(res);
     }
-    throw new Error(message);
+    // Attach the status so callers can special-case an idempotent outcome (a
+    // DELETE that 404s because the row is already gone, for example) instead
+    // of having to parse the message.
+    const error = new Error(message) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
   }
 
   // 204 No Content: no body to parse (countdown delete, PAT revoke, etc).

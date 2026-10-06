@@ -165,13 +165,23 @@ export async function refreshTasksPreservingWindow() {
   const store = useAppStore.getState();
   const seq = ++fetchSeq;
   try {
-    if (fullSnapshotLoaded && store.tasks.length > 0) {
+    // Reconcile tombstones/edits from the cursor whenever the store already
+    // holds tasks - including the FIRST load, when it was hydrated from the
+    // localStorage cache. Running this only after a snapshot (the old guard)
+    // meant a task deleted on another client while this one was closed stayed
+    // cached forever: the snapshot merge is add-only and then the cursor
+    // advanced past the deletion, so its tombstone was never fetched.
+    if (store.tasks.length > 0) {
       const changes = await fetchIncrementalChanges(seq);
       if (seq === fetchSeq && changes) {
         applyIncrementalChanges(changes);
         syncCursor = Date.now();
       }
-    } else {
+    }
+    // Snapshot when we have never paged, or whenever the store is empty (a new
+    // account, or after a logout cleared it), so a cache-hydrated load both
+    // reconciles tombstones above AND still fills the page window below.
+    if (!fullSnapshotLoaded || store.tasks.length === 0) {
       const data = await fetchTaskSnapshot(seq);
       if (seq === fetchSeq && data) {
         store.mergeTasks(data);
@@ -200,13 +210,17 @@ export function useTasks() {
     const seq = ++fetchSeq;
     const store = useAppStore.getState();
     try {
-      if (fullSnapshotLoaded && store.tasks.length > 0) {
+      // See refreshTasksPreservingWindow: reconcile tombstones from the cursor
+      // whenever the store already holds tasks, so a cached task deleted
+      // elsewhere this session was closed is removed on the first load.
+      if (store.tasks.length > 0) {
         const changes = await fetchIncrementalChanges(seq);
         if (seq === fetchSeq && changes) {
           applyIncrementalChanges(changes);
           syncCursor = Date.now();
         }
-      } else {
+      }
+      if (!fullSnapshotLoaded) {
         const data = await fetchTaskSnapshot(seq);
         if (seq === fetchSeq && data) {
           store.mergeTasks(data);
@@ -268,7 +282,14 @@ export function useTasks() {
 
   const deleteTask = useCallback(
     async (id: string) => {
-      await api.delete(`/tasks/${id}`);
+      try {
+        await api.delete(`/tasks/${id}`);
+      } catch (err) {
+        // A 404 means the row is already gone (deleted on another client or by
+        // the AI, or a stale cache entry). Treat it as success so the user can
+        // always clear a task instead of the delete failing forever.
+        if ((err as { status?: number } | null)?.status !== 404) throw err;
+      }
       // Merge out the deleted id so the merge-based refresh below can never
       // resurrect it while the response is in flight.
       setTasks(useAppStore.getState().tasks.filter((t) => t.id !== id));
