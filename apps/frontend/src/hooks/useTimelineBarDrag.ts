@@ -296,7 +296,7 @@ export function useTimelineBarDrag(
       return;
     }
     if (s.mode === "resize-right") {
-      const width = `${Math.max(8, s.startWidthPx + offset)}px`;
+      const width = `${Math.max(s.dayWidth, 8, s.startWidthPx + offset)}px`;
       if (width !== s.lastWidth) {
         s.el.style.width = width;
         s.lastWidth = width;
@@ -312,7 +312,7 @@ export function useTimelineBarDrag(
       s.lastTransform = transform;
       previewTransformRef.current = true;
     }
-    const width = `${Math.max(8, s.startWidthPx - offset)}px`;
+    const width = `${Math.max(s.dayWidth, 8, s.startWidthPx - offset)}px`;
     if (width !== s.lastWidth) {
       s.el.style.width = width;
       s.lastWidth = width;

@@ -71,8 +71,10 @@ export function applyMoveDays(
 
 /**
  * Date fields for resizing a task by whole days. The left handle moves the
- * start, the right handle moves the due. A task with only one bound extends
- * from the bound it has; a fully undated task anchors on `today`.
+ * start, the right handle moves the due. The edge that is NOT dragged stays
+ * anchored, and both bounds are always returned so a task with only one bound
+ * grows a real span instead of sliding. The span is clamped so the bar can
+ * never invert or collapse below a single day.
  */
 export function applyResizeDays(
   task: Task,
@@ -80,12 +82,18 @@ export function applyResizeDays(
   side: "left" | "right",
   today: Date = new Date()
 ): Record<string, string> {
+  const todayIso = toLocalDateString(today);
+  const baseStart = task.start_date ?? task.due_date ?? todayIso;
+  const baseDue = task.due_date ?? task.start_date ?? todayIso;
+  // Normalize an inverted (start > due) input so the clamp bounds are sane.
+  const lo = baseStart <= baseDue ? baseStart : baseDue;
+  const hi = baseStart <= baseDue ? baseDue : baseStart;
   if (side === "left") {
-    const anchor = task.start_date ?? task.due_date ?? toLocalDateString(today);
-    return { start_date: shiftIso(anchor, days) };
+    const moved = shiftIso(lo, days);
+    return { start_date: moved > hi ? hi : moved, due_date: hi };
   }
-  const anchor = task.due_date ?? task.start_date ?? toLocalDateString(today);
-  return { due_date: shiftIso(anchor, days) };
+  const moved = shiftIso(hi, days);
+  return { start_date: lo, due_date: moved < lo ? lo : moved };
 }
 
 /**

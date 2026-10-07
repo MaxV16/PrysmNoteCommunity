@@ -109,9 +109,8 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
     backgroundColor: colors.bg,
     backgroundClip: "padding-box",
     border: `1px solid ${colors.border}`,
-    borderLeft: `3px solid ${colors.border}`,
-    borderRightWidth: 6,
-    borderRightColor: "transparent",
+    borderLeftWidth: 0,
+    borderRightWidth: 0,
     borderRadius: 6,
     padding: "6px 12px",
     display: "flex",
@@ -128,11 +127,16 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
     overflow: "hidden",
     zIndex: dragging ? 100 : 20,
     opacity: isDone ? 0.65 : 1,
-    boxShadow: dragging
-      ? "0 8px 24px rgba(0,0,0,0.35)"
-      : selected
-      ? "0 0 0 2px var(--accent), 0 4px 12px rgba(0,0,0,0.3)"
-      : undefined,
+    boxShadow: [
+      `inset 3px 0 0 0 ${colors.border}`,
+      dragging
+        ? "0 8px 24px rgba(0,0,0,0.35)"
+        : selected
+        ? "0 0 0 2px var(--accent), 0 4px 12px rgba(0,0,0,0.3)"
+        : "",
+    ]
+      .filter(Boolean)
+      .join(", "),
     pointerEvents: "auto",
     transition: "opacity var(--dur-base, 180ms) ease, box-shadow var(--dur-fast, 120ms) ease",
   } as React.CSSProperties;

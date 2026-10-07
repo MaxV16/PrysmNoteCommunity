@@ -109,39 +109,56 @@ describe("applyMoveDays", () => {
 });
 
 describe("applyResizeDays", () => {
-  it("moves the start with a left resize", () => {
+  it("moves the start and keeps the due with a left resize", () => {
     const fields = applyResizeDays(
       makeTask({ start_date: "2026-09-10", due_date: "2026-09-20" }),
       5,
       "left"
     );
-    expect(fields).toEqual({ start_date: "2026-09-15" });
+    expect(fields).toEqual({ start_date: "2026-09-15", due_date: "2026-09-20" });
   });
 
-  it("moves the due with a right resize", () => {
+  it("moves the due and keeps the start with a right resize", () => {
     const fields = applyResizeDays(
       makeTask({ start_date: "2026-09-10", due_date: "2026-09-20" }),
       5,
       "right"
     );
-    expect(fields).toEqual({ due_date: "2026-09-25" });
+    expect(fields).toEqual({ start_date: "2026-09-10", due_date: "2026-09-25" });
   });
 
-  it("resizes a start-only task from its start", () => {
-    const right = applyResizeDays(makeTask({ start_date: "2026-09-10" }), 4, "right");
-    expect(right).toEqual({ due_date: "2026-09-14" });
+  it("grows a start-only task to the right without moving its start", () => {
+    const fields = applyResizeDays(makeTask({ start_date: "2026-09-10" }), 4, "right");
+    expect(fields).toEqual({ start_date: "2026-09-10", due_date: "2026-09-14" });
   });
 
-  it("resizes a due-only task from its due", () => {
-    const left = applyResizeDays(makeTask({ due_date: "2026-09-10" }), -3, "left");
-    expect(left).toEqual({ start_date: "2026-09-07" });
+  it("grows a start-only task to the left without moving its anchor", () => {
+    const fields = applyResizeDays(makeTask({ start_date: "2026-09-10" }), -2, "left");
+    expect(fields).toEqual({ start_date: "2026-09-08", due_date: "2026-09-10" });
+  });
+
+  it("grows a due-only task to the left without moving its due", () => {
+    const fields = applyResizeDays(makeTask({ due_date: "2026-09-10" }), -3, "left");
+    expect(fields).toEqual({ start_date: "2026-09-07", due_date: "2026-09-10" });
+  });
+
+  it("grows a due-only task to the right without moving its due", () => {
+    const fields = applyResizeDays(makeTask({ due_date: "2026-09-10" }), 4, "right");
+    expect(fields).toEqual({ start_date: "2026-09-10", due_date: "2026-09-14" });
+  });
+
+  it("never inverts the bar when a resize crosses the other edge", () => {
+    const fields = applyResizeDays(
+      makeTask({ start_date: "2026-09-10", due_date: "2026-09-20" }),
+      -15,
+      "right"
+    );
+    expect(fields).toEqual({ start_date: "2026-09-10", due_date: "2026-09-10" });
   });
 
   it("anchors an undated task on today", () => {
-    expect(applyResizeDays(makeTask(), 2, "left", TODAY)).toEqual({
-      start_date: "2026-09-18",
-    });
     expect(applyResizeDays(makeTask(), 2, "right", TODAY)).toEqual({
+      start_date: "2026-09-16",
       due_date: "2026-09-18",
     });
   });

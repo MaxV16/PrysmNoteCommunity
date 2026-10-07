@@ -436,7 +436,7 @@ pub async fn move_tasks_to_section(
     // Apply the destination bucket to the moved rows, then renumber everyone.
     if let Some(status) = section_status {
         sqlx::query(&format!(
-            "UPDATE tasks SET board_section_id = NULL, status = $3::task_status \
+            "UPDATE tasks SET board_section_id = NULL, status = $3::task_status, updated_at = now() \
              WHERE {access} AND id = ANY($2)"
         ))
         .bind(user_id)
@@ -446,7 +446,7 @@ pub async fn move_tasks_to_section(
         .await?;
     } else {
         sqlx::query(&format!(
-            "UPDATE tasks SET board_section_id = $3 WHERE {access} AND id = ANY($2)"
+            "UPDATE tasks SET board_section_id = $3, updated_at = now() WHERE {access} AND id = ANY($2)"
         ))
         .bind(user_id)
         .bind(&moved)
@@ -456,7 +456,7 @@ pub async fn move_tasks_to_section(
     }
 
     for (position, id) in order.iter().enumerate() {
-        sqlx::query("UPDATE tasks SET board_order = $2 WHERE id = $1")
+        sqlx::query("UPDATE tasks SET board_order = $2, updated_at = now() WHERE id = $1")
             .bind(id)
             .bind(position as i32)
             .execute(&mut *conn)

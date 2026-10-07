@@ -1384,8 +1384,8 @@ async fn batch_set_date(
     db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!(
-        "UPDATE tasks SET start_date = $3, due_date = $3 WHERE {access} AND deleted_at IS NULL \
-         AND id = ANY($2) AND updated_at = updated_at"
+        "UPDATE tasks SET start_date = $3, due_date = $3, updated_at = now() WHERE {access} AND deleted_at IS NULL \
+         AND id = ANY($2)"
     );
     let result = sqlx::query(&sql)
         .bind(user.user_id)
@@ -1422,7 +1422,8 @@ async fn batch_reschedule(
         due_date = CASE \
           WHEN due_date IS NULL AND start_date IS NULL THEN (CURRENT_DATE + ($3 * INTERVAL '1 day'))::date \
           WHEN due_date IS NULL THEN NULL \
-          ELSE (due_date + ($3 * INTERVAL '1 day'))::date END \
+          ELSE (due_date + ($3 * INTERVAL '1 day'))::date END, \
+        updated_at = now() \
         WHERE {access} AND deleted_at IS NULL AND id = ANY($2)"
     );
     let result = sqlx::query(&sql)
@@ -2203,9 +2204,17 @@ mod tests {
         let updated = body_json(res).await;
         assert_eq!(updated["title"], "Renamed");
         assert_eq!(updated["status"], "done");
+        // Use the DB-generated updated_at from the update as the incremental
+        // cursor: it is guaranteed to predate the delete transaction's now(),
+        // so the tombstone check below is not clock-skew flaky.
+        // The API serialises updated_at as RFC3339 with a "+00:00" offset; a
+        // raw "+" in a query string decodes to a space, which the route rejects
+        // as an invalid datetime, so percent-encode it and let the clock pass
+        // the update's transaction timestamp before the delete.
+        let since_iso = updated["updated_at"].as_str().unwrap().replace('+', "%2B");
+        std::thread::sleep(std::time::Duration::from_millis(5));
 
         // delete (soft) then it disappears from the active list
-        let since = Utc::now();
         let res = call(app.clone(), "DELETE", &format!("/api/tasks/{task_id}"), &token, None).await;
         assert_eq!(res.status(), StatusCode::OK);
         let res = call(app.clone(), "GET", "/api/tasks", &token, None).await;
@@ -2215,7 +2224,6 @@ mod tests {
         // The tombstone must surface in the incremental (updated_since) feed so
         // other devices drop the task too: soft-delete has to bump updated_at,
         // not just deleted_at, or nothing past the cursor ever reports it.
-        let since_iso = since.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let res = call(
             app.clone(),
             "GET",
