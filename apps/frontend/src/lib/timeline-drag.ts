@@ -22,6 +22,20 @@ export function dragOffsetPx(input: { dx: number; scrollDelta?: number }): numbe
 }
 
 /**
+ * Snap a raw pixel offset to the nearest whole day column. Used by the resize
+ * preview so the bar (and its live date badge) land on day boundaries while the
+ * handle is dragged, exactly where the drop commits, instead of sliding
+ * variably between columns. Falls back to the raw offset when the day width is
+ * unknown.
+ */
+export function snapOffsetPx(offset: number, dayWidth: number): number {
+  if (!Number.isFinite(dayWidth) || dayWidth <= 0) return offset;
+  const snapped = Math.round(offset / dayWidth) * dayWidth;
+  // Normalise negative zero so the helper never returns -0.
+  return snapped === 0 ? 0 : snapped;
+}
+
+/**
  * Whole days a bar commits on drop, from the same `dx`/`scrollDelta` pair the
  * preview used. Rounds to the nearest day; a drag shorter than half a day is a
  * no-op instead of a forced one-day jump, so a small hand jitter never moves a

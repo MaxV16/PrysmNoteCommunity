@@ -174,6 +174,19 @@ describe("useTimelineBarDrag gesture contract", () => {
     up(101, 100);
   });
 
+  it("keeps the grabbed point under the cursor on a move (no centre scale drift)", () => {
+    const h = setup();
+    down(h.bar, "mouse", 100, 100);
+    move(160, 100);
+    const transform = h.bar.style.transform;
+    expect(transform).toContain("translate3d");
+    // Scaling about the bar centre used to pull the grabbed edge off the
+    // cursor on wide bars, so a task grabbed at its start read as grabbed in
+    // the middle; the move preview must stay a pure translation.
+    expect(transform).not.toContain("scale(");
+    up(160, 100);
+  });
+
   it("never consults matchMedia, so a phone and a tablet share one contract", () => {
     const h = setup({ matchMediaMatches: false });
     down(h.bar, "touch", 100, 100);

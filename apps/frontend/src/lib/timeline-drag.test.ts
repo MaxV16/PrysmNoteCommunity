@@ -6,6 +6,7 @@ import {
   computeDragDays,
   dragOffsetPx,
   resizePreviewRange,
+  snapOffsetPx,
 } from "./timeline-drag";
 
 const DAY_WIDTH = 120;
@@ -50,6 +51,20 @@ describe("dragOffsetPx", () => {
     expect(dragOffsetPx({ dx: 0 })).toBe(0);
     expect(dragOffsetPx({ dx: Number.NaN })).toBe(0);
     expect(dragOffsetPx({ dx: 10, scrollDelta: Number.POSITIVE_INFINITY })).toBe(0);
+  });
+});
+
+describe("snapOffsetPx", () => {
+  it("snaps a resize offset to the nearest whole day column", () => {
+    expect(snapOffsetPx(DAY_WIDTH * 1.4, DAY_WIDTH)).toBe(DAY_WIDTH);
+    expect(snapOffsetPx(DAY_WIDTH * 1.6, DAY_WIDTH)).toBe(DAY_WIDTH * 2);
+    expect(snapOffsetPx(-DAY_WIDTH * 0.4, DAY_WIDTH)).toBe(0);
+    expect(snapOffsetPx(-DAY_WIDTH * 2.6, DAY_WIDTH)).toBe(-DAY_WIDTH * 3);
+  });
+
+  it("falls back to the raw offset when the day width is unknown", () => {
+    expect(snapOffsetPx(37, 0)).toBe(37);
+    expect(snapOffsetPx(37, Number.NaN)).toBe(37);
   });
 });
 

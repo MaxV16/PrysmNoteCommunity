@@ -14,6 +14,7 @@ import {
   computeDragDays,
   dragOffsetPx,
   resizePreviewRange,
+  snapOffsetPx,
   type BarDragMode,
 } from "@/lib/timeline-drag";
 
@@ -284,10 +285,11 @@ export function useTimelineBarDrag(
     const offset = s.offsetPx;
     if (s.mode === "move") {
       // Both axes so the bar follows the cursor; the lane it is over sets the
-      // section, and the x offset sets the days. A tiny compositor-only scale
-      // lifts the bar under the finger/cursor, so the grab reads as tactile
-      // without touching layout.
-      const transform = `translate3d(${offset}px, ${s.offsetYPx}px, 0) scale(1.03)`;
+      // section, and the x offset sets the days. Deliberately NO scale: scaling
+      // about the bar's centre pulled the grabbed point off the cursor on wide
+      // bars, so a task grabbed at its very start read as grabbed in the middle.
+      // The shadow lift (set on drag start) keeps the tactile cue.
+      const transform = `translate3d(${offset}px, ${s.offsetYPx}px, 0)`;
       if (transform !== s.lastTransform) {
         s.el.style.transform = transform;
         s.lastTransform = transform;
@@ -295,8 +297,12 @@ export function useTimelineBarDrag(
       }
       return;
     }
+    // A resize snaps to whole day columns while dragging, so the bar lands on a
+    // day boundary exactly where the drop commits instead of sliding variably
+    // between columns.
+    const snapped = snapOffsetPx(offset, s.dayWidth);
     if (s.mode === "resize-right") {
-      const width = `${Math.max(s.dayWidth, 8, s.startWidthPx + offset)}px`;
+      const width = `${Math.max(s.dayWidth, 8, s.startWidthPx + snapped)}px`;
       if (width !== s.lastWidth) {
         s.el.style.width = width;
         s.lastWidth = width;
@@ -306,13 +312,13 @@ export function useTimelineBarDrag(
     }
     // resize-left moves the left edge and keeps the right edge anchored, so the
     // bar extends left instead of growing off its fixed `left`.
-    const transform = `translate3d(${offset}px, 0, 0)`;
+    const transform = `translate3d(${snapped}px, 0, 0)`;
     if (transform !== s.lastTransform) {
       s.el.style.transform = transform;
       s.lastTransform = transform;
       previewTransformRef.current = true;
     }
-    const width = `${Math.max(s.dayWidth, 8, s.startWidthPx - offset)}px`;
+    const width = `${Math.max(s.dayWidth, 8, s.startWidthPx - snapped)}px`;
     if (width !== s.lastWidth) {
       s.el.style.width = width;
       s.lastWidth = width;
@@ -691,23 +697,20 @@ export function useTimelineBarDrag(
         // glide to the committed slot, so the bar lands instead of snapping.
         // Only the properties the preview actually wrote are animated.
         if (committed) {
+          // Only a move needs a glide: its preview is pixel-smooth, so the React
+          // slot swapped in under it must be eased from the last preview offset.
           const hasTransform = previewTransformRef.current;
-          const hasWidth = previewWidthRef.current;
-          if (hasTransform || hasWidth) {
+          if (s.mode === "move" && hasTransform) {
             const snappedPx = commitDaysUsed * s.dayWidth;
             glideRef.current = {
-              startTransform: hasTransform
-                ? `translate3d(${s.offsetPx - snappedPx}px, ${s.mode === "move" ? s.offsetYPx : 0}px, 0)`
-                : "",
-              endTransform: hasTransform ? "translate3d(0, 0, 0)" : "",
-              startWidth: hasWidth
-                ? `${s.mode === "resize-left" ? s.startWidthPx - s.offsetPx : s.startWidthPx + s.offsetPx}px`
-                : "",
-              endWidth: hasWidth
-                ? `${s.mode === "resize-left" ? s.startWidthPx - snappedPx : s.startWidthPx + snappedPx}px`
-                : "",
+              startTransform: `translate3d(${s.offsetPx - snappedPx}px, ${s.offsetYPx}px, 0)`,
+              endTransform: "translate3d(0, 0, 0)",
+              startWidth: "",
+              endWidth: "",
             };
           }
+          // A resize preview is already snapped to whole day columns, so it
+          // matches the committed slot exactly; the layout effect just clears it.
         }
         previewSigRef.current = "";
         setResizePreview(null);
