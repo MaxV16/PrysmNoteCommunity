@@ -294,7 +294,7 @@ async fn chat(
     let sanitized = sanitize_chat_history(&req.chat_history);
     let (current_summary, memories) =
         load_summary_and_memories(&state, user.user_id, session_id, &req.message).await?;
-    let premium = ai_tools::is_premium();
+    let premium = ai_tools::is_premium_for(&state.pool, user.user_id).await;
     let tools = Value::Array(ai_tools::tools_for_user(premium));
     let mut messages = ai_prompt::build_messages(
         &sanitized,

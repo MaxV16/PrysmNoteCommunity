@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 use serde_json::Value;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::ai_execute::ToolResult;
@@ -43,6 +44,9 @@ pub trait EeAgentTools: Send + Sync {
     fn tool_definitions(&self) -> Vec<Value>;
     /// All EE tool names (removed for free users).
     fn tool_names(&self) -> Vec<String>;
+    /// EE tool names that stay available to free users even though they are
+    /// enterprise-provided (for example the free-capped countdown tools).
+    fn free_names(&self) -> Vec<String>;
     /// EE finance tool names (the money-routing safety net).
     fn finance_names(&self) -> Vec<String>;
     /// Dispatch an EE tool, returning None when the name is not handled here.
@@ -114,9 +118,19 @@ fn ee_tool_definitions() -> Vec<Value> {
     }
 }
 
-/// Tool definitions for a request, minus EE tools for free users. In the
-/// community build `ee_tool_names()` is empty, so this is the full core set
-/// (mirrors the Python `tools_for_user`).
+/// EE tool names that remain available to free users (the EE provider decides
+/// which, for example the free-capped countdown tools).
+fn ee_free_names() -> Vec<String> {
+    match ee_agent_tools() {
+        Some(tools) => tools.free_names(),
+        None => Vec::new(),
+    }
+}
+
+/// Tool definitions for a request, minus the premium EE tools for free users.
+/// EE tools the provider marks as free (`free_names`) are kept. In the community
+/// build `ee_tool_names()` is empty, so this is the full core set (mirrors the
+/// Python `tools_for_user`).
 pub fn tools_for_user(premium: bool) -> Vec<Value> {
     let mut all = tool_definitions().to_vec();
     all.extend(ee_tool_definitions());
@@ -127,22 +141,47 @@ pub fn tools_for_user(premium: bool) -> Vec<Value> {
     if ee.is_empty() {
         return all;
     }
+    let free = ee_free_names();
     all.retain(|t| {
         let name = t
             .get("function")
             .and_then(|f| f.get("name"))
             .and_then(|n| n.as_str())
             .unwrap_or("");
-        !ee.iter().any(|n| n == name)
+        if !ee.iter().any(|n| n == name) {
+            return true; // core tool
+        }
+        // Enterprise tool: keep it only when the provider marks it free.
+        free.iter().any(|n| n == name)
     });
     all
 }
 
-/// The community build has no entitlement provider, so every user can use the
-/// full (here, core) tool set. The private build replaces this with a real
-/// subscription check.
-pub fn is_premium() -> bool {
-    true
+/// Premium-check provider installed by the private build. The community build
+/// registers none, so every user is treated as eligible for the full core set.
+pub trait AiPremiumCheck: Send + Sync {
+    fn is_premium<'a>(
+        &'a self,
+        pool: &'a PgPool,
+        user_id: Uuid,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+}
+
+static AI_PREMIUM_CHECK: OnceLock<Box<dyn AiPremiumCheck>> = OnceLock::new();
+
+/// Install the Premium-check provider (called once by the private build).
+pub fn register_premium_check(check: Box<dyn AiPremiumCheck>) {
+    let _ = AI_PREMIUM_CHECK.set(check);
+}
+
+/// Whether the caller's subscription grants Premium (active plan or 14-day
+/// trial). The private build installs the subscription-backed check; the
+/// community build has none, so the full core tool set is available.
+pub async fn is_premium_for(pool: &PgPool, user_id: Uuid) -> bool {
+    match AI_PREMIUM_CHECK.get() {
+        Some(check) => check.is_premium(pool, user_id).await,
+        None => true,
+    }
 }
 
 fn refusal_patterns() -> &'static Regex {
@@ -280,6 +319,23 @@ mod tests {
     fn tools_for_user_returns_all_for_premium() {
         assert_eq!(tools_for_user(true).len(), tool_definitions().len());
         assert_eq!(tools_for_user(false).len(), tool_definitions().len());
+    }
+
+    #[test]
+    fn community_has_no_ee_tools_or_free_names() {
+        // No EE provider is registered in the core build.
+        assert!(ee_tool_names().is_empty());
+        assert!(ee_free_names().is_empty());
+    }
+
+    #[tokio::test]
+    async fn premium_check_defaults_to_true_without_a_provider() {
+        // No provider registered: every user is eligible for the full set. A
+        // lazy pool is enough because the default path never touches the DB.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://prysm:prysm@localhost:5432/prysm")
+            .expect("lazy pool");
+        assert!(is_premium_for(&pool, uuid::Uuid::nil()).await);
     }
 
     #[test]

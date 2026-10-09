@@ -310,7 +310,7 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
         (summary, memories)
     };
 
-    let premium = ai_tools::is_premium();
+    let premium = ai_tools::is_premium_for(&state.pool, user_id).await;
     let tools = Value::Array(ai_tools::tools_for_user(premium));
     let mut messages = ai_prompt::build_messages(
         &job.sanitized_history,

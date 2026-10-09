@@ -18,7 +18,7 @@ export const TimelineGrid = memo(function TimelineGrid({ days, dayWidth = 120 }:
   const todayStr = useMemo(() => todayStart().toISOString(), []);
 
   return (
-    <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{ top: DAY_HEADER_HEIGHT, minHeight: `calc(100% - ${DAY_HEADER_HEIGHT}px)` }}>
+    <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{ top: DAY_HEADER_HEIGHT, minHeight: `calc(100% - ${DAY_HEADER_HEIGHT}px)`, backgroundColor: "var(--timeline-bg)" }}>
       {/* Vertical day columns */}
       <div className="flex" style={{ minHeight: "100%" }}>
         {days.map((day, index) => {

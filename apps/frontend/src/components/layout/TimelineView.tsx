@@ -1181,7 +1181,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
-            <span className="mx-1 hidden text-xs font-medium text-muted sm:inline">{monthLabel}</span>
+            <span className="mx-1 text-[11px] font-medium text-muted sm:text-xs">{monthLabel}</span>
           </div>
         )}
 

@@ -37,6 +37,8 @@ const CHAT_HISTORY_KEY = "prysm_ai_chat_history";
 const ACTIVE_CHAT_KEY = "prysm_ai_active_chat";
 const UPSELL_DISMISS_KEY = "prysm_ai_upsell_dismissed_at";
 const UPSELL_DISMISS_MS = 14 * 24 * 60 * 60 * 1000;
+const PRYSMAI_NUDGE_DISMISS_KEY = "prysm_ai_prysmai_nudge_dismissed_at";
+const PRYSMAI_NUDGE_DISMISS_MS = 30 * 24 * 60 * 60 * 1000;
 
 const AI_EXAMPLE_PROMPTS = [
   "Plan my week from a quick brain dump",
@@ -257,13 +259,40 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
     timestamp: s.timestamp,
   }));
 
-  // Free tier: no AI at all (no PrysmAI, no BYOK). Show a value-first,
-  // dismissible prompt instead of a hard lock. The community build has no gate
-  // and always sees BYOK.
+  // A free or lapsed account keeps BYOK access (mode "byok"), so AI is usable
+  // with the user's own key. "none" only appears on an entitlement lookup
+  // failure, where we show the value-first upsell instead of a hard lock. The
+  // community build has no gate and always sees BYOK.
   const aiLocked = entitlement?.mode === "none";
   const [upsellDismissed, setUpsellDismissed] = useState(false);
   const [upsellExpanded, setUpsellExpanded] = useState(false);
   const upsellShownRef = useRef(false);
+
+  // Non-blocking PrysmAI nudge for BYOK users (free or pay-as-you-go): keep the
+  // own-key path working, but offer the hosted plan.
+  const [prysmaiNudgeDismissed, setPrysmaiNudgeDismissed] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(PRYSMAI_NUDGE_DISMISS_KEY);
+      const ts = raw ? Number(raw) : 0;
+      if (Number.isFinite(ts) && ts > 0 && Date.now() - ts < PRYSMAI_NUDGE_DISMISS_MS) {
+        setPrysmaiNudgeDismissed(true);
+      }
+    } catch {
+      /* storage unavailable: treat as not dismissed */
+    }
+  }, []);
+
+  const dismissPrysmaiNudge = useCallback(() => {
+    setPrysmaiNudgeDismissed(true);
+    try {
+      localStorage.setItem(PRYSMAI_NUDGE_DISMISS_KEY, String(Date.now()));
+    } catch {
+      /* storage unavailable: keep the in-memory choice */
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -315,6 +344,30 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
         historyOpen={historyOpen}
         onClose={onClose}
       />
+
+      {entitlement?.mode === "byok" && !prysmaiNudgeDismissed && (
+        <div className="flex items-center gap-2 border-b border-border bg-accent/5 px-3 py-1.5">
+          <svg className="shrink-0 text-accent" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          <p className="min-w-0 flex-1 text-[11px] text-secondary">
+            Want hosted PrysmAI? Start the 14-day free trial. Your own key works on any plan.
+          </p>
+          <a
+            href="/settings?tab=premium"
+            onClick={() => track("upgrade_clicked", { source: "ai_panel", variant: "prysmai_nudge" })}
+            className="shrink-0 text-[11px] font-semibold text-accent hover:text-accent-hover"
+          >
+            Try free
+          </a>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={dismissPrysmaiNudge}
+            className="shrink-0 rounded p-0.5 text-muted hover:text-primary"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      )}
 
       <AIHistory
         open={historyOpen}

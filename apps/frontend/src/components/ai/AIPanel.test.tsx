@@ -75,4 +75,16 @@ describe("AIPanel EU AI Act Art. 50(1) disclosure", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/Hosted models vary by region/)).toBeInTheDocument();
   });
+
+  it("nudges BYOK users toward hosted PrysmAI without blocking their own key", async () => {
+    apiGet.mockResolvedValue({
+      mode: "byok",
+      allowance: 0,
+      used: 0,
+      remaining: null,
+      blocked: false,
+    });
+    render(<AIPanel onClose={() => {}} />);
+    expect(await screen.findByText(/Want hosted PrysmAI/)).toBeInTheDocument();
+  });
 });
