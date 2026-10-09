@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useUiScale } from "@/lib/ui-scale-context";
 
 export const DAY_WIDTH = 120;
 export const DAY_HEADER_HEIGHT = 56;
@@ -33,16 +34,41 @@ export const DEFAULT_ZOOM: ZoomLevel = 1.0;
  * density live when a phone rotates or a desktop window resizes.
  */
 export function useResponsiveDayWidth(zoom: ZoomLevel = DEFAULT_ZOOM): number {
-  const [width, setWidth] = useState(() => DAY_WIDTH * zoom);
+  const { scale } = useUiScale();
+  const [width, setWidth] = useState(() => DAY_WIDTH * zoom * scale);
   useEffect(() => {
     const update = () => {
       const vw = typeof window === "undefined" ? 120 : window.innerWidth;
       const base = Math.round(Math.min(DAY_WIDTH, Math.max(56, vw * 0.15)));
-      setWidth(base * zoom);
+      setWidth(Math.round(base * zoom * scale));
     };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
-  }, [zoom]);
+  }, [zoom, scale]);
   return width;
+}
+
+export interface TimelineMetrics {
+  barHeight: number;
+  barGap: number;
+  topPadding: number;
+}
+
+/**
+ * Row metrics scaled by the device-local interface size. The lane layout and the
+ * bars must read the same numbers or rows would overlap, so both derive them
+ * from here. Bars keep a sane floor (24px) so they never become untappable when
+ * the interface is scaled down.
+ */
+export function useTimelineMetrics(): TimelineMetrics {
+  const { scale } = useUiScale();
+  return useMemo(
+    () => ({
+      barHeight: Math.max(24, Math.round(BAR_HEIGHT * scale)),
+      barGap: Math.max(4, Math.round(BAR_GAP * scale)),
+      topPadding: Math.max(2, Math.round(TOP_PADDING * scale)),
+    }),
+    [scale]
+  );
 }

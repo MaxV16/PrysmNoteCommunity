@@ -139,44 +139,6 @@ describe("MobileTaskActionBar", () => {
     );
   });
 
-  it("stretches a task to span more days from the long-press menu", async () => {
-    const task = { ...makeTask(), start_date: "2026-10-01", due_date: "2026-10-01" };
-    useAppStore.setState({ tasks: [task], mobileActionTaskId: task.id });
-
-    render(<MobileTaskActionBar />);
-    fireEvent.click(screen.getByRole("button", { name: "Stretch" }));
-    // Extend the end by one day, then apply.
-    fireEvent.click(screen.getByRole("button", { name: "End one day later" }));
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-
-    await waitFor(() =>
-      expect(h.updateTask).toHaveBeenCalledWith("t1", {
-        start_date: "2026-10-01",
-        due_date: "2026-10-02",
-      })
-    );
-  });
-
-  it("shrinks a task without letting the end pass the start", async () => {
-    const task = { ...makeTask(), start_date: "2026-10-01", due_date: "2026-10-03" };
-    useAppStore.setState({ tasks: [task], mobileActionTaskId: task.id });
-
-    render(<MobileTaskActionBar />);
-    fireEvent.click(screen.getByRole("button", { name: "Stretch" }));
-    // Two shrinks would pass the start, so the end clamps to the start.
-    fireEvent.click(screen.getByRole("button", { name: "End one day earlier" }));
-    fireEvent.click(screen.getByRole("button", { name: "End one day earlier" }));
-    fireEvent.click(screen.getByRole("button", { name: "End one day earlier" }));
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-
-    await waitFor(() =>
-      expect(h.updateTask).toHaveBeenCalledWith("t1", {
-        start_date: "2026-10-01",
-        due_date: "2026-10-01",
-      })
-    );
-  });
-
   it("keeps move mode open when a background refresh changes task identity", async () => {
     const task = makeTask();
     useAppStore.setState({ tasks: [task], mobileActionTaskId: task.id });

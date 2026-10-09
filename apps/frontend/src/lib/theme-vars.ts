@@ -28,6 +28,7 @@ export const KNOWN_CSS_VARS: ReadonlySet<string> = new Set([
   "--ring",
   "--weekend-tint",
   "--timeline-bg",
+  "--ui-scale",
   "--radius-xs",
   "--radius-sm",
   "--radius-md",
@@ -59,6 +60,7 @@ export const KNOWN_CSS_VARS: ReadonlySet<string> = new Set([
 export const NON_THEME_CSS_VARS: ReadonlySet<string> = new Set([
   "--desktop-titlebar",
   "--timeline-bg",
+  "--ui-scale",
   "--dur-fast",
   "--dur-base",
   "--dur-slow",

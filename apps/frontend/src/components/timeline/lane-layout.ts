@@ -1,7 +1,7 @@
 import type { Task } from "@/types/task";
 import { parseLocalDate } from "@/lib/utils";
 import { todayStart } from "@/lib/dates";
-import { BAR_HEIGHT, BAR_GAP, TOP_PADDING, SECTION_BOTTOM_PADDING } from "./constants";
+import { BAR_HEIGHT, BAR_GAP, TOP_PADDING, SECTION_BOTTOM_PADDING, type TimelineMetrics } from "./constants";
 
 export interface PositionedTask {
   task: Task;
@@ -77,13 +77,16 @@ function todayIndex(days: Date[]): number {
  * label column use this so their heights line up exactly; keeping one algorithm
  * avoids the cumulative misalignment that comes from guessing each height.
  */
-export function computeLaneLayout(tasks: Task[], days: Date[]): {
+export function computeLaneLayout(tasks: Task[], days: Date[], metrics?: TimelineMetrics): {
   positioned: PositionedTask[];
   maxStack: number;
   height: number;
 } {
+  const barHeight = metrics?.barHeight ?? BAR_HEIGHT;
+  const barGap = metrics?.barGap ?? BAR_GAP;
+  const topPadding = metrics?.topPadding ?? TOP_PADDING;
   if (days.length === 0) {
-    return { positioned: [], maxStack: 0, height: TOP_PADDING * 2 + SECTION_BOTTOM_PADDING };
+    return { positioned: [], maxStack: 0, height: topPadding * 2 + SECTION_BOTTOM_PADDING };
   }
 
   // Day column index for "today", used to place undated (inbox) tasks so they
@@ -163,11 +166,11 @@ export function computeLaneLayout(tasks: Task[], days: Date[]): {
       left: `${info.index * (100 / days.length)}%`,
       width: `${(info.endIndex - info.index + 1) * (100 / days.length)}%`,
       dayIndex: info.index,
-      top: TOP_PADDING + row * (BAR_HEIGHT + BAR_GAP),
+      top: topPadding + row * (barHeight + barGap),
     },
   }));
 
   const height =
-    TOP_PADDING * 2 + Math.max(1, totalRows) * (BAR_HEIGHT + BAR_GAP) - BAR_GAP + SECTION_BOTTOM_PADDING;
+    topPadding * 2 + Math.max(1, totalRows) * (barHeight + barGap) - barGap + SECTION_BOTTOM_PADDING;
   return { positioned, maxStack: totalRows, height };
 }

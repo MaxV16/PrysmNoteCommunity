@@ -6,7 +6,9 @@ import {
   computeDragDays,
   dragOffsetPx,
   resizePreviewRange,
+  resizePreviewSpan,
   snapOffsetPx,
+  taskSpanDays,
 } from "./timeline-drag";
 
 const DAY_WIDTH = 120;
@@ -213,5 +215,41 @@ describe("resizePreviewRange", () => {
 
   it("returns null when the task has no date to anchor on", () => {
     expect(resizePreviewRange(makeTask(), 3, "left")).toBeNull();
+  });
+});
+
+describe("taskSpanDays", () => {
+  it("counts both bounds inclusively", () => {
+    expect(
+      taskSpanDays(makeTask({ start_date: "2026-09-10", due_date: "2026-09-12" }))
+    ).toBe(3);
+  });
+
+  it("treats a single dated task as one day", () => {
+    expect(taskSpanDays(makeTask({ start_date: "2026-09-10" }))).toBe(1);
+    expect(taskSpanDays(makeTask({ due_date: "2026-09-10" }))).toBe(1);
+  });
+
+  it("uses the anchor day for an undated task", () => {
+    expect(taskSpanDays(makeTask())).toBe(1);
+  });
+});
+
+describe("resizePreviewSpan", () => {
+  it("grows the span on a right resize without moving the left edge", () => {
+    expect(resizePreviewSpan(3, 2, "right")).toEqual({ spanDays: 5, leftShiftDays: 0 });
+  });
+
+  it("shrinks but never collapses a right resize below one day", () => {
+    expect(resizePreviewSpan(3, -5, "right")).toEqual({ spanDays: 1, leftShiftDays: 0 });
+  });
+
+  it("grows a left resize by moving the left edge without changing the due", () => {
+    // span 3, drag the left edge two days left: span 5, leftShiftDays -2.
+    expect(resizePreviewSpan(3, -2, "left")).toEqual({ spanDays: 5, leftShiftDays: -2 });
+  });
+
+  it("shrinks a left resize and clamps so the span stays at least one day", () => {
+    expect(resizePreviewSpan(3, 5, "left")).toEqual({ spanDays: 1, leftShiftDays: 2 });
   });
 });

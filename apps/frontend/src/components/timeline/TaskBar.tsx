@@ -8,6 +8,7 @@ import { TIER_COLORS, TIER_LABELS, normalizePriority, type PriorityTier } from "
 import { taskTimeLabel } from "@/lib/task-time";
 import { parseLocalDate } from "@/lib/utils";
 import { useTimelineBarDrag } from "@/hooks/useTimelineBarDrag";
+import { useUiScale } from "@/lib/ui-scale-context";
 import { BAR_HEIGHT } from "./constants";
 
 /** Compact "Mar 5 - Mar 12" label for the live resize preview. */
@@ -30,16 +31,30 @@ interface TaskBarProps {
 /**
  * A resize handle on the left or right edge of a task bar. It shares the bar's
  * pointer engine (so move/resize/auto-scroll all behave the same) and is a
- * comfortable 12px hit area, pointer-enabled on both mouse and touch.
+ * touch-sized hit area that sits just outside the bar edge, so a finger can
+ * grab it on a phone. It is hidden until the bar is hovered or the task is
+ * armed by a long press, and it activates on movement like a mouse so a touch
+ * grab resizes immediately.
  */
-function ResizeHandle({ task, side, disabled }: { task: Task; side: "left" | "right"; disabled?: boolean }) {
+function ResizeHandle({
+  task,
+  side,
+  disabled,
+  armed,
+}: {
+  task: Task;
+  side: "left" | "right";
+  disabled?: boolean;
+  armed?: boolean;
+}) {
   const { ref, onPointerDown, resizePreview } = useTimelineBarDrag(
     task,
     side === "left" ? "resize-left" : "resize-right",
-    disabled
+    disabled,
+    { touchActivateOnMove: true }
   );
-  // The bar clips its children (overflow: hidden), so the preview badge is
-  // portaled to the body and pinned just above the bar using its live rect.
+  // The preview badge is portaled to the body and pinned just above the bar
+  // using its live rect.
   const [badgePos, setBadgePos] = useState<{ top: number; left: number } | null>(null);
   useEffect(() => {
     if (!resizePreview || !ref.current) {
@@ -58,16 +73,23 @@ function ResizeHandle({ task, side, disabled }: { task: Task; side: "left" | "ri
         role="separator"
         aria-orientation="vertical"
         aria-label={`${side === "left" ? "Resize start" : "Resize end"}`}
-        className="absolute inset-y-0 z-10"
+        className={`absolute inset-y-0 z-10 flex items-center justify-center transition-opacity duration-150 ${
+          armed ? "opacity-100" : "opacity-0 group-hover/bar:opacity-100 group-focus-within/bar:opacity-100"
+        }`}
         style={{
-          [side]: side === "left" ? "-3px" : undefined,
-          right: side === "right" ? "-3px" : undefined,
-          width: 12,
+          [side]: side === "left" ? "-8px" : undefined,
+          right: side === "right" ? "-8px" : undefined,
+          width: 24,
           cursor: side === "left" ? "w-resize" : "e-resize",
           touchAction: "none",
           pointerEvents: "auto",
         }}
-      />
+      >
+        <span
+          className="pointer-events-none h-4 w-1 rounded-full bg-primary/80 shadow-sm"
+          aria-hidden="true"
+        />
+      </div>
       {resizePreview &&
         badgePos &&
         typeof document !== "undefined" &&
@@ -91,6 +113,12 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
   const { ref, onPointerDown, dragging } = useTimelineBarDrag(task, "move", dragDisabled, {
     onLongPress: () => useAppStore.getState().setMobileActionTaskId(task.id),
   });
+  // When this task is armed by a long press, its resize handles stay visible so
+  // the finger can grab one without hovering. On desktop they show on hover.
+  const armed = useAppStore((s) => s.mobileActionTaskId === task.id);
+  // Bar height follows the device-local interface size (floor 24px) so a task
+  // shrinks with the rest of the UI but stays tappable.
+  const { scale } = useUiScale();
   // Which pointer started the current press. A touch hold already opens the
   // bottom action bar, so the floating right-click menu must stay closed on
   // touch (it would duplicate the same actions and cover the task being moved).
@@ -105,7 +133,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
   const barStyle = {
     ...style,
     position: "absolute",
-    height: BAR_HEIGHT,
+    height: Math.max(24, Math.round(BAR_HEIGHT * scale)),
     backgroundColor: colors.bg,
     backgroundClip: "padding-box",
     border: `1px solid ${colors.border}`,
@@ -124,7 +152,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
     WebkitUserSelect: "none",
     WebkitUserDrag: "none",
     minWidth: 0,
-    overflow: "hidden",
+    overflow: "visible",
     zIndex: dragging ? 100 : 20,
     opacity: isDone ? 0.65 : 1,
     boxShadow: [
@@ -183,17 +211,19 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
         onContextMenu?.(e, task);
       }}
       title={`${task.title}${timeLabel ? ` (${timeLabel})` : ""}${task.description ? " - " + task.description : ""}`}
-      className={`transition-[filter] hover:brightness-110 ${
+      className={`group/bar transition-[filter] hover:brightness-110 ${
         dragging ? "ring-2 ring-accent/40" : isInProgress ? "animate-pulse-subtle" : ""
       }`}
     >
       {/* Resize handles: drag the left edge to move the start date, the right
           edge to move the due date, extending/contracting the task. */}
-      <ResizeHandle task={task} side="left" disabled={dragDisabled} />
-      <ResizeHandle task={task} side="right" disabled={dragDisabled} />
+      <ResizeHandle task={task} side="left" disabled={dragDisabled} armed={armed} />
+      <ResizeHandle task={task} side="right" disabled={dragDisabled} armed={armed} />
       {/* Label is capped so a task spanning many weeks reads as a band with a
-          title at its start instead of a wall of text running off-screen. */}
-      <div className="flex min-w-0 flex-1 items-center gap-1.5" style={{ maxWidth: 320 }}>
+          title at its start instead of a wall of text running off-screen. It
+          clips its own text since the bar no longer clips (the handles sit
+          just outside the edges). */}
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden" style={{ maxWidth: 320 }}>
         {timeLabel && (
           <span className="shrink-0 rounded-full bg-surface/70 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
             {timeLabel}

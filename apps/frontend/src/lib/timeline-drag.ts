@@ -130,3 +130,42 @@ export function resizePreviewRange(
     due: changed.due_date ?? baseDue,
   };
 }
+
+/**
+ * Inclusive day span a task currently occupies, from its dates. A task with one
+ * or no date occupies a single day. Used by the resize preview so a bar is
+ * drawn from its real span instead of its rendered (possibly slice-clamped)
+ * pixel width, which is what made a long task collapse to a tiny bar the moment
+ * you started dragging a handle.
+ */
+export function taskSpanDays(task: Task): number {
+  const baseStart = task.start_date ?? task.due_date ?? null;
+  const baseDue = task.due_date ?? task.start_date ?? null;
+  if (!baseStart || !baseDue) return 1;
+  const lo = parseLocalDate(baseStart <= baseDue ? baseStart : baseDue);
+  const hi = parseLocalDate(baseStart <= baseDue ? baseDue : baseStart);
+  const diff = Math.round((hi.getTime() - lo.getTime()) / 86400000);
+  return Math.max(1, diff + 1);
+}
+
+/**
+ * The whole-day span a resize drag is showing right now, from the task's base
+ * span and the day delta of the gesture. Mirrors `applyResizeDays` in days:
+ * the right handle grows/shrinks the end, the left handle moves the start, and
+ * the span is clamped to at least one day. `leftShiftDays` is how many days the
+ * left edge has moved (negative means it moved earlier), so a left resize keeps
+ * its right edge anchored. Working in days, not pixels, is what keeps the live
+ * preview exactly equal to the committed slot.
+ */
+export function resizePreviewSpan(
+  baseSpanDays: number,
+  days: number,
+  side: "left" | "right"
+): { spanDays: number; leftShiftDays: number } {
+  const span = Math.max(1, Math.round(baseSpanDays));
+  if (side === "right") {
+    return { spanDays: Math.max(1, span + days), leftShiftDays: 0 };
+  }
+  const clamped = Math.min(days, span - 1);
+  return { spanDays: Math.max(1, span - clamped), leftShiftDays: clamped };
+}

@@ -14,7 +14,8 @@ import {
   computeDragDays,
   dragOffsetPx,
   resizePreviewRange,
-  snapOffsetPx,
+  resizePreviewSpan,
+  taskSpanDays,
   type BarDragMode,
 } from "@/lib/timeline-drag";
 
@@ -142,6 +143,10 @@ interface DragSession {
   mode: BarDragMode;
   sectionIds: ReadonlySet<string>;
   startWidthPx: number;
+  /** The task's inclusive day span at press time; the resize preview grows or
+   * shrinks this, so the bar is drawn from real days instead of its rendered
+   * (possibly slice-clamped) pixel width. */
+  spanDays: number;
   offsetPx: number;
   offsetYPx: number;
   /** undefined = pointer is not over any lane or section label. */
@@ -161,6 +166,9 @@ interface DragSession {
   holdToDrag: boolean;
   /** True once the pointer has moved past ~2px, used to suppress the trailing click. */
   hasMoved: boolean;
+  /** Touch only: movement activates immediately (no 400ms hold and no pan),
+   * used by the touch resize handles so grabbing one resizes right away. */
+  touchActivateOnMove: boolean;
   lastTransform: string;
   lastWidth: string;
   lastHitX: number;
@@ -239,7 +247,7 @@ export function useTimelineBarDrag(
   task: Task,
   mode: BarDragMode,
   disabled?: boolean,
-  options?: { onLongPress?: () => void }
+  options?: { onLongPress?: () => void; touchActivateOnMove?: boolean }
 ) {
   const ctx = useContext(TimelineDragContext);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -297,12 +305,19 @@ export function useTimelineBarDrag(
       }
       return;
     }
-    // A resize snaps to whole day columns while dragging, so the bar lands on a
-    // day boundary exactly where the drop commits instead of sliding variably
-    // between columns.
-    const snapped = snapOffsetPx(offset, s.dayWidth);
+    // A resize works in whole days, not pixels: it takes the task's real span
+    // and grows/shrinks it by the rounded day delta, so the bar is drawn on day
+    // boundaries and its live width equals the slot the drop commits. Driving
+    // this from the rendered pixel width instead let a long or slice-clamped
+    // task collapse to a tiny bar and disagree with the committed dates.
+    const dayDelta = s.dayWidth > 0 ? Math.round(offset / s.dayWidth) : 0;
+    const span = resizePreviewSpan(
+      s.spanDays,
+      dayDelta,
+      s.mode === "resize-left" ? "left" : "right"
+    );
     if (s.mode === "resize-right") {
-      const width = `${Math.max(s.dayWidth, 8, s.startWidthPx + snapped)}px`;
+      const width = `${span.spanDays * s.dayWidth}px`;
       if (width !== s.lastWidth) {
         s.el.style.width = width;
         s.lastWidth = width;
@@ -312,13 +327,14 @@ export function useTimelineBarDrag(
     }
     // resize-left moves the left edge and keeps the right edge anchored, so the
     // bar extends left instead of growing off its fixed `left`.
-    const transform = `translate3d(${snapped}px, 0, 0)`;
+    const leftShift = span.leftShiftDays * s.dayWidth;
+    const transform = `translate3d(${leftShift}px, 0, 0)`;
     if (transform !== s.lastTransform) {
       s.el.style.transform = transform;
       s.lastTransform = transform;
       previewTransformRef.current = true;
     }
-    const width = `${Math.max(s.dayWidth, 8, s.startWidthPx - snapped)}px`;
+    const width = `${span.spanDays * s.dayWidth}px`;
     if (width !== s.lastWidth) {
       s.el.style.width = width;
       s.lastWidth = width;
@@ -568,6 +584,13 @@ export function useTimelineBarDrag(
     }
 
     if (!s.active) {
+      if (s.touchActivateOnMove) {
+        // The touch resize handles activate on movement, like a mouse, so a
+        // finger grab on the handle resizes right away instead of panning the
+        // canvas or waiting for the hold.
+        if (Math.hypot(dx, dy) >= POINTER_ACTIVATION_DISTANCE) activateRef.current();
+        return;
+      }
       if (s.holdToDrag) {
         if (s.moveDisabled) {
           // A drag-disabled bar is never picked up. Movement past the single
@@ -811,6 +834,7 @@ export function useTimelineBarDrag(
         // Measured once at activation, and only for a resize gesture; a move
         // drag never needs the bar width.
         startWidthPx: 0,
+        spanDays: taskSpanDays(taskRef.current),
         offsetPx: 0,
         offsetYPx: 0,
         dropSectionId: undefined,
@@ -822,6 +846,7 @@ export function useTimelineBarDrag(
         panning: false,
         holdToDrag: isTouch,
         hasMoved: false,
+        touchActivateOnMove: isTouch && !!optionsRef.current?.touchActivateOnMove,
         lastTransform: "",
         lastWidth: "",
         lastHitX: e.clientX,
@@ -837,7 +862,7 @@ export function useTimelineBarDrag(
       // is picked up, or (when the drag is disabled) it offers its action bar on
       // release. Nothing here depends on the window width, so the same press
       // means the same thing on a phone and a tablet.
-      if (s.holdToDrag) {
+      if (s.holdToDrag && !s.touchActivateOnMove) {
         s.holdTimer = window.setTimeout(() => {
           s.holdTimer = 0;
           if (sessionRef.current !== s || s.panning) return;

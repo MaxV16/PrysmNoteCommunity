@@ -5,7 +5,7 @@ import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
 import { TaskBar } from "./TaskBar";
 import { computeLaneLayout } from "./lane-layout";
-import { MIN_LANE_HEIGHT } from "./constants";
+import { MIN_LANE_HEIGHT, useTimelineMetrics } from "./constants";
 
 interface TimelineLaneProps {
   tasks: Task[];
@@ -156,7 +156,8 @@ export const TimelineLane = memo(function TimelineLane({ tasks, days, dayWidth =
   // O(1) membership per bar instead of an O(n) `includes` scan per bar (which
   // is O(n^2) across a lane) on every selection change or parent render.
   const selectedSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
-  const { positioned, height } = useMemo(() => computeLaneLayout(tasks, days), [tasks, days]);
+  const metrics = useTimelineMetrics();
+  const { positioned, height } = useMemo(() => computeLaneLayout(tasks, days, metrics), [tasks, days, metrics]);
   const laneHeight = rowHeight ?? height;
 
   const handleDayDoubleClick = useCallback(

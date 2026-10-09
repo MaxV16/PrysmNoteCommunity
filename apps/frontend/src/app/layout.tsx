@@ -3,6 +3,7 @@ import "./globals.css";
 import { DynamicFontLoader } from "@/lib/dynamic-font-loader";
 import { AuthProvider } from "@/lib/auth-context";
 import { ThemeProvider } from "@/lib/theme-context";
+import { UiScaleProvider } from "@/lib/ui-scale-context";
 import { ToastProvider } from "@/lib/toast-context";
 import { SubscriptionProvider } from "@/lib/subscription-context";
 import { UpdateBanner } from "@/components/ui/UpdateBanner";
@@ -73,17 +74,19 @@ export default function RootLayout({
         <DesktopTitlebar />
         <CapbridgeInit />
         <ThemeProvider>
-          <DynamicFontLoader />
-          <AuthProvider>
-            <SubscriptionProvider>
-              <ToastProvider>
-                <OfflineBanner />
-                {children}
-                <UpdateBanner />
-                <CookieBanner />
-              </ToastProvider>
-            </SubscriptionProvider>
-          </AuthProvider>
+          <UiScaleProvider>
+            <DynamicFontLoader />
+            <AuthProvider>
+              <SubscriptionProvider>
+                <ToastProvider>
+                  <OfflineBanner />
+                  {children}
+                  <UpdateBanner />
+                  <CookieBanner />
+                </ToastProvider>
+              </SubscriptionProvider>
+            </AuthProvider>
+          </UiScaleProvider>
         </ThemeProvider>
         {CF_ANALYTICS_BEACON ? (
           <Script
