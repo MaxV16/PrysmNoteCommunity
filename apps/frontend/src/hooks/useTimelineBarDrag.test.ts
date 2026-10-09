@@ -6,6 +6,7 @@ import {
   useTimelineBarDrag,
   type TimelineBarCommit,
 } from "./useTimelineBarDrag";
+import type { BarDragMode } from "@/lib/timeline-drag";
 import type { Task } from "@/types/task";
 
 function makeTask(partial: Partial<Task> = {}): Task {
@@ -38,13 +39,17 @@ function makeTask(partial: Partial<Task> = {}): Task {
 function Harness(props: {
   onLongPress: () => void;
   disabled?: boolean;
+  mode?: BarDragMode;
 }) {
-  const drag = useTimelineBarDrag(makeTask(), "move", props.disabled, {
+  const mode = props.mode ?? "move";
+  const drag = useTimelineBarDrag(makeTask(), mode, props.disabled, {
     onLongPress: props.onLongPress,
+    // A touch resize handle activates on movement, like a mouse.
+    touchActivateOnMove: mode !== "move",
   });
   return createElement(
     "div",
-    { "data-timeline-body": "" },
+    { "data-timeline-body": "", "data-testid": "body" },
     createElement("div", {
       ref: drag.ref,
       "data-task-bar": "",
@@ -68,7 +73,9 @@ function pointerEvent(type: string, init: Record<string, unknown>): Event {
   return ev;
 }
 
-function setup(opts: { disabled?: boolean; matchMediaMatches?: boolean } = {}) {
+function setup(
+  opts: { disabled?: boolean; matchMediaMatches?: boolean; mode?: BarDragMode } = {}
+) {
   const commits: TimelineBarCommit[] = [];
   const longPresses: number[] = [];
   const onLongPress = () => {
@@ -98,13 +105,18 @@ function setup(opts: { disabled?: boolean; matchMediaMatches?: boolean } = {}) {
           },
         },
       },
-      createElement(Harness, { onLongPress, disabled: opts.disabled })
+      createElement(Harness, {
+        onLongPress,
+        disabled: opts.disabled,
+        mode: opts.mode,
+      })
     )
   );
 
   return {
     ...utils,
     bar: utils.getByTestId("bar"),
+    body: utils.getByTestId("body"),
     commits,
     longPresses,
     matchMediaSpy,
@@ -299,5 +311,66 @@ describe("useTimelineBarDrag gesture contract", () => {
     up(160, 100, "touch");
     expect(h3.commits).toHaveLength(1);
     expect(h3.getByTestId("dragging").textContent).toBe("false");
+  });
+});
+
+describe("useTimelineBarDrag edge auto-scroll gate", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 16)
+    );
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  // jsdom leaves clientWidth/Height at 0, which would make the edge zones
+  // degenerate. Give the canvas a viewport so a pointer near the left edge is
+  // genuinely inside the edge zone.
+  function sizeCanvas(body: Element) {
+    Object.defineProperty(body, "clientWidth", { value: 400, configurable: true });
+    Object.defineProperty(body, "clientHeight", { value: 400, configurable: true });
+  }
+
+  it("auto-scrolls the canvas during a move held at the edge", () => {
+    let clock = 1000;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const h = setup({ mode: "move" });
+    sizeCanvas(h.body);
+
+    down(h.bar, "mouse", 20, 100);
+    move(21, 100); // 1px picks the bar up
+    clock += 500; // past the 250ms dwell, pointer still
+    advance(16);
+    advance(16);
+
+    expect(h.body.scrollLeft).toBeLessThan(0);
+    up(21, 100);
+    nowSpy.mockRestore();
+  });
+
+  it("never auto-scrolls the canvas during a resize held at the edge", () => {
+    let clock = 1000;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => clock);
+    const h = setup({ mode: "resize-right" });
+    sizeCanvas(h.body);
+
+    down(h.bar, "mouse", 20, 100);
+    move(21, 100);
+    clock += 500; // same dwell that would scroll a move
+    advance(16);
+    advance(16);
+
+    // A sliding canvas fed its scroll back into the day offset while the finger
+    // stayed put, so a held resize grew a day at a time (the "jumped 2 days
+    // instead of 1" report). A resize must never move the canvas.
+    expect(h.body.scrollLeft).toBe(0);
+    up(21, 100);
+    nowSpy.mockRestore();
   });
 });

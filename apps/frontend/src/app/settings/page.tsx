@@ -278,7 +278,20 @@ export default function SettingsPage() {
   const { themeName, setThemeName, fontFamily, setFontFamily, background, setBackgroundPreset, setBackgroundImage, clearBackground, customTheme, setCustomTheme } =
     useTheme();
   const router = useRouter();
-  const { scale, setScale, resetScale, min: scaleMin, max: scaleMax, step: scaleStep } = useUiScale();
+  const {
+    scale,
+    setScale,
+    resetScale,
+    min: scaleMin,
+    max: scaleMax,
+    step: scaleStep,
+    fontScale,
+    setFontScale,
+    resetFontScale,
+    fontMin: fontScaleMin,
+    fontMax: fontScaleMax,
+    fontStep: fontScaleStep,
+  } = useUiScale();
   const { keys, fetchKeys, saveKey, deleteKey, recoverKey, getLocalKey: getApiLocalKey } = useApiKeys();
   const tasks = useAppStore((s) => s.tasks);
 
@@ -1374,6 +1387,37 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={resetScale}
+                  className="btn bg-elevated border border-border text-secondary px-4 py-2 text-xs rounded-xl hover:text-primary"
+                >
+                  Reset to 100%
+                </button>
+              </div>
+
+              <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider pt-2">Font Size</h3>
+              <div className="space-y-3">
+                <p className="text-xs text-muted">
+                  Scale text on its own, without changing the timeline. Saved on this device only.
+                </p>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-muted">A</span>
+                  <input
+                    type="range"
+                    min={fontScaleMin}
+                    max={fontScaleMax}
+                    step={fontScaleStep}
+                    value={fontScale}
+                    onChange={(e) => setFontScale(parseFloat(e.target.value))}
+                    aria-label="Font size"
+                    className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-elevated accent-[var(--accent)]"
+                  />
+                  <span className="text-lg text-muted">A</span>
+                  <span className="w-12 text-right text-xs font-semibold text-primary tabular-nums">
+                    {Math.round(fontScale * 100)}%
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={resetFontScale}
                   className="btn bg-elevated border border-border text-secondary px-4 py-2 text-xs rounded-xl hover:text-primary"
                 >
                   Reset to 100%

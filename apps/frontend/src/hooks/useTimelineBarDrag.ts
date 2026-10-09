@@ -406,7 +406,12 @@ export function useTimelineBarDrag(
       // Eased edge auto-scroll, active only during this gesture. The viewport
       // size is captured at drag start, so this never forces a layout read.
       // Scrolling waits until the pointer has been held nearly still at an edge:
-      // an in-progress drag must move the task, never slide the canvas.
+      // an in-progress drag must move the task, never slide the canvas. It runs
+      // for a move only: during a resize the canvas sliding would feed its scroll
+      // back into the day offset (the finger stays put while the content moves),
+      // so a held resize near an edge grew the task a day at a time with no finger
+      // movement, which read as "it jumped 2 days instead of 1". A resize now
+      // never auto-scrolls; move the task first if it needs to reach a far date.
       const still =
         Math.hypot(s.latestX - s.edgeRefX, s.latestY - s.edgeRefY) <= EDGE_STILL_PX;
       if (!still) {
@@ -419,10 +424,10 @@ export function useTimelineBarDrag(
       const edgeZoneX = Math.min(MAX_EDGE_ZONE, Math.max(MIN_EDGE_ZONE, width * 0.2));
       const xInBody = s.latestX - s.bodyLeft;
       let velocityX = 0;
-      if (dwelled && xInBody < edgeZoneX) {
+      if (s.mode === "move" && dwelled && xInBody < edgeZoneX) {
         const intensity = Math.min(1, Math.max(0, (edgeZoneX - xInBody) / edgeZoneX));
         velocityX = -intensity * intensity * s.dayWidth * EDGE_MAX_DAYS_PER_FRAME;
-      } else if (dwelled && xInBody > width - edgeZoneX) {
+      } else if (s.mode === "move" && dwelled && xInBody > width - edgeZoneX) {
         const intensity = Math.min(1, Math.max(0, (xInBody - (width - edgeZoneX)) / edgeZoneX));
         velocityX = intensity * intensity * s.dayWidth * EDGE_MAX_DAYS_PER_FRAME;
       }
@@ -430,11 +435,10 @@ export function useTimelineBarDrag(
 
       // Vertical edge auto-scroll so a lane off-screen can be reached, but only
       // when the canvas can actually scroll vertically: a horizontal drag near
-      // the bottom of a non-overflowing canvas must never nudge lanes. The band
-      // is narrower than the horizontal one so it cannot hijack a mid-canvas
-      // horizontal drag.
+      // the bottom of a non-overflowing canvas must never nudge lanes. Also move
+      // only: a resize never changes the section, so it must never scroll lanes.
       const height = s.bodyClientHeight;
-      if (height > 0 && s.bodyHasVerticalOverflow) {
+      if (s.mode === "move" && height > 0 && s.bodyHasVerticalOverflow) {
         const edgeZoneY = Math.min(120, Math.max(48, height * 0.12));
         const yInBody = s.latestY - s.bodyTop;
         let velocityY = 0;
