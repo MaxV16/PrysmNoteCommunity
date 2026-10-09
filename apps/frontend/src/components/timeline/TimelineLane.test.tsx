@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { render, fireEvent } from "@testing-library/react";
 import { DndContext } from "@dnd-kit/core";
 import { TimelineLane } from "./TimelineLane";
 import { DAY_WIDTH } from "./constants";
@@ -124,5 +124,25 @@ describe("TimelineLane stacking", () => {
       expect(el.style.minWidth).toBe(`${DAY_WIDTH}px`);
       expect(el.style.flex).toBe(`0 0 ${DAY_WIDTH}px`);
     }
+  });
+
+  it("fires onDayDoubleClick with the clicked day and lane (day-cell create-task hook)", () => {
+    const days = daysFor("2026-08-03", 3);
+    const onDayDoubleClick = vi.fn();
+    const { container } = render(
+      <DndContext>
+        <TimelineLane
+          tasks={[]}
+          days={days}
+          sectionId="sec-1"
+          onDayDoubleClick={onDayDoubleClick}
+        />
+      </DndContext>
+    );
+    const cells = container.querySelectorAll("[class*='cursor-pointer']");
+    fireEvent.doubleClick(cells[1]);
+    expect(onDayDoubleClick).toHaveBeenCalledTimes(1);
+    expect(onDayDoubleClick.mock.calls[0][0]).toEqual(days[1]);
+    expect(onDayDoubleClick.mock.calls[0][1]).toBe("sec-1");
   });
 });

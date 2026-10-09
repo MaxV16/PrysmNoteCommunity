@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TimelineView, type TimelineViewMode } from "./TimelineView";
 import { ToastProvider } from "@/lib/toast-context";
@@ -268,5 +268,48 @@ describe("TimelineView selection action bar", () => {
 
     expect(screen.getByText("September 2026")).toBeInTheDocument();
     expect(screen.queryByText("October 2026")).not.toBeInTheDocument();
+  });
+});
+
+describe("TimelineView pan capture (day double-click regression)", () => {
+  beforeEach(() => {
+    h.selectedTaskIds = [];
+    window.localStorage.clear();
+    installResizeObserverMock();
+    installLayoutMetrics();
+  });
+
+  it("does not capture the pointer on a stationary press, so a day double-click still reaches the cell", () => {
+    renderTimeline("timeline");
+    const body = document.querySelector("[data-timeline-body]") as HTMLElement;
+    expect(body).not.toBeNull();
+
+    const captureSpy = vi.fn();
+    const releaseSpy = vi.fn();
+    (body as unknown as Record<string, unknown>).setPointerCapture = captureSpy;
+    (body as unknown as Record<string, unknown>).releasePointerCapture = releaseSpy;
+
+    // jsdom lacks PointerEvent; build an Event and copy the fields the pan
+    // engine reads so both the React onPointerDown and the native window
+    // pointermove/up listeners see a consistent pointerId.
+    const firePointer = (target: EventTarget, type: string, init: Record<string, unknown>) => {
+      const ev = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(ev, init);
+      target.dispatchEvent(ev);
+    };
+
+    // A stationary press must NOT capture, otherwise the native dblclick is
+    // retargeted to the scroll body and day double-click does nothing.
+    firePointer(body, "pointerdown", { button: 0, pointerId: 7, clientX: 120, clientY: 80, pointerType: "mouse" });
+    expect(captureSpy).not.toHaveBeenCalled();
+
+    // The first real movement engages the pan and captures lazily so no move is
+    // lost once the pointer leaves the body.
+    firePointer(window, "pointermove", { pointerId: 7, clientX: 160, clientY: 80, pointerType: "mouse" });
+    expect(captureSpy).toHaveBeenCalledTimes(1);
+    expect(captureSpy).toHaveBeenCalledWith(7);
+
+    firePointer(window, "pointerup", { pointerId: 7, clientX: 160, clientY: 80, pointerType: "mouse" });
+    expect(releaseSpy).toHaveBeenCalledWith(7);
   });
 });

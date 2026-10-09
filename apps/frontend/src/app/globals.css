@@ -228,8 +228,15 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
     border-radius: var(--radius-xl);
   }
 
+  /* Fluid long-form text: scales with the viewport instead of jumping at a
+     breakpoint, so phones get compact copy and desktop keeps the full size.
+     Applied only to non-interactive reading text (never buttons/inputs, whose
+     44px tap targets must not shrink). */
+  .text-fluid { font-size: clamp(0.8125rem, 0.76rem + 0.35vw, 0.9375rem); }
+  .text-fluid-sm { font-size: clamp(0.6875rem, 0.66rem + 0.22vw, 0.8125rem); }
+
   .markdown-body {
-    font-size: 0.875rem;
+    font-size: clamp(0.8125rem, 0.76rem + 0.35vw, 0.9375rem);
     line-height: 1.5;
     color: var(--text-primary);
     overflow-wrap: break-word;

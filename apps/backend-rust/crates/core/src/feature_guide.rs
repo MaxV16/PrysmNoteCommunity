@@ -45,6 +45,8 @@ NOTIFICATIONS: Reminders are per-task and OFF by default. Turn on Remind me when
 
 PASSKEYS: Settings, then Account, has a Security section where you can add a passkey and sign in without a password. Add a passkey on any device with Touch ID, Face ID, Windows Hello or a security key, give it a name, and use "Sign in with a passkey" on the login page next time. You can add more than one passkey, rename them, and remove ones you no longer use; a passkey works for any account, including one you created with Google or GitHub.
 
+TIMERS AND COUNTDOWNS: Set a short timer hands-free: ask the AI "set a timer for 8 minutes" and it creates a countdown card that counts down from now. For anything with a real deadline, give the date instead (for example "countdown to 2026-12-24" or "until my flight on 2026-12-24") and the AI sets the target. The Countdown workspace (under More on a phone, or in the sidebar) lists your cards, and you can create, rename and complete them there too. Mark a card complete when it is done. Free accounts keep up to 5 countdowns; Premium is unlimited.
+
 AI CHAT: The AI panel is a full assistant: create, schedule, search, reschedule and analyze tasks, plus summarize your day or week. Hosted PrysmAI is on by default; bring your own keys (OpenAI, Gemini, DeepSeek, OpenRouter) under Settings, then AI Keys. Chat history resumes after a refresh, and you can start a fresh conversation anytime. If you press Stop while it is replying, the part it already wrote is kept and marked Stopped, so you never lose a good answer to a stray click. On the hosted plan it answers quickly, with a lighter fallback model if the primary one is busy.
 
 DESKTOP AND MOBILE: Prysm Note runs everywhere. On a phone or tablet the web app is fully touch-friendly: the bottom bar has four tabs (Today, Chat, Capture and More), and the workspaces that do not fit on a phone live behind More in a sheet, so nothing is clipped. Settings become a drawer, and touching and holding a task picks it up to move and opens an action bar with Done, Duplicate, Delete and Move. Install it like any website from your browser for an app-like experience (PWA): on Android, Chrome, Edge, Opera and Samsung Internet show a one-tap Install prompt. In Brave, tap the three-dot menu, tap "Install and create shortcut" (older builds show "Add to Home screen"), then tap Install app; if the item is missing, open Customize menu and turn it on. Firefox adds it from the menu too (Add to Home screen). On iPhone/iPad every browser installs via Share then Add to Home Screen. Native desktop apps for Windows, macOS and Linux are on the Downloads page (https://prysmnote.com/downloads). On macOS, if the downloaded app says it is damaged, run xattr -cr "/Applications/Prysm Note.app" once and open it again. Your tasks and settings sync across the web, desktop and mobile apps with the same account.
@@ -84,6 +86,7 @@ mod tests {
             "VIEWS:",
             "HABITS:",
             "AI CHAT:",
+            "TIMERS AND COUNTDOWNS:",
             "SYNC ACROSS DEVICES:",
             "ACCOUNT LIFECYCLE:",
         ] {

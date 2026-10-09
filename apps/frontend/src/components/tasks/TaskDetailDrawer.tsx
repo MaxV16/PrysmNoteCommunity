@@ -538,7 +538,7 @@ const handleUpdate = async (data: {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                 if (e.key === "Escape") setRenaming(false);
               }}
-              className="input-field w-full bg-transparent text-lg font-semibold text-primary"
+              className="input-field w-full bg-transparent text-base font-semibold text-primary sm:text-lg"
             />
             <CharLimitHint value={draftTitle} max={TASK_TITLE_MAX} className="mt-1" />
           </div>
@@ -549,7 +549,7 @@ const handleUpdate = async (data: {
                 setDraftTitle(task.title);
                 setRenaming(true);
               }}
-              className={task.status === "done" ? "min-w-0 flex-1 text-lg font-semibold leading-snug text-muted line-through" : "min-w-0 flex-1 text-lg font-semibold leading-snug text-primary"}
+              className={task.status === "done" ? "min-w-0 flex-1 text-base font-semibold leading-snug text-muted line-through sm:text-lg" : "min-w-0 flex-1 text-base font-semibold leading-snug text-primary sm:text-lg"}
             >
               {task.title}
             </h2>

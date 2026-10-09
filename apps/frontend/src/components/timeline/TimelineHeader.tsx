@@ -35,14 +35,14 @@ export const TimelineHeader = memo(function TimelineHeader({ days, dayWidth = 12
           key={`hdr-${index}`}
           data-day-header
           data-is-today={isToday ? "true" : "false"}
-          className="flex flex-col items-center justify-center py-3"
+          className="flex flex-col items-center justify-center py-2 md:py-3"
           style={{ width: dayWidth, minWidth: dayWidth, flex: `0 0 ${dayWidth}px` }}
         >
-          <span className={`text-xs font-medium ${isToday ? "text-accent" : "text-secondary"}`}>
+          <span className={`text-[11px] font-medium md:text-xs ${isToday ? "text-accent" : "text-secondary"}`}>
             {dayName}
           </span>
           <span
-            className={`mt-1 text-2xl font-semibold tabular-nums leading-none ${isToday ? "text-accent" : "text-primary"}`}
+            className={`mt-0.5 text-lg font-semibold tabular-nums leading-none md:mt-1 md:text-2xl ${isToday ? "text-accent" : "text-primary"}`}
           >
             {dayNum}
           </span>

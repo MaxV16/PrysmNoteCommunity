@@ -107,6 +107,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     scrollTop: number;
     pointerId: number;
     active: boolean;
+    captured: boolean;
   } | null>(null);
   // Native pan engine state (see onTimelinePointerDown): one write per frame,
   // and a hook the pan effect can call to rebuild the slice after the gesture.
@@ -669,10 +670,12 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   // axes (like a map). The pan is driven by native window pointer events,
   // coalesced to a single scroll write per frame, so high-rate Windows pointer
   // input cannot thrash the main thread the way a per-event React handler did.
-  // It activates on the first pixel (no dead zone), captures the pointer at
-  // press so no move is lost, and defers the month-label/slice render until the
-  // gesture ends. The pointer is only captured from empty canvas, never from a
-  // task bar/handle or a button/input.
+  // It activates on the first pixel (no dead zone) and defers the
+  // month-label/slice render until the gesture ends. The pointer is captured
+  // lazily, only once the gesture actually becomes a pan (first move), so a
+  // stationary double-click on a day cell still reaches it instead of being
+  // retargeted to the scroll body. The pointer is only captured from empty
+  // canvas, never from a task bar/handle or a button/input.
   const applyPan = useCallback(() => {
     panRafRef.current = 0;
     const body = bodyRef.current;
@@ -707,6 +710,14 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         // scroll write during pan).
         if (last.clientX === start.x && last.clientY === start.y) return;
         start.active = true;
+        // Capture the pointer only now, on the first real movement. Capturing
+        // at press retargeted the native dblclick to the body, which silently
+        // broke double-click-to-create on a day cell; a stationary press no
+        // longer captures, so the day cell still receives its click/dblclick.
+        const body = bodyRef.current;
+        if (body && !start.captured) {
+          try { body.setPointerCapture(start.pointerId); start.captured = true; } catch {}
+        }
         applyPan();
       }
       if (panRafRef.current === 0) panRafRef.current = requestAnimationFrame(applyPan);
@@ -742,7 +753,9 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       panStartRef.current = null;
       panLatestRef.current = null;
       if (body) {
-        try { body.releasePointerCapture(start.pointerId); } catch {}
+        if (start.captured) {
+          try { body.releasePointerCapture(start.pointerId); } catch {}
+        }
         body.style.cursor = "";
         body.style.userSelect = "";
       }
@@ -879,6 +892,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         scrollTop: scrollPosRef.current.top,
         pointerId: e.pointerId,
         active: false,
+        captured: false,
       };
       panLatestRef.current = { x: e.clientX, y: e.clientY };
       // Apply the grab affordance at press, while no layout is dirty, instead
@@ -886,9 +900,11 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       // path. onNativePanUp restores both.
       body.style.cursor = "grabbing";
       body.style.userSelect = "none";
-      // Capture now so the first moves stream to us even if the pointer leaves
-      // the body before the pan activates.
-      try { body.setPointerCapture(e.pointerId); } catch {}
+      // Do NOT capture the pointer here: capturing on a stationary press
+      // retargets the native dblclick away from a day cell and broke
+      // double-click-to-create on desktop. onNativePanMove captures lazily on
+      // the first real movement instead, so no pan move is lost and a
+      // stationary double-click still reaches the day cell.
       window.addEventListener("pointermove", onNativePanMove);
       window.addEventListener("pointerup", onNativePanUp);
       window.addEventListener("pointercancel", onNativePanUp);
