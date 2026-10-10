@@ -4,6 +4,7 @@ import {
   applyMoveDays,
   applyResizeDays,
   computeDragDays,
+  daysBetween,
   dragOffsetPx,
   resizePreviewRange,
   resizePreviewSpan,
@@ -251,5 +252,19 @@ describe("resizePreviewSpan", () => {
 
   it("shrinks a left resize and clamps so the span stays at least one day", () => {
     expect(resizePreviewSpan(3, 5, "left")).toEqual({ spanDays: 1, leftShiftDays: 2 });
+  });
+});
+
+describe("daysBetween", () => {
+  it("counts whole days forward and backward between two ISO dates", () => {
+    expect(daysBetween("2026-10-12", "2026-10-15")).toBe(3);
+    expect(daysBetween("2026-10-15", "2026-10-12")).toBe(-3);
+    expect(daysBetween("2026-10-14", "2026-10-14")).toBe(0);
+  });
+
+  it("returns null when either date is missing or unparseable", () => {
+    expect(daysBetween(null, "2026-10-15")).toBeNull();
+    expect(daysBetween("2026-10-12", undefined)).toBeNull();
+    expect(daysBetween("nope", "2026-10-15")).toBeNull();
   });
 });

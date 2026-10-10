@@ -166,7 +166,12 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   useEffect(() => {
     const children = storeTasks
       .filter((t) => t.parent_task_id === task.id)
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      .sort((a, b) => {
+        const ad = a.status === "done" ? 1 : 0;
+        const bd = b.status === "done" ? 1 : 0;
+        if (ad !== bd) return ad - bd;
+        return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      });
     setSubtasks((prev) => {
       if (children.length === 0 && prev.length > 0) return prev;
       const same =

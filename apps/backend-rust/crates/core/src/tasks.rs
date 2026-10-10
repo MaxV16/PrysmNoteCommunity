@@ -1784,7 +1784,7 @@ async fn list_subtasks(
     let sql = format!(
         "SELECT id, title, status::text AS status, priority FROM tasks \
          WHERE parent_task_id = $1 AND {access} AND deleted_at IS NULL \
-         ORDER BY sort_order, created_at"
+         ORDER BY (status = 'done') ASC, sort_order, created_at"
     );
     let rows = sqlx::query(&sql)
         .bind(id)

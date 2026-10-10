@@ -62,6 +62,20 @@ function shiftIso(dateStr: string, days: number): string {
 }
 
 /**
+ * Whole-day distance from `fromIso` to `toIso` (positive when `toIso` is later).
+ * Used to snap a task dropped onto another task to that task's exact day, so a
+ * drop near an edge cannot land one column off. Returns null when either date is
+ * missing or unparseable.
+ */
+export function daysBetween(fromIso: string | null | undefined, toIso: string | null | undefined): number | null {
+  if (!fromIso || !toIso) return null;
+  const from = parseLocalDate(fromIso);
+  const to = parseLocalDate(toIso);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
+  return Math.round((to.getTime() - from.getTime()) / 86400000);
+}
+
+/**
  * Date fields for moving a task by whole days. Undated tasks gain both dates so
  * a dropped inbox task lands on a real day.
  */

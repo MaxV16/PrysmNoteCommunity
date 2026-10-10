@@ -374,3 +374,43 @@ describe("useTimelineBarDrag edge auto-scroll gate", () => {
     nowSpy.mockRestore();
   });
 });
+
+describe("useTimelineBarDrag drop-onto-task snap", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 16)
+    );
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("lands a moved task on the day of the task it is dropped on", () => {
+    const h = setup({ mode: "move" });
+    // Stand in for the task bar sitting under the pointer at release.
+    const target = document.createElement("div");
+    target.setAttribute("data-task-bar", "");
+    target.setAttribute("data-task-id", "t2");
+    target.setAttribute("data-task-start", "2026-08-06");
+    const elementsFromPoint = vi.fn(() => [target]);
+    (document as unknown as { elementsFromPoint: typeof elementsFromPoint }).elementsFromPoint =
+      elementsFromPoint;
+
+    down(h.bar, "mouse", 100, 100);
+    // A ~1 day pointer delta that would otherwise commit a single day.
+    move(130, 100);
+    up(130, 100);
+
+    expect(h.commits).toHaveLength(1);
+    // The dragged task starts 2026-08-03 and the target sits on 2026-08-06, so
+    // the drop lands exactly on the target's day instead of the pointer delta.
+    expect(h.commits[0].days).toBe(3);
+
+    delete (document as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
+  });
+});

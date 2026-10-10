@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { TaskChecklist } from "./TaskChecklist";
+import { TaskChecklist, sortSubtasks } from "./TaskChecklist";
 import type { Task } from "@/types/task";
 
 const mocks = vi.hoisted(() => ({
@@ -43,5 +43,39 @@ describe("TaskChecklist subtask formatting", () => {
 
     await waitFor(() => expect(mocks.updateTask).toHaveBeenCalledWith("s1", { title: "**hello**" }));
     await waitFor(() => expect(container.querySelector("strong")).toBeTruthy());
+  });
+});
+
+describe("sortSubtasks", () => {
+  it("keeps open subtasks first and sinks completed ones to the bottom, stable within a group", () => {
+    const open1 = { id: "o1", title: "open one", status: "todo" } as unknown as Task;
+    const done1 = { id: "d1", title: "done one", status: "done" } as unknown as Task;
+    const open2 = { id: "o2", title: "open two", status: "todo" } as unknown as Task;
+    const done2 = { id: "d2", title: "done two", status: "done" } as unknown as Task;
+
+    expect(sortSubtasks([done1, open1, done2, open2]).map((s) => s.id)).toEqual([
+      "o1",
+      "o2",
+      "d1",
+      "d2",
+    ]);
+  });
+});
+
+describe("TaskChecklist completed ordering", () => {
+  it("moves a subtask to the bottom once it is checked off", async () => {
+    const a = { id: "a", title: "alpha", status: "todo" } as unknown as Task;
+    const b = { id: "b", title: "beta", status: "todo" } as unknown as Task;
+    const { container } = render(<TaskChecklist subtasks={[a, b]} taskId="t1" />);
+
+    const order = () =>
+      Array.from(container.querySelectorAll('[role="checkbox"]')).map((el) => el.id);
+
+    expect(order()).toEqual(["subtask-check-a", "subtask-check-b"]);
+
+    fireEvent.click(container.querySelector("#subtask-check-a")!);
+
+    await waitFor(() => expect(order()).toEqual(["subtask-check-b", "subtask-check-a"]));
+    expect(mocks.updateTask).toHaveBeenCalledWith("a", { status: "done" });
   });
 });

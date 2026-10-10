@@ -12,6 +12,7 @@ import {
 import type { Task } from "@/types/task";
 import {
   computeDragDays,
+  daysBetween,
   dragOffsetPx,
   resizePreviewRange,
   resizePreviewSpan,
@@ -151,6 +152,10 @@ interface DragSession {
   offsetYPx: number;
   /** undefined = pointer is not over any lane or section label. */
   dropSectionId: string | null | undefined;
+  /** A move dropped over another task bar: snap to that task's day so a drop
+   * near a viewport edge cannot round one column off. Null when not over one. */
+  dropTaskId: string | null;
+  dropTaskStart: string | null;
   hoverEl: HTMLElement | null;
   hoverLaneEl: HTMLElement | null;
   raf: number;
@@ -369,10 +374,22 @@ export function useTimelineBarDrag(
     let nextSection: string | null | undefined;
     let labelEl: HTMLElement | null = null;
     let laneEl: HTMLElement | null = null;
+    let dropTaskId: string | null = null;
+    let dropTaskStart: string | null = null;
     if (typeof document.elementsFromPoint === "function") {
       for (const el of document.elementsFromPoint(s.latestX, s.latestY)) {
         const node = el as HTMLElement;
         if (node === s.el || s.el.contains(node)) continue;
+        // A move dropped over another task bar adopts that task's day. Scan for
+        // it before the lane break, and keep the first one under the pointer.
+        if (s.mode === "move" && !dropTaskId) {
+          const bar = node.closest?.("[data-task-bar]") as HTMLElement | null;
+          const barId = bar?.getAttribute("data-task-id") ?? null;
+          if (bar && barId && barId !== s.task.id) {
+            dropTaskId = barId;
+            dropTaskStart = bar.getAttribute("data-task-start") || null;
+          }
+        }
         const lane = node.closest?.("[data-timeline-lane]") as HTMLElement | null;
         if (lane) {
           const raw = lane.getAttribute("data-lane-section-id") ?? "";
@@ -399,6 +416,8 @@ export function useTimelineBarDrag(
       s.hoverLaneEl = laneEl;
     }
     s.dropSectionId = nextSection;
+    s.dropTaskId = dropTaskId;
+    s.dropTaskStart = dropTaskStart;
   }, []);
 
   const renderFrame = useCallback(
@@ -691,11 +710,19 @@ export function useTimelineBarDrag(
       if (s.body) s.body.style.userSelect = "";
 
       if (commit && s.active) {
-        const days = computeDragDays({
+        let days = computeDragDays({
           dx: s.latestX - s.startX,
           scrollDelta: s.scrollDelta,
           dayWidth: s.dayWidth,
         });
+        // Dropping a move onto another task snaps to that task's day, so the
+        // gesture lands exactly where the target sits instead of a column off
+        // (edge auto-scroll can otherwise skew the pixel delta by one day).
+        if (s.mode === "move" && s.dropTaskId && s.dropTaskStart) {
+          const draggedStart = s.task.start_date ?? s.task.due_date ?? null;
+          const diff = daysBetween(draggedStart, s.dropTaskStart);
+          if (diff !== null) days = diff;
+        }
         const sectionChanged = resolveSectionChange(s);
         let committed = false;
         // The days the drop actually commits (a stationary touch hold bumps by
@@ -842,6 +869,8 @@ export function useTimelineBarDrag(
         offsetPx: 0,
         offsetYPx: 0,
         dropSectionId: undefined,
+        dropTaskId: null,
+        dropTaskStart: null,
         hoverEl: null,
         hoverLaneEl: null,
         raf: 0,

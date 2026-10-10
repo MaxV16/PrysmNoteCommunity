@@ -29,6 +29,15 @@ interface TaskChecklistProps {
   taskId: string;
 }
 
+// Open subtasks first, completed ones sink to the bottom. The sort is stable,
+// so the persisted order (sort_order) is kept inside each group and every
+// device renders the same list.
+export function sortSubtasks(list: Task[]): Task[] {
+  const open = list.filter((s) => s.status !== "done");
+  const done = list.filter((s) => s.status === "done");
+  return [...open, ...done];
+}
+
 interface CheckboxButtonProps {
   checked: boolean;
   onChange: () => Promise<void>;
@@ -238,7 +247,7 @@ function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
 }
 
 export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
-  const [items, setItems] = useState<Task[]>(subtasks);
+  const [items, setItems] = useState<Task[]>(() => sortSubtasks(subtasks));
   const [newTitle, setNewTitle] = useState("");
   const { updateTask, fetchTasks } = useTasks();
   const subtasksSignature = subtasks.map((s) => `${s.id}:${s.status}:${s.title}`).join("|");
@@ -247,7 +256,7 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
   useEffect(() => {
     if (syncedSignatureRef.current === subtasksSignature) return;
     syncedSignatureRef.current = subtasksSignature;
-    setItems(subtasks);
+    setItems(sortSubtasks(subtasks));
   }, [subtasks, subtasksSignature]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -255,7 +264,9 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
   const handleToggle = async (sub: Task) => {
     const newStatus = sub.status === "done" ? "todo" : "done";
     await updateTask(sub.id, { status: newStatus });
-    setItems((prev) => prev.map((s) => (s.id === sub.id ? { ...s, status: newStatus } : s)));
+    setItems((prev) =>
+      sortSubtasks(prev.map((s) => (s.id === sub.id ? { ...s, status: newStatus } : s)))
+    );
   };
 
   const handleAdd = async () => {
@@ -264,10 +275,12 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
     const data = await api.post<{ id: string; title: string; status: string }>(`/tasks/${taskId}/subtasks`, {
       title: newTitle.trim(),
     });
-    setItems((prev) => [
-      ...prev,
-      { ...data, status: data.status as Task["status"] } as Task,
-    ]);
+    setItems((prev) =>
+      sortSubtasks([
+        ...prev,
+        { ...data, status: data.status as Task["status"] } as Task,
+      ])
+    );
     setNewTitle("");
   };
 
@@ -284,16 +297,12 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    setItems((prev) => {
-      const oldIndex = prev.findIndex((s) => s.id === active.id);
-      const newIndex = prev.findIndex((s) => s.id === over.id);
-      return arrayMove(prev, oldIndex, newIndex);
-    });
-    const orderedIds = items.map((s) => s.id);
     const oldIndex = items.findIndex((s) => s.id === active.id);
     const newIndex = items.findIndex((s) => s.id === over.id);
-    const next = arrayMove(orderedIds, oldIndex, newIndex);
-    await api.post(`/tasks/${taskId}/subtasks/reorder`, { ordered_ids: next });
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = sortSubtasks(arrayMove(items, oldIndex, newIndex));
+    setItems(next);
+    await api.post(`/tasks/${taskId}/subtasks/reorder`, { ordered_ids: next.map((s) => s.id) });
     fetchTasks();
   };
 

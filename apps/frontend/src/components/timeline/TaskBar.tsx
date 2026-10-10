@@ -179,6 +179,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
       ref={ref}
       data-task-bar={true}
       data-task-id={task.id}
+      data-task-start={task.start_date ?? task.due_date ?? ""}
       draggable={false}
       onDragStart={(e) => e.preventDefault()}
       onPointerDown={(e) => {
