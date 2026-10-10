@@ -9,6 +9,11 @@ interface AIComposerProps {
   hasUndo?: boolean;
   onAbort?: () => void;
   onUndo?: () => void;
+  /** True while the AI is still thinking / calling tools (before it starts
+   *  streaming the reply). Reveals the "Answer now" control so the user can
+   *  skip the remaining tool rounds and get an answer immediately. */
+  showAnswerNow?: boolean;
+  onAnswerNow?: () => void;
   additionalAction?: ReactNode;
   /** External components (e.g. speech-to-text) register an insert fn that
    *  APPENDS text to whatever is already in the composer (with spacing) and
@@ -34,6 +39,8 @@ export function AIComposer({
   hasUndo,
   onAbort,
   onUndo,
+  showAnswerNow,
+  onAnswerNow,
   additionalAction,
   onRegisterInsert,
 }: AIComposerProps) {
@@ -122,7 +129,16 @@ export function AIComposer({
   return (
     <div className="border-t border-border bg-surface/90 px-3 pb-3 pt-2.5">
       <div className="flex items-center gap-1.5 pb-1.5">
-        {isLoading && (
+        {showAnswerNow && (
+          <button
+            onClick={onAnswerNow}
+            className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent hover:bg-accent/20"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Answer now
+          </button>
+        )}
+        {(isLoading || showAnswerNow) && (
           <button
             onClick={onAbort}
             className="inline-flex items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1 text-[11px] font-medium text-danger hover:bg-danger/20"

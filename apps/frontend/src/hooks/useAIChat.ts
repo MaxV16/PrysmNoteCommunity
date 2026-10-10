@@ -16,6 +16,13 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 // memory (server-side) carries older context, so we keep this small.
 const CONTEXT_MAX_MESSAGES = 12;
 
+// Give up on a background turn after this long so the poll can never wedge the
+// panel forever (the backend also reaps a stale turn independently).
+const BACKGROUND_POLL_MAX_MS = 300_000;
+
+// If the SSE stream goes this long without a single event, treat it as dead.
+const STREAM_IDLE_MS = 120_000;
+
 function getStoredSessionId(): string {
   if (typeof window === "undefined") return "";
   return localStorage.getItem("ai_session_id") || "";
@@ -31,6 +38,23 @@ async function doRefreshToken(): Promise<boolean> {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// POST a control signal to the running turn (cancel or answer-now). Always
+// resolves; the UI does not need to distinguish a 404 from a network error.
+async function postTurnSignal(path: "cancel" | "answer-now"): Promise<boolean> {
+  try {
+    await ensureCsrf();
+    const csrf = getCsrfToken();
+    const res = await fetch(`${API_URL}/ai/turn/${path}`, {
+      method: "POST",
+      credentials: "include",
+      headers: csrf ? { [CSRF_HEADER]: csrf } : {},
     });
     return res.ok;
   } catch {
@@ -263,6 +287,7 @@ export function useAIChat() {
   const [usageTokens, setUsageTokens] = useState<number | null>(null);
   const rawRef = useRef("");
   const backgroundPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const backgroundPollStartRef = useRef<number>(0);
   const loadSessionRef = useRef<typeof loadSession>(async () => {});
 
   const stopBackgroundPoll = useCallback(() => {
@@ -276,7 +301,21 @@ export function useAIChat() {
 
   const startBackgroundPoll = useCallback(() => {
     setBackgroundWorking(true);
+    backgroundPollStartRef.current = Date.now();
     backgroundPollRef.current = setInterval(async () => {
+      // Hard cap: never poll forever. If the server never reports completion,
+      // cancel the turn and surface a retry so the panel cannot wedge.
+      if (Date.now() - backgroundPollStartRef.current > BACKGROUND_POLL_MAX_MS) {
+        stopBackgroundPoll();
+        await postTurnSignal("cancel");
+        addChatMessage({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "That took longer than expected, so I stopped it. Please try again.",
+          created_at: new Date().toISOString(),
+        });
+        return;
+      }
       try {
         const res = await fetch(`${API_URL}/ai/turn/status`, { credentials: "include" });
         if (!res.ok) {
@@ -297,7 +336,7 @@ export function useAIChat() {
         stopBackgroundPoll();
       }
     }, 2500);
-  }, [stopBackgroundPoll]);
+  }, [stopBackgroundPoll, addChatMessage]);
 
   const abort = useCallback(() => {
     abortRef.current?.abort();
@@ -305,19 +344,16 @@ export function useAIChat() {
     setIsLoading(false);
     // Also cancel server-side background turn (the relay abort alone does not
     // stop the background job - it reads from the queue, not the connection).
-    (async () => {
-      await ensureCsrf();
-      const csrf = getCsrfToken();
-      try {
-        await fetch(`${API_URL}/ai/turn/cancel`, {
-          method: "POST",
-          credentials: "include",
-          headers: csrf ? { [CSRF_HEADER]: csrf } : {},
-        });
-      } catch {}
-    })();
+    void postTurnSignal("cancel");
     stopBackgroundPoll();
   }, [stopBackgroundPoll]);
+
+  // Skip the remaining tool rounds and stream the final answer now. Used while
+  // the turn is still "thinking" so the user is never stuck waiting.
+  const answerNow = useCallback(() => {
+    setTurnPhase("final");
+    void postTurnSignal("answer-now");
+  }, []);
 
   const undoLastAction = useCallback(() => {
     const entry = undoStackRef.current.pop();
@@ -731,6 +767,13 @@ export function useAIChat() {
         return;
       }
 
+      if (res.status === 429) {
+        setAssistant(
+          "You're sending messages a little faster than I can keep up. Wait a few seconds and try again."
+        );
+        return;
+      }
+
       if (!res.ok) {
         let message = `Server error ${res.status}`;
         try {
@@ -836,7 +879,18 @@ export function useAIChat() {
       let streamOk = true;
       try {
         while (true) {
-          const { done, value } = await reader.read();
+          // Idle watchdog: a healthy turn always emits events (tokens, tool
+          // updates, or the 15s keep-alive comment). If nothing arrives for the
+          // idle window the stream is dead, so abort instead of spinning forever.
+          let idleTimer: ReturnType<typeof setTimeout> | undefined;
+          const { done, value } = await Promise.race([
+            reader.read(),
+            new Promise<never>((_, reject) => {
+              idleTimer = setTimeout(() => reject(new Error("stream-idle")), STREAM_IDLE_MS);
+            }),
+          ]).finally(() => {
+            if (idleTimer) clearTimeout(idleTimer);
+          });
           if (done) break;
           parser.feed(decoder.decode(value, { stream: true }));
         }
@@ -846,6 +900,9 @@ export function useAIChat() {
           // User hit stop / closed the panel: keep the partial reply, mark it
           // stopped, and drop only an empty placeholder (no forever typing).
           finalizeAbortedAssistant();
+        } else if (err instanceof Error && err.message === "stream-idle") {
+          abortRef.current?.abort();
+          setAssistant("That response took too long, so I stopped it. Please try again.");
         } else if (err instanceof Error) {
           setAssistant("Sorry, I encountered an error while reading the response. Please try again.");
         }
@@ -896,6 +953,7 @@ export function useAIChat() {
     backgroundWorking,
     turnPhase,
     abort,
+    answerNow,
     undoLastAction,
     hasUndo,
     loadSession,

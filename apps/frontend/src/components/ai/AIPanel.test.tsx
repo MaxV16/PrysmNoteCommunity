@@ -2,8 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { AIPanel } from "./AIPanel";
 
-const { apiGet } = vi.hoisted(() => ({
+const { apiGet, aiChatState } = vi.hoisted(() => ({
   apiGet: vi.fn(),
+  aiChatState: {
+    backgroundWorking: false,
+    turnPhase: null as string | null,
+    isLoading: false,
+  },
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -16,8 +21,11 @@ vi.mock("@/hooks/useAIChat", () => ({
   useAIChat: () => ({
     chatMessages: [],
     sendMessage: vi.fn(),
-    isLoading: false,
+    isLoading: aiChatState.isLoading,
+    backgroundWorking: aiChatState.backgroundWorking,
+    turnPhase: aiChatState.turnPhase,
     abort: vi.fn(),
+    answerNow: vi.fn(),
     undoLastAction: vi.fn(),
     hasUndo: false,
     loadSession: vi.fn(),
@@ -48,6 +56,9 @@ describe("AIPanel EU AI Act Art. 50(1) disclosure", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     localStorage.clear();
+    aiChatState.backgroundWorking = false;
+    aiChatState.turnPhase = null;
+    aiChatState.isLoading = false;
     apiGet.mockResolvedValue({
       mode: "prysmai",
       allowance: 100000,
@@ -86,5 +97,15 @@ describe("AIPanel EU AI Act Art. 50(1) disclosure", () => {
     });
     render(<AIPanel onClose={() => {}} />);
     expect(await screen.findByText(/Want hosted PrysmAI/)).toBeInTheDocument();
+  });
+
+  it("shows a thinking banner with an Answer now control while a turn runs", async () => {
+    aiChatState.backgroundWorking = true;
+    aiChatState.turnPhase = "tools";
+    render(<AIPanel onClose={() => {}} />);
+    expect(await screen.findByText(/Prysm AI is thinking/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Answer now" })
+    ).toBeInTheDocument();
   });
 });

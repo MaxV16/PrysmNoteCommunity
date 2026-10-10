@@ -35,3 +35,19 @@ describe("AIComposer emoji picker", () => {
     expect(screen.queryByRole("dialog", { name: "Pick an emoji" })).toBeNull();
   });
 });
+
+describe("AIComposer answer now", () => {
+  it("shows the Answer now control while the AI is still thinking", async () => {
+    const user = userEvent.setup();
+    const onAnswerNow = vi.fn();
+    render(<AIComposer onSend={vi.fn()} showAnswerNow onAnswerNow={onAnswerNow} />);
+    const button = screen.getByRole("button", { name: "Answer now" });
+    await user.click(button);
+    expect(onAnswerNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the Answer now control once the reply is streaming", () => {
+    render(<AIComposer onSend={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Answer now" })).toBeNull();
+  });
+});

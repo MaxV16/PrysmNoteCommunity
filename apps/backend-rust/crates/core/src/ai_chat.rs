@@ -91,6 +91,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/ai/chat/stream", post(chat_stream))
         .route("/api/ai/turn/status", get(turn_status))
         .route("/api/ai/turn/cancel", post(turn_cancel))
+        .route("/api/ai/turn/answer-now", post(turn_answer_now))
 }
 
 /// Keep at most the last 20 user/assistant turns, each capped at 4000 chars
@@ -582,6 +583,19 @@ async fn turn_cancel(
     })))
 }
 
+/// POST /api/ai/turn/answer-now
+/// Ask the in-flight turn to stop gathering tools and stream its final answer
+/// with whatever it already has.
+async fn turn_answer_now(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+    Ok(Json(json!({
+        "finalizing": ai_turn_runner::answer_now_turn(user.user_id),
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,6 +747,10 @@ mod tests {
         let (status, body) = call(&app, "POST", "/api/ai/turn/cancel", &token, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["cancelled"], false);
+        let (status, body) =
+            call(&app, "POST", "/api/ai/turn/answer-now", &token, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["finalizing"], false);
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(user_id)
             .execute(&state.pool)

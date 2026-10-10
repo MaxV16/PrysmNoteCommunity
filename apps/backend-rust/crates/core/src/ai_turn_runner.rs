@@ -15,10 +15,11 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use sqlx::PgConnection;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use uuid::Uuid;
 
 use crate::llm::{LlmClient, LlmError};
@@ -35,6 +36,25 @@ pub const MAX_RETRY_BUMPS: usize = 2;
 const APPLIED_LINE_CAP: usize = 6;
 /// SSE text chunk size (mirrors Python `_chunk_text` default).
 const CHUNK_SIZE: usize = 400;
+/// Wall-clock backstop for a whole turn (overridable via `AI_TURN_DEADLINE_SECS`).
+///
+/// A turn that somehow outlives this stops gathering tool results and answers
+/// with what it already has, so a slow or stuck provider can never wedge the
+/// one-turn-per-account gate (which would 409 every later message).
+const DEFAULT_TURN_DEADLINE_SECS: u64 = 300;
+
+/// The configured whole-turn backstop.
+fn turn_deadline() -> Duration {
+    static DEADLINE: OnceLock<Duration> = OnceLock::new();
+    *DEADLINE.get_or_init(|| {
+        let secs = std::env::var("AI_TURN_DEADLINE_SECS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(DEFAULT_TURN_DEADLINE_SECS);
+        Duration::from_secs(secs)
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Events
@@ -73,9 +93,15 @@ pub struct TurnJob {
     pub user_message: String,
     /// Optional client context block.
     pub context: Option<Value>,
+    /// When this turn began (used for the wall-clock backstop and stale reaping).
+    started_at: Instant,
     phase: Mutex<String>,
     status: Mutex<String>,
     cancel_requested: AtomicBool,
+    /// Set when the user asks to skip the remaining work and answer now.
+    answer_now_requested: AtomicBool,
+    /// Wakes an in-flight provider call so "answer now" takes effect at once.
+    answer_now: Notify,
     applied_actions: Mutex<Vec<String>>,
     tx: mpsc::UnboundedSender<TurnEvent>,
     rx: Mutex<Option<mpsc::UnboundedReceiver<TurnEvent>>>,
@@ -108,6 +134,17 @@ impl TurnJob {
         self.cancel_requested.store(true, Ordering::SeqCst);
     }
 
+    /// Ask the turn to skip any remaining tool work and answer with what it has.
+    /// Wakes an in-flight provider call so the final answer starts immediately.
+    pub fn request_answer_now(&self) {
+        self.answer_now_requested.store(true, Ordering::SeqCst);
+        self.answer_now.notify_one();
+    }
+
+    fn answer_now(&self) -> bool {
+        self.answer_now_requested.load(Ordering::SeqCst)
+    }
+
     fn cancelled(&self) -> bool {
         self.cancel_requested.load(Ordering::SeqCst)
     }
@@ -136,12 +173,23 @@ impl TurnJob {
 
 /// Removes a job from the registry even if the runner panics (Drop runs during
 /// unwind), so a crashed task can never leave a dangling 409 or a hung SSE.
-struct Cleanup(Uuid);
+/// Only removes the entry when it is still this exact job, so a job that was
+/// reaped or replaced by a newer turn cannot evict its successor.
+struct Cleanup {
+    user_id: Uuid,
+    job: Arc<TurnJob>,
+}
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
         if let Ok(mut map) = turns().lock() {
-            map.remove(&self.0);
+            let is_current = map
+                .get(&self.user_id)
+                .map(|current| Arc::ptr_eq(current, &self.job))
+                .unwrap_or(false);
+            if is_current {
+                map.remove(&self.user_id);
+            }
         }
     }
 }
@@ -152,8 +200,25 @@ fn turns() -> &'static Mutex<HashMap<Uuid, Arc<TurnJob>>> {
 }
 
 /// The active turn for a user, if any.
+///
+/// A job that has outlived [`turn_deadline`] is a stuck turn: it is cancelled
+/// and evicted here so it can never keep returning 409 for every later message.
 pub fn get_active_turn(user_id: Uuid) -> Option<Arc<TurnJob>> {
-    turns().lock().ok().and_then(|map| map.get(&user_id).cloned())
+    let mut map = match turns().lock() {
+        Ok(m) => m,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let job = match map.get(&user_id) {
+        Some(job) => job.clone(),
+        None => return None,
+    };
+    if job.started_at.elapsed() > turn_deadline() {
+        tracing::warn!(user = %user_id, "reaping stale AI turn past the deadline");
+        job.request_cancel();
+        map.remove(&user_id);
+        return None;
+    }
+    Some(job)
 }
 
 /// Request cancellation of the active turn. Returns false when none is running.
@@ -161,6 +226,18 @@ pub fn cancel_turn(user_id: Uuid) -> bool {
     match get_active_turn(user_id) {
         Some(job) => {
             job.request_cancel();
+            true
+        }
+        None => false,
+    }
+}
+
+/// Ask the active turn to answer now (skip remaining tool work). Returns false
+/// when no turn is running.
+pub fn answer_now_turn(user_id: Uuid) -> bool {
+    match get_active_turn(user_id) {
+        Some(job) => {
+            job.request_answer_now();
             true
         }
         None => false,
@@ -186,8 +263,14 @@ pub fn start_turn(state: AppState, params: TurnParams) -> Option<Arc<TurnJob>> {
         Ok(m) => m,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if map.contains_key(&params.user_id) {
-        return None;
+    if let Some(existing) = map.get(&params.user_id) {
+        if existing.started_at.elapsed() <= turn_deadline() {
+            return None;
+        }
+        // Stale: cancel and replace so the user is never locked out.
+        tracing::warn!(user = %params.user_id, "replacing stale AI turn past the deadline");
+        existing.request_cancel();
+        map.remove(&params.user_id);
     }
     let (tx, rx) = mpsc::unbounded_channel();
     let job = Arc::new(TurnJob {
@@ -199,9 +282,12 @@ pub fn start_turn(state: AppState, params: TurnParams) -> Option<Arc<TurnJob>> {
         sanitized_history: params.sanitized_history,
         user_message: params.user_message,
         context: params.context,
+        started_at: Instant::now(),
         phase: Mutex::new("tools".to_string()),
         status: Mutex::new("running".to_string()),
         cancel_requested: AtomicBool::new(false),
+        answer_now_requested: AtomicBool::new(false),
+        answer_now: Notify::new(),
         applied_actions: Mutex::new(Vec::new()),
         tx,
         rx: Mutex::new(Some(rx)),
@@ -265,7 +351,7 @@ async fn begin_tx<'a>(
 
 async fn run_turn(state: AppState, job: Arc<TurnJob>) {
     let user_id = job.user_id;
-    let _cleanup = Cleanup(user_id);
+    let _cleanup = Cleanup { user_id, job: job.clone() };
 
     match run_turn_inner(&state, &job).await {
         Ok(()) => {}
@@ -354,17 +440,37 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
             return Ok(());
         }
 
+        // The user asked for the answer now, or the turn has run past its
+        // deadline: stop gathering tools and answer with what we have. Clear the
+        // stale pre-tool text so the final phase streams a fresh reply from the
+        // conversation instead of reusing it through the fast path.
+        if job.answer_now() || job.started_at.elapsed() > turn_deadline() {
+            content.clear();
+            tool_calls = None;
+            break;
+        }
+
         let model = job.chain.get(current_model_index).cloned();
-        let response = chat_with_cache(
-            state,
-            user_id,
-            &job.provider,
-            &client,
-            &messages,
-            Some(&tools),
-            model.as_deref(),
-        )
-        .await?;
+        // Race the provider call against the answer-now signal so an in-flight
+        // (up to 90s) round is dropped immediately and we move to the final
+        // answer. Dropping the future cancels the request.
+        let response = tokio::select! {
+            biased;
+            _ = job.answer_now.notified() => {
+                content.clear();
+                tool_calls = None;
+                break;
+            }
+            res = chat_with_cache(
+                state,
+                user_id,
+                &job.provider,
+                &client,
+                &messages,
+                Some(&tools),
+                model.as_deref(),
+            ) => res?,
+        };
 
         let choice = LlmClient::first_choice(&response);
         let assistant = choice.get("message").cloned().unwrap_or_else(|| json!({}));
@@ -1354,5 +1460,51 @@ mod tests {
             provider_error_message("HTTP 402: {\"error\":{\"message\":\"Insufficient Credits\"}}"),
             "Insufficient Credits"
         );
+    }
+
+    fn make_job() -> (Arc<TurnJob>, mpsc::UnboundedReceiver<TurnEvent>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let job = TurnJob {
+            user_id: Uuid::new_v4(),
+            session_id: Uuid::new_v4(),
+            provider: "openai".to_string(),
+            api_key: String::new(),
+            chain: Vec::new(),
+            sanitized_history: Vec::new(),
+            user_message: "hi".to_string(),
+            context: None,
+            started_at: Instant::now(),
+            phase: Mutex::new("tools".to_string()),
+            status: Mutex::new("running".to_string()),
+            cancel_requested: AtomicBool::new(false),
+            answer_now_requested: AtomicBool::new(false),
+            answer_now: Notify::new(),
+            applied_actions: Mutex::new(Vec::new()),
+            tx,
+            rx: Mutex::new(None),
+        };
+        (Arc::new(job), rx)
+    }
+
+    #[test]
+    fn request_answer_now_flips_the_flag_without_cancelling() {
+        let (job, _rx) = make_job();
+        assert!(!job.answer_now());
+        job.request_answer_now();
+        assert!(job.answer_now());
+        // Asking for the answer must not be treated as a cancellation.
+        assert!(!job.cancelled());
+    }
+
+    #[test]
+    fn answer_now_turn_is_false_without_an_active_turn() {
+        assert!(!answer_now_turn(Uuid::new_v4()));
+    }
+
+    #[test]
+    fn turn_deadline_is_positive() {
+        // turn_deadline() reads AI_TURN_DEADLINE_SECS once (300s default), so
+        // only assert a sane lower bound rather than a specific value.
+        assert!(turn_deadline() >= Duration::from_secs(1));
     }
 }

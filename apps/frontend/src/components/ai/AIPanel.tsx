@@ -80,7 +80,7 @@ function activeSessionId(): string | null {
 }
 
 export function AIPanel({ onClose, view }: ChatPanelProps) {
-  const { chatMessages, sendMessage, isLoading, backgroundWorking, turnPhase, abort, undoLastAction, hasUndo, loadSession, newChat, clearActiveSession, fetchSessions, usageTokens } = useAIChat();
+  const { chatMessages, sendMessage, isLoading, backgroundWorking, turnPhase, abort, answerNow, undoLastAction, hasUndo, loadSession, newChat, clearActiveSession, fetchSessions, usageTokens } = useAIChat();
   const [chatHistory, setChatHistory] = useState<ChatSession[]>([]);
   const [serverSessions, setServerSessions] = useState<HistoryServerSession[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -508,13 +508,15 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
             hasUndo={hasUndo}
             onAbort={abort}
             onUndo={undoLastAction}
+            showAnswerNow={(isLoading || backgroundWorking) && turnPhase !== "final"}
+            onAnswerNow={answerNow}
             onRegisterInsert={(insert) => { insertRef.current = insert; }}
           />
-          {backgroundWorking && (
+          {(isLoading || backgroundWorking) && (
             <div className="flex items-center justify-center gap-2 px-4 pb-2">
               <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></div>
               <span className="text-[11px] text-muted">
-                Working in the background{turnPhase === "final" ? " (generating reply)" : " (using tools)"}...
+                {turnPhase === "final" ? "Writing the reply..." : "Prysm AI is thinking..."}
               </span>
             </div>
           )}

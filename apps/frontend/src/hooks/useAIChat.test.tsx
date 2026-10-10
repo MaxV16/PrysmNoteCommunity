@@ -183,3 +183,74 @@ describe("useAIChat refresh-on-abort", () => {
     expect(result.current.hasUndo).toBe(false);
   });
 });
+
+describe("useAIChat turn controls", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    useAppStore.getState().reset();
+    localStorage.clear();
+    // A csrf_token cookie makes ensureCsrf resolve without a GET /auth/me.
+    document.cookie = "csrf_token=test";
+  });
+
+  it("answerNow asks the backend to finalize the current turn", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    global.fetch = fetchMock;
+
+    const { result } = renderHook(() => useAIChat());
+    await act(async () => {
+      result.current.answerNow();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const call = fetchMock.mock.calls.find(
+      ([url, opts]) =>
+        String(url).includes("/ai/turn/answer-now") &&
+        (opts as RequestInit)?.method === "POST"
+    );
+    expect(call).toBeTruthy();
+  });
+
+  it("surfaces a friendly message when the server rate limits", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 429 }));
+
+    const { result } = renderHook(() => useAIChat());
+    await act(async () => {
+      await result.current.sendMessage("hi");
+    });
+
+    const assistant = useAppStore
+      .getState()
+      .chatMessages.find((m) => m.role === "assistant");
+    expect(assistant?.content).toContain("faster than I can keep up");
+  });
+
+  it("stops a stalled stream instead of waiting forever", async () => {
+    vi.useFakeTimers();
+    try {
+      // A body whose reader never resolves: the idle watchdog must fire.
+      const hung = new ReadableStream<Uint8Array>({ start() {} });
+      global.fetch = vi.fn().mockImplementation((url: string) => {
+        if (String(url).includes("/ai/chat/stream")) {
+          return Promise.resolve(new Response(hung, { status: 200 }));
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      });
+
+      const { result } = renderHook(() => useAIChat());
+      await act(async () => {
+        const pending = result.current.sendMessage("hi");
+        await vi.advanceTimersByTimeAsync(120_001);
+        await pending;
+      });
+
+      const assistant = useAppStore
+        .getState()
+        .chatMessages.find((m) => m.role === "assistant");
+      expect(assistant?.content).toContain("took too long");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
