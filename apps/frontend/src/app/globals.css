@@ -428,3 +428,25 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
     }
   }
 }
+
+/* Content text scaling for the Font Size setting. These sit OUTSIDE the
+   @layer block on purpose so they win by source order over the companion
+   Tailwind text-* utility (which supplies the line-height), letting the user
+   size the reading surfaces (task titles, chat) up or down without touching
+   interactive chrome or the 16px root font that protects 44px tap targets. */
+.text-scale-2xs { font-size: calc(0.625rem * var(--font-scale, 1)); }
+.text-scale-xs { font-size: calc(0.75rem * var(--font-scale, 1)); }
+.text-scale-sm { font-size: calc(0.875rem * var(--font-scale, 1)); }
+.text-scale-base { font-size: calc(1rem * var(--font-scale, 1)); }
+.text-scale-lg { font-size: calc(1.125rem * var(--font-scale, 1)); }
+/* Task detail title keeps its responsive 16px -> 18px step and scales on top. */
+.text-scale-title { font-size: calc(1rem * var(--font-scale, 1)); }
+@media (min-width: 640px) {
+  .text-scale-title { font-size: calc(1.125rem * var(--font-scale, 1)); }
+}
+/* Timeline day header: 11px weekday label and the 18px -> 24px day number. */
+.text-scale-day { font-size: calc(0.6875rem * var(--font-scale, 1)); }
+.text-scale-num { font-size: calc(1.125rem * var(--font-scale, 1)); }
+@media (min-width: 768px) {
+  .text-scale-num { font-size: calc(1.5rem * var(--font-scale, 1)); }
+}

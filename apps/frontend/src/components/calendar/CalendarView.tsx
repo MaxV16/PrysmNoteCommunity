@@ -131,7 +131,7 @@ function CalendarDayCell({
               e.stopPropagation();
               onOpenCardMenu(e, task);
             }}
-            className={`truncate text-[10px] rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110 ${
+            className={`truncate text-[10px] text-scale-2xs rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110 ${
               selectedTaskIds.includes(task.id) ? "ring-1 ring-accent" : ""
             }`}
             style={{

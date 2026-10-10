@@ -119,7 +119,7 @@ export function KanbanCard({ task, subtasks = [], sectionId, onContextMenu, sele
           className="mt-0.5 block h-2 w-2 shrink-0 rounded-full"
           style={{ backgroundColor: PRIORITY_COLORS[normalizePriority(task.priority)] || "var(--text-muted)" }}
         />
-        <span className="text-sm text-primary leading-snug">{task.title}</span>
+        <span className="text-sm text-scale-sm text-primary leading-snug">{task.title}</span>
       </div>
 
       {subtasks.length > 0 && (

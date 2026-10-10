@@ -208,7 +208,7 @@ export function BoardCard({
       >
         <div className="flex items-start gap-2">
           <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-          <h3 className={`min-w-0 flex-1 text-sm font-semibold leading-snug line-clamp-2 ${isDone ? "line-through text-muted" : "text-primary"}`}>
+          <h3 className={`min-w-0 flex-1 text-sm text-scale-sm font-semibold leading-snug line-clamp-2 ${isDone ? "line-through text-muted" : "text-primary"}`}>
             {task.title}
           </h3>
           <RoundCheckbox

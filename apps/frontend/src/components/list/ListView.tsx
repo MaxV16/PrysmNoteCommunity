@@ -397,7 +397,7 @@ export function ListView() {
                     style={{ backgroundColor: PRIORITY_COLORS[normalizePriority(task.priority)] || "var(--text-muted)" }}
                   />
                   <div className="flex-1 min-w-0">
-                    <span className={`text-sm truncate block transition-colors duration-[var(--dur-slow)] ${isDone ? "line-through text-muted" : "text-primary"}`}>
+                    <span className={`text-sm text-scale-sm truncate block transition-colors duration-[var(--dur-slow)] ${isDone ? "line-through text-muted" : "text-primary"}`}>
                       {task.title}
                     </span>
                     {(task.due_date || task.start_date) && (

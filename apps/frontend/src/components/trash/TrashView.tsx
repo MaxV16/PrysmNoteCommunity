@@ -139,7 +139,7 @@ export function TrashView({ open, onClose }: TrashViewProps) {
                   }`}
                 >
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium text-primary">{task.title}</span>
+                    <span className="block truncate text-xs text-scale-xs font-medium text-primary">{task.title}</span>
                     <span className="block text-[10px] text-muted">
                       {date ? `Due ${formatDate(date, { includeYear: false })}` : "No date"}
                       {task.deleted_at ? ` · deleted ${timeAgo(task.deleted_at)}` : ""}

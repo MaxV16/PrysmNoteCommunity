@@ -55,7 +55,7 @@ export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
       <div className="flex max-w-[88%] flex-col gap-0.5 sm:max-w-[85%]">
         {hasBody && (
           <div
-            className={`rounded-2xl px-3 py-2 text-sm leading-relaxed sm:px-3.5 sm:py-2.5 ${
+            className={`rounded-2xl px-3 py-2 text-sm text-scale-sm leading-relaxed sm:px-3.5 sm:py-2.5 ${
               isUser
                 ? "gradient-bg text-[var(--on-gradient)] rounded-br-md"
                 : "bg-elevated text-primary rounded-bl-md"

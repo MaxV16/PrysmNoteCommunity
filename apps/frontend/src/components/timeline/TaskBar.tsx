@@ -32,9 +32,11 @@ interface TaskBarProps {
  * A resize handle on the left or right edge of a task bar. It shares the bar's
  * pointer engine (so move/resize/auto-scroll all behave the same) and is a
  * touch-sized hit area that sits just outside the bar edge, so a finger can
- * grab it on a phone. It is hidden until the bar is hovered or the task is
- * armed by a long press, and it activates on movement like a mouse so a touch
- * grab resizes immediately.
+ * grab it on a phone. On a fine pointer (desktop) it is hidden until the bar is
+ * hovered; on a coarse pointer (touch) it is inert until the task is armed by a
+ * long press, so a stray tap near an edge moves the task instead of resizing it
+ * and the whole bar stays long-pressable. It activates on movement like a mouse
+ * so a touch grab resizes immediately.
  */
 function ResizeHandle({
   task,
@@ -74,7 +76,9 @@ function ResizeHandle({
         aria-orientation="vertical"
         aria-label={`${side === "left" ? "Resize start" : "Resize end"}`}
         className={`absolute inset-y-0 z-10 flex items-center justify-center transition-opacity duration-150 ${
-          armed ? "opacity-100" : "opacity-0 group-hover/bar:opacity-100 group-focus-within/bar:opacity-100"
+          armed
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0 group-hover/bar:opacity-100 group-focus-within/bar:opacity-100 pointer-fine:pointer-events-auto"
         }`}
         style={{
           [side]: side === "left" ? "-8px" : undefined,
@@ -82,7 +86,6 @@ function ResizeHandle({
           width: 24,
           cursor: side === "left" ? "w-resize" : "e-resize",
           touchAction: "none",
-          pointerEvents: "auto",
         }}
       >
         <span
@@ -234,7 +237,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
             {TIER_LABELS[tier]}
           </span>
         )}
-        <span className="truncate text-sm font-medium text-primary">
+        <span className="truncate text-sm text-scale-sm font-medium text-primary">
           {task.title}
         </span>
       </div>

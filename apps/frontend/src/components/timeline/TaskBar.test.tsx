@@ -76,11 +76,15 @@ describe("TaskBar", () => {
     const right = container.querySelector('[data-resize-handle="right"]') as HTMLElement;
     expect(left).not.toBeNull();
     expect(right).not.toBeNull();
-    // Not armed: handles are revealed on hover (opacity-0 default + group hover).
+    // Not armed: the handle is inert on a coarse pointer so a touch near an
+    // edge moves the task instead of resizing it; on a fine pointer it stays
+    // interactive and is revealed on hover.
     expect(left.className).toContain("opacity-0");
+    expect(left.className).toContain("pointer-events-none");
+    expect(left.className).toContain("pointer-fine:pointer-events-auto");
 
-    // Once the task is armed via long-press, the handles stay visible and get a
-    // touch-sized hit area.
+    // Once the task is armed via long-press, the handles stay visible and become
+    // touch-interactive with a touch-sized hit area.
     act(() => useAppStore.setState({ mobileActionTaskId: task.id }));
     const armed = render(
       <DndContext>
@@ -91,6 +95,8 @@ describe("TaskBar", () => {
       '[data-resize-handle="left"]'
     ) as HTMLElement;
     expect(armedLeft.className).toContain("opacity-100");
+    expect(armedLeft.className).toContain("pointer-events-auto");
+    expect(armedLeft.className).not.toContain("pointer-events-none");
     expect(armedLeft.style.width).toBe("24px");
   });
 
