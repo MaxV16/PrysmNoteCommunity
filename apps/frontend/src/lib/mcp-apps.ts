@@ -54,6 +54,19 @@ const JSON_BODY_TEMPLATE = `{
   }
 }`;
 
+const OPENCODE_TEMPLATE = `{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "prysm": {
+      "type": "remote",
+      "url": "${MCP_ENDPOINT}",
+      "headers": {
+        "Authorization": "Bearer ${MCP_TOKEN_PLACEHOLDER}"
+      }
+    }
+  }
+}`;
+
 export const MCP_APPS: McpAppConfig[] = [
   {
     id: "vscode",
@@ -142,6 +155,14 @@ export const MCP_APPS: McpAppConfig[] = [
     file: "kilo.json",
     kind: "json",
     json: JSON_TEMPLATE,
+  },
+  {
+    id: "opencode",
+    name: "opencode",
+    description: "opencode reads remote MCP servers from its global config (~/.config/opencode/opencode.jsonc) or a project opencode.json. Add this under the \"mcp\" key.",
+    file: "~/.config/opencode/opencode.jsonc",
+    kind: "json",
+    json: OPENCODE_TEMPLATE,
   },
   {
     id: "gemini-cli",
