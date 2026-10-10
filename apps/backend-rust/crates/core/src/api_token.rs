@@ -7,7 +7,7 @@
 //! system pool rather than an RLS-keyed transaction.
 
 use chrono::{DateTime, Utc};
-use sqlx::{PgConnection, PgPool, Row};
+use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -114,12 +114,19 @@ pub async fn lookup_token(
     Ok(row.as_ref().map(row_to_token))
 }
 
-/// Resolve a token on the system pool and stamp `last_used_at`.
+/// Resolve a token on the BYPASSRLS system pool and stamp `last_used_at`.
 ///
-/// The MCP path has no user identity yet, so it cannot rely on RLS; the
-/// production role bypasses RLS on this table for exactly this lookup.
-pub async fn lookup_token_system(pool: &PgPool, raw: &str) -> Result<Option<TokenRow>, sqlx::Error> {
-    let mut conn = pool.acquire().await?;
+/// The MCP path has no user identity yet, so it cannot rely on RLS: `api_tokens`
+/// is FORCE ROW LEVEL SECURITY, so a lookup on the RLS-enforced app pool returns
+/// zero rows on production (the app role is `NOBYPASSRLS`). This MUST run on
+/// `state.system_pool` (role `prysm_system`), which bypasses RLS for exactly this
+/// pre-auth lookup. Taking `&AppState` rather than a bare pool makes passing the
+/// wrong pool a compile error.
+pub async fn lookup_token_system(
+    state: &crate::AppState,
+    raw: &str,
+) -> Result<Option<TokenRow>, sqlx::Error> {
+    let mut conn = state.system_pool.acquire().await?;
     let Some(row) = lookup_token(&mut conn, raw).await? else {
         return Ok(None);
     };
@@ -186,6 +193,7 @@ pub async fn revoke_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::PgPool;
 
     #[test]
     fn raw_tokens_are_prefixed_and_hashed() {

@@ -171,7 +171,7 @@ async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<Uuid, Res
     }
 
     let user_id = if token.starts_with(crate::api_token::TOKEN_PREFIX) {
-        match crate::api_token::lookup_token_system(&state.pool, token).await {
+        match crate::api_token::lookup_token_system(state, token).await {
             Ok(Some(row)) => row.user_id,
             _ => return Err(unauthorized(state)),
         }

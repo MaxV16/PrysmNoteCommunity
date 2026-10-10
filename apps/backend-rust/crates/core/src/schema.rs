@@ -71,6 +71,19 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS ix_financial_items_user_due ON public.financial_items USING btree (user_id, due_date);
+
+-- The MCP PAT lookup runs pre-auth on the BYPASSRLS system pool because
+-- api_tokens is FORCE ROW LEVEL SECURITY and the app role is NOBYPASSRLS (the
+-- app pool would see zero rows and reject every valid token). zz-init-roles.sh
+-- grants the system role via default privileges, but a database provisioned
+-- before that block existed lacks the grant; re-assert it here (the app role
+-- owns the table, so it may grant). No-op on databases without the system role.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'prysm_system') THEN
+        GRANT SELECT, UPDATE ON public.api_tokens TO prysm_system;
+    END IF;
+END $$;
 "#;
 
 /// Provisions the core schema on a fresh database.
