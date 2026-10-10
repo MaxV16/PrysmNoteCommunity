@@ -32,11 +32,13 @@ interface TaskBarProps {
  * A resize handle on the left or right edge of a task bar. It shares the bar's
  * pointer engine (so move/resize/auto-scroll all behave the same) and is a
  * touch-sized hit area that sits just outside the bar edge, so a finger can
- * grab it on a phone. On a fine pointer (desktop) it is hidden until the bar is
- * hovered; on a coarse pointer (touch) it is inert until the task is armed by a
- * long press, so a stray tap near an edge moves the task instead of resizing it
- * and the whole bar stays long-pressable. It activates on movement like a mouse
- * so a touch grab resizes immediately.
+ * grab it on a phone. It is always interactive: grabbing an edge must resize,
+ * never fall through to the bar's long-press (which would start a move). On a
+ * fine pointer (desktop) it is hidden until the bar is hovered; on a coarse
+ * pointer (touch) it stays faintly visible so it can be found, and turns solid
+ * while the task is armed by a long press. It activates on movement like a
+ * mouse (touchActivateOnMove), so a touch grab resizes immediately and a tap
+ * with no movement commits nothing.
  */
 function ResizeHandle({
   task,
@@ -75,14 +77,14 @@ function ResizeHandle({
         role="separator"
         aria-orientation="vertical"
         aria-label={`${side === "left" ? "Resize start" : "Resize end"}`}
-        className={`absolute inset-y-0 z-10 flex items-center justify-center transition-opacity duration-150 ${
+        className={`absolute inset-y-0 z-10 flex items-center justify-center pointer-events-auto transition-opacity duration-150 ${
           armed
-            ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0 group-hover/bar:opacity-100 group-focus-within/bar:opacity-100 pointer-fine:pointer-events-auto"
+            ? "opacity-100"
+            : "opacity-0 group-hover/bar:opacity-100 group-focus-within/bar:opacity-100 pointer-coarse:opacity-60"
         }`}
         style={{
-          [side]: side === "left" ? "-8px" : undefined,
-          right: side === "right" ? "-8px" : undefined,
+          [side]: side === "left" ? "-12px" : undefined,
+          right: side === "right" ? "-12px" : undefined,
           width: 24,
           cursor: side === "left" ? "w-resize" : "e-resize",
           touchAction: "none",

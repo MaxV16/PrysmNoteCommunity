@@ -65,7 +65,7 @@ describe("TaskBar", () => {
     expect(titleSpan!.className).toContain("truncate");
   });
 
-  it("renders both resize handles and arms them when the task is long-pressed", () => {
+  it("renders both resize handles and keeps them interactive so an edge grab resizes", () => {
     const task = makeTask({ title: "Resizable" });
     const { container } = render(
       <DndContext>
@@ -76,15 +76,19 @@ describe("TaskBar", () => {
     const right = container.querySelector('[data-resize-handle="right"]') as HTMLElement;
     expect(left).not.toBeNull();
     expect(right).not.toBeNull();
-    // Not armed: the handle is inert on a coarse pointer so a touch near an
-    // edge moves the task instead of resizing it; on a fine pointer it stays
-    // interactive and is revealed on hover.
+    // The handles are always interactive (never pointer-events-none), so on a
+    // phone grabbing an edge starts a resize instead of falling through to the
+    // bar's long-press (which would move the task). They start hidden and are
+    // revealed on hover, and stay faintly visible on a coarse pointer.
+    expect(left.className).toContain("pointer-events-auto");
+    expect(left.className).not.toContain("pointer-events-none");
     expect(left.className).toContain("opacity-0");
-    expect(left.className).toContain("pointer-events-none");
-    expect(left.className).toContain("pointer-fine:pointer-events-auto");
+    expect(left.className).toContain("pointer-coarse:opacity-60");
+    expect(left.style.left).toBe("-12px");
+    expect(right.style.right).toBe("-12px");
+    expect(left.style.width).toBe("24px");
 
-    // Once the task is armed via long-press, the handles stay visible and become
-    // touch-interactive with a touch-sized hit area.
+    // Once the task is armed via long-press, the handles stay solid.
     act(() => useAppStore.setState({ mobileActionTaskId: task.id }));
     const armed = render(
       <DndContext>
@@ -96,7 +100,6 @@ describe("TaskBar", () => {
     ) as HTMLElement;
     expect(armedLeft.className).toContain("opacity-100");
     expect(armedLeft.className).toContain("pointer-events-auto");
-    expect(armedLeft.className).not.toContain("pointer-events-none");
     expect(armedLeft.style.width).toBe("24px");
   });
 
