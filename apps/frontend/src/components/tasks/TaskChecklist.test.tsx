@@ -63,7 +63,7 @@ describe("sortSubtasks", () => {
 });
 
 describe("TaskChecklist completed ordering", () => {
-  it("moves a subtask to the bottom once it is checked off", async () => {
+  it("hides a completed subtask and reveals it again under Show completed", async () => {
     const a = { id: "a", title: "alpha", status: "todo" } as unknown as Task;
     const b = { id: "b", title: "beta", status: "todo" } as unknown as Task;
     const { container } = render(<TaskChecklist subtasks={[a, b]} taskId="t1" />);
@@ -75,7 +75,14 @@ describe("TaskChecklist completed ordering", () => {
 
     fireEvent.click(container.querySelector("#subtask-check-a")!);
 
-    await waitFor(() => expect(order()).toEqual(["subtask-check-b", "subtask-check-a"]));
+    // Completed subtasks are hidden by default, so only "b" stays visible.
+    await waitFor(() => expect(order()).toEqual(["subtask-check-b"]));
     expect(mocks.updateTask).toHaveBeenCalledWith("a", { status: "done" });
+
+    // The toggle counts the hidden ones and brings them back, done last.
+    const toggle = await screen.findByRole("button", { name: /Show completed/i });
+    expect(toggle.textContent).toContain("Show completed (1)");
+    fireEvent.click(toggle);
+    await waitFor(() => expect(order()).toEqual(["subtask-check-b", "subtask-check-a"]));
   });
 });

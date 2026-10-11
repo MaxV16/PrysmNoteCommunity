@@ -249,6 +249,9 @@ function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
 export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
   const [items, setItems] = useState<Task[]>(() => sortSubtasks(subtasks));
   const [newTitle, setNewTitle] = useState("");
+  // Completed subtasks are hidden by default so the list stays focused on what
+  // is left; the header toggle reveals them again.
+  const [showCompleted, setShowCompleted] = useState(false);
   const { updateTask, fetchTasks } = useTasks();
   const subtasksSignature = subtasks.map((s) => `${s.id}:${s.status}:${s.title}`).join("|");
   const syncedSignatureRef = useRef(subtasksSignature);
@@ -306,6 +309,9 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
     fetchTasks();
   };
 
+  const completedCount = items.filter((s) => s.status === "done").length;
+  const visibleItems = showCompleted ? items : items.filter((s) => s.status !== "done");
+
   return (
     <div className="flex flex-col gap-1">
       <div className="mb-1 flex items-center gap-2">
@@ -313,21 +319,47 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
         <span className="rounded-full bg-elevated px-2 py-0.5 text-[10px] font-medium text-secondary">
           {items.length}
         </span>
+        {completedCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowCompleted((v) => !v)}
+            aria-expanded={showCompleted}
+            className="ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-muted transition-colors hover:bg-hover hover:text-primary"
+          >
+            {showCompleted ? "Hide completed" : `Show completed (${completedCount})`}
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={showCompleted ? "rotate-180 transition-transform" : "transition-transform"}
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        )}
       </div>
       {items.length === 0 && <p className="mb-1 text-xs text-muted">No subtasks</p>}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={items.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-          <div className="flex flex-col gap-1 rounded-xl border border-border/60 bg-elevated/30 p-1.5">
-            {items.map((sub) => (
-              <SortableRow
-                key={sub.id}
-                sub={sub}
-                onToggle={handleToggle}
-                onDelete={handleDelete}
-                onRename={handleRename}
-              />
-            ))}
-          </div>
+        <SortableContext items={visibleItems.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+          {visibleItems.length > 0 && (
+            <div className="flex flex-col gap-1 rounded-xl border border-border/60 bg-elevated/30 p-1.5">
+              {visibleItems.map((sub) => (
+                <SortableRow
+                  key={sub.id}
+                  sub={sub}
+                  onToggle={handleToggle}
+                  onDelete={handleDelete}
+                  onRename={handleRename}
+                />
+              ))}
+            </div>
+          )}
         </SortableContext>
       </DndContext>
       <div className="mt-2">

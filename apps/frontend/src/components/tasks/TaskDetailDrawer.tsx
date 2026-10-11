@@ -22,6 +22,7 @@ import { formatDate } from "@/lib/dates";
 import { taskTimeLabel } from "@/lib/task-time";
 import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 import {
   TIER_COLORS,
@@ -745,6 +746,8 @@ const handleUpdate = async (data: {
         </div>
       )}
 
+      <ErrorBoundary label="GitHub">
+      </ErrorBoundary>
 
       {isBroadTask(task.title) && (
         <button
