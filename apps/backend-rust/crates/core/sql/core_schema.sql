@@ -498,6 +498,7 @@ CREATE TABLE public.task_shares (
     task_id uuid NOT NULL,
     team_id uuid NOT NULL,
     shared_by uuid NOT NULL,
+    user_id uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 

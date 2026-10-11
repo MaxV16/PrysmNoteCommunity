@@ -71,6 +71,12 @@ function formatDateRange(task: Task): string | null {
   return time ? `${range} · ${time}` : range;
 }
 
+interface ShareTeam {
+  id: string;
+  name: string;
+  members?: { user_id: string; email?: string | null; role: string }[];
+}
+
 interface TaskDetailDrawerProps {
   task: Task;
   onClose: () => void;
@@ -86,21 +92,25 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [teamList, setTeamList] = useState<{ id: string; name: string }[]>([]);
+  const [teamList, setTeamList] = useState<ShareTeam[]>([]);
   const [sharedTeamIds, setSharedTeamIds] = useState<Set<string>>(new Set());
+  const [sharedUserIds, setSharedUserIds] = useState<Set<string>>(new Set());
 
   const loadShareData = async () => {
     try {
       const [teamsRes, sharesRes] = await Promise.all([
-        api.get<{ teams: { id: string; name: string }[] }>("/teams/"),
-        api.get<{ team_ids: string[] }>(`/tasks/${task.id}/shares`),
+        api.get<{ teams: ShareTeam[] }>("/teams/"),
+        api.get<{ team_ids?: string[]; user_ids?: string[] }>(`/tasks/${task.id}/shares`),
       ]);
-      setTeamList(teamsRes.teams);
-      setSharedTeamIds(new Set(sharesRes.team_ids));
-    } catch {}
+      setTeamList(teamsRes.teams ?? []);
+      setSharedTeamIds(new Set(sharesRes.team_ids ?? []));
+      setSharedUserIds(new Set(sharesRes.user_ids ?? []));
+    } catch {
+      showToast("Could not load sharing details", "error");
+    }
   };
 
-  const toggleShare = async (teamId: string) => {
+  const toggleShareTeam = async (teamId: string) => {
     const isShared = sharedTeamIds.has(teamId);
     try {
       if (isShared) {
@@ -114,7 +124,28 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
         await api.post(`/teams/${teamId}/share-task`, { task_id: task.id });
         setSharedTeamIds((prev) => new Set(prev).add(teamId));
       }
-    } catch {}
+    } catch {
+      showToast("Could not update team sharing", "error");
+    }
+  };
+
+  const toggleShareUser = async (teamId: string, userId: string) => {
+    const isShared = sharedUserIds.has(userId);
+    try {
+      if (isShared) {
+        await api.delete(`/teams/${teamId}/share-task/${task.id}?user_id=${userId}`);
+        setSharedUserIds((prev) => {
+          const next = new Set(prev);
+          next.delete(userId);
+          return next;
+        });
+      } else {
+        await api.post(`/teams/${teamId}/share-task`, { task_id: task.id, user_id: userId });
+        setSharedUserIds((prev) => new Set(prev).add(userId));
+      }
+    } catch {
+      showToast("Could not update sharing", "error");
+    }
   };
   const [editingDescription, setEditingDescription] = useState(false);
   const [descDraft, setDescDraft] = useState(task.description || "");
@@ -124,9 +155,9 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [dateOpen, setDateOpen] = useState(false);
   const datePillRef = useRef<HTMLButtonElement | null>(null);
   const titleOptionsRef = useRef<HTMLButtonElement | null>(null);
-  const footerMoreRef = useRef<HTMLButtonElement | null>(null);
   const priorityRef = useRef<HTMLButtonElement | null>(null);
   const statusRef = useRef<HTMLButtonElement | null>(null);
+  const shareRef = useRef<HTMLButtonElement | null>(null);
   const descSectionRef = useRef<HTMLDivElement | null>(null);
   const descTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [optionsTrigger, setOptionsTrigger] = useState<HTMLButtonElement | null>(null);
@@ -610,8 +641,10 @@ const handleUpdate = async (data: {
         </div>
       </div>
 
-      {/* Content: description then subtasks, all on one page */}
-      <div ref={descSectionRef} className="mt-4 flex-1 overflow-y-auto">
+      {/* Content: description then subtasks, all on one page. No flex-1 so the
+          sections flow directly into Tags, GitHub and the footer instead of
+          leaving a large empty gap on short tasks (mostly visible on phones). */}
+      <div ref={descSectionRef} className="mt-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <Label>Description</Label>
           {!editingDescription && (
@@ -777,6 +810,7 @@ const handleUpdate = async (data: {
               </svg>
             </button>
             <button
+              ref={shareRef}
               onClick={() => {
                 void loadShareData();
                 setShareOpen((v) => !v);
@@ -791,15 +825,15 @@ const handleUpdate = async (data: {
             </button>
             <PopoverMenu
               open={shareOpen}
-              triggerRef={footerMoreRef}
+              triggerRef={shareRef}
               align="right"
               preferred="above"
               onClose={() => setShareOpen(false)}
               className="w-64"
             >
-              <div className="p-2">
+              <div className="max-h-80 overflow-y-auto p-2">
                 <p className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">
-                  Share with a team
+                  Share with
                 </p>
                 {teamList.length === 0 ? (
                   <p className="px-2 py-2 text-xs text-muted">
@@ -807,59 +841,39 @@ const handleUpdate = async (data: {
                   </p>
                 ) : (
                   teamList.map((t) => {
-                    const isShared = sharedTeamIds.has(t.id);
+                    const members = (t.members ?? []).filter((m) => m.user_id !== task.user_id);
                     return (
-                      <button
-                        key={t.id}
-                        onClick={() => void toggleShare(t.id)}
-                        className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition-colors hover:bg-hover hover:text-primary"
-                      >
-                        <span className="truncate">{t.name}</span>
-                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${isShared ? "gradient-bg text-[var(--on-gradient)]" : "bg-elevated text-muted"}`}>
-                          {isShared ? "Shared" : "Share"}
-                        </span>
-                      </button>
+                      <div key={t.id} className="mb-1 last:mb-0">
+                        <button
+                          onClick={() => void toggleShareTeam(t.id)}
+                          className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-secondary transition-colors hover:bg-hover hover:text-primary"
+                        >
+                          <span className="truncate font-medium">{t.name}</span>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${sharedTeamIds.has(t.id) ? "gradient-bg text-[var(--on-gradient)]" : "bg-elevated text-muted"}`}>
+                            {sharedTeamIds.has(t.id) ? "Whole team" : "Share team"}
+                          </span>
+                        </button>
+                        {members.length > 0 && (
+                          <div className="mt-0.5 space-y-0.5 pl-2">
+                            {members.map((m) => (
+                              <button
+                                key={m.user_id}
+                                onClick={() => void toggleShareUser(t.id, m.user_id)}
+                                className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-xs text-muted transition-colors hover:bg-hover hover:text-secondary"
+                              >
+                                <span className="truncate">{m.email || "Teammate"}</span>
+                                <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${sharedUserIds.has(m.user_id) ? "bg-accent/20 text-accent" : "bg-elevated text-muted"}`}>
+                                  {sharedUserIds.has(m.user_id) ? "Shared" : "Share"}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     );
                   })
                 )}
               </div>
-            </PopoverMenu>
-            <button
-              ref={footerMoreRef}
-              onClick={() => {
-                setOptionsTrigger(footerMoreRef.current);
-                setOptionsOpen((v) => !v);
-              }}
-              className="rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
-              aria-label="More options"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="5" cy="12" r="1" />
-                <circle cx="12" cy="12" r="1" />
-                <circle cx="19" cy="12" r="1" />
-              </svg>
-            </button>
-            <PopoverMenu
-              open={optionsOpen && optionsTrigger === footerMoreRef.current}
-              triggerRef={footerMoreRef}
-              align="right"
-              preferred="above"
-              onClose={() => setOptionsOpen(false)}
-              className="w-64"
-            >
-              <OptionsMenuContent
-                busy={busy}
-                hasSubtasks={hasSubtasks}
-                onConvertToSubtasks={handleConvertToSubtasks}
-                onConvertToDescription={handleConvertToDescription}
-                onBreakDown={handleBreakDown}
-                onSticky={() => addNoteWithContent(task.title, task.description || "")}
-                onEdit={() => {
-                  setOptionsOpen(false);
-                  setEditing(true);
-                }}
-                onDelete={handleDelete}
-              />
             </PopoverMenu>
           </div>
         </div>

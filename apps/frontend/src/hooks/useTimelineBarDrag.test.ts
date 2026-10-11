@@ -375,7 +375,7 @@ describe("useTimelineBarDrag edge auto-scroll gate", () => {
   });
 });
 
-describe("useTimelineBarDrag drop-onto-task snap", () => {
+describe("useTimelineBarDrag drop-onto-task uses the pointer column", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) =>
@@ -390,27 +390,48 @@ describe("useTimelineBarDrag drop-onto-task snap", () => {
     vi.useRealTimers();
   });
 
-  it("lands a moved task on the day of the task it is dropped on", () => {
-    const h = setup({ mode: "move" });
-    // Stand in for the task bar sitting under the pointer at release.
+  // Stand in for a task bar sitting under the pointer at release.
+  function stubTargetBar(taskId: string, taskStart: string) {
     const target = document.createElement("div");
     target.setAttribute("data-task-bar", "");
-    target.setAttribute("data-task-id", "t2");
-    target.setAttribute("data-task-start", "2026-08-06");
+    target.setAttribute("data-task-id", taskId);
+    target.setAttribute("data-task-start", taskStart);
     const elementsFromPoint = vi.fn(() => [target]);
     (document as unknown as { elementsFromPoint: typeof elementsFromPoint }).elementsFromPoint =
       elementsFromPoint;
+    return () => {
+      delete (document as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
+    };
+  }
+
+  it("moves by the column under the pointer, not the target's start day", () => {
+    const h = setup({ mode: "move" });
+    // The target starts three days after the dragged task; the old override
+    // snapped to it, but the drop should land where the finger released.
+    const restore = stubTargetBar("t2", "2026-08-06");
 
     down(h.bar, "mouse", 100, 100);
-    // A ~1 day pointer delta that would otherwise commit a single day.
+    // A ~1 day pointer delta (dayWidth 28) over the target bar.
     move(130, 100);
     up(130, 100);
 
     expect(h.commits).toHaveLength(1);
-    // The dragged task starts 2026-08-03 and the target sits on 2026-08-06, so
-    // the drop lands exactly on the target's day instead of the pointer delta.
-    expect(h.commits[0].days).toBe(3);
+    expect(h.commits[0].days).toBe(1);
+    restore();
+  });
 
-    delete (document as unknown as { elementsFromPoint?: unknown }).elementsFromPoint;
+  it("still moves when dropped on a long task that starts on the same day", () => {
+    const h = setup({ mode: "move" });
+    // A long task starting on the dragged task's own start day (2026-08-03).
+    // The old override computed a 0-day diff and committed nothing.
+    const restore = stubTargetBar("t2", "2026-08-03");
+
+    down(h.bar, "mouse", 100, 100);
+    move(156, 100); // two columns (56px / 28px)
+    up(156, 100);
+
+    expect(h.commits).toHaveLength(1);
+    expect(h.commits[0].days).toBe(2);
+    restore();
   });
 });

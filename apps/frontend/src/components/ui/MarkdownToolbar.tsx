@@ -47,12 +47,38 @@ function replaceRange(
   ta.focus?.();
 }
 
+/** A line-start marker for each prefix action. Bullet deliberately excludes the
+ * checklist form (`- [ ]`) so the two never shadow each other. */
+const MARKER: Partial<Record<MarkdownAction, RegExp>> = {
+  heading: /^#{1,6}\s+/,
+  bullet: /^[-*+]\s+(?!\[[ xX]\])/,
+  checklist: /^[-*+]\s+\[[ xX]\]\s+/,
+  numbered: /^\d+\.\s+/,
+  quote: /^>\s+/,
+};
+
+/** Any line-start marker, used to replace one list/heading kind with another
+ * instead of stacking them (`- one` + checklist used to make `- [ ] - one`). */
+const ANY_MARKER = /^(?:#{1,6}\s+|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+|>\s+)/;
+
+function splitIndent(line: string): { indent: string; body: string } {
+  const indent = line.match(/^\s*/)?.[0] ?? "";
+  return { indent, body: line.slice(indent.length) };
+}
+
 /**
  * Apply one markdown action to a textarea in place. Exported so the toolbar and
- * its tests share exactly one implementation. Inline actions wrap/ unwrap the
+ * its tests share exactly one implementation. Inline actions wrap or unwrap the
  * selection (an empty selection inserts a placeholder), prefix actions add or
- * remove a line marker across the selected lines, and code/link insert a
- * fenced block / `[text](url)` pair.
+ * remove a line marker across the selected lines, and code/link insert a fenced
+ * block / `[text](url)` pair.
+ *
+ * Edge cases handled: selecting a whole `**bold**` unwraps instead of nesting;
+ * a caret sitting inside `**|**` toggles the markers off; whitespace around a
+ * selection is kept outside the emphasis so it still renders; italic never
+ * mistakes the outer star of `**bold**` for its own marker; prefix actions
+ * replace a conflicting marker, number lists through, recognise every heading
+ * level, and keep the user's selection instead of collapsing the caret.
  */
 export function applyMarkdownAction(ta: HTMLTextAreaElement, action: MarkdownAction): void {
   const value = ta.value;
@@ -61,57 +87,112 @@ export function applyMarkdownAction(ta: HTMLTextAreaElement, action: MarkdownAct
 
   const inline = INLINE[action];
   if (inline) {
+    const before = inline.before;
+    const after = inline.after;
+    const single = before === "*";
     const selected = value.slice(start, end);
-    const text = selected || inline.placeholder;
-    const beforeStart = start - inline.before.length;
-    const afterEnd = end + inline.after.length;
-    const alreadyWrapped =
-      selected.length > 0 &&
-      value.slice(beforeStart, start) === inline.before &&
-      value.slice(end, afterEnd) === inline.after;
-    if (alreadyWrapped) {
-      replaceRange(ta, text, beforeStart, afterEnd, { from: 0, to: text.length });
-    } else {
-      const inserted = `${inline.before}${text}${inline.after}`;
+
+    // Markers immediately surrounding the selection (adjacent outside).
+    const beforeOk =
+      value.slice(start - before.length, start) === before &&
+      (!single || value[start - before.length - 1] !== "*");
+    const afterOk =
+      value.slice(end, end + after.length) === after &&
+      (!single || value[end + after.length] !== "*");
+    // The selection itself is `before … after`.
+    const selfWrapped =
+      selected.length >= before.length + after.length &&
+      selected.startsWith(before) &&
+      selected.endsWith(after) &&
+      (!single || (!selected.startsWith("**") && !selected.endsWith("**")));
+
+    if (selected.length === 0) {
+      if (beforeOk && afterOk) {
+        replaceRange(ta, "", start - before.length, end + after.length);
+        return;
+      }
+      const inserted = `${before}${inline.placeholder}${after}`;
       replaceRange(ta, inserted, start, end, {
-        from: inline.before.length,
-        to: inline.before.length + text.length,
+        from: before.length,
+        to: before.length + inline.placeholder.length,
       });
+      return;
     }
+
+    if (beforeOk && afterOk) {
+      replaceRange(ta, selected, start - before.length, end + after.length, {
+        from: 0,
+        to: selected.length,
+      });
+      return;
+    }
+
+    if (selfWrapped) {
+      const inner = selected.slice(before.length, selected.length - after.length);
+      replaceRange(ta, inner, start, end, { from: 0, to: inner.length });
+      return;
+    }
+
+    const lead = selected.match(/^\s*/)?.[0] ?? "";
+    const trail = selected.match(/\s*$/)?.[0] ?? "";
+    const inner = selected.slice(lead.length, selected.length - trail.length);
+    if (inner.length === 0) {
+      const inserted = `${before}${inline.placeholder}${after}`;
+      replaceRange(ta, inserted, start, end, {
+        from: before.length,
+        to: before.length + inline.placeholder.length,
+      });
+      return;
+    }
+    const inserted = `${lead}${before}${inner}${after}${trail}`;
+    const from = lead.length + before.length;
+    replaceRange(ta, inserted, start, end, { from, to: from + inner.length });
     return;
   }
 
   if (action === "code") {
-    const body = value.slice(start, end) || "code";
-    const block = `\`\`\`\n${body}\n\`\`\``;
-    replaceRange(ta, block, start, end);
+    const selected = value.slice(start, end);
+    const body = selected || "code";
+    const leadNewline = start > 0 && value[start - 1] !== "\n";
+    const trailNewline = end < value.length && value[end] !== "\n";
+    const inserted = `${leadNewline ? "\n" : ""}\`\`\`\n${body}\n\`\`\`${trailNewline ? "\n" : ""}`;
+    const bodyStart = (leadNewline ? 1 : 0) + 4;
+    replaceRange(ta, inserted, start, end, selected ? { from: bodyStart, to: bodyStart + body.length } : undefined);
     return;
   }
 
   if (action === "link") {
-    const label = value.slice(start, end) || "link text";
+    const label = (value.slice(start, end) || "link text").replace(/\]/g, "\\]");
     const inserted = `[${label}](url)`;
-    const urlStart = label.length + 3;
+    const urlStart = inserted.length - 4;
     replaceRange(ta, inserted, start, end, { from: urlStart, to: urlStart + 3 });
     return;
   }
 
   const prefix = PREFIX[action];
-  if (prefix !== undefined) {
+  const marker = MARKER[action];
+  if (prefix !== undefined && marker !== undefined) {
     const lineStart = value.lastIndexOf("\n", start - 1) + 1;
     let lineEnd = value.indexOf("\n", end);
     if (lineEnd === -1) lineEnd = value.length;
     const lines = value.slice(lineStart, lineEnd).split("\n");
     const nonEmpty = lines.filter((l) => l.trim() !== "");
-    const allPrefixed = nonEmpty.length > 0 && nonEmpty.every((l) => l.startsWith(prefix));
+    const allActive = nonEmpty.length > 0 && nonEmpty.every((l) => marker.test(l));
+    let counter = 0;
     const next = lines
       .map((line) => {
         if (line.trim() === "") return line;
-        if (allPrefixed) return line.startsWith(prefix) ? line.slice(prefix.length) : line;
-        return line.startsWith(prefix) ? line : prefix + line;
+        const { indent, body } = splitIndent(line);
+        if (allActive) return indent + body.replace(marker, "");
+        const cleaned = body.replace(ANY_MARKER, "");
+        if (action === "numbered") {
+          counter += 1;
+          return `${indent}${counter}. ${cleaned}`;
+        }
+        return `${indent}${prefix}${cleaned}`;
       })
       .join("\n");
-    replaceRange(ta, next, lineStart, lineEnd);
+    replaceRange(ta, next, lineStart, lineEnd, { from: 0, to: next.length });
   }
 }
 

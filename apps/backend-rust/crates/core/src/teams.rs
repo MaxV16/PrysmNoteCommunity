@@ -4,7 +4,7 @@
 //! scopes rows to the caller, so the handlers set `app.user_id`/`app.user_email`
 //! and rely on the policies plus explicit membership checks for authorization.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
@@ -53,6 +53,7 @@ pub fn router() -> Router<AppState> {
             delete(unshare_task),
         )
         .route("/api/teams/{team_id}/tasks", get(team_tasks))
+        .route("/api/tasks/{task_id}/shares", get(task_shares))
 }
 
 fn invite_limiter() -> &'static RateLimiter {
@@ -136,6 +137,9 @@ struct UpdateRoleRequest {
 #[derive(Deserialize)]
 struct ShareTaskRequest {
     task_id: String,
+    /// When set, share with this one teammate instead of the whole team.
+    #[serde(default)]
+    user_id: Option<String>,
 }
 
 struct TeamRow {
@@ -782,39 +786,70 @@ async fn share_task(
         ));
     }
 
-    let existing: Option<Uuid> =
-        sqlx::query_scalar("SELECT id FROM task_shares WHERE task_id = $1 AND team_id = $2")
-            .bind(task_id)
-            .bind(team_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db_error)?;
+    // `Some(id)` targets a single teammate; `None` shares with the whole team.
+    let target_user = match req.user_id.as_deref() {
+        Some(raw) => {
+            let target_id = task::require_uuid(raw)?;
+            if membership_role(&mut *tx, team_id, target_id).await?.is_none() {
+                return Err(ApiError::Unprocessable(
+                    "That person is not a member of this team".to_string(),
+                ));
+            }
+            Some(target_id)
+        }
+        None => None,
+    };
+
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM task_shares \
+         WHERE task_id = $1 AND team_id = $2 AND user_id IS NOT DISTINCT FROM $3",
+    )
+    .bind(task_id)
+    .bind(team_id)
+    .bind(target_user)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db_error)?;
     if existing.is_some() {
         tx.commit().await.map_err(db_error)?;
         return Ok(Json(json!({ "status": "already_shared" })));
     }
 
-    sqlx::query("INSERT INTO task_shares (task_id, team_id, shared_by) VALUES ($1, $2, $3)")
-        .bind(task_id)
-        .bind(team_id)
-        .bind(user.user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
+    sqlx::query(
+        "INSERT INTO task_shares (task_id, team_id, shared_by, user_id) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(task_id)
+    .bind(team_id)
+    .bind(user.user_id)
+    .bind(target_user)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(
         json!({ "status": "shared", "task_id": task_id.to_string() }),
     ))
 }
 
+#[derive(Deserialize)]
+struct UnshareParams {
+    #[serde(default)]
+    user_id: Option<String>,
+}
+
 async fn unshare_task(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((team_id, task_id)): Path<(String, String)>,
+    Query(params): Query<UnshareParams>,
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let team_id = task::require_uuid(&team_id)?;
     let task_id = task::require_uuid(&task_id)?;
+    let target_user = match params.user_id.as_deref() {
+        Some(raw) => Some(task::require_uuid(raw)?),
+        None => None,
+    };
     let mut tx = state.pool.begin().await.map_err(db_error)?;
     set_rls_for(&mut *tx, user.user_id).await?;
 
@@ -826,14 +861,59 @@ async fn unshare_task(
         &["owner", "admin", "member"],
     )
     .await?;
-    sqlx::query("DELETE FROM task_shares WHERE task_id = $1 AND team_id = $2")
-        .bind(task_id)
-        .bind(team_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
+    sqlx::query(
+        "DELETE FROM task_shares \
+         WHERE task_id = $1 AND team_id = $2 AND user_id IS NOT DISTINCT FROM $3",
+    )
+    .bind(task_id)
+    .bind(team_id)
+    .bind(target_user)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({ "status": "unshared" })))
+}
+
+/// Which teams and teammates a task is currently shared with. The caller must
+/// be able to see the task (`find_task` honours ownership + team shares).
+async fn task_shares(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+    let task_id = task::require_uuid(&task_id)?;
+    let mut tx = state.pool.begin().await.map_err(db_error)?;
+    set_rls_for(&mut *tx, user.user_id).await?;
+
+    let task = task::find_task(&mut *tx, task_id, user.user_id, false)
+        .await
+        .map_err(db_error)?;
+    if task.is_none() {
+        return Err(ApiError::NotFound("Task not found".to_string()));
+    }
+
+    let team_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT team_id FROM task_shares WHERE task_id = $1 AND user_id IS NULL",
+    )
+    .bind(task_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    let user_ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT user_id FROM task_shares WHERE task_id = $1 AND user_id IS NOT NULL",
+    )
+    .bind(task_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
+
+    Ok(Json(json!({
+        "team_ids": team_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+        "user_ids": user_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+    })))
 }
 
 async fn team_tasks(
@@ -1150,6 +1230,113 @@ mod tests {
             .any(|t| t["title"] == "Shared task"));
 
         cleanup(&state, &[owner_id]).await;
+    }
+
+    #[tokio::test]
+    async fn shares_endpoint_reports_team_and_member_shares() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let (owner_id, _owner_email, owner_token) = make_user(&state, "shareowner").await;
+        let (member_id, _member_email, _member_token) = make_user(&state, "sharemember").await;
+        let app = router()
+            .merge(crate::tasks::router())
+            .with_state(state.clone());
+
+        let res = call(
+            app.clone(),
+            "POST",
+            "/api/teams",
+            &owner_token,
+            Some(json!({ "name": "Shareable" })),
+        )
+        .await;
+        let team_id = body_json(res).await["id"].as_str().unwrap().to_string();
+
+        sqlx::query("INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')")
+            .bind(Uuid::parse_str(&team_id).unwrap())
+            .bind(member_id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        let res = call(
+            app.clone(),
+            "POST",
+            "/api/tasks",
+            &owner_token,
+            Some(json!({ "title": "Shareable task" })),
+        )
+        .await;
+        let task_id = body_json(res).await["id"].as_str().unwrap().to_string();
+
+        // Whole-team share.
+        let res = call(
+            app.clone(),
+            "POST",
+            &format!("/api/teams/{team_id}/share-task"),
+            &owner_token,
+            Some(json!({ "task_id": task_id })),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Per-member share.
+        let res = call(
+            app.clone(),
+            "POST",
+            &format!("/api/teams/{team_id}/share-task"),
+            &owner_token,
+            Some(json!({ "task_id": task_id, "user_id": member_id.to_string() })),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = call(
+            app.clone(),
+            "GET",
+            &format!("/api/tasks/{task_id}/shares"),
+            &owner_token,
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let shares = body_json(res).await;
+        assert!(shares["team_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t == &json!(team_id)));
+        assert!(shares["user_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|u| u == &json!(member_id.to_string())));
+
+        // Unshare just the member; the whole-team share stays.
+        let res = call(
+            app.clone(),
+            "DELETE",
+            &format!("/api/teams/{team_id}/share-task/{task_id}?user_id={member_id}"),
+            &owner_token,
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = call(
+            app.clone(),
+            "GET",
+            &format!("/api/tasks/{task_id}/shares"),
+            &owner_token,
+            None,
+        )
+        .await;
+        let shares = body_json(res).await;
+        assert!(shares["user_ids"].as_array().unwrap().is_empty());
+        assert!(!shares["team_ids"].as_array().unwrap().is_empty());
+
+        cleanup(&state, &[owner_id, member_id]).await;
     }
 
     #[tokio::test]

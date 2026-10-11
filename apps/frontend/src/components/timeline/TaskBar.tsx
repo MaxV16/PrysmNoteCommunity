@@ -236,7 +236,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
           </span>
         )}
         {tier === 1 && (
-          <span className="shrink-0 text-[9px] font-semibold uppercase text-primary">
+          <span className="hidden shrink-0 text-[9px] font-semibold uppercase text-primary sm:inline">
             {TIER_LABELS[tier]}
           </span>
         )}

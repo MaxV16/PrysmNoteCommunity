@@ -229,11 +229,15 @@ pub async fn default_list_id(
 
 /// SQL predicate granting a user access to a task: their own tasks plus any
 /// task shared with a team they belong to (Python `task_access_condition`).
+/// A whole-team share has `task_shares.user_id IS NULL`; a share aimed at one
+/// member sets `task_shares.user_id`, and only that member sees it.
 /// `p` is the placeholder index the user id is bound to.
 pub fn access_condition(p: usize) -> String {
     format!(
         "(user_id = ${p} OR id IN (SELECT ts.task_id FROM task_shares ts \
-         JOIN team_members tm ON tm.team_id = ts.team_id WHERE tm.user_id = ${p}))"
+         JOIN team_members tm ON tm.team_id = ts.team_id \
+         WHERE tm.user_id = ${p} AND ts.user_id IS NULL) \
+         OR id IN (SELECT ts.task_id FROM task_shares ts WHERE ts.user_id = ${p}))"
     )
 }
 

@@ -53,6 +53,62 @@ describe("applyMarkdownAction", () => {
     expect(ta.value).toBe("[link text](url)");
     expect(ta.value.slice(ta.selectionStart, ta.selectionEnd)).toBe("url");
   });
+
+  it("unwraps a whole selection that already includes the bold markers", () => {
+    const ta = makeTextarea("**hello**", 0, 9);
+    applyMarkdownAction(ta, "bold");
+    expect(ta.value).toBe("hello");
+  });
+
+  it("toggles bold off when the caret sits inside an empty pair", () => {
+    const ta = makeTextarea("ab****cd", 4, 4);
+    applyMarkdownAction(ta, "bold");
+    expect(ta.value).toBe("abcd");
+  });
+
+  it("keeps whitespace outside the emphasis so it still renders", () => {
+    const ta = makeTextarea(" hello ", 0, 7);
+    applyMarkdownAction(ta, "bold");
+    expect(ta.value).toBe(" **hello** ");
+    expect(ta.value.slice(ta.selectionStart, ta.selectionEnd)).toBe("hello");
+  });
+
+  it("does not mistake the outer star of bold for italic", () => {
+    const ta = makeTextarea("**bold**", 2, 6);
+    applyMarkdownAction(ta, "italic");
+    expect(ta.value).toBe("***bold***");
+  });
+
+  it("converts a conflicting line marker instead of stacking", () => {
+    const ta = makeTextarea("- one", 0, 5);
+    applyMarkdownAction(ta, "checklist");
+    expect(ta.value).toBe("- [ ] one");
+  });
+
+  it("numbers every selected line", () => {
+    const ta = makeTextarea("a\nb\nc", 0, 5);
+    applyMarkdownAction(ta, "numbered");
+    expect(ta.value).toBe("1. a\n2. b\n3. c");
+  });
+
+  it("recognises and strips any heading level", () => {
+    const ta = makeTextarea("### title", 0, 9);
+    applyMarkdownAction(ta, "heading");
+    expect(ta.value).toBe("title");
+  });
+
+  it("puts a mid-line code fence on its own lines", () => {
+    const ta = makeTextarea("abcdef", 3, 3);
+    applyMarkdownAction(ta, "code");
+    expect(ta.value).toBe("abc\n```\ncode\n```\ndef");
+  });
+
+  it("keeps the selection over the transformed lines for prefix actions", () => {
+    const ta = makeTextarea("one\ntwo", 0, 7);
+    applyMarkdownAction(ta, "bullet");
+    expect(ta.value).toBe("- one\n- two");
+    expect([ta.selectionStart, ta.selectionEnd]).toEqual([0, 11]);
+  });
 });
 
 function Harness() {

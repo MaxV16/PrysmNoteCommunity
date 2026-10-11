@@ -59,6 +59,23 @@ ALTER TABLE public.financial_items ADD COLUMN IF NOT EXISTS settled_at date;
 ALTER TABLE public.financial_items ADD COLUMN IF NOT EXISTS receivable boolean NOT NULL DEFAULT false;
 ALTER TABLE public.financial_items ADD COLUMN IF NOT EXISTS linked_task_id uuid;
 
+-- Per-member task sharing: a NULL user_id is a whole-team share, a set value
+-- targets one teammate (see task::access_condition + the drawer share popover).
+ALTER TABLE public.task_shares ADD COLUMN IF NOT EXISTS user_id uuid;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'task_shares_user_id_fkey'
+    ) THEN
+        ALTER TABLE public.task_shares
+            ADD CONSTRAINT task_shares_user_id_fkey
+            FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS ix_task_shares_user ON public.task_shares USING btree (user_id);
+
 DO $$
 BEGIN
     IF NOT EXISTS (
