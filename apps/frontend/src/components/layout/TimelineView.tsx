@@ -1098,7 +1098,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         <span className="text-lg font-bold text-primary mr-2 hidden md:block shrink-0">{viewModeLabel}</span>
 
         {(filterBadge || selectedTagId || searchQuery) && (
-          <span className="inline-flex max-w-[45vw] items-center gap-1 rounded bg-accent/15 px-2 py-0.5 text-[10px] text-accent shrink-0 sm:max-w-none">
+          <span className="inline-flex max-w-[30vw] items-center gap-1 rounded bg-accent/15 px-2 py-0.5 text-[10px] text-accent shrink-0 sm:max-w-none">
             <span className="truncate">
               {[
                 filterBadge,
@@ -1122,8 +1122,8 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           </span>
         )}
 
-        {/* Search first, then the view switcher and the period nav, so the
-            controls a phone needs most stay visible without scrolling. */}
+        {/* Search stays inline on every width; the period nav moves into the
+            More menu on phones so the primary buttons always fit. */}
         <div className="flex shrink-0 items-center">
           <button
             onClick={() => {
@@ -1158,8 +1158,10 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
             rest right; phones pack everything to the left and scroll. */}
         <div className="hidden min-w-0 flex-1 sm:block" />
 
+        {/* Period nav: on phones it lives in the More menu so the primary
+            buttons (New task, AI, More) always fit; inline from sm up. */}
         {safeMode === "timeline" && (
-          <div className="flex shrink-0 items-center gap-0.5 rounded-full bg-elevated p-0.5">
+          <div className="hidden shrink-0 items-center gap-0.5 rounded-full bg-elevated p-0.5 sm:flex">
             <button
               onClick={() => navigatePeriod("prev")}
               aria-label="Previous period"
@@ -1278,6 +1280,31 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           >
             New task
           </button>
+          {smallScreen && safeMode === "timeline" && (
+            <div className="flex items-center justify-between gap-2 border-y border-border px-4 py-2">
+              <button
+                onClick={() => { setMobileMenuOpen(false); navigatePeriod("prev"); }}
+                className="btn bg-elevated border border-border px-2.5 py-1 text-xs text-secondary hover:text-primary"
+                aria-label="Previous period"
+              >
+                ‹
+              </button>
+              <button
+                onClick={() => { setMobileMenuOpen(false); navigatePeriod("today"); }}
+                className="flex-1 rounded-full px-2 py-1 text-xs font-medium text-secondary transition-colors hover:bg-hover hover:text-primary"
+                aria-label="Go to today"
+              >
+                Today
+              </button>
+              <button
+                onClick={() => { setMobileMenuOpen(false); navigatePeriod("next"); }}
+                className="btn bg-elevated border border-border px-2.5 py-1 text-xs text-secondary hover:text-primary"
+                aria-label="Next period"
+              >
+                ›
+              </button>
+            </div>
+          )}
           {safeMode === "timeline" && (
             <button
               onClick={() => { setMobileMenuOpen(false); setSelectionMode((v) => !v); }}

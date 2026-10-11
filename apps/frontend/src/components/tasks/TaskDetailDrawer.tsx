@@ -168,6 +168,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const isNote = !task.start_date && !task.due_date;
   const tier: PriorityTier = normalizePriority(task.priority);
   const dateRange = formatDateRange(task);
+  const isShared = sharedTeamIds.size > 0 || sharedUserIds.size > 0;
 
   const hasSubtasks = subtasks.length > 0;
 
@@ -189,6 +190,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task.id, task.updated_at]);
+
+  // Load the shared state as soon as the drawer opens so the share button can
+  // show a small indicator even before the menu is opened.
+  useEffect(() => {
+    void loadShareData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.id]);
 
   // Keep the checklist in step with the shared store: the list payload carries
   // every subtask row (flat, with parent_task_id), so a refresh that changes a
@@ -815,13 +823,19 @@ const handleUpdate = async (data: {
                 void loadShareData();
                 setShareOpen((v) => !v);
               }}
-              className="rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
-              aria-label="Share with a team"
+              className="relative rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
+              aria-label={isShared ? "Shared with a team" : "Share with a team"}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
                 <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
               </svg>
+              {isShared && (
+                <span
+                  className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-accent"
+                  aria-hidden="true"
+                />
+              )}
             </button>
             <PopoverMenu
               open={shareOpen}
@@ -855,18 +869,23 @@ const handleUpdate = async (data: {
                         </button>
                         {members.length > 0 && (
                           <div className="mt-0.5 space-y-0.5 pl-2">
-                            {members.map((m) => (
-                              <button
-                                key={m.user_id}
-                                onClick={() => void toggleShareUser(t.id, m.user_id)}
-                                className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-xs text-muted transition-colors hover:bg-hover hover:text-secondary"
-                              >
-                                <span className="truncate">{m.email || "Teammate"}</span>
-                                <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${sharedUserIds.has(m.user_id) ? "bg-accent/20 text-accent" : "bg-elevated text-muted"}`}>
-                                  {sharedUserIds.has(m.user_id) ? "Shared" : "Share"}
-                                </span>
-                              </button>
-                            ))}
+                            {members.map((m) => {
+                              const teamShared = sharedTeamIds.has(t.id);
+                              const shared = teamShared || sharedUserIds.has(m.user_id);
+                              return (
+                                <button
+                                  key={m.user_id}
+                                  disabled={teamShared}
+                                  onClick={() => void toggleShareUser(t.id, m.user_id)}
+                                  className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-xs text-muted transition-colors hover:bg-hover hover:text-secondary disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent"
+                                >
+                                  <span className="truncate">{m.email || "Teammate"}</span>
+                                  <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${shared ? "bg-accent/20 text-accent" : "bg-elevated text-muted"}`}>
+                                    {shared ? "Shared" : "Share"}
+                                  </span>
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
