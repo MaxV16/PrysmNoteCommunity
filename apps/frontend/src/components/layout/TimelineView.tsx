@@ -1154,9 +1154,10 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           />
         </div>
 
-        {/* Desktop-only spacer: keeps the primary controls left and pushes the
-            rest right; phones pack everything to the left and scroll. */}
-        <div className="hidden min-w-0 flex-1 sm:block" />
+        {/* Flexible spacer: keeps the primary controls left and pushes the
+            period nav and the New task / AI / More buttons to the right edge at
+            every width, so the More menu is never stranded mid-row on a phone. */}
+        <div className="min-w-0 flex-1" />
 
         {/* Period nav: on phones it lives in the More menu so the primary
             buttons (New task, AI, More) always fit; inline from sm up. */}
