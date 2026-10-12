@@ -120,6 +120,13 @@ pub fn router() -> Router<AppState> {
             "/api/mcp/.well-known/oauth-protected-resource",
             get(protected_resource),
         )
+        // RFC 9728 path-insertion form (resource = `/api/mcp`): clients such as
+        // opencode derive this URL from the resource identifier instead of
+        // following the `resource_metadata` hint on the 401 challenge.
+        .route(
+            "/.well-known/oauth-protected-resource/api/mcp",
+            get(protected_resource),
+        )
 }
 
 async fn get_mcp() -> Response {
@@ -1063,6 +1070,23 @@ mod tests {
             .unwrap()
             .ends_with("/api/mcp"));
         assert_eq!(body["scopes_supported"], json!(["tasks", "watchlist", "habits"]));
+    }
+
+    #[tokio::test]
+    async fn protected_resource_path_insertion_is_served() {
+        let res = lazy_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/.well-known/oauth-protected-resource/api/mcp")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(body["resource"].as_str().unwrap().ends_with("/api/mcp"));
     }
 
     #[tokio::test]
