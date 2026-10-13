@@ -13,6 +13,7 @@ import { TaskChecklist } from "./TaskChecklist";
 import { TaskLinks } from "./TaskLinks";
 import { TaskTagsEditor } from "./TaskTagsEditor";
 import { DateRecurrencePopover } from "./DateRecurrencePopover";
+import { describeRule } from "@/lib/recurrence";
 import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
 import { Markdown } from "@/components/ai/Markdown";
 import dynamic from "next/dynamic";
@@ -162,7 +163,7 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const descSectionRef = useRef<HTMLDivElement | null>(null);
   const descTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [optionsTrigger, setOptionsTrigger] = useState<HTMLButtonElement | null>(null);
-  const { updateTask, deleteTask, restoreTask, fetchTasks } = useTasks();
+  const { updateTask, deleteTask, restoreTask, fetchTasks, stopTaskRecurrence } = useTasks();
   const { showToast } = useToast();
   const { addNoteWithContent } = useStickyBoard();
 
@@ -439,6 +440,11 @@ const handleUpdate = async (data: {
     setEditing(false);
   };
 
+  const handleStopRecurrence = async () => {
+    await stopTaskRecurrence(task.id);
+    showToast("Recurrence stopped", "info");
+  };
+
   const handleDateChange = async (
     newStartDate: string | null,
     newDueDate: string | null,
@@ -446,6 +452,7 @@ const handleUpdate = async (data: {
     newEndDate: string | null
   ) => {
     setDateOpen(false);
+    const hadRecurrence = !!task.recurrence_rule || !!task.recurrence_parent_id;
     const fields: Record<string, unknown> = {};
     if (newStartDate) fields.start_date = newStartDate;
     if (newDueDate) fields.due_date = newDueDate;
@@ -455,6 +462,11 @@ const handleUpdate = async (data: {
     }
     fields.recurrence_rule = newRule;
     fields.recurrence_end_date = newEndDate;
+    // Clearing the repeat must also clear the upcoming occurrences; the endpoint
+    // keeps the ones already created and soft-deletes the future ones.
+    if (!newRule && hadRecurrence) {
+      await stopTaskRecurrence(task.id);
+    }
     await updateTask(task.id, fields);
   };
 
@@ -554,6 +566,26 @@ const handleUpdate = async (data: {
           </button>
         </div>
       </div>
+
+      {(task.recurrence_rule || task.recurrence_parent_id) && (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full bg-elevated px-2 py-0.5 text-[11px] text-secondary">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8" />
+              <path d="M20 4v4h-4" />
+              <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16" />
+              <path d="M4 20v-4h4" />
+            </svg>
+            {task.recurrence_rule ? describeRule(task.recurrence_rule) || "Repeats" : "Repeats"}
+          </span>
+          <button
+            onClick={handleStopRecurrence}
+            className="text-[11px] text-secondary transition-colors hover:text-primary"
+          >
+            Stop repeating
+          </button>
+        </div>
+      )}
 
       {/* Title */}
       <div className="mt-3 flex items-start gap-2">

@@ -25,7 +25,7 @@ pub const STATUSES: [&str; 5] = ["backlog", "todo", "in_progress", "done", "canc
 
 /// Column projection shared by every task query. `status` is cast to text so it
 /// maps to a `String` instead of a Postgres enum type.
-pub const COLUMNS: &str = "id, user_id, parent_task_id, board_section_id, board_order, \
+pub const COLUMNS: &str = "id, user_id, parent_task_id, recurrence_parent_id, board_section_id, board_order, \
      title, description, status::text AS status, priority, start_date, due_date, \
      start_time, end_time, is_all_day, estimated_minutes, recurrence_rule, \
      recurrence_end_date, sort_order, is_archived, reminder_enabled, list_id, \
@@ -37,6 +37,7 @@ pub struct Task {
     pub id: Uuid,
     pub user_id: Uuid,
     pub parent_task_id: Option<Uuid>,
+    pub recurrence_parent_id: Option<Uuid>,
     pub board_section_id: Option<Uuid>,
     pub board_order: Option<i32>,
     pub title: String,
@@ -68,6 +69,7 @@ impl Task {
             id: row.try_get("id")?,
             user_id: row.try_get("user_id")?,
             parent_task_id: row.try_get("parent_task_id")?,
+            recurrence_parent_id: row.try_get("recurrence_parent_id")?,
             board_section_id: row.try_get("board_section_id")?,
             board_order: row.try_get("board_order")?,
             title: row.try_get("title")?,
@@ -101,6 +103,7 @@ pub fn task_json(task: &Task, tags: Option<&[serde_json::Value]>) -> serde_json:
         "id": task.id.to_string(),
         "user_id": task.user_id.to_string(),
         "parent_task_id": task.parent_task_id.map(|u| u.to_string()),
+        "recurrence_parent_id": task.recurrence_parent_id.map(|u| u.to_string()),
         "board_section_id": task.board_section_id.map(|u| u.to_string()),
         "board_order": task.board_order,
         "title": task.title,

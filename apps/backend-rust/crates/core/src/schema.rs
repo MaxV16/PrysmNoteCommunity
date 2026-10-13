@@ -101,6 +101,41 @@ BEGIN
         GRANT SELECT, UPDATE ON public.api_tokens TO prysm_system;
     END IF;
 END $$;
+
+-- Recurring tasks: occurrence rows used to be stored in the subtask column
+-- (parent_task_id), so the UI hid them as subtasks and they never showed on the
+-- timeline. Occurrences now point at their template through a dedicated
+-- recurrence_parent_id, leaving parent_task_id exclusively for real subtasks.
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS recurrence_parent_id uuid;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'tasks_recurrence_parent_id_fkey'
+    ) THEN
+        ALTER TABLE public.tasks
+            ADD CONSTRAINT tasks_recurrence_parent_id_fkey
+            FOREIGN KEY (recurrence_parent_id) REFERENCES public.tasks(id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_parent ON public.tasks USING btree (recurrence_parent_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_parent_start_date ON public.tasks USING btree (recurrence_parent_id, start_date);
+
+-- Backfill existing occurrence rows from parent_task_id into
+-- recurrence_parent_id. A real subtask never has a start_date (insert_subtask
+-- does not set one) while an occurrence always does, so start_date IS NOT NULL
+-- distinguishes them. tasks is FORCE ROW LEVEL SECURITY; the app role owns the
+-- table, so clear FORCE for the backfill and re-enable it in the same
+-- transaction.
+ALTER TABLE public.tasks NO FORCE ROW LEVEL SECURITY;
+UPDATE public.tasks
+   SET recurrence_parent_id = parent_task_id,
+       parent_task_id = NULL
+ WHERE parent_task_id IS NOT NULL
+   AND start_date IS NOT NULL
+   AND parent_task_id IN (SELECT id FROM public.tasks WHERE recurrence_rule IS NOT NULL);
+ALTER TABLE public.tasks FORCE ROW LEVEL SECURITY;
 "#;
 
 /// Provisions the core schema on a fresh database.

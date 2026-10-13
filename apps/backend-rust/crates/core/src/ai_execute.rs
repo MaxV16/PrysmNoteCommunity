@@ -609,7 +609,8 @@ async fn soft_delete_ids(
     }
     let sql = "WITH RECURSIVE tree AS ( \
                  SELECT id FROM tasks WHERE user_id = $1 AND id = ANY($2) \
-                 UNION ALL SELECT t.id FROM tasks t JOIN tree ON t.parent_task_id = tree.id \
+                 UNION ALL SELECT t.id FROM tasks t JOIN tree \
+                   ON t.parent_task_id = tree.id OR t.recurrence_parent_id = tree.id \
                ) UPDATE tasks SET deleted_at = now(), updated_at = now() \
                WHERE id IN (SELECT id FROM tree)";
     let result = sqlx::query(sql)
@@ -2292,7 +2293,8 @@ async fn tool_restore_task(state: &AppState, user_id: Uuid, args: &Value) -> Too
     };
     let sql = "WITH RECURSIVE tree AS ( \
                  SELECT id FROM tasks WHERE id = $1 AND user_id = $2 \
-                 UNION ALL SELECT t.id FROM tasks t JOIN tree ON t.parent_task_id = tree.id \
+                 UNION ALL SELECT t.id FROM tasks t JOIN tree \
+                   ON t.parent_task_id = tree.id OR t.recurrence_parent_id = tree.id \
                ) UPDATE tasks SET deleted_at = NULL, updated_at = now() WHERE id IN (SELECT id FROM tree)";
     sqlx::query(sql)
         .bind(t.id)

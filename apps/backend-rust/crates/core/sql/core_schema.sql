@@ -525,6 +525,7 @@ CREATE TABLE public.tasks (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     user_id uuid NOT NULL,
     parent_task_id uuid,
+    recurrence_parent_id uuid,
     board_section_id uuid,
     board_order integer,
     title character varying(5000) NOT NULL,
@@ -1136,6 +1137,20 @@ CREATE INDEX idx_tasks_parent ON public.tasks USING btree (parent_task_id);
 --
 
 CREATE INDEX idx_tasks_parent_start_date ON public.tasks USING btree (parent_task_id, start_date);
+
+
+--
+-- Name: idx_tasks_recurrence_parent; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_tasks_recurrence_parent ON public.tasks USING btree (recurrence_parent_id);
+
+
+--
+-- Name: idx_tasks_recurrence_parent_start_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_tasks_recurrence_parent_start_date ON public.tasks USING btree (recurrence_parent_id, start_date);
 
 
 --
@@ -1811,6 +1826,14 @@ ALTER TABLE ONLY public.tasks
 
 ALTER TABLE ONLY public.tasks
     ADD CONSTRAINT tasks_parent_task_id_fkey FOREIGN KEY (parent_task_id) REFERENCES public.tasks(id) ON DELETE SET NULL;
+
+
+--
+-- Name: tasks tasks_recurrence_parent_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tasks
+    ADD CONSTRAINT tasks_recurrence_parent_id_fkey FOREIGN KEY (recurrence_parent_id) REFERENCES public.tasks(id) ON DELETE CASCADE;
 
 
 --

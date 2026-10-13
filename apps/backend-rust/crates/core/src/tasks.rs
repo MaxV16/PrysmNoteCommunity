@@ -57,6 +57,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/tasks/{task_id}/permanent", axum::routing::delete(delete_permanent))
         .route("/api/tasks/{task_id}/restore", post(restore_task))
         .route(
+            "/api/tasks/{task_id}/recurrence",
+            axum::routing::delete(stop_recurrence),
+        )
+        .route(
             "/api/tasks/{task_id}/subtasks",
             get(list_subtasks).post(create_subtask),
         )
@@ -527,7 +531,8 @@ async fn apply_delete(
         "WITH RECURSIVE tree AS ( \
            SELECT id FROM tasks WHERE id = $1 AND {access} \
            UNION ALL \
-           SELECT t.id FROM tasks t JOIN tree ON t.parent_task_id = tree.id \
+           SELECT t.id FROM tasks t JOIN tree \
+             ON t.parent_task_id = tree.id OR t.recurrence_parent_id = tree.id \
          ) UPDATE tasks SET deleted_at = {value}, updated_at = now() WHERE id IN (SELECT id FROM tree)"
     );
     let result = sqlx::query(&sql)
@@ -1013,7 +1018,7 @@ pub(crate) async fn svc_create_task(
         .await
         .map_err(db_error)?
         .ok_or_else(|| ApiError::Internal("created task missing".to_string()))?;
-    if new.recurrence_rule.is_some() && new.parent_task_id.is_none() {
+    if new.recurrence_rule.is_some() && new.parent_task_id.is_none() && task.recurrence_parent_id.is_none() {
         crate::recurring::expand_task_occurrences(&mut *tx, &task)
             .await
             .map_err(db_error)?;
@@ -1075,7 +1080,10 @@ pub(crate) async fn svc_update_task(
         .await
         .map_err(db_error)?
         .ok_or_else(|| ApiError::Internal("updated task missing".to_string()))?;
-    if refreshed.recurrence_rule.is_some() && refreshed.parent_task_id.is_none() {
+    if refreshed.recurrence_rule.is_some()
+        && refreshed.parent_task_id.is_none()
+        && refreshed.recurrence_parent_id.is_none()
+    {
         crate::recurring::expand_task_occurrences(&mut *tx, &refreshed)
             .await
             .map_err(db_error)?;
@@ -1126,7 +1134,8 @@ pub(crate) async fn svc_delete_task_permanent(
     let access = task::access_condition(2);
     let sql = format!(
         "WITH RECURSIVE tree AS (SELECT id FROM tasks WHERE id = $1 AND {access} \
-         UNION ALL SELECT t.id FROM tasks t JOIN tree ON t.parent_task_id = tree.id) \
+         UNION ALL SELECT t.id FROM tasks t JOIN tree \
+           ON t.parent_task_id = tree.id OR t.recurrence_parent_id = tree.id) \
          DELETE FROM tasks WHERE id IN (SELECT id FROM tree)"
     );
     sqlx::query(&sql)
@@ -1218,6 +1227,51 @@ async fn restore_task(
     Ok(Json(json!({ "status": "restored" })))
 }
 
+/// Stop a recurring series: accept either the template or any occurrence, cap
+/// the template's `recurrence_end_date` at today so no new occurrences
+/// materialize, and soft-delete the future occurrences still ahead of today.
+/// Past occurrences are kept as ordinary task history.
+async fn stop_recurrence(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(task_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+    let id = task::require_uuid(&task_id)?;
+    let mut tx = state.pool.begin().await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    let task = task::find_task(&mut *tx, id, user.user_id, false)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| ApiError::NotFound("Task not found".to_string()))?;
+    let template_id = task.recurrence_parent_id.unwrap_or(task.id);
+    let today = Utc::now().date_naive();
+    sqlx::query(
+        "UPDATE tasks SET recurrence_end_date = $2, updated_at = now() \
+         WHERE id = $1 AND user_id = $3 AND recurrence_rule IS NOT NULL",
+    )
+    .bind(template_id)
+    .bind(today)
+    .bind(user.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    let removed = sqlx::query(
+        "UPDATE tasks SET deleted_at = now(), updated_at = now() \
+         WHERE recurrence_parent_id = $1 AND user_id = $2 AND start_date > $3 \
+         AND deleted_at IS NULL",
+    )
+    .bind(template_id)
+    .bind(user.user_id)
+    .bind(today)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?
+    .rows_affected();
+    tx.commit().await.map_err(db_error)?;
+    Ok(Json(json!({ "status": "stopped", "removed": removed })))
+}
+
 /// Hard-delete trashed tasks older than `retention_days`, plus their descendant
 /// subtasks, in one recursive-CTE delete. `user_id` `Some` scopes the pass to
 /// one user (the opportunistic purge inside `list_trash`); `None` covers every
@@ -1235,7 +1289,8 @@ pub async fn purge_trash(
                 "WITH RECURSIVE expired AS ( \
                    SELECT id FROM tasks WHERE user_id = $2 AND deleted_at IS NOT NULL \
                    AND deleted_at < now() - ($1 * INTERVAL '1 day') \
-                   UNION ALL SELECT t.id FROM tasks t JOIN expired e ON t.parent_task_id = e.id \
+                   UNION ALL SELECT t.id FROM tasks t JOIN expired e \
+                     ON t.parent_task_id = e.id OR t.recurrence_parent_id = e.id \
                  ) DELETE FROM tasks WHERE id IN (SELECT id FROM expired)",
             )
             .bind(retention_days)
@@ -1248,7 +1303,8 @@ pub async fn purge_trash(
                 "WITH RECURSIVE expired AS ( \
                    SELECT id FROM tasks WHERE deleted_at IS NOT NULL \
                    AND deleted_at < now() - ($1 * INTERVAL '1 day') \
-                   UNION ALL SELECT t.id FROM tasks t JOIN expired e ON t.parent_task_id = e.id \
+                   UNION ALL SELECT t.id FROM tasks t JOIN expired e \
+                     ON t.parent_task_id = e.id OR t.recurrence_parent_id = e.id \
                  ) DELETE FROM tasks WHERE id IN (SELECT id FROM expired)",
             )
             .bind(retention_days)
@@ -2440,12 +2496,71 @@ mod tests {
         let created = body_json(res).await;
         let template_id = created["id"].as_str().unwrap().to_string();
 
-        let children: i64 = sqlx::query_scalar("SELECT count(*) FROM tasks WHERE parent_task_id = $1")
-            .bind(Uuid::parse_str(&template_id).unwrap())
-            .fetch_one(&state.pool)
-            .await
-            .unwrap();
+        let template_uuid = Uuid::parse_str(&template_id).unwrap();
+        let children: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM tasks WHERE recurrence_parent_id = $1")
+                .bind(template_uuid)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
         assert!(children > 0, "expected materialized occurrences, got {children}");
+
+        // Occurrences are top-level tasks, not subtasks: none may carry a
+        // parent_task_id (that column is reserved for real subtasks).
+        let nested: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM tasks WHERE recurrence_parent_id = $1 AND parent_task_id IS NOT NULL",
+        )
+        .bind(template_uuid)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(nested, 0, "occurrences must not be stored as subtasks");
+
+        // They surface as individual tasks on the date-range feed (the timeline
+        // and calendar read path), unlike subtasks.
+        let res = call(
+            app.clone(),
+            "GET",
+            &format!(
+                "/api/tasks/?date_from={}&date_to={}",
+                today,
+                today + chrono::Duration::days(30)
+            ),
+            &token,
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let listed = body_json(res).await;
+        let listed = listed.as_array().unwrap();
+        let returned_ids: Vec<String> = listed
+            .iter()
+            .filter_map(|t| t["id"].as_str().map(ToString::to_string))
+            .collect();
+        assert!(
+            returned_ids.contains(&template_id),
+            "template must appear on the timeline feed"
+        );
+        for occ in listed.iter().filter(|t| {
+            t["recurrence_parent_id"].as_str() == Some(template_id.as_str())
+        }) {
+            assert!(occ["parent_task_id"].is_null(), "occurrence must have no parent");
+        }
+        let window_children: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM tasks WHERE recurrence_parent_id = $1 \
+             AND start_date >= $2 AND start_date <= $3",
+        )
+        .bind(template_uuid)
+        .bind(today)
+        .bind(today + chrono::Duration::days(30))
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        assert!(
+            returned_ids.len() as i64 >= window_children + 1,
+            "expected template + {window_children} occurrences within the window, got {}",
+            returned_ids.len()
+        );
 
         // Re-running the sweep creates nothing new (idempotent) and reports 0.
         let res = call(
@@ -2458,6 +2573,36 @@ mod tests {
         .await;
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(body_json(res).await["expanded"], 0);
+
+        // Stopping the recurrence keeps the template, ends the series, and clears
+        // upcoming occurrences (past ones are kept).
+        let res = call(
+            app.clone(),
+            "DELETE",
+            &format!("/api/tasks/{template_id}/recurrence"),
+            &token,
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["status"], "stopped");
+        let future: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM tasks WHERE recurrence_parent_id = $1 \
+             AND start_date > $2 AND deleted_at IS NULL",
+        )
+        .bind(template_uuid)
+        .bind(today)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap();
+        assert_eq!(future, 0, "upcoming occurrences must be cleared after stop");
+        let ended: Option<chrono::NaiveDate> =
+            sqlx::query_scalar("SELECT recurrence_end_date FROM tasks WHERE id = $1")
+                .bind(template_uuid)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap();
+        assert_eq!(ended, Some(today), "recurrence_end_date must be set to today");
 
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(user.id)

@@ -4,9 +4,10 @@
 //! expanded lazily for a date window on reads ([`expand_recurring_for_range`]),
 //! materialized up to a 90-day horizon when a template is created/updated
 //! ([`expand_task_occurrences`]), and swept by an hourly background loop with a
-//! cooldown ([`expand_recurring_tasks`]). Occurrence rows are ordinary tasks
-//! whose `parent_task_id` points at the template row and whose start/due dates
-//! are the instance dates (the template row itself is the first occurrence).
+//! cooldown ([`expand_recurring_tasks`]). Occurrence rows are ordinary
+//! top-level tasks whose `recurrence_parent_id` points at the template row and
+//! whose start/due dates are the instance dates (the template row itself is the
+//! first occurrence). `parent_task_id` stays reserved for real subtasks.
 
 use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
@@ -77,25 +78,45 @@ pub fn expand_recurring_instances(
 }
 
 /// Insert one occurrence row for a template on `date`.
+///
+/// Occurrences are ordinary top-level tasks: they carry no `parent_task_id`
+/// (that column is reserved for real subtasks) and instead point at their
+/// template through `recurrence_parent_id`. They copy the template's list,
+/// board section, times, estimated minutes, all-day flag and tags so they show
+/// up in the same filtered views as the template.
 async fn insert_occurrence(
     conn: &mut PgConnection,
     template: &Task,
     date: NaiveDate,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO tasks (user_id, parent_task_id, title, description, status, priority, \
-         start_date, due_date, start_time, end_time, is_all_day, is_archived, sort_order, \
-         reminder_enabled) \
-         VALUES ($1, $2, $3, $4, 'todo'::task_status, $5, $6, $6, $7, $8, false, false, 0, false)",
+    let row = sqlx::query(
+        "INSERT INTO tasks (user_id, parent_task_id, recurrence_parent_id, board_section_id, \
+         title, description, status, priority, start_date, due_date, start_time, end_time, \
+         is_all_day, estimated_minutes, is_archived, sort_order, reminder_enabled, list_id) \
+         VALUES ($1, NULL, $2, $3, $4, $5, 'todo'::task_status, $6, $7, $7, $8, $9, $10, $11, \
+         false, 0, false, $12) RETURNING id",
     )
     .bind(template.user_id)
     .bind(template.id)
+    .bind(template.board_section_id)
     .bind(&template.title)
     .bind(&template.description)
     .bind(template.priority)
     .bind(date)
     .bind(template.start_time)
     .bind(template.end_time)
+    .bind(template.is_all_day)
+    .bind(template.estimated_minutes)
+    .bind(template.list_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    let occurrence_id: Uuid = row.try_get("id")?;
+    sqlx::query(
+        "INSERT INTO task_tags (task_id, tag_id) \
+         SELECT $1, tag_id FROM task_tags WHERE task_id = $2",
+    )
+    .bind(occurrence_id)
+    .bind(template.id)
     .execute(&mut *conn)
     .await?;
     Ok(())
@@ -106,7 +127,7 @@ async fn existing_occurrence_dates(
     conn: &mut PgConnection,
     parent_id: Uuid,
 ) -> Result<HashSet<NaiveDate>, sqlx::Error> {
-    let rows = sqlx::query("SELECT start_date FROM tasks WHERE parent_task_id = $1")
+    let rows = sqlx::query("SELECT start_date FROM tasks WHERE recurrence_parent_id = $1")
         .bind(parent_id)
         .fetch_all(&mut *conn)
         .await?;
@@ -245,7 +266,7 @@ pub async fn expand_recurring_for_range(
     let templates: Vec<Task> = rows.iter().map(Task::from_row).collect::<Result<_, _>>()?;
     let mut total = 0u32;
     for template in templates {
-        if template.parent_task_id.is_some() {
+        if template.recurrence_parent_id.is_some() {
             continue;
         }
         match expand_task_occurrences_for_range(conn, &template, from, to).await {
@@ -283,7 +304,7 @@ pub async fn expand_recurring_tasks(
     let templates: Vec<Task> = rows.iter().map(Task::from_row).collect::<Result<_, _>>()?;
     let mut total = 0u32;
     for template in templates {
-        if template.parent_task_id.is_some() {
+        if template.recurrence_parent_id.is_some() {
             continue;
         }
         match expand_task_occurrences(conn, &template).await {

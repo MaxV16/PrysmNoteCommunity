@@ -74,6 +74,17 @@ describe("isVisibleTask", () => {
     expect(isVisibleTask(makeTask({ is_archived: true }))).toBe(false);
     expect(isVisibleTask(makeTask({ parent_task_id: "parent" }))).toBe(false);
   });
+
+  it("shows recurring occurrences as top-level tasks", () => {
+    // Occurrences hang off the template via recurrence_parent_id, not parent_task_id.
+    const occurrence = makeTask({
+      parent_task_id: null,
+      recurrence_parent_id: "template-1",
+      start_date: TODAY,
+      due_date: TODAY,
+    });
+    expect(isVisibleTask(occurrence)).toBe(true);
+  });
 });
 
 describe("applyNavFilter", () => {

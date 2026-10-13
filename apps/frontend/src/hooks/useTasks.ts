@@ -267,6 +267,17 @@ export function useTasks() {
     []
   );
 
+  // Stop a recurring series: keeps the occurrences that already exist and clears
+  // the upcoming ones (server sets recurrence_end_date to today and soft-deletes
+  // future occurrences). Works from either the template or one of its occurrences.
+  const stopTaskRecurrence = useCallback(
+    async (id: string) => {
+      await api.delete(`/tasks/${id}/recurrence`);
+      await fetchTasks();
+    },
+    [fetchTasks]
+  );
+
   // Gesture-friendly persist: patch and reconcile in the background instead of
   // awaiting a full `fetchTasks()` inside the interaction. Callers still do an
   // optimistic store write, so the UI stays instant.
@@ -351,6 +362,7 @@ export function useTasks() {
     createTask,
     updateTask,
     persistTask,
+    stopTaskRecurrence,
     deleteTask,
     deleteTasksBatch,
     restoreTask,
