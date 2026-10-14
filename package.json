@@ -10,6 +10,7 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "smoke:api": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/api-smoke.mjs",
+    "smoke:recurring": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/recurring-smoke.mjs",
     "smoke:ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke.mjs",
     "smoke:ui-mobile": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke-mobile.mjs",
     "smoke:timeline": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-infinite-smoke.mjs",
