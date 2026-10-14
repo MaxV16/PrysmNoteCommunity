@@ -136,6 +136,30 @@ UPDATE public.tasks
    AND start_date IS NOT NULL
    AND parent_task_id IN (SELECT id FROM public.tasks WHERE recurrence_rule IS NOT NULL);
 ALTER TABLE public.tasks FORCE ROW LEVEL SECURITY;
+
+-- Legacy occurrence rows were also missing their template's list and board
+-- section (the columns stayed NULL) and never got the template's tags, so once
+-- these rows started showing as individual tasks they were still not where the
+-- user expected. Fill the gaps from each occurrence's template. Idempotent: only
+-- blank fields and missing tags are filled. Both tables are FORCE ROW LEVEL
+-- SECURITY, so clear FORCE around the bulk writes and re-enable it in the same
+-- transaction.
+ALTER TABLE public.tasks NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.task_tags NO FORCE ROW LEVEL SECURITY;
+UPDATE public.tasks o
+   SET list_id = COALESCE(o.list_id, t.list_id),
+       board_section_id = COALESCE(o.board_section_id, t.board_section_id)
+  FROM public.tasks t
+ WHERE o.recurrence_parent_id = t.id
+   AND (o.list_id IS NULL OR o.board_section_id IS NULL);
+INSERT INTO public.task_tags (task_id, tag_id)
+SELECT o.id, tt.tag_id
+  FROM public.tasks o
+  JOIN public.task_tags tt ON tt.task_id = o.recurrence_parent_id
+ WHERE o.recurrence_parent_id IS NOT NULL
+ON CONFLICT DO NOTHING;
+ALTER TABLE public.task_tags FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.tasks FORCE ROW LEVEL SECURITY;
 "#;
 
 /// Provisions the core schema on a fresh database.

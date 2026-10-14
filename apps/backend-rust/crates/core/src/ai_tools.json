@@ -83,7 +83,7 @@
           },
           "recurrence_rule": {
             "type": "string",
-            "description": "RRULE string"
+            "description": "RRULE string. Set ONLY when the user explicitly says the task repeats (for example 'every Monday', 'every weekday'). Leave it out for a one-off task, even when the task has a date or a deadline."
           },
           "recurrence_end_date": {
             "type": "string",
@@ -98,7 +98,11 @@
           },
           "list_id": {
             "type": "string",
-            "description": "task list id to put the task in (optional; defaults to the current/default list)"
+            "description": "id of a specific list. Prefer list_name; only set when the user explicitly names a list. Omit to use the main list."
+          },
+          "list_name": {
+            "type": "string",
+            "description": "name of the list to put the task in (case-insensitive), e.g. 'mobile app list'. Only set when the user explicitly names a list; omit otherwise so the task lands in the main list."
           },
           "reminder_enabled": {
             "type": "boolean",
@@ -459,7 +463,7 @@
                 },
                 "recurrence_rule": {
                   "type": "string",
-                  "description": "RRULE string for recurring tasks, e.g. FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR. Occurrences are expanded automatically."
+                  "description": "RRULE string. Set ONLY when the user explicitly says this task repeats; leave it out for one-off tasks. Occurrences are expanded automatically."
                 },
                 "recurrence_end_date": {
                   "type": "string",
@@ -467,7 +471,11 @@
                 },
                 "list_id": {
                   "type": "string",
-                  "description": "task list id (optional; defaults to the current/default list)"
+                  "description": "id of a specific list. Prefer list_name; only set when the user explicitly names a list. Omit to use the main list."
+                },
+                "list_name": {
+                  "type": "string",
+                  "description": "name of the list to put the task in (case-insensitive). Only set when the user explicitly names a list; omit otherwise so the task lands in the main list."
                 }
               },
               "required": [

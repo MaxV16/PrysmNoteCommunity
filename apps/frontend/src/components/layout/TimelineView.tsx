@@ -400,6 +400,33 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     scrollPosRef.current = { left: body.scrollLeft, top: body.scrollTop };
   }, [safeMode, dayWidth]);
 
+  // When the calendar day rolls over (midnight, or returning from a suspended
+  // laptop), the rendered strip re-anchors on the new today, so every day
+  // column shifts by the elapsed number of days. Shift the scroll position by
+  // the same number of columns so the date the user is looking at stays put,
+  // and refresh the month label to match.
+  const lastTimelineTodayRef = useRef(today.getTime());
+  useEffect(() => {
+    const previous = lastTimelineTodayRef.current;
+    lastTimelineTodayRef.current = today.getTime();
+    if (previous === today.getTime()) return;
+    const body = bodyRef.current;
+    if (!body || safeMode !== "timeline") return;
+    const DAY_MS = 1000 * 60 * 60 * 24;
+    const deltaDays = Math.round((today.getTime() - previous) / DAY_MS);
+    if (deltaDays === 0) return;
+    body.scrollLeft -= deltaDays * dayWidth;
+    scrollPosRef.current = { left: body.scrollLeft, top: body.scrollTop };
+    const next = monthLabelForViewport({
+      scrollLeft: body.scrollLeft,
+      clientWidth: body.clientWidth,
+      dayWidth,
+      today,
+    });
+    monthLabelRef.current = next;
+    setMonthLabel(next);
+  }, [today, dayWidth, safeMode]);
+
   // Latest slice start for the scroll listener, which is attached once per
   // (view, width) rather than on every slice change.
   const sliceStartRef = useRef(sliceStart);

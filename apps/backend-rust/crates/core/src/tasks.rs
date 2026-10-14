@@ -967,6 +967,37 @@ async fn list_tasks(
     Ok(Json(Value::Array(out)))
 }
 
+/// Best-effort materialization of a recurring task's occurrences.
+///
+/// Runs in its own transaction so an expansion failure (bad rule, transient DB
+/// error) cannot roll back the task the user just created; occurrences are also
+/// produced lazily on the next date-range read and by the background sweep.
+pub(crate) async fn expand_occurrences_best_effort(state: &AppState, user_id: Uuid, task: &Task) {
+    let mut tx = match state.pool.begin().await {
+        Ok(tx) => tx,
+        Err(err) => {
+            tracing::warn!("recurring expansion skipped for {} ({err})", task.id);
+            return;
+        }
+    };
+    let result = async {
+        db::set_rls_user(&mut *tx, user_id, "").await?;
+        crate::recurring::expand_task_occurrences(&mut *tx, task).await
+    }
+    .await;
+    match result {
+        Ok(_) => {
+            if let Err(err) = tx.commit().await {
+                tracing::warn!("recurring expansion commit failed for {} ({err})", task.id);
+            }
+        }
+        Err(err) => {
+            let _ = tx.rollback().await;
+            tracing::warn!("recurring expansion failed for {} ({err})", task.id);
+        }
+    }
+}
+
 pub(crate) async fn svc_create_task(
     state: &AppState,
     user_id: Uuid,
@@ -1018,13 +1049,14 @@ pub(crate) async fn svc_create_task(
         .await
         .map_err(db_error)?
         .ok_or_else(|| ApiError::Internal("created task missing".to_string()))?;
-    if new.recurrence_rule.is_some() && new.parent_task_id.is_none() && task.recurrence_parent_id.is_none() {
-        crate::recurring::expand_task_occurrences(&mut *tx, &task)
-            .await
-            .map_err(db_error)?;
-    }
     let out = serialize_one(&mut *tx, &task).await.map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
+    // Materialize the recurring occurrences AFTER the template is committed and
+    // best-effort, so an expansion failure can never roll back the task the user
+    // just created (it still fills in on the next read or the background sweep).
+    if new.recurrence_rule.is_some() && new.parent_task_id.is_none() && task.recurrence_parent_id.is_none() {
+        expand_occurrences_best_effort(state, user_id, &task).await;
+    }
     crate::embedding::spawn_embedding(
         state.pool.clone(),
         state.settings.encryption_key.clone(),
@@ -1080,16 +1112,14 @@ pub(crate) async fn svc_update_task(
         .await
         .map_err(db_error)?
         .ok_or_else(|| ApiError::Internal("updated task missing".to_string()))?;
+    let out = serialize_one(&mut *tx, &refreshed).await.map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
     if refreshed.recurrence_rule.is_some()
         && refreshed.parent_task_id.is_none()
         && refreshed.recurrence_parent_id.is_none()
     {
-        crate::recurring::expand_task_occurrences(&mut *tx, &refreshed)
-            .await
-            .map_err(db_error)?;
+        expand_occurrences_best_effort(state, user_id, &refreshed).await;
     }
-    let out = serialize_one(&mut *tx, &refreshed).await.map_err(db_error)?;
-    tx.commit().await.map_err(db_error)?;
     crate::embedding::spawn_embedding(
         state.pool.clone(),
         state.settings.encryption_key.clone(),

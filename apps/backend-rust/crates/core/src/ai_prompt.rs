@@ -144,18 +144,11 @@ pub fn build_messages(
         }
 
         if let Some(al) = ctx.get("active_list").filter(|v| !v.is_null()) {
-            let al_id = str_field(al, "id").unwrap_or_default();
             let al_name = str_field(al, "name").unwrap_or_else(|| "a list".to_string());
             system.push_str("\n\n[UNTRUSTED DATA START] ACTIVE LIST: The user currently has the list \"");
             system.push_str(&al_name);
-            system.push_str("\" (id ");
-            system.push_str(&al_id);
             system.push_str(
-                ") active in the sidebar. When creating tasks and the user expects them to land in that list, pass list_id=\"",
-            );
-            system.push_str(&al_id);
-            system.push_str(
-                "\" to create_task / batch_create_tasks. If the user names a different list, use the one they named instead. [UNTRUSTED DATA END]",
+                "\" open in the sidebar. Do NOT put tasks in it by default. Only set a list when the user explicitly names one (for example \"add it to my mobile app list\" or \"the school list\"): then pass list_name with that name to create_task / batch_create_tasks. When the user does not name a list, leave list_id and list_name out entirely so the task lands in the user's main list and shows in the unfiltered All Tasks view. [UNTRUSTED DATA END]",
             );
         }
 

@@ -825,10 +825,34 @@ fn norm_time_arg(args: &Value, key: &str) -> Option<String> {
     parse_time_arg(arg_str(args, key)).map(|t| t.format("%H:%M:%S").to_string())
 }
 
+/// Resolve the list a create should land in. An explicit `list_id` wins; a
+/// `list_name` is matched case-insensitively (like search_tasks). When neither
+/// is given, the task is left for the service default (the main list) so it
+/// shows in the unfiltered All Tasks view rather than the sidebar-active list.
+async fn resolve_create_list(
+    state: &AppState,
+    user_id: Uuid,
+    args: &Value,
+) -> Result<Option<Uuid>, ApiError> {
+    if args.get("list_id").and_then(safe_uuid).is_some() {
+        return Ok(None);
+    }
+    let Some(name) = arg_str(args, "list_name").filter(|s| !s.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let mut tx = begin(state, user_id).await?;
+    let resolved = resolve_list_id_by_name(&mut *tx, user_id, name)
+        .await
+        .map_err(db_err)?;
+    tx.commit().await.map_err(db_err)?;
+    Ok(resolved)
+}
+
 fn build_create_request(
     args: &Value,
     title: &str,
     forced_priority: Option<i64>,
+    resolved_list: Option<Uuid>,
 ) -> tasks::CreateTaskRequest {
     let priority = forced_priority.or_else(|| arg_i64(args, "priority")).unwrap_or(2);
     tasks::CreateTaskRequest {
@@ -846,7 +870,7 @@ fn build_create_request(
         recurrence_end_date: norm_date_arg(args, "recurrence_end_date"),
         estimated_minutes: arg_i64(args, "estimated_minutes").map(|v| v as i32),
         tag_ids: None,
-        list_id: args.get("list_id").and_then(safe_uuid),
+        list_id: resolved_list.or_else(|| args.get("list_id").and_then(safe_uuid)),
         reminder_enabled: arg_bool(args, "reminder_enabled"),
     }
 }
@@ -938,7 +962,8 @@ async fn tool_create_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
         }
     }
 
-    let req = build_create_request(args, &title, None);
+    let resolved_list = resolve_create_list(state, user_id, args).await?;
+    let req = build_create_request(args, &title, None, resolved_list);
     let created = tasks::svc_create_task(state, user_id, req).await?;
     let task_id = created
         .get("id")
@@ -1692,7 +1717,8 @@ async fn tool_batch_create_tasks(state: &AppState, user_id: Uuid, args: &Value) 
         if title.is_empty() {
             title = "Untitled".to_string();
         }
-        let req = build_create_request(item, &title, None);
+        let resolved_list = resolve_create_list(state, user_id, item).await?;
+        let req = build_create_request(item, &title, None, resolved_list);
         let value = tasks::svc_create_task(state, user_id, req).await?;
         created.push(json!({
             "id": value.get("id").cloned().unwrap_or(Value::Null),
@@ -1704,7 +1730,8 @@ async fn tool_batch_create_tasks(state: &AppState, user_id: Uuid, args: &Value) 
 
 async fn tool_add_event(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
     let title = arg_str(args, "title").unwrap_or("Untitled").to_string();
-    let req = build_create_request(args, &title, Some(2));
+    let resolved_list = resolve_create_list(state, user_id, args).await?;
+    let req = build_create_request(args, &title, Some(2), resolved_list);
     let created = tasks::svc_create_task(state, user_id, req).await?;
     let task_id = created
         .get("id")
@@ -2888,6 +2915,7 @@ mod tests {
             &json!({ "title": "Testing", "start_date": "2026-10-03", "start_time": "2pm" }),
             "Testing",
             None,
+            None,
         );
         assert_eq!(req.start_date.as_deref(), Some("2026-10-03"));
         assert_eq!(req.start_time.as_deref(), Some("14:00:00"));
@@ -2896,9 +2924,34 @@ mod tests {
             &json!({ "title": "Testing", "start_date": "tomorrow", "start_time": "sometime" }),
             "Testing",
             None,
+            None,
         );
         assert_eq!(req.start_date, None);
         assert_eq!(req.start_time, None);
+        // No list named means no list_id: the service defaults to the main list.
+        assert_eq!(req.list_id, None);
+    }
+
+    #[test]
+    fn build_create_request_uses_resolved_list_and_explicit_id() {
+        let resolved = Uuid::new_v4();
+        // A name the model supplied, already resolved server-side, wins.
+        let req = build_create_request(
+            &json!({ "title": "Mobile fix", "list_name": "mobile app list" }),
+            "Mobile fix",
+            None,
+            Some(resolved),
+        );
+        assert_eq!(req.list_id, Some(resolved));
+        // An explicit list_id is honored when no name was resolved.
+        let explicit = Uuid::new_v4();
+        let req = build_create_request(
+            &json!({ "title": "X", "list_id": explicit.to_string() }),
+            "X",
+            None,
+            None,
+        );
+        assert_eq!(req.list_id, Some(explicit));
     }
 
     /// The exact reported case: "stuff to do tmr at 2pm" then "testing". A

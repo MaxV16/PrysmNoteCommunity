@@ -142,16 +142,41 @@ pub fn normalize_priority(priority: Option<i64>) -> i16 {
 }
 
 /// Parse a `YYYY-MM-DD` date, returning `None` on malformed input.
+///
+/// Tolerant of surrounding whitespace and of a full ISO datetime (a model
+/// sometimes sends `2026-10-14T09:30:00` where only a date is expected); the
+/// date part is used in that case.
 pub fn parse_date(value: Option<&str>) -> Option<NaiveDate> {
-    value.and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok())
+    let raw = value?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Ok(date) = NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
+        return Some(date);
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw) {
+        return Some(dt.date_naive());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.f") {
+        return Some(dt.date());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S") {
+        return Some(dt.date());
+    }
+    None
 }
 
-/// Parse an `HH:MM` (or `HH:MM:SS`) time, returning `None` on malformed input.
+/// Parse an `HH:MM` (or `HH:MM:SS`/`HHMM`) time, returning `None` on malformed
+/// input. Tolerates surrounding whitespace and a single-digit hour (`9:30`).
 pub fn parse_time(value: Option<&str>) -> Option<NaiveTime> {
-    let raw = value?;
+    let raw = value?.trim();
+    if raw.is_empty() {
+        return None;
+    }
     let normalized = if raw.len() == 5 { format!("{raw}:00") } else { raw.to_string() };
     NaiveTime::parse_from_str(&normalized, "%H:%M:%S")
         .or_else(|_| NaiveTime::parse_from_str(raw, "%H:%M"))
+        .or_else(|_| NaiveTime::parse_from_str(raw, "%H%M"))
         .ok()
 }
 
