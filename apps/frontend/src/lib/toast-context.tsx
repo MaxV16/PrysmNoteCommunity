@@ -70,7 +70,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           return (
             <div
               key={toast.id}
-              className={`pointer-events-auto rounded-xl border px-4 py-3 text-sm shadow-lg backdrop-blur-sm slide-up ${colors[toast.type]}`}
+              className={`pointer-events-auto rounded-xl border px-4 py-3 text-sm shadow-lg slide-up ${colors[toast.type]}`}
             >
               <div className="flex items-center gap-2">
                 <span>{icons[toast.type]}</span>

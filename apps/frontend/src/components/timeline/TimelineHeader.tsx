@@ -41,7 +41,7 @@ export const TimelineHeader = memo(function TimelineHeader({ days, dayWidth = 12
           style={{ width: dayWidth, minWidth: dayWidth, flex: `0 0 ${dayWidth}px` }}
         >
           <span
-            className={`text-[11px] text-scale-day font-medium md:text-xs ${
+            className={`text-[10px] uppercase tracking-[0.08em] text-scale-day font-medium md:text-[11px] ${
               isToday ? "text-accent" : isWeekend ? "text-muted" : "text-secondary"
             }`}
           >
@@ -50,7 +50,7 @@ export const TimelineHeader = memo(function TimelineHeader({ days, dayWidth = 12
           <span
             className={
               isToday
-                ? "mt-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-accent/15 text-base text-scale-num font-semibold tabular-nums leading-none text-accent md:mt-1 md:h-9 md:w-9 md:text-xl"
+                ? "mt-0.5 text-sm text-scale-num font-semibold tabular-nums leading-none text-accent md:mt-1 md:text-base"
                 : `mt-0.5 text-lg text-scale-num font-semibold tabular-nums leading-none md:mt-1 md:text-2xl ${
                     isWeekend ? "text-secondary" : "text-primary"
                   }`

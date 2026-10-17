@@ -954,11 +954,11 @@ function DrawerShell({ onClose, title, dimmed, children }: DrawerShellProps) {
       style={{ top: "var(--desktop-titlebar, 0px)", WebkitAppRegion: "no-drag" } as CSSProperties}
     >
       <div
-        className="h-full flex-1 bg-black/40 backdrop-blur-[2px]"
+        className="h-full flex-1 bg-black/40"
         aria-hidden
         onClick={onClose}
       />
-      <div className="slide-in-right flex h-full w-full flex-col border-l border-border bg-surface shadow-2xl sm:w-[400px] sm:max-w-[92vw]">
+      <div className="slide-in-right flex h-full w-full flex-col border-l border-border bg-surface shadow-lg sm:w-[400px] sm:max-w-[92vw]">
         {title ? (
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <h3 className="text-sm font-semibold text-primary">{title}</h3>

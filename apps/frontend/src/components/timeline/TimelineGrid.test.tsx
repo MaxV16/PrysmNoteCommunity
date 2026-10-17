@@ -55,6 +55,8 @@ describe("TimelineGrid", () => {
     expect(indicator).not.toBeNull();
     expect(indicator!.style.zIndex).toBe("0");
     expect(indicator!.style.pointerEvents).toBe("none");
-    expect(indicator!.style.opacity).toBe("0.55");
+    expect(indicator!.style.opacity).toBe("0.9");
+    // The marker is a flat hairline now: no glow shadow.
+    expect(indicator!.style.boxShadow).toBe("");
   });
 });

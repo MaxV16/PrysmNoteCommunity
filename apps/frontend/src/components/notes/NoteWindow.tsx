@@ -140,7 +140,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
   return (
     <div
       onPointerDown={onWindowPointerDown}
-      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-2xl border border-border bg-surface/85 shadow-glow-lg backdrop-blur-xl"
+      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-lg"
       style={style}
     >
       <div

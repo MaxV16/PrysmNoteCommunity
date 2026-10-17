@@ -43,7 +43,7 @@ export const TimelineGrid = memo(function TimelineGrid({ days, dayWidth = 120 }:
                     ? undefined
                     : "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
                 backgroundColor: isToday
-                  ? "color-mix(in srgb, var(--accent) 10%, transparent)"
+                  ? "color-mix(in srgb, var(--accent) 7%, transparent)"
                   : isWeekend
                   ? "var(--weekend-tint)"
                   : undefined,
@@ -58,8 +58,7 @@ export const TimelineGrid = memo(function TimelineGrid({ days, dayWidth = 120 }:
                     width: 2,
                     transform: "translateX(-50%)",
                     backgroundColor: "var(--accent)",
-                    opacity: 0.55,
-                    boxShadow: "0 0 6px var(--accent)",
+                    opacity: 0.9,
                     zIndex: 0,
                     pointerEvents: "none",
                   }}
