@@ -25,6 +25,7 @@ import { taskTimeLabel } from "@/lib/task-time";
 import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { imageFrom, insertImageAtCursor } from "@/lib/upload";
 
 import {
   TIER_COLORS,
@@ -307,6 +308,17 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const startDescriptionEdit = () => {
     setDescDraft(task.description || "");
     setEditingDescription(true);
+  };
+
+  const handleDescriptionImage = async (file: File | null) => {
+    if (!file) return;
+    const textarea = descTextareaRef.current;
+    if (!textarea) return;
+    try {
+      await insertImageAtCursor(textarea, file, setDescDraft);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not upload that image.", "error");
+    }
   };
 
   // Escape / blur-cancel restores the saved text so a stray key cannot wipe it.
@@ -712,7 +724,29 @@ const handleUpdate = async (data: {
                   autoFocus
                   value={descDraft}
                   onChange={(e) => setDescDraft(e.target.value)}
-                  onBlur={() => void handleDescriptionSave()}
+                  onPaste={(e) => {
+                    const file = imageFrom(e.clipboardData);
+                    if (file) {
+                      e.preventDefault();
+                      void handleDescriptionImage(file);
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    if (imageFrom(e.dataTransfer)) e.preventDefault();
+                  }}
+                  onDrop={(e) => {
+                    const file = imageFrom(e.dataTransfer);
+                    if (file) {
+                      e.preventDefault();
+                      void handleDescriptionImage(file);
+                    }
+                  }}
+                  onBlur={(e) => {
+                    // Opening the image picker moves focus to its hidden file
+                    // input; don't close the editor before the upload lands.
+                    if (e.relatedTarget instanceof HTMLInputElement && e.relatedTarget.type === "file") return;
+                    void handleDescriptionSave();
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                       e.preventDefault();

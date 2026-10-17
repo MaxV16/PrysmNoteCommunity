@@ -105,6 +105,7 @@ pub mod task;
 pub mod task_links;
 pub mod tasks;
 pub mod teams;
+pub mod uploads;
 pub mod user;
 pub mod watchlist;
 
@@ -173,6 +174,7 @@ pub fn build_router(state: AppState, ee: Option<&dyn EeExtension>) -> Router {
         .merge(events::router())
         .merge(tasks::router())
         .merge(teams::router())
+        .merge(uploads::router())
         .merge(tags::router())
         .merge(lists::router())
         .merge(calendar::router())

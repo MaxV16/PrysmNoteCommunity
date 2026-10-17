@@ -393,6 +393,24 @@ ALTER TABLE ONLY public.notes FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: uploads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.uploads (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    mime character varying(100) NOT NULL,
+    filename character varying(255) NOT NULL,
+    size integer NOT NULL,
+    data bytea NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (id)
+);
+
+ALTER TABLE ONLY public.uploads FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: notification_logs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2020,6 +2038,8 @@ ALTER TABLE public.lists ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
 
+ALTER TABLE public.uploads ENABLE ROW LEVEL SECURITY;
+
 --
 -- Name: notification_logs; Type: ROW SECURITY; Schema: public; Owner: -
 --
@@ -2201,6 +2221,13 @@ CREATE POLICY user_isolation ON public.lists USING ((user_id = public.rls_user_i
 --
 
 CREATE POLICY user_isolation ON public.notes USING ((user_id = public.rls_user_id())) WITH CHECK ((user_id = public.rls_user_id()));
+
+
+--
+-- Name: uploads user_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY user_isolation ON public.uploads USING ((user_id = public.rls_user_id())) WITH CHECK ((user_id = public.rls_user_id()));
 
 
 --

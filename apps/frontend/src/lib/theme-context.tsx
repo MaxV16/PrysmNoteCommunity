@@ -44,7 +44,13 @@ function applyThemeColors(colors: ThemeColors, extra?: Record<string, string>) {
   root.style.setProperty("--border", colors.border);
   root.style.setProperty("--text-primary", colors.primary);
   root.style.setProperty("--text-secondary", colors.secondary);
-  root.style.setProperty("--text-muted", colors.muted);
+  // Lift the muted token toward the foreground so helper text stays readable on
+  // every theme (the raw muted values were nearly invisible on several dark
+  // palettes and in settings cards).
+  root.style.setProperty(
+    "--text-muted",
+    `color-mix(in srgb, ${colors.muted} 72%, ${colors.primary} 28%)`,
+  );
   root.style.setProperty("--accent", colors.accent);
   root.style.setProperty("--accent-hover", colors["accent-hover"]);
   root.style.setProperty("--danger", colors.danger);
@@ -61,8 +67,19 @@ function applyThemeColors(colors: ThemeColors, extra?: Record<string, string>) {
   const chromeKeys = ["chrome-bg", "chrome-border", "chrome-text", "chrome-text-secondary", "chrome-text-muted"] as const;
   for (const key of chromeKeys) {
     const value = colors[key];
-    if (value) root.style.setProperty("--" + key, value);
-    else root.style.removeProperty("--" + key);
+    if (!value) {
+      root.style.removeProperty("--" + key);
+      continue;
+    }
+    if (key === "chrome-text-muted") {
+      const chromeText = colors["chrome-text"] ?? colors.primary;
+      root.style.setProperty(
+        "--chrome-text-muted",
+        `color-mix(in srgb, ${value} 70%, ${chromeText} 30%)`,
+      );
+    } else {
+      root.style.setProperty("--" + key, value);
+    }
   }
   if (extra) {
     for (const [name, value] of Object.entries(extra)) {

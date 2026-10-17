@@ -21,8 +21,9 @@ import type { Task } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
 import { Markdown } from "@/components/ai/Markdown";
 import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
-import { SUBTASK_TITLE_MAX } from "@/lib/char-limits";
+import { SUBTASK_TITLE_MAX, SUBTASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
+import { imageFrom, insertImageAtCursor } from "@/lib/upload";
 
 interface TaskChecklistProps {
   subtasks: Task[];
@@ -78,9 +79,10 @@ interface SortableRowProps {
   onToggle: (sub: Task) => Promise<void>;
   onDelete: (sub: Task) => Promise<void>;
   onRename: (sub: Task, title: string) => Promise<void>;
+  onUpdateDescription: (sub: Task, description: string) => Promise<void>;
 }
 
-function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
+function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }: SortableRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: sub.id,
   });
@@ -88,7 +90,11 @@ function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
   const [withToolbar, setWithToolbar] = useState(false);
   const [draft, setDraft] = useState(sub.title);
   const [expanded, setExpanded] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descDraft, setDescDraft] = useState(sub.description || "");
+  const [descError, setDescError] = useState<string | null>(null);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const descRef = useRef<HTMLTextAreaElement | null>(null);
   const done = sub.status === "done";
   const isLong = sub.title.length > 140 || sub.title.includes("\n");
 
@@ -115,6 +121,37 @@ function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
     if (next && next !== sub.title) await onRename(sub, next);
     setEditing(false);
     setWithToolbar(false);
+  };
+
+  const startDescriptionEdit = () => {
+    setDescDraft(sub.description || "");
+    setDescError(null);
+    setEditingDescription(true);
+  };
+
+  const saveDescription = async () => {
+    if (descDraft.length > SUBTASK_DESCRIPTION_MAX) {
+      setDescError(`Description is ${(descDraft.length - SUBTASK_DESCRIPTION_MAX).toLocaleString()} characters over the limit.`);
+      return;
+    }
+    setDescError(null);
+    try {
+      await onUpdateDescription(sub, descDraft.trim());
+      setEditingDescription(false);
+    } catch (err) {
+      setDescError(err instanceof Error ? err.message : "Could not save that description.");
+    }
+  };
+
+  const handleDescriptionImage = async (file: File | null) => {
+    const ta = descRef.current;
+    if (!ta || !file) return;
+    setDescError(null);
+    try {
+      await insertImageAtCursor(ta, file, setDescDraft);
+    } catch (err) {
+      setDescError(err instanceof Error ? err.message : "Could not upload that image.");
+    }
   };
 
   return (
@@ -190,7 +227,8 @@ function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
           </div>
         )
       ) : (
-          <div className="flex min-w-0 flex-1 items-start gap-1">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex min-w-0 items-start gap-1">
             <div
               className={`min-w-0 flex-1 break-words text-sm ${
                 done
@@ -215,6 +253,13 @@ function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
               </button>
             )}
             <button
+              onClick={startDescriptionEdit}
+              aria-label={`Edit description for ${sub.title}`}
+              className="pointer-coarse:opacity-100 flex shrink-0 items-center justify-center rounded p-1 text-muted opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg>
+            </button>
+            <button
               onClick={() => startEditing(true)}
               aria-label={`Format ${sub.title}`}
               className="pointer-coarse:opacity-100 flex shrink-0 items-center justify-center rounded p-1 text-muted opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
@@ -228,6 +273,72 @@ function SortableRow({ sub, onToggle, onDelete, onRename }: SortableRowProps) {
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
             </button>
+            </div>
+            {editingDescription ? (
+              <div className="ml-1 rounded-lg border border-border/60 bg-elevated/40 p-1.5">
+                <MarkdownToolbar
+                  textareaRef={descRef}
+                  onChange={setDescDraft}
+                  className="mb-1 border-b border-border/60 pb-1"
+                />
+                <textarea
+                  ref={descRef}
+                  autoFocus
+                  value={descDraft}
+                  onChange={(e) => setDescDraft(e.target.value)}
+                  onPaste={(e) => {
+                    const file = imageFrom(e.clipboardData);
+                    if (!file) return;
+                    e.preventDefault();
+                    void handleDescriptionImage(file);
+                  }}
+                  onDragOver={(e) => {
+                    if (Array.from(e.dataTransfer.items).some((i) => i.type.startsWith("image/"))) {
+                      e.preventDefault();
+                    }
+                  }}
+                  onDrop={(e) => {
+                    const file = imageFrom(e.dataTransfer);
+                    if (!file) return;
+                    e.preventDefault();
+                    void handleDescriptionImage(file);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      void saveDescription();
+                    }
+                    if (e.key === "Escape") {
+                      e.stopPropagation();
+                      setEditingDescription(false);
+                    }
+                  }}
+                  placeholder="Add notes, links, or images..."
+                  rows={3}
+                  className="input-field w-full bg-transparent text-xs"
+                />
+                {descError && (
+                  <p role="alert" className="mt-1 text-[10px] text-danger">
+                    {descError}
+                  </p>
+                )}
+                <div className="mt-1 flex items-center justify-end gap-2">
+                  <CharLimitHint value={descDraft} max={SUBTASK_DESCRIPTION_MAX} className="mr-auto" />
+                  <button
+                    onClick={() => void saveDescription()}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onPointerDown={(e) => e.preventDefault()}
+                    className="btn btn-primary px-3 py-1 text-xs"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : sub.description ? (
+              <div className="ml-1 border-l-2 border-border/60 pl-2 text-xs text-secondary">
+                <Markdown>{sub.description}</Markdown>
+              </div>
+            ) : null}
           </div>
         )}
       <div className="pointer-coarse:opacity-100 flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
@@ -253,7 +364,7 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
   // is left; the header toggle reveals them again.
   const [showCompleted, setShowCompleted] = useState(false);
   const { updateTask, fetchTasks } = useTasks();
-  const subtasksSignature = subtasks.map((s) => `${s.id}:${s.status}:${s.title}`).join("|");
+  const subtasksSignature = subtasks.map((s) => `${s.id}:${s.status}:${s.title}:${s.description ?? ""}`).join("|");
   const syncedSignatureRef = useRef(subtasksSignature);
 
   useEffect(() => {
@@ -295,6 +406,12 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
   const handleRename = async (sub: Task, title: string) => {
     await updateTask(sub.id, { title });
     setItems((prev) => prev.map((s) => (s.id === sub.id ? { ...s, title } : s)));
+  };
+
+  const handleUpdateDescription = async (sub: Task, description: string) => {
+    const next = description || null;
+    await updateTask(sub.id, { description: next });
+    setItems((prev) => prev.map((s) => (s.id === sub.id ? { ...s, description: next } : s)));
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -356,6 +473,7 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
                   onToggle={handleToggle}
                   onDelete={handleDelete}
                   onRename={handleRename}
+                  onUpdateDescription={handleUpdateDescription}
                 />
               ))}
             </div>

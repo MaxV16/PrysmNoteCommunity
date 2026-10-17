@@ -40,6 +40,26 @@ CREATE TABLE IF NOT EXISTS public.account_deletions (
 CREATE INDEX IF NOT EXISTS ix_account_deletions_email_hash ON public.account_deletions USING btree (email_hash);
 CREATE INDEX IF NOT EXISTS ix_account_deletions_user_id ON public.account_deletions USING btree (user_id);
 
+-- User image uploads for task descriptions and subtasks. Bytes live in the
+-- database so the normal Postgres backup covers them with no extra volume.
+CREATE TABLE IF NOT EXISTS public.uploads (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    mime character varying(100) NOT NULL,
+    filename character varying(255) NOT NULL,
+    size integer NOT NULL,
+    data bytea NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_uploads_user_id ON public.uploads USING btree (user_id);
+
+ALTER TABLE public.uploads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.uploads FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS user_isolation ON public.uploads;
+CREATE POLICY user_isolation ON public.uploads USING ((user_id = public.rls_user_id())) WITH CHECK ((user_id = public.rls_user_id()));
+
 -- user_tokens must NOT be row-level-secured: OAuth tokens are Fernet-encrypted
 -- and every query scopes by user_id, while core background loops (the calendar
 -- pull) read tokens across users on the app pool with no RLS context. A legacy

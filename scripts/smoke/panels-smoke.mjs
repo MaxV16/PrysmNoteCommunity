@@ -196,7 +196,8 @@ async function main() {
   await page.goto(`${BASE_URL}/settings`);
   await page.getByRole("button", { name: "Premium", exact: true }).first().click();
   await page.getByText("Work in progress", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
-  await page.getByText("Coming soon", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
+  assert((await page.getByText("Coming soon", { exact: true }).count()) === 0, "redundant Coming soon button should be gone");
+  await page.getByText("The Process idea action is paused while we finish this workflow.", { exact: false }).waitFor({ state: "visible", timeout: 10000 });
 
   console.log("[8/8] note pin controls are present");
   await page.goto(`${BASE_URL}/`);

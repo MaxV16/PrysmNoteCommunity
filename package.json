@@ -23,6 +23,7 @@
     "smoke:ai": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/ai-smoke.mjs",
     "smoke:ai-ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ai-ui-smoke.mjs",
     "smoke:panels": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/panels-smoke.mjs",
+    "smoke:content": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/content-smoke.mjs",
     "smoke:404": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/not-found-smoke.mjs",
     "ui:audit": "node scripts/ui-audit.mjs",
     "build:desktop": "node scripts/build-desktop.mjs"

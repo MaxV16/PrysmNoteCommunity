@@ -4,6 +4,14 @@ import type { NextConfig } from "next";
 import bundleAnalyzer from "@next/bundle-analyzer";
 
 
+const uploadedImageOrigin = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_API_URL || "").origin;
+  } catch {
+    return "";
+  }
+})();
+
 const nextConfig: NextConfig = {
   output: "standalone",
   // Serve future raster content as modern formats first. Icons deliberately
@@ -40,7 +48,7 @@ const nextConfig: NextConfig = {
               // TMDB hosts: posters/search thumbs/provider logos (image.tmdb.org)
               // + the TMDB attribution logo in the watchlist footer
               // (www.themoviedb.org).
-              "img-src 'self' data: blob: https://image.tmdb.org https://www.themoviedb.org",
+              `img-src 'self' data: blob: https://image.tmdb.org https://www.themoviedb.org${uploadedImageOrigin ? ` ${uploadedImageOrigin}` : ""}`,
               "font-src 'self' https://fonts.gstatic.com data:",
               // Browser-side LLM calls go straight to the provider APIs, and the
               // Google Fonts stylesheet is loaded from its CDN. The google.com hosts

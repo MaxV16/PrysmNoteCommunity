@@ -15,14 +15,15 @@
   --text-primary: #F1ECFA;
   --text-secondary: #CFC4E6;
   --text-muted: #A79BBF;
-  /* App chrome (sidebar, rails). Defaults mirror the theme so every existing
-     theme renders exactly as before. A mixed theme sets these to a contrasting
-     pair, giving a dark sidebar over light content. */
-  --chrome-bg: var(--bg-surface);
-  --chrome-border: var(--border);
+  /* App chrome (sidebar, rails). Chrome sits on the base layer instead of the
+     content surface so the rail reads as a distinct frame in every theme, and
+     its border/text are mixed toward the foreground for visible separation.
+     A mixed theme (dusk) can still override all five tokens outright. */
+  --chrome-bg: var(--bg-base);
+  --chrome-border: color-mix(in srgb, var(--border) 70%, var(--text-primary) 30%);
   --chrome-text: var(--text-primary);
   --chrome-text-secondary: var(--text-secondary);
-  --chrome-text-muted: var(--text-muted);
+  --chrome-text-muted: color-mix(in srgb, var(--text-muted) 68%, var(--text-primary) 32%);
   /* Timeline bars: vibrant priority fills, with ink tuned per theme so the
      title stays readable on every surface. */
   --bar-mix: 82%;

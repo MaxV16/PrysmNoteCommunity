@@ -1,6 +1,8 @@
 "use client";
 
+import { useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
+import { insertImageAtCursor } from "@/lib/upload";
 
 export type MarkdownAction =
   | "bold"
@@ -197,7 +199,15 @@ export function applyMarkdownAction(ta: HTMLTextAreaElement, action: MarkdownAct
 }
 
 const ICON_BUTTON =
-  "pointer-coarse:h-10 pointer-coarse:w-10 flex h-7 w-7 items-center justify-center rounded-md text-secondary transition-colors hover:bg-hover hover:text-primary";
+  "pointer-coarse:h-10 pointer-coarse:w-10 flex h-7 w-7 items-center justify-center rounded-md text-secondary transition-colors hover:bg-hover hover:text-primary disabled:cursor-wait disabled:opacity-60";
+
+const IMAGE_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="8.5" cy="9.5" r="1.5" fill="currentColor" stroke="none" />
+    <path d="M21 15l-5-5L5 20" />
+  </svg>
+);
 
 const ACTIONS: { id: MarkdownAction; label: string; icon: ReactNode }[] = [
   { id: "bold", label: "Bold", icon: <span className="text-[12px] font-bold">B</span> },
@@ -262,11 +272,30 @@ interface MarkdownToolbarProps {
  * would otherwise commit a blur-to-save edit) before the action runs.
  */
 export function MarkdownToolbar({ textareaRef, onChange, className }: MarkdownToolbarProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+
   const run = (action: MarkdownAction) => {
     const ta = textareaRef.current;
     if (!ta) return;
     applyMarkdownAction(ta, action);
     onChange(ta.value);
+  };
+
+  const handleImage = async (file: File | undefined) => {
+    if (!file) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    setImageError(null);
+    setUploading(true);
+    try {
+      await insertImageAtCursor(ta, file, onChange);
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : "Could not upload that image.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -289,6 +318,40 @@ export function MarkdownToolbar({ textareaRef, onChange, className }: MarkdownTo
           {action.icon}
         </button>
       ))}
+      <button
+        type="button"
+        aria-label={uploading ? "Uploading image" : "Add image"}
+        title={uploading ? "Uploading image..." : "Add image (PNG, JPEG, GIF, WebP up to 5 MB)"}
+        onMouseDown={(e) => e.preventDefault()}
+        onPointerDown={(e) => e.preventDefault()}
+        onClick={() => fileInputRef.current?.click()}
+        disabled={uploading}
+        className={ICON_BUTTON}
+      >
+        {uploading ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+            <path d="M21 12a9 9 0 1 1-6.2-8.56" strokeLinecap="round" />
+          </svg>
+        ) : (
+          IMAGE_ICON
+        )}
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          void handleImage(file);
+        }}
+      />
+      {imageError && (
+        <span role="alert" className="basis-full px-1 pt-0.5 text-[10px] text-danger">
+          {imageError}
+        </span>
+      )}
     </div>
   );
 }

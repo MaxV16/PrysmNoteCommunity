@@ -1,6 +1,6 @@
 "use client";
 
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import {
@@ -28,7 +28,37 @@ export function Markdown({ children, ai = false }: { children: string; ai?: bool
     : protectDateLineBreaks(children);
   return (
     <div className="markdown-body">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        urlTransform={(url) => (url.startsWith("data:image/") ? url : defaultUrlTransform(url))}
+        components={{
+          img({ src, alt, title }) {
+            return (
+              // eslint-disable-next-line @next/next/no-img-element -- user-provided upload URLs cannot use the Next image optimizer
+              <img
+                src={typeof src === "string" ? src : undefined}
+                alt={alt ?? ""}
+                title={title}
+                loading="lazy"
+                className="my-2 max-h-80 max-w-full rounded-lg border border-border object-contain"
+              />
+            );
+          },
+          a({ href, title, children }) {
+            return (
+              <a
+                href={href}
+                title={title}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent underline underline-offset-2 hover:text-accent-hover"
+              >
+                {children}
+              </a>
+            );
+          },
+        }}
+      >
         {source}
       </ReactMarkdown>
     </div>
