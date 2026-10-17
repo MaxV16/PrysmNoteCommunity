@@ -1075,7 +1075,9 @@ pub fn unmet_action(content: &str, user_message: &str, action_succeeded: bool) -
     if action_succeeded || content.is_empty() {
         return false;
     }
-    ai_tools::has_hallucinated_action(content) && ai_tools::needs_tool_retry(content, user_message)
+    ai_tools::has_mutation_intent(user_message)
+        && ai_tools::has_hallucinated_action(content)
+        && !ai_tools::is_confirmation_question(content)
 }
 
 /// Reply when the final stream died: prefer the tool-round content, else a
@@ -1395,8 +1397,35 @@ mod tests {
     /// this is the "AI says it created the task but nothing was saved" bug.
     #[test]
     fn unmet_action_flags_success_narration_without_committed_action() {
-        assert!(unmet_action("I've created the task for you:", "testing", false));
-        assert!(!unmet_action("I've created the task for you:", "testing", true));
+        assert!(unmet_action("I've created the task for you:", "create a task", false));
+        assert!(!unmet_action("I've created the task for you:", "create a task", true));
+    }
+
+    #[test]
+    fn unmet_action_ignores_read_only_and_confirmation_turns() {
+        // A search summary is not a failed mutation.
+        assert!(!unmet_action(
+            "I've found 2 tasks matching that.",
+            "what do I have tomorrow?",
+            false
+        ));
+        // Asking for confirmation is not a claim that the change happened.
+        assert!(!unmet_action(
+            "I found the task. Should I delete it?",
+            "delete Buy milk",
+            false
+        ));
+        assert!(!unmet_action(
+            "I will delete it once you confirm.",
+            "delete Buy milk",
+            false
+        ));
+        // A real mutation request that narrates success still gets replaced.
+        assert!(unmet_action(
+            "I've created the task for you.",
+            "create a task called Buy milk",
+            false
+        ));
     }
 
     #[test]

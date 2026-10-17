@@ -214,6 +214,29 @@ fn action_keywords() -> &'static Regex {
     })
 }
 
+/// Verbs that ask for a persisted change. Read-only requests ("what do I have
+/// tomorrow", "find my task") intentionally do not match, so a legitimate
+/// search summary can never be replaced by the honest-failure fallback.
+fn mutation_intent_patterns() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(
+            r"(?i)\b(?:delet(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|schedul(?:e|es|ed|ing)|updat(?:e|es|ed|ing)|edit(?:s|ed|ing)?|complet(?:e|es|ed|ing)|reschedul(?:e|es|ed|ing)|renam(?:e|es|ed|ing)|duplicat(?:e|es|ed|ing)|cancel(?:s|led|ing)?|chang(?:e|es|ed|ing)|mark(?:s|ed|ing)?|finish(?:es|ed|ing)?|mov(?:e|es|ed|ing)|add(?:s|ed|ing)?|split(?:s|ting)?|merg(?:e|es|ed|ing)|post(?:s|ed|ing)?|send(?:s|ing)?|sent|shar(?:e|es|ed|ing)|dm|dms|messag(?:e|es|ed|ing)|invit(?:e|es|ed|ing)|react(?:s|ed|ing)?|comment(?:s|ed|ing)?|triag(?:e|es|ed|ing)|archiv(?:e|es|ed|ing)|restor(?:e|es|ed|ing)|pay(?:s|ed|ing)?|record(?:s|ed|ing)?|payment(?:s)?)\b",
+        )
+        .expect("valid mutation-intent regex")
+    })
+}
+
+fn confirmation_question_patterns() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?:should i|shall i|want me to|would you like(?: me)? to|like me to|do you want me to|confirm|proceed|go ahead)",
+        )
+        .expect("valid confirmation regex")
+    })
+}
+
 fn question_only_start() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
@@ -261,6 +284,37 @@ pub fn is_tool_refusal(content: &str) -> bool {
 /// Python `_HALLUCINATED_ACTION_PATTERNS.search`).
 pub fn has_hallucinated_action(content: &str) -> bool {
     hallucinated_action_patterns().is_match(content)
+}
+
+/// True when the user actually asked for a persisted change. Used to scope the
+/// honest-failure fallback so read-only questions are never rewritten.
+pub fn has_mutation_intent(user_message: &str) -> bool {
+    let lower = user_message.trim().to_lowercase();
+    if ["is ", "are ", "was ", "were "].iter().any(|p| lower.starts_with(p)) {
+        return false;
+    }
+    mutation_intent_patterns().is_match(user_message)
+}
+
+/// True when the reply asks the user to confirm/proceed instead of claiming the
+/// change already happened. A question such as "Should I delete it?" is not a
+/// hallucinated action.
+pub fn is_confirmation_question(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    const TRAILING_CONFIRMATIONS: [&str; 8] = [
+        "once you confirm",
+        "if you confirm",
+        "when you confirm",
+        "after you confirm",
+        "waiting for confirmation",
+        "awaiting confirmation",
+        "confirm to proceed",
+        "pending confirmation",
+    ];
+    if TRAILING_CONFIRMATIONS.iter().any(|phrase| lower.contains(phrase)) {
+        return true;
+    }
+    content.contains('?') && confirmation_question_patterns().is_match(content)
 }
 
 /// True when the model's text reply is a refusal or a hallucinated completion
@@ -353,6 +407,74 @@ mod tests {
         assert!(needs_tool_retry("I don't have access to that", "create a task"));
         assert!(needs_tool_retry("I've created the task", "create a task"));
         assert!(!needs_tool_retry("It is sunny today", "what is the weather"));
+    }
+
+    #[test]
+    fn mutation_intent_separates_writes_from_reads() {
+        for message in [
+            "delete Buy milk",
+            "removing the old task",
+            "create a task for tomorrow",
+            "schedule the meeting",
+            "update the due date",
+            "edit my notes",
+            "mark it done",
+            "complete the report",
+            "reschedule it to Friday",
+            "rename the list",
+            "duplicate this task",
+            "cancel the recurring task",
+            "change the priority",
+            "move it to backlog",
+            "add a tag",
+            "split the task",
+            "merge these two",
+            "send it to Slack",
+            "share this task",
+            "invite a member",
+            "comment on the issue",
+            "triage my inbox",
+            "archive the old ones",
+            "restore the deleted task",
+            "record a payment",
+        ] {
+            assert!(has_mutation_intent(message), "expected mutation intent: {message}");
+        }
+        for message in [
+            "what do I have tomorrow?",
+            "which tasks are due today",
+            "find my dentist appointment",
+            "search for Buy milk",
+            "show me my week",
+            "how many tasks are done",
+            "who is assigned to this",
+            "is the report finished",
+            "",
+        ] {
+            assert!(!has_mutation_intent(message), "unexpected mutation intent: {message}");
+        }
+    }
+
+    #[test]
+    fn confirmation_questions_are_not_claims() {
+        for content in [
+            "Should I delete it?",
+            "Shall I mark it done?",
+            "Do you want me to remove the tag?",
+            "Would you like me to reschedule it?",
+            "I will delete it once you confirm.",
+            "Proceed?",
+        ] {
+            assert!(is_confirmation_question(content), "expected confirmation: {content}");
+        }
+        for content in [
+            "I've deleted it.",
+            "The task is done.",
+            "Should I delete it",
+            "I found 2 tasks.",
+        ] {
+            assert!(!is_confirmation_question(content), "unexpected confirmation: {content}");
+        }
     }
 
     /// Battery of real, messy user phrasings: when the model answers with plain

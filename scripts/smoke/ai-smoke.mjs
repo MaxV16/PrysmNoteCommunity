@@ -188,7 +188,9 @@ async function main() {
   await check("recurring create stores a recurrence", async () => {
     await chat(cookies, csrf, `create a task called ${RECUR_TITLE} every monday at 10am`);
     const found = await searchTasks(cookies, RECUR_TITLE);
-    const task = found.find((t) => (t.title || "").includes(RECUR_TITLE));
+    const task =
+      found.find((t) => (t.title || "").includes(RECUR_TITLE) && t.recurrence_rule) ||
+      found.find((t) => (t.title || "").includes(RECUR_TITLE));
     assert(task, "recurring task is searchable");
     assert(task.recurrence_rule, "task carries a recurrence_rule");
   });
