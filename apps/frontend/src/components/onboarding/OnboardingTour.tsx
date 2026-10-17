@@ -154,7 +154,7 @@ export function OnboardingTour() {
       {/* Tooltip card */}
       <div
         ref={tooltipRef}
-        className="absolute w-[min(21rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface p-4 shadow-2xl"
+        className="absolute w-[min(21rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface p-4 shadow-lg"
         style={
           tooltipPos
             ? { top: tooltipPos.top, left: tooltipPos.left }

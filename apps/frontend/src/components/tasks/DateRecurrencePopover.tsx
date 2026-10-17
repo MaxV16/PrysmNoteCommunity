@@ -276,7 +276,7 @@ export function DateRecurrencePopover({
           role="dialog"
           aria-modal="true"
           aria-label="Set reminder"
-          className="absolute inset-x-0 bottom-0 flex max-h-[85dvh] flex-col overflow-hidden rounded-t-2xl border border-border bg-surface pb-safe shadow-2xl"
+          className="absolute inset-x-0 bottom-0 flex max-h-[85dvh] flex-col overflow-hidden rounded-t-2xl border border-border bg-surface pb-safe shadow-lg"
           onClick={(e) => e.stopPropagation()}
         >
           {body}
@@ -290,7 +290,7 @@ export function DateRecurrencePopover({
     <div
       ref={menuRef}
       role="dialog"
-      className="fixed z-[70] flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
+      className="fixed z-[70] flex flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-lg"
       style={{ top: pos?.top ?? minOverlayTop(12), left: pos?.left ?? 12, width: "min(320px, calc(100vw - 24px))", maxHeight: "min(32rem, 90dvh)" }}
     >
       {body}

@@ -139,7 +139,7 @@ export function ContextMenu({ open, x, y, onClose, children, className = "" }: C
     <div
       ref={menuRef}
       role="menu"
-      className={`fixed z-[70] overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface py-1 shadow-2xl ${className}`}
+      className={`fixed z-[70] overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface py-1 shadow-lg ${className}`}
       style={pos ? { top: pos.top, left: pos.left, maxHeight: pos.maxH } : { top: y, left: x }}
     >
       {children}
