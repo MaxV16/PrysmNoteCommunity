@@ -157,7 +157,7 @@ export const TimelineLane = memo(function TimelineLane({ tasks, days, dayWidth =
   // is O(n^2) across a lane) on every selection change or parent render.
   const selectedSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
   const metrics = useTimelineMetrics();
-  const { positioned, height } = useMemo(() => computeLaneLayout(tasks, days, metrics), [tasks, days, metrics]);
+  const { positioned, height } = useMemo(() => computeLaneLayout(tasks, days, metrics, dayWidth), [tasks, days, metrics, dayWidth]);
   const laneHeight = rowHeight ?? height;
 
   const handleDayDoubleClick = useCallback(
@@ -192,7 +192,7 @@ export const TimelineLane = memo(function TimelineLane({ tasks, days, dayWidth =
           onDayContextMenu={onDayContextMenu ? handleDayContextMenu : undefined}
         />
       )}
-      <div className="absolute inset-0 z-20 pointer-events-none">
+      <div className="absolute inset-0 z-10 pointer-events-none">
         {positioned.map(({ task, pos }) => (
           <TimelineTaskBar
             key={task.id}

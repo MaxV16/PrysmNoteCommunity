@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { formatDate, formatTime, getDatePrefs, invalidateDatePrefs } from "./dates";
+import { daysBetweenISO, formatDate, formatTime, getDatePrefs, invalidateDatePrefs } from "./dates";
 
 // dates.ts imports the preferences cache (which imports the api client). Mock
 // the api so importing this module never touches the network stack.
@@ -81,5 +81,14 @@ describe("formatTime", () => {
     localStorage.setItem("prysm_tz", JSON.stringify("UTC"));
     invalidateDatePrefs();
     expect(formatTime("2026-09-12T14:05:00Z")).toBe("14:05");
+  });
+});
+
+describe("daysBetweenISO", () => {
+  it("counts whole calendar days without timezone shifts", () => {
+    expect(daysBetweenISO("2026-09-12", "2026-09-12")).toBe(0);
+    expect(daysBetweenISO("2026-09-12", "2026-09-14")).toBe(2);
+    expect(daysBetweenISO("2026-09-14", "2026-09-12")).toBe(-2);
+    expect(daysBetweenISO("2026-12-31", "2027-01-02")).toBe(2);
   });
 });

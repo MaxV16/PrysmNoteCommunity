@@ -30,7 +30,7 @@ export const TimelineHeader = memo(function TimelineHeader({ days, dayWidth = 12
   }, [days]);
 
   return (
-    <div className="flex border-b border-border bg-surface sticky top-0 z-20 shrink-0" style={{ width: "100%", minWidth: "max-content", height: DAY_HEADER_HEIGHT }}>
+    <div className="flex border-b border-border bg-surface sticky top-0 z-30 shrink-0" style={{ width: "100%", minWidth: "max-content", height: DAY_HEADER_HEIGHT }}>
       {dayRows.map(({ dayName, dayNum, isToday, isWeekend }, index) => (
         <div
           key={`hdr-${index}`}

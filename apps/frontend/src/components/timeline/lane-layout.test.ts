@@ -45,7 +45,7 @@ describe("computeLaneLayout", () => {
 
   it("returns a single-row height for one task", () => {
     const tasks = [makeTask({ id: "t1", start_date: "2026-08-03", due_date: "2026-08-03" })];
-    const { positioned, maxStack, height } = computeLaneLayout(tasks, days);
+    const { positioned, maxStack, height } = computeLaneLayout(tasks, days, undefined, 120);
     expect(positioned).toHaveLength(1);
     expect(maxStack).toBe(1);
     expect(height).toBe(
@@ -59,7 +59,7 @@ describe("computeLaneLayout", () => {
       makeTask({ id: "t2", start_date: "2026-08-03", due_date: "2026-08-03" }),
       makeTask({ id: "t3", start_date: "2026-08-03", due_date: "2026-08-03" }),
     ];
-    const { maxStack, height } = computeLaneLayout(tasks, days);
+    const { maxStack, height } = computeLaneLayout(tasks, days, undefined, 120);
     expect(maxStack).toBe(3);
     expect(height).toBe(TOP_PADDING * 2 + 3 * (BAR_HEIGHT + BAR_GAP) - BAR_GAP + SECTION_BOTTOM_PADDING);
   });
@@ -67,8 +67,8 @@ describe("computeLaneLayout", () => {
   it("is deterministic and independent of input order", () => {
     const a = makeTask({ id: "a", title: "Alpha", start_date: "2026-08-03", due_date: "2026-08-03" });
     const b = makeTask({ id: "b", title: "Beta", start_date: "2026-08-03", due_date: "2026-08-03" });
-    const first = computeLaneLayout([a, b], days).positioned.map((p) => p.task.id);
-    const second = computeLaneLayout([b, a], days).positioned.map((p) => p.task.id);
+    const first = computeLaneLayout([a, b], days, undefined, 120).positioned.map((p) => p.task.id);
+    const second = computeLaneLayout([b, a], days, undefined, 120).positioned.map((p) => p.task.id);
     expect(first).toEqual(["a", "b"]);
     expect(second).toEqual(first);
   });
@@ -78,7 +78,7 @@ describe("computeLaneLayout", () => {
       makeTask({ id: "far", start_date: "2032-03-01", due_date: "2032-03-01" }),
       makeTask({ id: "undated", start_date: null, due_date: null }),
     ];
-    const { positioned } = computeLaneLayout(tasks, days);
+    const { positioned } = computeLaneLayout(tasks, days, undefined, 120);
     expect(positioned.map((p) => p.task.id)).toEqual(["undated"]);
   });
 
@@ -95,21 +95,21 @@ describe("computeLaneLayout", () => {
 
     // Slice entirely inside the long task, months after its start date.
     const inside = daysFor("2026-09-10", 14);
-    const inner = computeLaneLayout([long, oneDay], inside);
+    const inner = computeLaneLayout([long, oneDay], inside, undefined, 120);
     expect(inner.positioned.map((p) => p.task.id).sort()).toEqual(["long", "one"]);
     const longPos = inner.positioned.find((p) => p.task.id === "long")!;
     // Clamped to the rendered window, never negative or past its width.
-    expect(longPos.pos.left).toBe("0%");
-    expect(longPos.pos.width).toBe("100%");
+    expect(longPos.pos.left).toBe(0);
+    expect(longPos.pos.width).toBe(inside.length * 120);
 
     // Scroll later: the start is far behind, the end is still ahead.
     const later = daysFor("2026-11-01", 14);
-    const laterLayout = computeLaneLayout([long, oneDay], later);
+    const laterLayout = computeLaneLayout([long, oneDay], later, undefined, 120);
     expect(laterLayout.positioned.map((p) => p.task.id)).toEqual(["long"]);
 
     // Past the end of the long task it drops out again.
     const after = daysFor("2027-02-01", 14);
-    expect(computeLaneLayout([long, oneDay], after).positioned).toHaveLength(0);
+    expect(computeLaneLayout([long, oneDay], after, undefined, 120).positioned).toHaveLength(0);
   });
 
   it("clamps a bar that starts before and ends after the slice", () => {
@@ -119,19 +119,31 @@ describe("computeLaneLayout", () => {
       due_date: "2030-01-01",
     });
     const slice = daysFor("2026-09-10", 10);
-    const { positioned } = computeLaneLayout([spanning], slice);
+    const { positioned } = computeLaneLayout([spanning], slice, undefined, 120);
     expect(positioned).toHaveLength(1);
-    expect(positioned[0].pos.left).toBe("0%");
-    expect(positioned[0].pos.width).toBe("100%");
+    expect(positioned[0].pos.left).toBe(0);
+    expect(positioned[0].pos.width).toBe(slice.length * 120);
   });
 
   it("keeps a partially overlapping bar anchored to the correct leading columns", () => {
     const task = makeTask({ id: "tail", start_date: "2026-09-01", due_date: "2026-09-12" });
     const slice = daysFor("2026-09-10", 10); // task's last 3 days are inside
-    const { positioned } = computeLaneLayout([task], slice);
+    const { positioned } = computeLaneLayout([task], slice, undefined, 120);
     expect(positioned).toHaveLength(1);
-    expect(positioned[0].pos.left).toBe("0%");
-    expect(positioned[0].pos.width).toBe("30%"); // Sep 10, 11, 12
+    expect(positioned[0].pos.left).toBe(0);
+    expect(positioned[0].pos.width).toBe(3 * 120); // Sep 10, 11, 12
+  });
+
+  it("uses exact pixel geometry instead of fractional percentages", () => {
+    const task = makeTask({ id: "pixel", start_date: "2026-09-12", due_date: "2026-09-14" });
+    const slice = daysFor("2026-09-10", 10);
+    const dayWidth = 137;
+    const { positioned } = computeLaneLayout([task], slice, undefined, dayWidth);
+    expect(positioned[0].pos.left).toBe(2 * dayWidth);
+    expect(positioned[0].pos.width).toBe(3 * dayWidth);
+    // The bar sits exactly on the same 137px grid as the day columns.
+    expect((positioned[0].pos.left as number) % dayWidth).toBe(0);
+    expect((positioned[0].pos.width as number) % dayWidth).toBe(0);
   });
 
   it("keeps row assignment stable while the slice slides", () => {
@@ -141,7 +153,7 @@ describe("computeLaneLayout", () => {
       makeTask({ id: "b", start_date: "2026-09-17", due_date: "2026-09-17" }),
     ];
     const rowFor = (start: string) => {
-      const positioned = computeLaneLayout(tasks, daysFor(start, 20)).positioned;
+      const positioned = computeLaneLayout(tasks, daysFor(start, 20), undefined, 120).positioned;
       return Object.fromEntries(positioned.map((p) => [p.task.id, p.pos.top]));
     };
     // Two adjacent slices covering the same tasks must agree on their rows.
@@ -157,7 +169,7 @@ describe("computeLaneLayout", () => {
     const bar = makeTask({ id: "t1", start_date: "2026-08-03", due_date: "2026-08-03" });
     const barHeight = TOP_PADDING * 2 + (BAR_HEIGHT + BAR_GAP) - BAR_GAP;
     // One extra row of space sits below the bar for an easy create/drop target.
-    expect(computeLaneLayout([bar], days).height).toBe(barHeight + SECTION_BOTTOM_PADDING);
+    expect(computeLaneLayout([bar], days, undefined, 120).height).toBe(barHeight + SECTION_BOTTOM_PADDING);
     expect(SECTION_BOTTOM_PADDING).toBeGreaterThan(0);
   });
 });

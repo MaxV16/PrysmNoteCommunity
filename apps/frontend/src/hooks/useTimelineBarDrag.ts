@@ -431,7 +431,14 @@ export function useTimelineBarDrag(
         const intensity = Math.min(1, Math.max(0, (xInBody - (width - edgeZoneX)) / edgeZoneX));
         velocityX = intensity * intensity * s.dayWidth * EDGE_MAX_DAYS_PER_FRAME;
       }
-      if (velocityX !== 0 && s.body) s.body.scrollLeft += velocityX;
+      if (velocityX !== 0 && s.body) {
+        // Account for the scroll we just applied BEFORE computing the preview.
+        // Waiting for the passive scroll event left the bar one frame behind the
+        // canvas during edge auto-scroll, which read as a jitter/rubber-band.
+        const before = s.body.scrollLeft;
+        s.body.scrollLeft += velocityX;
+        s.scrollDelta += s.body.scrollLeft - before;
+      }
 
       // Vertical edge auto-scroll so a lane off-screen can be reached, but only
       // when the canvas can actually scroll vertically: a horizontal drag near
@@ -449,7 +456,11 @@ export function useTimelineBarDrag(
           const intensity = Math.min(1, Math.max(0, (yInBody - (height - edgeZoneY)) / edgeZoneY));
           velocityY = intensity * intensity * EDGE_MAX_PX_PER_FRAME;
         }
-        if (velocityY !== 0 && s.body) s.body.scrollTop += velocityY;
+        if (velocityY !== 0 && s.body) {
+          const before = s.body.scrollTop;
+          s.body.scrollTop += velocityY;
+          s.scrollTopDelta += s.body.scrollTop - before;
+        }
       }
 
       const offsetX = dragOffsetPx({

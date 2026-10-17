@@ -1,13 +1,13 @@
 import type { Task } from "@/types/task";
 import { parseLocalDate } from "@/lib/utils";
 import { todayStart } from "@/lib/dates";
-import { BAR_HEIGHT, BAR_GAP, TOP_PADDING, SECTION_BOTTOM_PADDING, type TimelineMetrics } from "./constants";
+import { BAR_HEIGHT, BAR_GAP, DAY_WIDTH, TOP_PADDING, SECTION_BOTTOM_PADDING, type TimelineMetrics } from "./constants";
 
 export interface PositionedTask {
   task: Task;
   pos: {
-    left: string;
-    width: string;
+    left: number;
+    width: number;
     dayIndex: number;
     top: number;
   };
@@ -77,7 +77,12 @@ function todayIndex(days: Date[]): number {
  * label column use this so their heights line up exactly; keeping one algorithm
  * avoids the cumulative misalignment that comes from guessing each height.
  */
-export function computeLaneLayout(tasks: Task[], days: Date[], metrics?: TimelineMetrics): {
+export function computeLaneLayout(
+  tasks: Task[],
+  days: Date[],
+  metrics?: TimelineMetrics,
+  dayWidth: number = DAY_WIDTH
+): {
   positioned: PositionedTask[];
   maxStack: number;
   height: number;
@@ -163,8 +168,11 @@ export function computeLaneLayout(tasks: Task[], days: Date[], metrics?: Timelin
   const positioned: PositionedTask[] = assigned.map(({ task, info, row }) => ({
     task,
     pos: {
-      left: `${info.index * (100 / days.length)}%`,
-      width: `${(info.endIndex - info.index + 1) * (100 / days.length)}%`,
+      // Pixel geometry keeps bars aligned with the integer-pixel day columns.
+      // Percentages produced fractional widths at some zoom levels, which made
+      // dragged bars shimmer against the grid and header.
+      left: info.index * dayWidth,
+      width: (info.endIndex - info.index + 1) * dayWidth,
       dayIndex: info.index,
       top: topPadding + row * (barHeight + barGap),
     },
