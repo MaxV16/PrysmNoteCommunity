@@ -309,7 +309,7 @@ export function ListView() {
         onPointerDown={(e) => {
           const target = e.target as HTMLElement;
           longPress.onPointerDown(e);
-          if (target.closest("[data-list-row], [data-list-check], button, input, select, textarea, a")) return;
+          if (target.closest("[data-list-row], button, input, select, textarea, a")) return;
           clearTaskSelection();
         }}
         onPointerMove={longPress.onPointerMove}
@@ -365,23 +365,8 @@ export function ListView() {
                   }`}
                 >
                   <button
-                    data-list-check
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleTaskSelected(task.id);
-                    }}
-                    aria-pressed={isSelected}
-                    aria-label={isSelected ? `Deselect ${task.title}` : `Select ${task.title}`}
-                    className={`h-4 w-4 shrink-0 cursor-pointer rounded border-2 transition-colors ${
-                      isSelected ? "bg-accent border-accent text-[var(--bg-base)]" : "border-border hover:border-accent/50 text-transparent"
-                    } flex items-center justify-center`}
-                  >
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12"/>
-                    </svg>
-                  </button>
-                  <button
                     onClick={(e) => { e.stopPropagation(); handleToggleStatus(task); }}
+                    aria-label={isDone ? `Mark ${task.title} as not done` : `Mark ${task.title} as done`}
                     className={`h-4 w-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${
                       isDone ? "bg-accent border-accent" : "border-border hover:border-accent/50"
                     }`}

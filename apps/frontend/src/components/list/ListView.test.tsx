@@ -133,6 +133,13 @@ describe("ListView multi-select", () => {
     expect(h.clearTaskSelection).toHaveBeenCalled();
   });
 
+  it("renders only the completion checkbox on a row", () => {
+    render(<ListView />);
+    expect(screen.queryByRole("button", { name: "Select Alpha" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Deselect Alpha" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Mark Alpha as done" })).toBeTruthy();
+  });
+
   it("row meta-click toggles selection without opening the drawer", () => {
     render(<ListView />);
     fireEvent.click(screen.getAllByText("Alpha")[0], { metaKey: true });

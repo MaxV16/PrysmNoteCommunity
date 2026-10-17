@@ -73,6 +73,18 @@ describe("CalendarView", () => {
     useAppStore.setState({ selectedTaskId: null, selectedTaskIds: [] });
   });
 
+  it("does not render a per-day add button", () => {
+    const ds = dateForDay(10);
+    mocks.tasks = [task("t0", "Task 0", ds)];
+
+    render(<CalendarView />);
+
+    expect(
+      screen.queryByRole("button", { name: `Add task on ${ds}` })
+    ).toBeNull();
+    expect(document.querySelectorAll(`[data-cal-day="${ds}"]`)).toHaveLength(1);
+  });
+
   it("expands a busy day by ten tasks at a time", () => {
     const ds = dateForDay(10);
     mocks.tasks = Array.from({ length: 5 }, (_, i) =>

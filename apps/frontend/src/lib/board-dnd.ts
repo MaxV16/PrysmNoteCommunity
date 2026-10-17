@@ -95,7 +95,13 @@ export function computeBoardDrop(
   if (!overTask) return null;
 
   const overSectionOf = sectionOfTask(overTask, sections);
-  if (!overSectionOf) return null;
+  if (!overSectionOf) {
+    // A card with no explicit section lives in the implicit Unsorted area.
+    // Dropping onto one reorders within Unsorted instead of being a no-op.
+    const siblings = unsortedTasks(tasks).filter((t) => t.id !== activeId);
+    const index = siblings.findIndex((t) => t.id === overId);
+    return { sectionId: null, index: index === -1 ? siblings.length : index };
+  }
 
   const siblings = sectionTasks(tasks, overSectionOf).filter((t) => t.id !== activeId);
   const index = siblings.findIndex((t) => t.id === overId);

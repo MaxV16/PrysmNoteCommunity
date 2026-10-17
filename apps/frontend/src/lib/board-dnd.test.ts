@@ -124,6 +124,19 @@ describe("computeBoardDrop", () => {
       index: 0,
     });
   });
+  it("reorders within Unsorted when dropping onto an unsorted card", () => {
+    const tasks = [
+      makeTask("t1", { board_order: 0 }),
+      makeTask("t2", { board_order: 1 }),
+      makeTask("t3", { board_order: 2 }),
+    ];
+    // siblings without t1 = [t2, t3]; dropping on t3 lands at index 1
+    expect(computeBoardDrop(tasks, freeSections, "t1", "t3")).toEqual({
+      sectionId: null,
+      index: 1,
+    });
+  });
+
 
   it("returns null for an unknown over target", () => {
     const tasks = [makeTask("t1")];

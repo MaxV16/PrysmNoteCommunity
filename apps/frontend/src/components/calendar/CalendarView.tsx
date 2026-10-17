@@ -127,26 +127,6 @@ function CalendarDayCell({
         >
           {d}
         </span>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDayNewTask(d);
-          }}
-          aria-label={`Add task on ${ds}`}
-          className="pointer-coarse:opacity-100 -mr-0.5 -mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-elevated text-secondary opacity-0 transition-opacity hover:bg-hover hover:text-primary group-hover:opacity-100"
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-          >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
       </div>
       <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
         {dayTasks.slice(0, shown).map((task) => {

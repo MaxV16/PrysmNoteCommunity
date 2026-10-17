@@ -190,7 +190,7 @@ export function KanbanBoard() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <KanbanToolbar
-        onAddSection={(title) => void addSection({ title, color: "var(--text-muted)" })}
+        onAddSection={(title) => void addSection({ title, color: null })}
       />
 
       <div

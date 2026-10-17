@@ -417,7 +417,7 @@ export function BoardView({ tasks }: BoardViewProps) {
       />
 
       <KanbanToolbar
-        onAddSection={(title) => void addSection({ title, color: "var(--text-muted)" })}
+        onAddSection={(title) => void addSection({ title, color: null })}
         onAddTask={handleCreate}
         filter={filter}
         onFilterChange={setFilter}

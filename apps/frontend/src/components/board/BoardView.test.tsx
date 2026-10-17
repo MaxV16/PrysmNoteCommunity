@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   fetchTasks: vi.fn().mockResolvedValue(undefined),
   tasks: [] as Task[],
   setPreference: vi.fn(),
+  addSection: vi.fn(),
 }));
 
 vi.mock("@/stores/app-store", () => {
@@ -57,7 +58,7 @@ vi.mock("@/hooks/useBoardSections", () => ({
     sections: h.sections,
     loading: false,
     reload: vi.fn(),
-    addSection: vi.fn(),
+    addSection: h.addSection,
     renameSection: vi.fn(),
     recolorSection: vi.fn(),
     removeSection: vi.fn(),
@@ -223,6 +224,7 @@ describe("BoardView", () => {
     // useBoardSections.addSection is mocked; the section appears only after the
     // server round-trip, so just assert the toolbar flow completed without error.
     expect(screen.queryByPlaceholderText("Section name")).not.toBeInTheDocument();
+    expect(h.addSection).toHaveBeenCalledWith({ title: "New section", color: null });
   });
 
   it("per-column quick add posts to /tasks/ scoped to the section and refreshes", async () => {
