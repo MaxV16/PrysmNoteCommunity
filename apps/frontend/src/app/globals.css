@@ -55,7 +55,7 @@
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --weekend-tint: rgba(0, 0, 0, 0.25);
+  --weekend-tint: rgba(0, 0, 0, 0.12);
   /* Timeline canvas: a slightly recessed tint so the day strip reads as a
      distinct surface, in every theme (derived from the theme's own tokens). */
   --timeline-bg: color-mix(in srgb, var(--bg-base) 55%, var(--bg-surface) 45%);

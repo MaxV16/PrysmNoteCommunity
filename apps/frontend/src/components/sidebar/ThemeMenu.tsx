@@ -31,7 +31,7 @@ export function ThemeMenu() {
   const current = THEMES[themeName];
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative min-w-0 flex-1">
       <button
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
@@ -41,7 +41,7 @@ export function ThemeMenu() {
         <span className="flex h-5 w-5 items-center justify-center rounded-md" style={{ background: `linear-gradient(135deg, ${current?.colors?.surface || "#1b1b25"}, ${current?.colors?.accent || "#C08A2B"})` }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
         </span>
-        <span className="flex-1 text-left">{current?.label || themeName}</span>
+        <span className="min-w-0 flex-1 truncate text-left">{current?.label || themeName}</span>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
 

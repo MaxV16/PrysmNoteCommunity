@@ -3,7 +3,7 @@
    brand accent (warm ochre) is identical across themes so the product reads
    the same everywhere. */
 
-[data-theme="light"] {
+:root[data-theme="light"] {
   --bg-base: #FAF7F2;
   --bg-surface: #FFFFFF;
   --bg-elevated: #F1ECE4;
@@ -23,7 +23,7 @@
   --danger: #B42318;
   --success: #2F7A47;
   --warning: #A8571A;
-  --weekend-tint: rgba(0, 0, 0, 0.04);
+  --weekend-tint: rgba(120, 90, 40, 0.06);
   --shadow-sm: 0 1px 2px rgba(26, 23, 19, 0.07);
   --shadow-md: 0 4px 12px rgba(26, 23, 19, 0.10);
   --shadow-lg: 0 12px 32px rgba(26, 23, 19, 0.14);
@@ -31,7 +31,7 @@
   color-scheme: light;
 }
 
-[data-theme="slate"] {
+:root[data-theme="slate"] {
   --bg-base: #191919;
   --bg-surface: #1F1F1F;
   --bg-elevated: #2C2C2C;
@@ -58,7 +58,7 @@
   color-scheme: dark;
 }
 
-[data-theme="coffee"] {
+:root[data-theme="coffee"] {
   --bg-base: #17120E;
   --bg-surface: #1F1915;
   --bg-elevated: #28211B;
@@ -85,7 +85,7 @@
   color-scheme: dark;
 }
 
-[data-theme="solarized"] {
+:root[data-theme="solarized"] {
   --bg-base: #002b36;
   --bg-surface: #073642;
   --bg-elevated: #0d4d5e;
@@ -112,7 +112,7 @@
   color-scheme: dark;
 }
 
-[data-theme="github-dark"] {
+:root[data-theme="github-dark"] {
   --bg-base: #0d1117;
   --bg-surface: #161b22;
   --bg-elevated: #21262d;
@@ -139,7 +139,7 @@
   color-scheme: dark;
 }
 
-[data-theme="tokyo"] {
+:root[data-theme="tokyo"] {
   --bg-base: #16171F;
   --bg-surface: #1D1F2A;
   --bg-elevated: #262936;

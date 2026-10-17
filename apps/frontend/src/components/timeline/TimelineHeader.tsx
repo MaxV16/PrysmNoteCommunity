@@ -50,7 +50,7 @@ export const TimelineHeader = memo(function TimelineHeader({ days, dayWidth = 12
           <span
             className={
               isToday
-                ? "mt-0.5 text-sm text-scale-num font-semibold tabular-nums leading-none text-accent md:mt-1 md:text-base"
+                ? "mt-0.5 text-lg text-scale-num font-semibold tabular-nums leading-none text-accent md:mt-1 md:text-2xl"
                 : `mt-0.5 text-lg text-scale-num font-semibold tabular-nums leading-none md:mt-1 md:text-2xl ${
                     isWeekend ? "text-secondary" : "text-primary"
                   }`
