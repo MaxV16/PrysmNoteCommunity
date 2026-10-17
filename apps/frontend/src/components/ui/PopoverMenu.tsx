@@ -142,7 +142,7 @@ export function PopoverMenu({
       ref={menuRef}
       role="menu"
       aria-label="Menu"
-      className={`fixed z-[70] overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface py-1 shadow-2xl ${className}`}
+      className={`fixed z-[70] overflow-y-auto overscroll-contain rounded-lg border border-border bg-surface py-1 shadow-md ${className}`}
       style={{ top: pos.top, left: pos.left, minWidth: pos.width, maxHeight: pos.maxH }}
     >
       {children}

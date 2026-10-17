@@ -49,7 +49,7 @@ export function Dropdown({ trigger, children }: DropdownProps) {
       {isOpen && (
         <div
           role="menu"
-          className="absolute right-0 z-40 mt-1 min-w-[180px] rounded border border-border bg-surface py-1 shadow-lg"
+          className="absolute right-0 z-40 mt-1 min-w-[180px] rounded-lg border border-border bg-surface py-1 shadow-md"
         >
           {children}
         </div>

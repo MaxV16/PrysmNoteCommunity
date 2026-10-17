@@ -40,7 +40,7 @@ export function Tooltip({ content, children, position = "top", delay = 400 }: To
       {children}
       {visible && (
         <div className={`absolute z-50 ${positionClasses[position]}`}>
-          <div className="whitespace-nowrap rounded-md bg-elevated px-2.5 py-1.5 text-xs text-primary shadow-lg border border-border">
+          <div className="whitespace-nowrap rounded-md bg-elevated px-2.5 py-1.5 text-xs text-primary shadow-md border border-border">
             {content}
           </div>
           <div className={`absolute h-0 w-0 border-4 ${arrowClasses[position]}`} />

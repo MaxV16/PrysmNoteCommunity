@@ -17,7 +17,7 @@ export function Select({ label, options, placeholder, className = "", ...props }
       <div className="relative">
         <select
           id={id}
-          className={`rounded border border-border bg-elevated px-2 py-1.5 text-sm text-primary outline-none focus:border-accent appearance-none pr-8 cursor-pointer ${className}`}
+          className={`rounded-md border border-border bg-elevated px-2 py-1.5 text-sm text-primary outline-none transition-colors focus:border-accent appearance-none pr-8 cursor-pointer ${className}`}
           {...props}
         >
           {placeholder && (
