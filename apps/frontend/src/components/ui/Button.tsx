@@ -12,11 +12,12 @@ export function Button({
   children,
   ...props
 }: ButtonProps) {
-  const base = "rounded-xl font-semibold transition-all outline-none";
+  const base =
+    "rounded-md font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-base disabled:opacity-50 disabled:pointer-events-none";
   const variants: Record<string, string> = {
     primary: "bg-accent text-[var(--on-gradient)] hover:bg-accent-hover",
     secondary: "bg-elevated text-primary hover:bg-hover border border-border",
-    danger: "bg-danger text-[var(--on-gradient)] hover:opacity-90",
+    danger: "bg-danger text-[var(--on-danger)] hover:bg-[var(--danger-hover)]",
   };
   const sizes: Record<string, string> = {
     sm: "px-2 py-1 text-xs",

@@ -43,7 +43,7 @@ export function celebrate(origin?: { x?: number; y?: number }): void {
   ctx.scale(dpr, dpr);
 
   const colors = [
-    cssVar("--accent", "#5B5BD6"),
+    cssVar("--accent", "#C08A2B"),
     cssVar("--success", "#2ed573"),
     cssVar("--warning", "#ffa502"),
   ];

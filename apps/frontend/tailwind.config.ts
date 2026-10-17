@@ -8,7 +8,7 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        "mono-timeline": ["'DM Mono'", "'SF Mono'", "Consolas", "monospace"],
+        "mono-timeline": ["'IBM Plex Mono'", "'SF Mono'", "Consolas", "monospace"],
         ui: ["var(--font-ui)"],
       },
       colors: {
@@ -27,9 +27,12 @@ const config: Config = {
         warning: "var(--warning)",
       },
       borderRadius: {
+        xs: "var(--radius-xs)",
         sm: "var(--radius-sm)",
         md: "var(--radius-md)",
         lg: "var(--radius-lg)",
+        xl: "var(--radius-xl)",
+        "2xl": "var(--radius-2xl)",
       },
       borderColor: {
         DEFAULT: "var(--border)",

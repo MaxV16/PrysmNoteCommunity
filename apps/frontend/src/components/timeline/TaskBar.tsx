@@ -130,7 +130,13 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
   const lastPointerTypeRef = useRef<string>("mouse");
 
   const tier: PriorityTier = normalizePriority(task.priority);
-  const colors = { bg: TIER_COLORS[tier], border: TIER_COLORS[tier], text: "#ffffff" };
+  // Bars stay on the elevated surface and only the priority rule carries the
+  // tier color, so a busy week reads as an instrument rather than a stack of
+  // colored blocks.
+  const colors = {
+    bg: `color-mix(in srgb, ${TIER_COLORS[tier]} 14%, var(--bg-elevated))`,
+    border: TIER_COLORS[tier],
+  };
   const isDone = task.status === "done";
   const isInProgress = task.status === "in_progress";
   const timeLabel = taskTimeLabel(task);
@@ -144,7 +150,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
     border: `1px solid ${colors.border}`,
     borderLeftWidth: 0,
     borderRightWidth: 0,
-    borderRadius: 6,
+    borderRadius: 4,
     padding: "6px 12px",
     display: "flex",
     alignItems: "center",
@@ -161,7 +167,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
     zIndex: dragging ? 100 : 20,
     opacity: isDone ? 0.65 : 1,
     boxShadow: [
-      `inset 3px 0 0 0 ${colors.border}`,
+      `inset 2px 0 0 0 ${colors.border}`,
       dragging
         ? "0 8px 24px rgba(0,0,0,0.35)"
         : selected
@@ -217,7 +223,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
         onContextMenu?.(e, task);
       }}
       title={`${task.title}${timeLabel ? ` (${timeLabel})` : ""}${task.description ? " - " + task.description : ""}`}
-      className={`group/bar transition-[filter] hover:brightness-110 ${
+      className={`group/bar transition-colors ${
         dragging ? "ring-2 ring-accent/40" : isInProgress ? "animate-pulse-subtle" : ""
       }`}
     >

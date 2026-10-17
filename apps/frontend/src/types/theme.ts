@@ -46,4 +46,4 @@ export const FONT_PRESETS = tokens.fontPresets as string[];
 export const BACKGROUND_PRESETS = tokens.backgroundPresets as BackgroundPreset[];
 
 export const DEFAULT_THEME: ThemeName = "dark";
-export const DEFAULT_FONT = "Inter";
+export const DEFAULT_FONT = "IBM Plex Sans";

@@ -12,7 +12,8 @@ export function DynamicFontLoader() {
     const existing = document.getElementById(id);
     if (existing) existing.remove();
 
-    if (fontFamily === "Inter") return;
+    // The default UI font is already loaded by the root layout.
+    if (fontFamily === "IBM Plex Sans") return;
 
     const link = document.createElement("link");
     link.id = id;

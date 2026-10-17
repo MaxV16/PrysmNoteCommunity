@@ -5,46 +5,56 @@
 @import "./themes.css";
 
 :root {
-  --bg-base: #0A0A0F;
-  --bg-surface: #12121a;
-  --bg-elevated: #1b1b25;
-  --bg-hover: #262633;
-  --border: #2e2e40;
-  --text-primary: #f0f0f4;
-  --text-secondary: #c0c0d0;
-  --text-muted: #9090a8;
-  --accent: #6366F1;
-  --accent-hover: #818CF8;
-  --accent-glow: rgba(99, 102, 241, 0.24);
-  --grad-from: #6366F1;
-  --grad-via: #818CF8;
-  --grad-to: #6366F1;
-  --on-gradient: #ffffff;
-  --shadow-glow-strong: 0 0 24px rgba(99, 102, 241, 0.32);
-  --danger: #ff4757;
-  --danger-hover: #ff6b78;
-  --success: #2ed573;
-  --success-hover: #3ee685;
-  --warning: #ffa502;
-  --warning-hover: #ffb733;
-  --info: #4c7eff;
-  --text-info: #9db4ff;
-  --ring: rgba(99, 102, 241, 0.5);
+  /* Warm graphite: neutrals carry a little warmth so the surface reads as
+     paper and ink rather than as a blue-black dashboard. */
+  --bg-base: #12100E;
+  --bg-surface: #181512;
+  --bg-elevated: #211D19;
+  --bg-hover: #2A251F;
+  --border: #36302A;
+  --text-primary: #F2EDE6;
+  --text-secondary: #C4B9AA;
+  --text-muted: #8C8177;
+  /* One accent, warm ochre. Used only for primary action, active nav and the
+     focus ring. Text on the accent is dark, never white. */
+  --accent: #C08A2B;
+  --accent-hover: #D49C3C;
+  --accent-glow: rgba(192, 138, 43, 0.2);
+  --grad-from: #C08A2B;
+  --grad-via: #C08A2B;
+  --grad-to: #C08A2B;
+  --on-gradient: #17130E;
+  --shadow-glow-strong: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --danger: #E5484D;
+  --danger-hover: #F2666B;
+  --on-danger: #FFFFFF;
+  --success: #3FB950;
+  --success-hover: #56C96A;
+  --warning: #E07A3F;
+  --warning-hover: #EC8F56;
+  --info: #6E9BEA;
+  --text-info: #A9C1F2;
+  --ring: rgba(192, 138, 43, 0.45);
 
-  --radius-xs: 6px;
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-xl: 28px;
+  /* Radius scale mirrors Tailwind's native steps (4 / 6 / 8 / 12 / 16) so
+     `rounded`, `rounded-md`, `rounded-lg`, `rounded-xl`, `rounded-2xl` and the
+     CSS vars never disagree. */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
   --dur-fast: 120ms;
   --dur-base: 180ms;
   --dur-slow: 260ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.6);
-  --shadow-glow: 0 0 20px var(--accent-glow);
+  /* Two elevation levels only. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 1px 3px rgba(0, 0, 0, 0.4);
   --weekend-tint: rgba(0, 0, 0, 0.25);
   /* Timeline canvas: a slightly recessed tint so the day strip reads as a
      distinct surface, in every theme (derived from the theme's own tokens). */
@@ -72,7 +82,7 @@ html, body {
   height: 100%;
   background-color: var(--bg-base);
   color: var(--text-primary);
-  font-family: var(--font-ui, 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif);
+  font-family: var(--font-ui, 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.5;
@@ -153,42 +163,43 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
     min-height: calc(30px * var(--ui-scale, 1));
     cursor: grab;
     border-radius: var(--radius-lg);
-    border-left: 3px solid var(--accent);
+    border-left: 2px solid var(--accent);
     background: var(--bg-elevated);
     color: var(--text-primary);
-    backdrop-filter: blur(4px);
   }
   .task-bar:active { cursor: grabbing; }
-  .task-bar:hover { filter: brightness(1.2); z-index: 10; box-shadow: var(--shadow-md), 0 0 16px rgba(0,0,0,0.2); }
+  .task-bar:hover { background: var(--bg-hover); z-index: 10; }
 
   .sidebar-item {
     @apply flex items-center gap-2.5 px-3 py-2.5 text-sm
            transition-all duration-150 cursor-pointer;
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     color: var(--text-secondary);
+    border-left: 2px solid transparent;
   }
   .sidebar-item:hover { background: var(--bg-hover); color: var(--text-primary); }
   .sidebar-item.active {
-    background: var(--accent);
-    color: var(--on-gradient);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--text-primary);
+    border-left-color: var(--accent);
     font-weight: 600;
   }
 
   .btn {
     @apply inline-flex items-center justify-center font-medium
            transition-all duration-150 outline-none select-none;
-    border-radius: 9999px;
+    border-radius: var(--radius-md);
   }
-  .btn:active { transform: scale(0.96); }
+  .btn:active { transform: scale(0.98); }
   .btn-primary {
     @apply font-semibold;
-    border-radius: 9999px;
+    border-radius: var(--radius-md);
     background: var(--accent);
     color: var(--on-gradient);
-    transition: filter 0.15s ease;
+    transition: background-color 0.15s ease;
   }
   .btn-primary:hover {
-    filter: brightness(1.08);
+    background: var(--accent-hover);
   }
 
   .input-field {
@@ -201,7 +212,7 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
     min-height: 40px;
   }
   .input-field::placeholder { color: var(--text-muted); }
-  .input-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+  .input-field:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }
 
   /* Pricing-page design language: accent surfaces, CTAs, checks and pills. */
   .gradient-bg {
@@ -235,7 +246,7 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
 
   .badge {
     @apply inline-flex items-center justify-center px-2.5 py-0.5 text-xs font-medium shrink-0;
-    border-radius: var(--radius-xl);
+    border-radius: 9999px;
   }
 
   /* Fluid long-form text: scales with the viewport instead of jumping at a
@@ -286,7 +297,7 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
   .markdown-body a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .markdown-body strong { color: var(--text-primary); font-weight: 600; }
   .markdown-body code {
-    font-family: 'DM Mono', 'SF Mono', Consolas, monospace;
+    font-family: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
     font-size: 0.8em;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
@@ -399,9 +410,12 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.3; letter-spacing: -0.
   .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
   .font-mono-timeline {
-    font-family: 'DM Mono', 'SF Mono', 'Consolas', monospace;
-    letter-spacing: 0.02em;
+    font-family: 'IBM Plex Mono', 'SF Mono', 'Consolas', monospace;
+    letter-spacing: 0.01em;
   }
+
+  /* Numerals line up in columns: counts, dates, times, money. */
+  .tnum { font-variant-numeric: tabular-nums; }
 
   /* Safe-area helpers for standalone PWA (notch / home indicator). */
   .pt-safe { padding-top: max(env(safe-area-inset-top), 0px); }
