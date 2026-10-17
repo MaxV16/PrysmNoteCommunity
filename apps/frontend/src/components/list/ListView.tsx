@@ -284,14 +284,14 @@ export function ListView() {
               <button
                 onClick={() => setShowMoveModal(true)}
                 disabled={busy}
-                className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
+                className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-md"
               >
                 Move to…
               </button>
               <button
                 onClick={() => setShowDateModal(true)}
                 disabled={busy}
-                className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
+                className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-md"
               >
                 Set date
               </button>

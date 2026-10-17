@@ -191,9 +191,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (stored && THEMES[stored]) {
       setThemeNameState(stored);
     } else {
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      const initial: ThemeName = prefersDark ? "dark" : "light";
-      setThemeNameState(initial);
+      // The branded plum dark theme is the product base; light is a Settings
+      // choice rather than something inherited from the OS.
+      setThemeNameState(DEFAULT_THEME);
     }
     setFontFamilyState(ls.getStr(FONT_KEY, DEFAULT_FONT));
     setCustomThemeState(ls.get<CustomTheme | null>(CUSTOM_THEME_KEY, null));
@@ -288,7 +288,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       themeName,
       setThemeName,
       toggleTheme,
-      isDark: themeName !== "light",
+      isDark: !["light", "parchment", "fog"].includes(themeName),
       fontFamily,
       setFontFamily,
       background,

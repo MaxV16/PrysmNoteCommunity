@@ -5,25 +5,25 @@
 @import "./themes.css";
 
 :root {
-  /* Warm graphite: neutrals carry a little warmth so the surface reads as
-     paper and ink rather than as a blue-black dashboard. */
-  --bg-base: #12100E;
-  --bg-surface: #181512;
-  --bg-elevated: #211D19;
-  --bg-hover: #2A251F;
-  --border: #36302A;
-  --text-primary: #F2EDE6;
-  --text-secondary: #C4B9AA;
-  --text-muted: #8C8177;
-  /* One accent, warm ochre. Used only for primary action, active nav and the
+  /* Prysm plum: a deep violet ink. Neutrals carry a little warmth so surfaces
+     read as paper and ink rather than as a blue-black dashboard. */
+  --bg-base: #0F0C15;
+  --bg-surface: #15111D;
+  --bg-elevated: #1D1729;
+  --bg-hover: #272033;
+  --border: #332B44;
+  --text-primary: #F1ECFA;
+  --text-secondary: #BFB4D4;
+  --text-muted: #8B809F;
+  /* One accent, soft violet. Used only for primary action, active nav and the
      focus ring. Text on the accent is dark, never white. */
-  --accent: #C08A2B;
-  --accent-hover: #D49C3C;
-  --accent-glow: rgba(192, 138, 43, 0.2);
-  --grad-from: #C08A2B;
-  --grad-via: #C08A2B;
-  --grad-to: #C08A2B;
-  --on-gradient: #17130E;
+  --accent: #9B7BFF;
+  --accent-hover: #B198FF;
+  --accent-glow: rgba(155, 123, 255, 0.18);
+  --grad-from: #9B7BFF;
+  --grad-via: #9B7BFF;
+  --grad-to: #9B7BFF;
+  --on-gradient: #140F1E;
   --shadow-glow-strong: 0 1px 3px rgba(0, 0, 0, 0.45);
   --danger: #E5484D;
   --danger-hover: #F2666B;
@@ -34,7 +34,7 @@
   --warning-hover: #EC8F56;
   --info: #6E9BEA;
   --text-info: #A9C1F2;
-  --ring: rgba(192, 138, 43, 0.45);
+  --ring: rgba(155, 123, 255, 0.45);
 
   /* Radius scale mirrors Tailwind's native steps (4 / 6 / 8 / 12 / 16) so
      `rounded`, `rounded-md`, `rounded-lg`, `rounded-xl`, `rounded-2xl` and the
@@ -55,7 +55,7 @@
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --weekend-tint: rgba(0, 0, 0, 0.12);
+  --weekend-tint: rgba(255, 255, 255, 0.04);
   /* Timeline canvas: a slightly recessed tint so the day strip reads as a
      distinct surface, in every theme (derived from the theme's own tokens). */
   --timeline-bg: color-mix(in srgb, var(--bg-base) 55%, var(--bg-surface) 45%);

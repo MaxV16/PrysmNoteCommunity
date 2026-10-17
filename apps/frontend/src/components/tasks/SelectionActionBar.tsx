@@ -66,13 +66,13 @@ export function SelectionActionBar({
       <button
         onClick={onDelete}
         disabled={busy}
-        className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-danger hover:brightness-125 rounded-full disabled:opacity-50"
+        className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-danger hover:brightness-125 rounded-md disabled:opacity-50"
       >
         {busy ? "Deleting…" : "Delete"}
       </button>
       <button
         onClick={onClear}
-        className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-full"
+        className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-md"
       >
         Clear
       </button>

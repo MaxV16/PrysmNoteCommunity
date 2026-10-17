@@ -1224,7 +1224,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
                 void refreshTasksPreservingWindow();
                 window.dispatchEvent(new CustomEvent(FOREGROUND_REFRESH_EVENT));
               }}
-              className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary shrink-0"
+              className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-md text-secondary hover:text-primary shrink-0"
               aria-label="Refresh tasks"
               data-testid="refresh-tasks"
             >
@@ -1236,13 +1236,13 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
                 onClick={() => {
                   void addTimelineSection({ title: `Section ${timelineSections.length + 1}` });
                 }}
-                className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary shrink-0"
+                className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-md text-secondary hover:text-primary shrink-0"
                 aria-label="Add section"
               >
                 + Section
               </button>
             )}
-            <button onClick={() => router.push("/settings")} className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary shrink-0" aria-label="Settings" data-tour="settings">
+            <button onClick={() => router.push("/settings")} className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-md text-secondary hover:text-primary shrink-0" aria-label="Settings" data-tour="settings">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -1251,7 +1251,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
             {stickyOn && (
               <button
                 onClick={() => openStickyNote()}
-                className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-full text-secondary hover:text-primary shrink-0"
+                className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-md text-secondary hover:text-primary shrink-0"
                 aria-label="Notes"
               >
                 Notes
@@ -1262,7 +1262,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
 
         <button
           onClick={() => openTaskForm()}
-          className="pointer-coarse:h-11 pointer-coarse:w-11 btn btn-primary flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-0"
+          className="pointer-coarse:h-11 pointer-coarse:w-11 btn btn-primary flex h-8 w-8 shrink-0 items-center justify-center rounded-md p-0"
           aria-label="New task"
           data-testid="new-task-button"
           title="New task"

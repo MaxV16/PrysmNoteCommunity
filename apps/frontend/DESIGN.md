@@ -26,8 +26,11 @@ accent that marks action and attention and nothing else.
 | `--on-gradient` | text placed on an accent fill |
 | `--danger` / `--success` / `--warning` / `--info` | state only, never decoration |
 
-The accent is ochre `#C08A2B` in every theme. Themes change the surface temperature (paper, slate,
-coffee, solarized, github-dark, tokyo), not the meaning of the accent.
+The default theme is Prysm Plum: a deep violet ink (`#0F0C15` base) with a soft violet accent
+`#9B7BFF`. Themes live in `src/design-tokens.json` and are chosen in Settings, never in the app
+chrome. Each preset keeps the same token meanings and tunes its own accent to its surface
+(Paper `#6B4BA8`, Parchment `#8A5A2B`, Fog `#3E6DA6`, and so on), so the accent always means action,
+active nav, focus and today.
 
 ## Type
 

@@ -2,11 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { useTheme } from "@/lib/theme-context";
 import { useUiModule } from "@/lib/ui-module-registry";
 import { SidebarNav } from "@/components/sidebar/SidebarNav";
 import { TagList } from "@/components/sidebar/TagList";
-import { ThemeMenu } from "@/components/sidebar/ThemeMenu";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { useIsMobileOS } from "@/lib/use-is-mobile-os";
@@ -23,7 +21,6 @@ interface SidebarLeftProps {
 
 export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: SidebarLeftProps) {
   const { user, logout } = useAuth();
-  const { toggleTheme } = useTheme();
   const tagsOn = useUiModule("tagList");
   const financeOn = useUiModule("finance");
   const watchlistOn = useUiModule("watchlist");
@@ -197,15 +194,6 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
         )}
 
         <div className="relative flex items-center gap-1">
-          <ThemeMenu />
-          <button
-            onClick={toggleTheme}
-            className="icon-btn ml-auto"
-            title="Toggle dark / light"
-            aria-label="Toggle dark / light"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          </button>
           <button
             onClick={handleLogout}
             className="icon-btn"

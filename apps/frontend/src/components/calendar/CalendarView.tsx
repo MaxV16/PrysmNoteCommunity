@@ -345,7 +345,7 @@ export function CalendarView() {
               <button
                 onClick={() => void handleBatchMove()}
                 disabled={moving || moveDays === 0}
-                className="btn btn-gradient px-2.5 py-0.5 text-[10px] rounded-full disabled:opacity-50"
+                className="btn btn-gradient px-2.5 py-0.5 text-[10px] rounded-md disabled:opacity-50"
               >
                 {moving ? "Moving…" : "Move"}
               </button>

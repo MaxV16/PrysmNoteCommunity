@@ -85,7 +85,7 @@ function SectionHeader({
       {!rail && (
         <span className="min-w-0 flex-1 truncate leading-tight text-primary">{section.title}</span>
       )}
-      <span className={`shrink-0 rounded-full bg-elevated px-1.5 py-0.5 text-[10px] tabular-nums text-muted ${rail ? "leading-none" : ""}`}>
+      <span className={`shrink-0 rounded-md bg-elevated px-1.5 py-0.5 text-[10px] tabular-nums text-secondary ${rail ? "leading-none" : ""}`}>
         {count}
       </span>
     </button>
@@ -202,7 +202,7 @@ export function LeftLabelsCol({
                 <span className="min-w-0 flex-1 truncate leading-tight text-primary">Unsorted</span>
               </>
             )}
-            <span className="shrink-0 rounded-full bg-elevated px-1.5 py-0.5 text-[10px] tabular-nums text-muted">
+            <span className="shrink-0 rounded-md bg-elevated px-1.5 py-0.5 text-[10px] tabular-nums text-secondary">
               {unsortedCount}
             </span>
           </div>

@@ -237,7 +237,7 @@ export function SidebarNav({ view, onSelectView, financeOn, watchlistOn, habitsO
                     </span>
                   )}
                   {count > 0 && (
-                    <span className={`badge tnum ${isActive ? "bg-accent/20 text-accent" : "bg-elevated text-muted"}`}>
+                    <span className={`badge tnum ${isActive ? "bg-accent/20 text-accent" : "bg-elevated text-secondary"}`}>
                       {count}
                     </span>
                   )}
