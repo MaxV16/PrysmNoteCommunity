@@ -81,8 +81,8 @@
         "hover": "#272033",
         "border": "#332B44",
         "primary": "#F1ECFA",
-        "secondary": "#BFB4D4",
-        "muted": "#8B809F",
+        "secondary": "#CFC4E6",
+        "muted": "#A79BBF",
         "accent": "#9B7BFF",
         "accent-hover": "#B198FF",
         "danger": "#E5484D",
@@ -105,7 +105,7 @@
         "border": "#D9D2E6",
         "primary": "#1B1626",
         "secondary": "#4E4761",
-        "muted": "#7C7490",
+        "muted": "#6E6683",
         "accent": "#6B4BA8",
         "accent-hover": "#5A3D92",
         "danger": "#B42318",
@@ -118,6 +118,52 @@
         "on-gradient": "#FFFFFF"
       }
     },
+    "parchment": {
+      "label": "Parchment",
+      "colors": {
+        "base": "#FAF6EE",
+        "surface": "#FFFDF8",
+        "elevated": "#F1EADC",
+        "hover": "#E8DFCC",
+        "border": "#DED3BE",
+        "primary": "#221D14",
+        "secondary": "#4E4433",
+        "muted": "#6F6450",
+        "accent": "#8A5A2B",
+        "accent-hover": "#74491F",
+        "danger": "#B42318",
+        "success": "#3F6B37",
+        "warning": "#A8571A",
+        "accent-glow": "rgba(138,90,43,0.16)",
+        "on-gradient": "#FFF8EE",
+        "shadow-sm": "0 1px 2px rgba(24,18,34,0.08)",
+        "shadow-md": "0 4px 12px rgba(24,18,34,0.10)",
+        "shadow-lg": "0 12px 32px rgba(24,18,34,0.14)"
+      }
+    },
+    "fog": {
+      "label": "Fog",
+      "colors": {
+        "base": "#F2F5F8",
+        "surface": "#FFFFFF",
+        "elevated": "#E7ECF2",
+        "hover": "#DBE3EC",
+        "border": "#CCD6E0",
+        "primary": "#121A22",
+        "secondary": "#3B4854",
+        "muted": "#63727F",
+        "accent": "#3E6DA6",
+        "accent-hover": "#345B8C",
+        "danger": "#B42318",
+        "success": "#2F7A47",
+        "warning": "#A8571A",
+        "accent-glow": "rgba(62,109,166,0.16)",
+        "on-gradient": "#FFFFFF",
+        "shadow-sm": "0 1px 2px rgba(24,18,34,0.08)",
+        "shadow-md": "0 4px 12px rgba(24,18,34,0.10)",
+        "shadow-lg": "0 12px 32px rgba(24,18,34,0.14)"
+      }
+    },
     "dusk": {
       "label": "Dusk",
       "colors": {
@@ -127,8 +173,8 @@
         "hover": "#E6E0F1",
         "border": "#DAD3E8",
         "primary": "#1A1526",
-        "secondary": "#4C4461",
-        "muted": "#7A718F",
+        "secondary": "#423A56",
+        "muted": "#6B627F",
         "accent": "#7C5CE0",
         "accent-hover": "#6A4BCB",
         "danger": "#B42318",

@@ -22,9 +22,9 @@ describe("normalizePriority", () => {
 
 describe("priority tiers", () => {
   it("maps tier colors: high=red, medium=blue, low=green", () => {
-    expect(TIER_COLORS[1]).toBe("#a8504c");
-    expect(TIER_COLORS[2]).toBe("#4a6ea5");
-    expect(TIER_COLORS[3]).toBe("#4a7c62");
+    expect(TIER_COLORS[1]).toBe("#E15A5F");
+    expect(TIER_COLORS[2]).toBe("#5C86D6");
+    expect(TIER_COLORS[3]).toBe("#4E9E74");
   });
 
   it("labels the three tiers", () => {

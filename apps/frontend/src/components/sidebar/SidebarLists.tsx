@@ -610,21 +610,6 @@ export function SidebarLists({ view, onSelectView }: SidebarListsProps) {
           <p className="nav-label">Lists</p>
           <div className="flex items-center gap-0.5">
             <button
-              onClick={() => {
-                setNewSectionName("");
-                setAddingSection(true);
-              }}
-              className="pointer-coarse:h-9 pointer-coarse:w-9 flex h-5 w-5 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-primary"
-              title="New section"
-              aria-label="New section"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m12 2 9 5-9 5-9-5 9-5Z" />
-                <path d="m3 12 9 5 9-5" />
-                <path d="m3 17 9 5 9-5" />
-              </svg>
-            </button>
-            <button
               onClick={() => setAdding(true)}
               className="pointer-coarse:h-9 pointer-coarse:w-9 flex h-5 w-5 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-primary"
               title="New list"

@@ -13,8 +13,8 @@
   --bg-hover: #272033;
   --border: #332B44;
   --text-primary: #F1ECFA;
-  --text-secondary: #BFB4D4;
-  --text-muted: #8B809F;
+  --text-secondary: #CFC4E6;
+  --text-muted: #A79BBF;
   /* App chrome (sidebar, rails). Defaults mirror the theme so every existing
      theme renders exactly as before. A mixed theme sets these to a contrasting
      pair, giving a dark sidebar over light content. */
@@ -23,6 +23,11 @@
   --chrome-text: var(--text-primary);
   --chrome-text-secondary: var(--text-secondary);
   --chrome-text-muted: var(--text-muted);
+  /* Timeline bars: vibrant priority fills, with ink tuned per theme so the
+     title stays readable on every surface. */
+  --bar-mix: 82%;
+  --bar-ink: #FFFFFF;
+  --bar-ink-muted: rgba(255, 255, 255, 0.75);
   /* One accent, soft violet. Used only for primary action, active nav and the
      focus ring. Text on the accent is dark, never white. */
   --accent: #9B7BFF;

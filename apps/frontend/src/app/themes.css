@@ -11,7 +11,7 @@
   --border: #D9D2E6;
   --text-primary: #1B1626;
   --text-secondary: #4E4761;
-  --text-muted: #7C7490;
+  --text-muted: #6E6683;
   --accent: #6B4BA8;
   --accent-hover: #5A3D92;
   --accent-glow: rgba(107, 75, 168, 0.16);
@@ -28,6 +28,9 @@
   --shadow-md: 0 4px 12px rgba(24, 18, 34, 0.10);
   --shadow-lg: 0 12px 32px rgba(24, 18, 34, 0.14);
   --shadow-glow: 0 1px 3px rgba(24, 18, 34, 0.10);
+  --bar-mix: 55%;
+  --bar-ink: #1A1526;
+  --bar-ink-muted: rgba(26, 21, 38, 0.7);
   color-scheme: light;
 }
 
@@ -38,8 +41,8 @@
   --bg-hover: #E8DFCC;
   --border: #DED3BE;
   --text-primary: #221D14;
-  --text-secondary: #584F40;
-  --text-muted: #857A67;
+  --text-secondary: #4E4433;
+  --text-muted: #6F6450;
   --accent: #8A5A2B;
   --accent-hover: #74491F;
   --accent-glow: rgba(138, 90, 43, 0.16);
@@ -56,6 +59,9 @@
   --shadow-md: 0 4px 12px rgba(40, 30, 16, 0.10);
   --shadow-lg: 0 12px 32px rgba(40, 30, 16, 0.14);
   --shadow-glow: 0 1px 3px rgba(40, 30, 16, 0.10);
+  --bar-mix: 55%;
+  --bar-ink: #1A1526;
+  --bar-ink-muted: rgba(26, 21, 38, 0.7);
   color-scheme: light;
 }
 
@@ -66,8 +72,8 @@
   --bg-hover: #DBE3EC;
   --border: #CCD6E0;
   --text-primary: #121A22;
-  --text-secondary: #45535F;
-  --text-muted: #71808D;
+  --text-secondary: #3B4854;
+  --text-muted: #63727F;
   --accent: #3E6DA6;
   --accent-hover: #345B8C;
   --accent-glow: rgba(62, 109, 166, 0.16);
@@ -84,6 +90,9 @@
   --shadow-md: 0 4px 12px rgba(16, 28, 40, 0.10);
   --shadow-lg: 0 12px 32px rgba(16, 28, 40, 0.14);
   --shadow-glow: 0 1px 3px rgba(16, 28, 40, 0.10);
+  --bar-mix: 55%;
+  --bar-ink: #1A1526;
+  --bar-ink-muted: rgba(26, 21, 38, 0.7);
   color-scheme: light;
 }
 
@@ -236,8 +245,8 @@
   --bg-hover: #E6E0F1;
   --border: #DAD3E8;
   --text-primary: #1A1526;
-  --text-secondary: #4C4461;
-  --text-muted: #7A718F;
+  --text-secondary: #423A56;
+  --text-muted: #6B627F;
   --accent: #7C5CE0;
   --accent-hover: #6A4BCB;
   --accent-glow: rgba(124, 92, 224, 0.16);
@@ -259,5 +268,8 @@
   --chrome-text: #F1ECFA;
   --chrome-text-secondary: #B9AECE;
   --chrome-text-muted: #857A9B;
+  --bar-mix: 55%;
+  --bar-ink: #1A1526;
+  --bar-ink-muted: rgba(26, 21, 38, 0.7);
   color-scheme: light;
 }

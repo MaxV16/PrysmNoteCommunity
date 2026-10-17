@@ -133,9 +133,10 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
   // Bars stay on the elevated surface and only the priority rule carries the
   // tier color, so a busy week reads as an instrument rather than a stack of
   // colored blocks.
+  // Vibrant priority fill with theme-aware ink, the way a calendar bar reads
+  // at a glance: colour carries meaning, the label stays legible.
   const colors = {
-    bg: `color-mix(in srgb, ${TIER_COLORS[tier]} 9%, var(--bg-elevated))`,
-    rule: `color-mix(in srgb, ${TIER_COLORS[tier]} 70%, var(--border))`,
+    bg: `color-mix(in srgb, ${TIER_COLORS[tier]} var(--bar-mix), var(--bg-surface))`,
   };
   const isDone = task.status === "done";
   const isInProgress = task.status === "in_progress";
@@ -164,7 +165,6 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
     zIndex: dragging ? 100 : 20,
     opacity: isDone ? 0.65 : 1,
     boxShadow: [
-      `inset 2px 0 0 0 ${colors.rule}`,
       dragging
         ? "0 8px 24px rgba(0,0,0,0.35)"
         : selected
@@ -234,16 +234,16 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
           just outside the edges). */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden" style={{ maxWidth: 320 }}>
         {timeLabel && (
-          <span className="shrink-0 rounded-full bg-surface/70 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
+          <span className="shrink-0 rounded-full bg-black/20 px-1.5 py-0.5 text-[9px] font-semibold" style={{ color: "var(--bar-ink)" }}>
             {timeLabel}
           </span>
         )}
         {tier === 1 && (
-          <span className="hidden shrink-0 text-[9px] font-semibold uppercase tracking-wide text-muted sm:inline">
+          <span className="hidden shrink-0 text-[9px] font-semibold uppercase tracking-wide sm:inline" style={{ color: "var(--bar-ink-muted)" }}>
             {TIER_LABELS[tier]}
           </span>
         )}
-        <span className="truncate text-sm text-scale-sm font-medium text-primary">
+        <span className="truncate text-sm text-scale-sm font-medium" style={{ color: "var(--bar-ink)" }}>
           {task.title}
         </span>
       </div>
