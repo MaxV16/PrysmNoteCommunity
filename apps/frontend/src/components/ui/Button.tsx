@@ -13,7 +13,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   const base =
-    "rounded-md font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-base disabled:opacity-50 disabled:pointer-events-none";
+    "rounded-md font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent/70 disabled:opacity-50 disabled:pointer-events-none";
   const variants: Record<string, string> = {
     primary: "bg-accent text-[var(--on-gradient)] hover:bg-accent-hover",
     secondary: "bg-elevated text-primary hover:bg-hover border border-border",
