@@ -106,7 +106,7 @@ export function useNativeStickyNotes(): UseNativeStickyNotesReturn {
         windowId,
         noteId: note.id,
         bounds: { x: note.x, y: note.y, width: note.width, height: note.height },
-        alwaysOnTop: true,
+        alwaysOnTop: note.alwaysOnTop ?? false,
       });
       emit();
     }
@@ -139,6 +139,7 @@ export function useNativeStickyNotes(): UseNativeStickyNotesReturn {
         title: note.title,
         content: note.content,
         minimized: note.minimized,
+        alwaysOnTop: note.alwaysOnTop ?? false,
       });
     }
   };

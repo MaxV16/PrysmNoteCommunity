@@ -34,6 +34,7 @@ import { OnboardingDiscoveryCard } from "@/components/onboarding/OnboardingDisco
 import { useAppStore } from "@/stores/app-store";
 import { useForegroundRefresh, FOREGROUND_REFRESH_EVENT } from "@/hooks/useForegroundRefresh";
 import { useRealtimeSync } from "@/hooks/useRealtimeSync";
+import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { refreshTasksPreservingWindow } from "@/hooks/useTasks";
 import { registerBackHandler } from "@/lib/back-nav";
 import { useFilterPersistence } from "@/hooks/useFilterPersistence";
@@ -52,6 +53,13 @@ const VIEW_MODES: TimelineViewMode[] = ["timeline", "kanban", "calendar", "list"
 
 export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const aiResize = useResizablePanel({
+    panel: "ai",
+    defaultWidth: 360,
+    minWidth: 280,
+    maxWidth: 560,
+    side: "right",
+  });
 
   // Sync browser timezone to localStorage + server on mount.
   useSyncTimezone();
@@ -399,9 +407,23 @@ export function AppShell() {
                 className={
                   smallScreen
                     ? "absolute inset-y-0 right-0 z-30 w-[min(22rem,92vw)] pt-safe pb-safe shadow-lg"
-                    : "relative h-full min-h-0 w-[22.5rem] shrink-0 border-l border-border"
+                    : `relative h-full min-h-0 shrink-0 border-l border-border ${
+                        aiResize.isEnabled ? "" : "w-[22.5rem]"
+                      }`
+                }
+                style={
+                  !smallScreen && aiResize.isEnabled
+                    ? { width: aiResize.width }
+                    : undefined
                 }
               >
+                {!smallScreen && (
+                  <div
+                    {...aiResize.handleProps}
+                    data-resize-handle="ai"
+                    className="absolute inset-y-0 left-0 z-20 w-1.5 -translate-x-1/2 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/40"
+                  />
+                )}
                 <AIPanel onClose={() => setAiOpen(false)} view={view} />
               </div>
             </>

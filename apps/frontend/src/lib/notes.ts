@@ -23,9 +23,38 @@ interface ServerNote extends Omit<StickyNote, "zIndex"> {
   updated_at: string | null;
 }
 
+export function noteZBase(alwaysOnTop?: boolean): number {
+  return alwaysOnTop ? NOTE_Z_PINNED_BASE : NOTE_Z_UNPINNED_BASE;
+}
+
+function normalizeZIndex(note: StickyNote): number {
+  const base = noteZBase(note.alwaysOnTop);
+  const offset = Math.abs(note.zIndex ?? 0) % NOTE_Z_BAND_SIZE;
+  return base + (offset || 1);
+}
+
+export function noteZIndex(note: StickyNote): number {
+  return normalizeZIndex(note);
+}
+
+export function nextNoteZIndex(alwaysOnTop: boolean | undefined, list: StickyNote[]): number {
+  const base = noteZBase(alwaysOnTop);
+  const max = list.reduce(
+    (acc, n) =>
+      (n.alwaysOnTop ?? false) === (alwaysOnTop ?? false)
+        ? Math.max(acc, normalizeZIndex(n))
+        : acc,
+    base
+  );
+  return max + 1;
+}
+
 export const NOTES_STORAGE_KEY = "prysm_sticky_notes";
 export const NOTES_SYNCED_KEY = "prysm_sticky_notes_synced";
 export const NOTES_DELETED_KEY = "prysm_sticky_notes_deleted";
+export const NOTE_Z_UNPINNED_BASE = 10;
+export const NOTE_Z_PINNED_BASE = 1000;
+const NOTE_Z_BAND_SIZE = 1000;
 export const NOTE_COLORS = [
   "#fbbf24",
   "#f87171",
@@ -65,12 +94,16 @@ export function loadNotes(): StickyNote[] {
     const raw = localStorage.getItem(NOTES_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as StickyNote[];
-    return parsed.map((n) => ({
-      ...n,
-      minimized: n.minimized ?? false,
-      open: n.open ?? false,
-      alwaysOnTop: n.alwaysOnTop ?? true,
-    }));
+    return parsed.map((n) => {
+      const alwaysOnTop = n.alwaysOnTop ?? false;
+      return {
+        ...n,
+        minimized: n.minimized ?? false,
+        open: n.open ?? false,
+        alwaysOnTop,
+        zIndex: normalizeZIndex({ ...n, alwaysOnTop }),
+      };
+    });
   } catch {
     return [];
   }
@@ -390,7 +423,20 @@ export function subscribeNotes(listener: Listener): () => void {
 export function upsertNote(id: string, patch: Partial<StickyNote>) {
   const existing = notes.find((n) => n.id === id);
   if (!existing) return;
-  mutate(notes.map((n) => (n.id === id ? { ...n, ...patch } : n)));
+  const next = { ...existing, ...patch };
+  if (patch.alwaysOnTop !== undefined) next.zIndex = normalizeZIndex(next);
+  mutate(notes.map((n) => (n.id === id ? next : n)));
+}
+
+export function setNotePinned(id: string, pinned: boolean) {
+  const existing = notes.find((n) => n.id === id);
+  if (!existing || (existing.alwaysOnTop ?? false) === pinned) return;
+  const zIndex = nextNoteZIndex(pinned, notes.filter((n) => n.id !== id));
+  mutate(
+    notes.map((n) =>
+      n.id === id ? { ...n, alwaysOnTop: pinned, zIndex } : n
+    )
+  );
 }
 
 export function createNote(title = "", content = ""): StickyNote {
@@ -405,10 +451,10 @@ export function createNote(title = "", content = ""): StickyNote {
     title,
     content,
     color: defaultNoteColor(),
-    alwaysOnTop: true,
+    alwaysOnTop: false,
     minimized: false,
     open: true,
-    zIndex: (notes.reduce((max, n) => Math.max(max, n.zIndex || 0), 0) || 0) + 1,
+    zIndex: nextNoteZIndex(false, notes),
   };
   mutate([...notes, note]);
   return note;
@@ -417,7 +463,7 @@ export function createNote(title = "", content = ""): StickyNote {
 export function openNote(id: string) {
   const existing = notes.find((n) => n.id === id);
   if (!existing) return;
-  const z = (notes.reduce((max, n) => Math.max(max, n.zIndex || 0), 0) || 0) + 1;
+  const z = nextNoteZIndex(existing.alwaysOnTop, notes.filter((n) => n.id !== id));
   mutate(
     notes.map((n) =>
       n.id === id ? { ...n, open: true, minimized: false, zIndex: z } : n
@@ -476,7 +522,7 @@ export async function openNativeStickyNote(note: StickyNote): Promise<string | n
       title: note.title,
       content: note.content,
       minimized: note.minimized,
-      alwaysOnTop: true,
+      alwaysOnTop: note.alwaysOnTop ?? false,
     });
     return windowId;
   } catch {

@@ -780,4 +780,62 @@ mod tests {
             MAX_MESSAGE_LENGTH
         );
     }
+
+    #[test]
+    fn sanitize_handles_unicode_at_the_char_boundary() {
+        let unicode = "é".repeat(MAX_MESSAGE_LENGTH + 10);
+        let sanitized =
+            sanitize_chat_history(&[json!({ "role": "assistant", "content": unicode })]);
+        let content = sanitized[0]["content"].as_str().unwrap();
+        assert_eq!(content.chars().count(), MAX_MESSAGE_LENGTH);
+        assert!(content.chars().all(|c| c == 'é'));
+    }
+
+    #[test]
+    fn sanitize_drops_malformed_and_non_conversation_entries() {
+        let history = vec![
+            json!("not an object"),
+            json!(42),
+            json!({}),
+            json!({ "role": "system", "content": "hidden" }),
+            json!({ "role": "tool", "content": "tool output" }),
+            json!({ "role": "user", "content": null }),
+            json!({ "role": "user", "content": ["not", "a", "string"] }),
+            json!({ "role": "assistant", "content": 123 }),
+            json!({ "role": "USER", "content": "uppercase role is rejected" }),
+            json!({ "role": "user", "content": "keep me" }),
+            json!({ "role": "assistant", "content": "and me" }),
+            json!({ "role": "user", "content": "" }),
+        ];
+        let sanitized = sanitize_chat_history(&history);
+        assert_eq!(sanitized.len(), 6);
+        assert_eq!(sanitized[0]["content"], "null");
+        assert_eq!(sanitized[1]["content"], "[\"not\",\"a\",\"string\"]");
+        assert_eq!(sanitized[2]["content"], "123");
+        assert_eq!(sanitized[3]["content"], "keep me");
+        assert_eq!(sanitized[4]["content"], "and me");
+        assert_eq!(sanitized[5]["content"], "");
+        assert!(sanitized.iter().all(|m| m["content"].is_string()));
+    }
+
+    #[test]
+    fn sanitize_keeps_oldest_of_the_last_twenty_in_order() {
+        let mut history = Vec::new();
+        for i in 0..100 {
+            history.push(json!({
+                "role": if i % 2 == 0 { "user" } else { "assistant" },
+                "content": format!("turn-{i}")
+            }));
+        }
+        let sanitized = sanitize_chat_history(&history);
+        assert_eq!(sanitized.len(), MAX_CHAT_HISTORY);
+        assert_eq!(sanitized[0]["content"], "turn-80");
+        assert_eq!(sanitized[19]["content"], "turn-99");
+    }
+
+    #[test]
+    fn sanitize_empty_history_is_empty() {
+        assert!(sanitize_chat_history(&[]).is_empty());
+        assert!(sanitize_chat_history(&[json!(null)]).is_empty());
+    }
 }

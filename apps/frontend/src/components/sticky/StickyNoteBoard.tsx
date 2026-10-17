@@ -21,6 +21,7 @@ interface StickyBoardContextValue {
   openSticky: (noteId: string) => void;
   openNativeWindow: (noteId: string) => Promise<void>;
   closeNativeWindow: (noteId: string) => Promise<void>;
+  syncNativeWindow: (noteId: string) => Promise<void>;
   isNativeOpen: (noteId: string) => boolean;
   nativeSupported: boolean;
 }
@@ -32,6 +33,7 @@ const StickyBoardContext = createContext<StickyBoardContextValue>({
   openSticky: () => {},
   openNativeWindow: async () => {},
   closeNativeWindow: async () => {},
+  syncNativeWindow: async () => {},
   isNativeOpen: () => false,
   nativeSupported: false,
 });
@@ -43,7 +45,8 @@ export function useStickyBoard(): StickyBoardContextValue {
 export function StickyBoardProvider({ children }: { children: ReactNode }) {
   const isMobileOS = useIsMobileOS();
   const stickyOn = useUiModule("stickyNotes") && !isMobileOS;
-  const { supported, openNativeWindow, closeNativeWindow, isNativeOpen } = useNativeStickyNotes();
+  const { supported, openNativeWindow, closeNativeWindow, syncNativeWindow, isNativeOpen } =
+    useNativeStickyNotes();
 
   // Open one note as a floating window: a native always-on-top window in the
   // desktop app, or a small standalone popup in the browser. Never the board.
@@ -105,6 +108,7 @@ export function StickyBoardProvider({ children }: { children: ReactNode }) {
         openSticky,
         openNativeWindow,
         closeNativeWindow,
+        syncNativeWindow,
         isNativeOpen,
         nativeSupported: supported,
       }}

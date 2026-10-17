@@ -198,7 +198,7 @@ fn hallucinated_action_patterns() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
         Regex::new(
-            r"(?i)(?:(?:i'?ve )?(?:found|identified|located|noticed) \d+|(?:i'?ve )?(?:created|deleted|removed|scheduled|completed|added|marked)|(?:let me|i will|going to|i'?ll|i'?m going to)\s+(?:(?:try|attempt|start|begin|go ahead and|now)\s+)?(?:creat(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|schedul(?:e|es|ed|ing)|complet(?:e|es|ed|ing)|updat(?:e|es|ed|ing)|chang(?:e|es|ed|ing)|reschedul(?:e|es|ed|ing)|cancell?(?:s|ed|ing)?|add(?:s|ed|ing)?|mark(?:s|ed|ing)?|mov(?:e|es|ed|ing))\b)",
+            r"(?i)(?:(?:i'?ve )?(?:created|deleted|removed|scheduled|completed|added|marked)|(?:let me|i will|going to|i'?ll|i'?m going to)\s+(?:(?:try|attempt|start|begin|go ahead and|now)\s+)?(?:creat(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|schedul(?:e|es|ed|ing)|complet(?:e|es|ed|ing)|updat(?:e|es|ed|ing)|chang(?:e|es|ed|ing)|reschedul(?:e|es|ed|ing)|cancell?(?:s|ed|ing)?|add(?:s|ed|ing)?|mark(?:s|ed|ing)?|mov(?:e|es|ed|ing))\b)",
         )
         .expect("valid hallucination regex")
     })
@@ -208,7 +208,7 @@ fn action_keywords() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
         Regex::new(
-            r"(?i)\b(?:delete|remove|create|schedule|add|update|mark|complete|finish|find|search|move|reschedule|cancel|change|rename|remind|notify|duplicate|split|merge|post|send|share|dm|message|standup|stand|digest|slack|github|pull request|pr|issue|review|invite|react|comment|triage|repository|repo|channel)\b",
+            r"(?i)\b(?:delet\w*|remov\w*|creat\w*|schedul\w*|updat\w*|complet\w*|reschedul\w*|renam\w*|remind\w*|notif\w*|duplicat\w*|cancell?\w*|chang\w*|mark\w*|finish\w*|find|search\w*|mov\w*|add|ad|split|merge|post|send|share|dm|message|standup|stand|digest|slack|github|pull request|pr|issue|review|invite|react|comment|triage|repository|repo|channel)\b",
         )
         .expect("valid action regex")
     })
@@ -418,5 +418,234 @@ mod tests {
         assert_eq!(mutation_resource("list_tags"), None);
         assert_eq!(mutation_resource("get_task_details"), None);
         assert_eq!(mutation_resource("unknown_tool"), None);
+    }
+
+    #[test]
+    fn money_intent_edge_cases() {
+        for text in [
+            "I get paid 3200 EUR on the 1st",
+            "my salary arrives friday",
+            "rent is overdue",
+            "credit card debt",
+            "coffee cost me €3.50",
+            "£40 for the train",
+            "250 usd invoice",
+            "I need to budget for taxes",
+            "loan payment",
+            "savings goal",
+        ] {
+            assert!(money_intent(text), "expected money intent: {text}");
+        }
+        for text in [
+            "",
+            " ",
+            "what is the weather",
+            "call mum tomorrow",
+            "review the design doc",
+            "the number 42",
+            "Eurovision is on saturday",
+        ] {
+            assert!(!money_intent(text), "expected no money intent: {text}");
+        }
+    }
+
+    #[test]
+    fn needs_tool_retry_ambiguous_and_hostile_inputs() {
+        let retry = [
+            "",
+            "I don't have the necessary tools",
+            "I cannot assist with that",
+            "As an AI, I can't do that",
+            "I've created and scheduled it",
+            "I will delete the old tasks",
+            "Found 3 matching tasks",
+            "Sure! Let me update that for you",
+            "I wasn't able to find it",
+            "Failed to complete the operation",
+            "No tools are available",
+        ];
+        for content in retry {
+            assert!(
+                needs_tool_retry(content, "create a task for tomorrow"),
+                "expected retry for model output: {content}"
+            );
+        }
+
+        let no_retry = [
+            ("It is 18 degrees and sunny.", "what is the weather"),
+            ("Recurrence repeats a task on a schedule.", "explain how recurrence works"),
+            ("A task is a unit of work.", "what is a task"),
+            ("Yes, that is possible.", "can I share a list"),
+            ("Use the plus button.", "how do I add a task"),
+        ];
+        for (content, message) in no_retry {
+            assert!(
+                !needs_tool_retry(content, message),
+                "expected no retry for {content:?} / {message:?}"
+            );
+        }
+
+        let typo_actions = [
+            "creat taks buy milk",
+            "delet all done taks",
+            "reschedul meeting to friday",
+            "ad tag urgent",
+            "complet the report",
+            "schedul dentist next week",
+            "updat due date",
+            "remov duplicate",
+            "find my notes",
+            "mark as done",
+        ];
+        for message in typo_actions {
+            assert!(
+                needs_tool_retry("Here is a plain answer.", message),
+                "expected retry for request: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn refusal_and_hallucination_never_fire_on_clean_results() {
+        let refusals = [
+            "I don't have access",
+            "I cannot assist",
+            "I'm not able to do that",
+            "I was not able to find it",
+            "Unable to create the task",
+            "Failed to update the task",
+            "I cannot call tools",
+            "No functions available",
+            "I'm just an AI",
+            "I do not have the ability",
+        ];
+        for text in refusals {
+            assert!(is_tool_refusal(text), "expected refusal: {text}");
+            assert!(needs_tool_retry(text, "do something"));
+        }
+
+        let clean = [
+            "Added Buy milk for tomorrow.",
+            "Done. The task is now in progress.",
+            "I found your task and moved it to Friday.",
+            "Here is a summary of your week.",
+            "Your task was created successfully.",
+        ];
+        for text in clean {
+            assert!(!is_tool_refusal(text), "unexpected refusal: {text}");
+        }
+
+        for text in [
+            "I found 3 tasks",
+            "I located 1 matching task.",
+            "I noticed 2 tasks due today.",
+        ] {
+            assert!(
+                !has_hallucinated_action(text),
+                "read-only summary treated as a hallucinated action: {text}"
+            );
+        }
+
+        for text in [
+            "I've created the task",
+            "I deleted the old one",
+            "I scheduled it for Friday",
+            "I've marked it complete",
+            "I will create that now",
+            "Let me update the due date",
+            "I'm going to reschedule it",
+            "I've added the tag",
+            "I will move it to backlog",
+        ] {
+            assert!(has_hallucinated_action(text), "expected hallucination: {text}");
+        }
+
+        for text in [
+            "Here is how you can create a task",
+            "The task list is empty",
+            "You can schedule it yourself",
+            "This task is due Friday",
+            "Your notes are below",
+        ] {
+            assert!(
+                !has_hallucinated_action(text),
+                "unexpected hallucination: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn tool_registry_has_no_duplicate_names_and_stays_bounded() {
+        let functions: Vec<&Value> = tool_definitions()
+            .iter()
+            .filter_map(|t| t.get("function"))
+            .collect();
+        assert_eq!(functions.len(), tool_definitions().len());
+        let names: Vec<&str> = functions
+            .iter()
+            .filter_map(|f| f.get("name").and_then(Value::as_str))
+            .collect();
+        assert_eq!(names.len(), functions.len());
+        assert!(!names.is_empty());
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len(), "duplicate tool names");
+        assert!(names.iter().all(|n| !n.trim().is_empty()));
+        assert!(names.len() <= 64, "toolset unexpectedly large");
+        for function in functions {
+            assert!(function.get("description").and_then(Value::as_str).is_some());
+            assert!(function.get("parameters").is_some());
+        }
+    }
+
+    #[test]
+    fn mutation_resource_never_flags_reads_or_unknown_names() {
+        for name in [
+            "search_tasks",
+            "list_tags",
+            "get_task_details",
+            "get_subtasks",
+            "list_tasks_by_date_range",
+            "check_calendar",
+            "suggest_best_time",
+            "list_habits",
+            "get_habit_logs",
+            "list_watchlist",
+            "search_titles",
+            "list_memories",
+            "",
+            " ",
+            "CREATE_TASK",
+            "create-task",
+            "delete_everything",
+        ] {
+            assert_eq!(mutation_resource(name), None, "unexpected resource for {name}");
+        }
+        let writes = [
+            ("create_task", "tasks"),
+            ("update_task", "tasks"),
+            ("delete_task", "tasks"),
+            ("complete_task", "tasks"),
+            ("duplicate_task", "tasks"),
+            ("add_tag_to_task", "tasks"),
+            ("create_subtask", "tasks"),
+            ("update_subtask", "tasks"),
+            ("delete_subtask", "tasks"),
+            ("reorder_subtasks", "tasks"),
+            ("reschedule_task", "tasks"),
+            ("batch_create_tasks", "tasks"),
+            ("batch_delete_tasks", "tasks"),
+            ("add_event", "tasks"),
+            ("create_habit", "habits"),
+            ("toggle_habit_log", "habits"),
+            ("add_watchlist_item", "watchlist"),
+            ("update_watchlist_item", "watchlist"),
+            ("remove_watchlist_item", "watchlist"),
+            ("create_list", "lists"),
+        ];
+        for (name, expected) in writes {
+            assert_eq!(mutation_resource(name), Some(expected), "wrong resource for {name}");
+        }
     }
 }

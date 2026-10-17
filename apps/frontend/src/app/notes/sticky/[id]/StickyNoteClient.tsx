@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   upsertNote,
+  setNotePinned,
   minimizeNote,
   deleteNote,
   getNotes,
   subscribeNotes,
   syncNotesFromServer,
+  noteZIndex,
+  nextNoteZIndex,
   NOTE_COLORS,
   noteBodyFontSize,
   type StickyNote,
@@ -158,12 +161,12 @@ export function StickyNoteRenderer({ noteId }: { noteId: string }) {
   };
 
   const handleAlwaysOnTopChange = (onTop: boolean) => {
-    upsertNote(note.id, { alwaysOnTop: onTop });
+    setNotePinned(note.id, onTop);
     if (native) stickyBridge()?.sendAlwaysOnTop(onTop);
   };
 
   const onWindowPointerDown = () => {
-    const z = (note.zIndex || 10) + 1;
+    const z = nextNoteZIndex(note.alwaysOnTop, getNotes().filter((n) => n.id !== note.id));
     if ((note.zIndex || 0) < z) {
       upsertNote(note.id, { zIndex: z });
     }
@@ -182,8 +185,8 @@ export function StickyNoteRenderer({ noteId }: { noteId: string }) {
   // The native sticky window is already positioned and sized on screen by the
   // desktop shell, so the note fills its viewport (0,0).
   const style: CSSProperties = native
-    ? { left: 0, top: 0, width: "100%", height: "100%", zIndex: note.zIndex || 10 }
-    : { left: 0, top: 0, width: "100vw", height: "100vh", zIndex: note.zIndex || 10 };
+    ? { left: 0, top: 0, width: "100%", height: "100%", zIndex: noteZIndex(note) }
+    : { left: 0, top: 0, width: "100vw", height: "100vh", zIndex: noteZIndex(note) };
 
   return (
     <div
@@ -204,20 +207,19 @@ export function StickyNoteRenderer({ noteId }: { noteId: string }) {
         />
         <div className="flex-1" />
         <div className="flex items-center gap-1" style={NO_DRAG}>
-          {native && (
-            <button
-              onClick={() => handleAlwaysOnTopChange(!note.alwaysOnTop)}
-              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
-                note.alwaysOnTop ? "bg-accent/20 text-accent" : "text-secondary hover:bg-hover hover:text-primary"
-              }`}
-              title={note.alwaysOnTop ? "Stop keeping on top" : "Keep this note on top"}
-              aria-label={note.alwaysOnTop ? "Stop keeping on top" : "Keep this note on top"}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 17v5M5 10V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3l-2 2v3H7v-3l-2-2Z" />
-              </svg>
-            </button>
-          )}
+          <button
+            onClick={() => handleAlwaysOnTopChange(!note.alwaysOnTop)}
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${
+              note.alwaysOnTop ? "bg-accent/20 text-accent" : "text-secondary hover:bg-hover hover:text-primary"
+            }`}
+            title={note.alwaysOnTop ? "Unpin note" : "Pin note on top"}
+            aria-label={note.alwaysOnTop ? "Unpin note" : "Pin note on top"}
+            aria-pressed={!!note.alwaysOnTop}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 17v5M5 10V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3l-2 2v3H7v-3l-2-2Z" />
+            </svg>
+          </button>
           <button
             onClick={handleMinimize}
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-secondary transition-colors hover:bg-hover hover:text-primary"

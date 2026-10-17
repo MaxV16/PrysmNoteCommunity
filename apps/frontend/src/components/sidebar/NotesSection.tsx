@@ -125,7 +125,7 @@ export function NotesSection() {
                         ? "bg-accent/20 text-accent"
                         : "text-muted opacity-0 hover:bg-hover hover:text-primary"
                     } group-hover:opacity-100`}
-                    title={isNativeOpen(n.id) ? "Already open as native window" : "Pop out as native window (always on top)"}
+                    title={isNativeOpen(n.id) ? "Already open as native window" : "Pop out as native window"}
                     aria-label={isNativeOpen(n.id) ? "Already open as native window" : "Pop out as native window"}
                     disabled={isNativeOpen(n.id)}
                   >

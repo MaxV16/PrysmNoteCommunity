@@ -5,12 +5,14 @@ import {
   getNotes,
   subscribeNotes,
   upsertNote,
+  setNotePinned,
   minimizeNote,
   deleteNote,
+  noteZIndex,
+  nextNoteZIndex,
   NOTE_COLORS,
   noteBodyFontSize,
   isNativeStickySupported,
-  openNativeStickyNote,
   type StickyNote,
 } from "@/lib/notes";
 import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
@@ -43,7 +45,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
   noteRef.current = note;
   const dragRef = useRef<DragState | null>(null);
   const resizeRef = useRef<ResizeState | null>(null);
-  const { nativeSupported, openNativeWindow, isNativeOpen } = useStickyBoard();
+  const { nativeSupported, openNativeWindow, syncNativeWindow, isNativeOpen } = useStickyBoard();
   const isOpenNatively = isNativeOpen(note.id);
   const nativeSupportedNow = nativeSupported && isNativeStickySupported();
 
@@ -115,8 +117,14 @@ export function NoteWindow({ note }: { note: StickyNote }) {
   };
 
   const onWindowPointerDown = () => {
-    const z = (getNotes().reduce((max, n) => Math.max(max, n.zIndex || 0), 0) || 0) + 1;
-    if ((noteRef.current.zIndex || 0) < z) upsertNote(noteRef.current.id, { zIndex: z });
+    const current = noteRef.current;
+    const z = nextNoteZIndex(current.alwaysOnTop, getNotes().filter((n) => n.id !== current.id));
+    if ((current.zIndex || 0) < z) upsertNote(current.id, { zIndex: z });
+  };
+
+  const handlePin = () => {
+    setNotePinned(note.id, !note.alwaysOnTop);
+    if (isOpenNatively) void syncNativeWindow(note.id);
   };
 
   const handlePopOut = async () => {
@@ -134,7 +142,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
     top: Math.max(8, Math.min(note.y, vh - height - 8)),
     width,
     height,
-    zIndex: note.zIndex || 10,
+    zIndex: noteZIndex(note),
   };
 
   return (
@@ -169,7 +177,7 @@ export function NoteWindow({ note }: { note: StickyNote }) {
                 ? "bg-accent/20 text-accent"
                 : "text-secondary hover:bg-hover hover:text-primary"
             }`}
-            title={isOpenNatively ? "Already open as native window" : "Pop out as native window (always on top)"}
+            title={isOpenNatively ? "Already open as native window" : "Pop out as native window"}
             aria-label={isOpenNatively ? "Already open as native window" : "Pop out as native window"}
             disabled={isOpenNatively}
           >
@@ -180,6 +188,21 @@ export function NoteWindow({ note }: { note: StickyNote }) {
             </svg>
           </button>
         )}
+        <button
+          onClick={handlePin}
+          className={`flex h-6 w-6 shrink-0 pointer-coarse:h-9 pointer-coarse:w-9 items-center justify-center rounded-md transition-colors ${
+            note.alwaysOnTop
+              ? "bg-accent/20 text-accent"
+              : "text-secondary hover:bg-hover hover:text-primary"
+          }`}
+          title={note.alwaysOnTop ? "Unpin note" : "Pin note on top"}
+          aria-label={note.alwaysOnTop ? "Unpin note" : "Pin note on top"}
+          aria-pressed={!!note.alwaysOnTop}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 17v5M5 10V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3l-2 2v3H7v-3l-2-2Z" />
+          </svg>
+        </button>
         <button
           onClick={() => minimizeNote(note.id)}
           className="flex h-6 w-6 shrink-0 pointer-coarse:h-9 pointer-coarse:w-9 items-center justify-center rounded-md text-secondary transition-colors hover:bg-hover hover:text-primary"

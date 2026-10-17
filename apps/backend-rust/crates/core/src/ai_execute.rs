@@ -393,6 +393,40 @@ fn safe_uuid_str(raw: &str) -> Option<Uuid> {
     Uuid::parse_str(&compact).ok()
 }
 
+/// Resolve a `task_id` that the model may have filled with a title instead of
+/// the UUID returned by `search_tasks`. Live models occasionally pass the
+/// human-readable title directly, which used to fail the whole tool call and
+/// leave the user with no change. Try an exact title match first, then fall
+/// back to the task search ranking.
+async fn resolve_task_id(
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    raw: &Value,
+) -> Result<Option<Uuid>, ApiError> {
+    if let Some(id) = safe_uuid(raw) {
+        return Ok(Some(id));
+    }
+    let Some(title) = raw.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let exact = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
+         AND lower(title) = lower($2) ORDER BY updated_at DESC NULLS LAST LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(title)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(db_err)?;
+    if exact.is_some() {
+        return Ok(exact);
+    }
+    let hits = task::search_tasks(&mut *conn, user_id, title, 1)
+        .await
+        .map_err(db_err)?;
+    Ok(hits.first().map(|(task, _)| task.id))
+}
+
 fn is_inbox_alias(name: Option<&str>) -> bool {
     match name {
         Some(n) => {
@@ -1000,9 +1034,6 @@ async fn tool_create_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
 
 async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
     let raw_id = args.get("task_id").cloned().unwrap_or(Value::Null);
-    let Some(task_uuid) = safe_uuid(&raw_id) else {
-        return ok_obj(json!({ "error": "Invalid task_id format", "task_id": raw_id }));
-    };
     let fields = args
         .get("fields")
         .and_then(|f| f.as_object())
@@ -1010,6 +1041,10 @@ async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
         .unwrap_or_default();
 
     let mut tx = begin(state, user_id).await?;
+    let Some(task_uuid) = resolve_task_id(&mut tx, user_id, &raw_id).await? else {
+        tx.rollback().await.ok();
+        return ok_obj(json!({ "error": "Task not found", "task_id": raw_id }));
+    };
     let Some(mut t) = task::find_task(&mut *tx, task_uuid, user_id, false)
         .await
         .map_err(db_err)?
@@ -1087,16 +1122,19 @@ async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
             .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
-    payloads.push(obj_str(&json!({ "updated": true, "task_id": raw_id })));
+    payloads.push(obj_str(
+        &json!({ "updated": true, "task_id": task_uuid.to_string() }),
+    ));
     Ok(payloads)
 }
 
 async fn tool_delete_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
     let raw_id = args.get("task_id").cloned().unwrap_or(Value::Null);
-    let Some(task_uuid) = safe_uuid(&raw_id) else {
-        return ok_obj(json!({ "error": "Invalid task_id format", "task_id": raw_id }));
-    };
     let mut tx = begin(state, user_id).await?;
+    let Some(task_uuid) = resolve_task_id(&mut tx, user_id, &raw_id).await? else {
+        tx.rollback().await.ok();
+        return ok_obj(json!({ "error": "Task not found", "task_id": raw_id }));
+    };
     let exists = task::find_task(&mut *tx, task_uuid, user_id, false)
         .await
         .map_err(db_err)?;
@@ -1110,7 +1148,7 @@ async fn tool_delete_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
     tx.commit().await.map_err(db_err)?;
     ok_obj(json!({
         "deleted": true,
-        "task_id": raw_id,
+        "task_id": task_uuid.to_string(),
         "note": "Moved to Trash (restorable for 14 days)",
     }))
 }
@@ -1250,11 +1288,12 @@ async fn tool_delete_matching_tasks(state: &AppState, user_id: Uuid, args: &Valu
 }
 
 async fn tool_get_task_details(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
-    let raw = arg_str(args, "task_id").unwrap_or("");
-    let Ok(task_id) = Uuid::parse_str(raw) else {
+    let raw = args.get("task_id").cloned().unwrap_or(Value::Null);
+    let mut tx = begin(state, user_id).await?;
+    let Some(task_id) = resolve_task_id(&mut tx, user_id, &raw).await? else {
+        tx.rollback().await.ok();
         return ok_obj(json!({ "error": "Task not found" }));
     };
-    let mut tx = begin(state, user_id).await?;
     let Some(t) = task::find_task(&mut *tx, task_id, user_id, false)
         .await
         .map_err(db_err)?
@@ -1494,14 +1533,15 @@ async fn tool_detect_conflicts(state: &AppState, user_id: Uuid, args: &Value) ->
 
 async fn tool_reschedule_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
     let raw = args.get("task_id").cloned().unwrap_or(Value::Null);
-    let Some(task_id) = safe_uuid(&raw) else {
-        return ok_obj(json!({ "error": "Task not found" }));
-    };
     let new_start = arg_str(args, "new_start_date");
     let new_due = arg_str(args, "new_due_date");
     let reason = arg_str(args, "reason").unwrap_or("").to_string();
 
     let mut tx = begin(state, user_id).await?;
+    let Some(task_id) = resolve_task_id(&mut tx, user_id, &raw).await? else {
+        tx.rollback().await.ok();
+        return ok_obj(json!({ "error": "Task not found" }));
+    };
     let Some(mut t) = task::find_task(&mut *tx, task_id, user_id, false)
         .await
         .map_err(db_err)?
@@ -1550,7 +1590,7 @@ async fn tool_reschedule_task(state: &AppState, user_id: Uuid, args: &Value) -> 
     tx.commit().await.map_err(db_err)?;
     ok_obj(json!({
         "rescheduled": true,
-        "task_id": raw,
+        "task_id": task_id.to_string(),
         "new_start_date": t.start_date.map(|d| d.to_string()),
         "new_due_date": t.due_date.map(|d| d.to_string()),
         "reason": reason,
@@ -2187,10 +2227,11 @@ async fn tool_convert_subtasks_to_description(
 
 async fn tool_complete_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
     let raw = args.get("task_id").cloned().unwrap_or(Value::Null);
-    let Some(task_id) = safe_uuid(&raw) else {
-        return ok_obj(json!({ "error": "Invalid task_id format", "task_id": raw }));
-    };
     let mut tx = begin(state, user_id).await?;
+    let Some(task_id) = resolve_task_id(&mut tx, user_id, &raw).await? else {
+        tx.rollback().await.ok();
+        return ok_obj(json!({ "error": "Task not found", "task_id": raw }));
+    };
     let exists = task::find_task(&mut *tx, task_id, user_id, false)
         .await
         .map_err(db_err)?;
@@ -2208,7 +2249,7 @@ async fn tool_complete_task(state: &AppState, user_id: Uuid, args: &Value) -> To
     .await
     .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
-    ok_obj(json!({ "completed": true, "task_id": raw, "status": "done" }))
+    ok_obj(json!({ "completed": true, "task_id": task_id.to_string(), "status": "done" }))
 }
 
 async fn tool_duplicate_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
@@ -2262,17 +2303,20 @@ async fn tool_list_tags(state: &AppState, user_id: Uuid) -> ToolResult {
 
 async fn tool_add_tag_to_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
     let raw = args.get("task_id").cloned().unwrap_or(Value::Null);
-    let Some(task_id) = safe_uuid(&raw) else {
-        return ok_obj(json!({ "error": "Invalid task_id format", "task_id": raw }));
-    };
     let tag_name = arg_str(args, "tag_name").unwrap_or("").trim().to_string();
     if tag_name.is_empty() {
         return ok_obj(json!({ "error": "tag_name is required" }));
     }
+    let mut tx = begin(state, user_id).await?;
+    let Some(task_id) = resolve_task_id(&mut tx, user_id, &raw).await? else {
+        tx.rollback().await.ok();
+        return ok_obj(json!({ "error": "Task not found" }));
+    };
+    tx.rollback().await.ok();
     match tags::svc_add_tag_to_task(state, user_id, task_id, tag_name).await {
         Ok(tag) => ok_obj(json!({
             "added": true,
-            "task_id": raw,
+            "task_id": task_id.to_string(),
             "tag": {
                 "id": tag.get("id").cloned().unwrap_or(Value::Null),
                 "name": tag.get("name").cloned().unwrap_or(Value::Null),
@@ -2788,6 +2832,130 @@ mod tests {
         assert!(parsed_full.get("truncated").is_none());
     }
 
+    #[test]
+    fn parse_time_arg_rejects_malformed_and_out_of_range_values() {
+        for bad in [
+            Some(""),
+            Some(" "),
+            Some("7:5"),
+            Some("24:00"),
+            Some("23:60"),
+            Some("23:59:60"),
+            Some("13pm"),
+            Some("0pm"),
+            Some("0am"),
+            Some("noon"),
+            Some("2 pm tomorrow"),
+            Some("-1:00"),
+            Some("1:2:3"),
+            Some("12:00pmx"),
+            Some("12:00:00pmx"),
+            None,
+        ] {
+            assert_eq!(parse_time_arg(bad), None, "expected rejection for {bad:?}");
+        }
+        for (raw, hour, minute, second) in [
+            ("00:00", 0, 0, 0),
+            ("23:59:59", 23, 59, 59),
+            ("12:30", 12, 30, 0),
+            ("12am", 0, 0, 0),
+            ("12pm", 12, 0, 0),
+            ("1am", 1, 0, 0),
+            ("1pm", 13, 0, 0),
+            (" 9 ", 9, 0, 0),
+            ("9:05", 9, 5, 0),
+        ] {
+            assert_eq!(
+                parse_time_arg(Some(raw)),
+                NaiveTime::from_hms_opt(hour, minute, second),
+                "unexpected parse for {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_date_arg_accepts_iso_dates_and_datetimes() {
+        for (raw, expected) in [
+            ("2026-10-17", NaiveDate::from_ymd_opt(2026, 10, 17)),
+            ("2026-1-7", NaiveDate::from_ymd_opt(2026, 1, 7)),
+        ] {
+            assert_eq!(parse_date_arg(Some(raw)), expected, "unexpected parse for {raw:?}");
+        }
+        assert_eq!(
+            parse_date_arg(Some("2024-02-29")),
+            NaiveDate::from_ymd_opt(2024, 2, 29)
+        );
+        assert_eq!(
+            parse_date_arg(Some("2026-10-17T13:45:00Z")),
+            NaiveDate::from_ymd_opt(2026, 10, 17)
+        );
+        assert_eq!(
+            parse_date_arg(Some("2026-10-17T13:45:00")),
+            NaiveDate::from_ymd_opt(2026, 10, 17)
+        );
+        for bad in [
+            Some(""),
+            Some(" "),
+            Some("2026-13-01"),
+            Some("2026-02-30"),
+            Some("2025-02-29"),
+            Some("17/10/2026"),
+            Some("tomorrow"),
+            None,
+        ] {
+            assert_eq!(parse_date_arg(bad), None, "expected rejection for {bad:?}");
+        }
+    }
+
+    #[test]
+    fn safe_uuid_rejects_lookalike_and_partial_ids() {
+        for value in [
+            json!(null),
+            json!(""),
+            json!(" "),
+            json!("not-a-uuid"),
+            json!("550e8400-e29b-41d4-a716-44665544000"),
+            json!("550e8400-e29b-41d4-a716-4466554400000"),
+            json!("550e8400-e29b-41d4-a716-44665544000z"),
+            json!(42),
+            json!(true),
+            json!({}),
+            json!([]),
+        ] {
+            assert_eq!(safe_uuid(&value), None, "expected rejection for {value}");
+        }
+        let canonical = "550e8400-e29b-41d4-a716-446655440000";
+        let expected = Uuid::parse_str(canonical).unwrap();
+        for value in [
+            canonical,
+            "550E8400-E29B-41D4-A716-446655440000",
+            " 550e8400-e29b-41d4-a716-446655440000 ",
+            "550e8400-e29b-41d4-a716446655440000",
+            "550e8400e29b41d4a716446655440000",
+        ] {
+            assert_eq!(safe_uuid(&json!(value)), Some(expected), "failed for {value}");
+        }
+    }
+
+    #[test]
+    fn bounded_list_payload_handles_unicode_and_empty_lists() {
+        let mut fields = Map::new();
+        fields.insert("found".to_string(), json!(0));
+        let out = bounded_list_payload(fields, "tasks", Vec::new(), 1000);
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["found"], 0);
+        assert_eq!(parsed["tasks"].as_array().unwrap().len(), 0);
+
+        let items = vec![json!({ "title": "é".repeat(300), "emoji": "🧪" })];
+        let mut fields = Map::new();
+        fields.insert("found".to_string(), json!(1));
+        let out = bounded_list_payload(fields, "tasks", items, 500);
+        assert!(out.len() <= 500);
+        let parsed: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["truncated"], true);
+        assert!(parsed["omitted"].as_u64().unwrap() >= 1);
+    }
+
     #[tokio::test]
     async fn unknown_tool_returns_python_message() {
         let state = AppState::lazy(crate::config::tests::sample("test"));
@@ -2897,6 +3065,140 @@ mod tests {
                 .execute(&state.pool)
                 .await
                 .expect("cleanup");
+        }
+    }
+
+    #[tokio::test]
+    async fn mutating_tools_accept_a_task_title_instead_of_a_uuid() {
+        let Some(state) = live_state() else {
+            return;
+        };
+        let email = format!("rust-ai-title-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .expect("create user");
+
+        let call = |id: &'static str, name: &'static str, args: Value| {
+            json!({
+                "id": id,
+                "function": { "name": name, "arguments": serde_json::to_string(&args).unwrap() },
+            })
+        };
+
+        let created = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c1",
+                "create_task",
+                json!({ "title": "Title resolution task" }),
+            )],
+        )
+        .await;
+        let task_id = first_content(&created)["task"]["id"]
+            .as_str()
+            .expect("task id")
+            .to_string();
+
+        let updated = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c2",
+                "update_task",
+                json!({
+                    "task_id": "title resolution TASK",
+                    "fields": { "title": "Renamed by title" },
+                }),
+            )],
+        )
+        .await;
+        assert_eq!(first_content(&updated)["updated"], true);
+
+        let completed = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c3",
+                "complete_task",
+                json!({ "task_id": "Renamed by title" }),
+            )],
+        )
+        .await;
+        let completed_payload = first_content(&completed);
+        assert_eq!(completed_payload["completed"], true);
+        assert_eq!(completed_payload["task_id"], task_id);
+
+        let status: String =
+            sqlx::query_scalar("SELECT status::text FROM tasks WHERE id = $1 AND user_id = $2")
+                .bind(Uuid::parse_str(&task_id).unwrap())
+                .bind(user.id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("task status");
+        assert_eq!(status, "done");
+
+        let deleted = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c4",
+                "delete_task",
+                json!({ "task_id": "Renamed by title" }),
+            )],
+        )
+        .await;
+        assert_eq!(first_content(&deleted)["deleted"], true);
+
+        for sql in [
+            "DELETE FROM tasks WHERE user_id = $1",
+            "DELETE FROM lists WHERE user_id = $1",
+            "DELETE FROM users WHERE id = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(user.id)
+                .execute(&state.pool)
+                .await
+                .expect("cleanup");
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_tool_arguments_are_reported_without_panicking() {
+        let Some(state) = live_state() else {
+            return;
+        };
+        let calls = vec![
+            json!({
+                "id": "bad-json",
+                "function": { "name": "complete_task", "arguments": "{not json" },
+            }),
+            json!({
+                "id": "non-object",
+                "function": { "name": "complete_task", "arguments": "[]" },
+            }),
+            json!({
+                "id": "missing-id",
+                "function": { "name": "complete_task", "arguments": "{}" },
+            }),
+            json!({
+                "id": "missing-args",
+                "function": { "name": "delete_task" },
+            }),
+        ];
+        let out = execute_tool_calls(&state, Uuid::new_v4(), &calls).await;
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0]["content"], "Invalid arguments");
+
+        let non_object: Value = serde_json::from_str(out[1]["content"].as_str().unwrap()).unwrap();
+        assert!(non_object["error"]
+            .as_str()
+            .unwrap()
+            .contains("complete_task"));
+
+        for entry in &out[2..] {
+            let payload: Value = serde_json::from_str(entry["content"].as_str().unwrap()).unwrap();
+            assert_eq!(payload["error"], "Task not found");
         }
     }
 

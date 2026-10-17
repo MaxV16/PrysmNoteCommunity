@@ -10,6 +10,7 @@ import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { useIsMobileOS } from "@/lib/use-is-mobile-os";
 import { track } from "@/lib/track";
 import { useAppStore } from "@/stores/app-store";
+import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import type { WorkspaceView } from "@/components/layout/AppShell";
 
 interface SidebarLeftProps {
@@ -32,6 +33,13 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
   const notesOn = useUiModule("stickyNotes") && !isMobileOS;
   const router = useRouter();
   const { addNoteWithContent } = useStickyBoard();
+  const sidebarResize = useResizablePanel({
+    panel: "sidebar",
+    defaultWidth: 240,
+    minWidth: 180,
+    maxWidth: 360,
+    side: "left",
+  });
 
   const handleLogout = () => {
     logout();
@@ -148,7 +156,13 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
   }
 
   return (
-    <div className="app-chrome flex h-full w-56 shrink-0 flex-col overflow-hidden border-r border-border bg-surface lg:w-60" data-tour="sidebar">
+    <div
+      className={`app-chrome relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-surface ${
+        sidebarResize.isEnabled ? "" : "w-56 lg:w-60"
+      }`}
+      style={sidebarResize.isEnabled ? { width: sidebarResize.width } : undefined}
+      data-tour="sidebar"
+    >
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
@@ -204,6 +218,11 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
           </button>
         </div>
       </div>
+      <div
+        {...sidebarResize.handleProps}
+        data-resize-handle="sidebar"
+        className="absolute inset-y-0 right-0 z-20 hidden w-1.5 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/40 sm:block"
+      />
     </div>
   );
 }

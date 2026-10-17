@@ -19,6 +19,7 @@ import { Markdown } from "@/components/ai/Markdown";
 import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
 import { useLocalBool } from "@/lib/use-local-bool";
+import { useResizablePanel } from "@/hooks/use-resizable-panel";
 import { formatDate } from "@/lib/dates";
 import { taskTimeLabel } from "@/lib/task-time";
 import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
@@ -472,7 +473,7 @@ const handleUpdate = async (data: {
 
   if (editing) {
     return (
-      <DrawerShell onClose={onClose} title="Edit Task">
+      <DrawerShell onClose={onClose} title="Edit Task" resizeKey={task.id}>
         <TaskForm
           onSubmit={handleUpdate}
           onCancel={() => setEditing(false)}
@@ -483,7 +484,7 @@ const handleUpdate = async (data: {
   }
 
   return (
-    <DrawerShell onClose={onClose} dimmed={task.status === "done"}>
+    <DrawerShell onClose={onClose} dimmed={task.status === "done"} resizeKey={task.id}>
       {/* Header: type label + date range pill, priority flag */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-xs text-secondary">
@@ -940,10 +941,20 @@ interface DrawerShellProps {
   onClose: () => void;
   title?: string;
   dimmed?: boolean;
+  resizeKey: string;
   children: React.ReactNode;
 }
 
-function DrawerShell({ onClose, title, dimmed, children }: DrawerShellProps) {
+function DrawerShell({ onClose, title, dimmed, resizeKey, children }: DrawerShellProps) {
+  const resize = useResizablePanel({
+    panel: "task",
+    suffix: resizeKey,
+    defaultWidth: 400,
+    minWidth: 320,
+    maxWidth: 760,
+    side: "right",
+  });
+
   return (
     <div
       className="fixed inset-0 z-40 flex justify-end"
@@ -958,7 +969,19 @@ function DrawerShell({ onClose, title, dimmed, children }: DrawerShellProps) {
         aria-hidden
         onClick={onClose}
       />
-      <div className="slide-in-right flex h-full w-full flex-col border-l border-border bg-surface shadow-lg sm:w-[400px] sm:max-w-[92vw]">
+      <div
+        className={`slide-in-right relative flex h-full w-full flex-col border-l border-border bg-surface shadow-lg sm:max-w-[92vw] ${
+          resize.isEnabled ? "" : "sm:w-[400px]"
+        }`}
+        style={resize.isEnabled ? { width: resize.width } : undefined}
+      >
+        {resize.isEnabled && (
+          <div
+            {...resize.handleProps}
+            data-resize-handle="task"
+            className="absolute inset-y-0 left-0 z-20 w-1.5 -translate-x-1/2 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/40"
+          />
+        )}
         {title ? (
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <h3 className="text-sm font-semibold text-primary">{title}</h3>
