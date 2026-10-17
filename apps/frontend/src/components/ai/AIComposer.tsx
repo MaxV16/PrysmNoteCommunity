@@ -160,7 +160,7 @@ export function AIComposer({
 
       <form
         onSubmit={(e) => { e.preventDefault(); submit(); }}
-        className="flex items-end gap-2 rounded-2xl border border-border bg-elevated p-2 focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/15"
+        className="flex items-end gap-2 rounded-xl border border-border bg-elevated p-2 focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/15"
       >
         <textarea
           id="ai-input"

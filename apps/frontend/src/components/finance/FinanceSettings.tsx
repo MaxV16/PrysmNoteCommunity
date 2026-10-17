@@ -40,7 +40,7 @@ export function FinanceSettings() {
     <div className="space-y-6">
       <section className="card p-6">
         <div className="flex items-center gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl">
+          <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 3h18v18H3V3z M3 9h18 M9 3v18" />
             </svg>
@@ -60,7 +60,7 @@ export function FinanceSettings() {
         <h3 className="text-sm font-semibold text-primary">Summary</h3>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {cards.map((c) => (
-            <div key={c.label} className="rounded-2xl border border-border/70 bg-elevated p-4">
+            <div key={c.label} className="rounded-xl border border-border/70 bg-elevated p-4">
               <p className="text-xs text-muted">{c.label}</p>
               <p className={`mt-1.5 text-xl font-semibold tabular-nums ${c.tone}`}>{loading && c.label === "Net monthly" && summary.net === 0 ? "…" : c.value}</p>
             </div>

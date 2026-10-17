@@ -46,7 +46,7 @@ export default function VerifyEmailPage() {
       <div className="w-full max-w-sm scale-in">
         <div className="card p-8 relative overflow-hidden text-center">
           <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-accent/10">
             <BrandMark size={32} />
           </div>
 
@@ -56,7 +56,7 @@ export default function VerifyEmailPage() {
 
           {status === "success" && (
             <>
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-success/10">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-success/10">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
                   <path d="m9 11 3 3L22 4" />
@@ -69,7 +69,7 @@ export default function VerifyEmailPage() {
 
           {status === "error" && (
             <>
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-danger/10">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-danger/10">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10" />
                   <path d="m15 9-6 6" />

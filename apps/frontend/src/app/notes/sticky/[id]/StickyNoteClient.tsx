@@ -189,7 +189,7 @@ export function StickyNoteRenderer({ noteId }: { noteId: string }) {
     <div
       onPointerDown={onWindowPointerDown}
       className={`pointer-events-auto absolute flex flex-col overflow-hidden border border-border bg-surface shadow-lg ${
-        native ? "rounded-2xl" : "inset-0 rounded-none"
+        native ? "rounded-xl" : "inset-0 rounded-none"
       }`}
       style={style}
     >

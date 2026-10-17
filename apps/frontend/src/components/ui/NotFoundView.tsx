@@ -15,7 +15,7 @@ export function NotFoundView() {
         Prysm Note
       </div>
 
-      <div className="mt-8 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/10 text-accent">
+      <div className="mt-8 flex h-14 w-14 items-center justify-center rounded-xl bg-accent/10 text-accent">
         <svg
           width="24"
           height="24"

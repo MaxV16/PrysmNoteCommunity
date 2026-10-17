@@ -815,7 +815,7 @@ export default function SettingsPage() {
           {activeTab === "account" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl font-bold text-accent "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl font-bold text-accent "> 
                   {(user.display_name || user.email || "U")[0].toUpperCase()}
                 </div>
                 <div>
@@ -901,7 +901,7 @@ export default function SettingsPage() {
             <>
               <section className="card p-6 space-y-5">
                 <div className="flex items-center gap-4">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5" />
                     </svg>
@@ -934,7 +934,7 @@ export default function SettingsPage() {
           {activeTab === "features" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8" />
                   </svg>
@@ -964,7 +964,7 @@ export default function SettingsPage() {
           {activeTab === "preferences" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" />
                   </svg>
@@ -1078,7 +1078,7 @@ export default function SettingsPage() {
           {activeTab === "preferences" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
                   </svg>
@@ -1151,7 +1151,7 @@ export default function SettingsPage() {
           {activeTab === "preferences" && (
             <section className="card p-6 space-y-6">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="5" />
                   </svg>
@@ -1185,7 +1185,7 @@ export default function SettingsPage() {
                           setCustomTheme(null);
                         }
                       }}
-                      className={`rounded-2xl border-2 p-2.5 text-center transition-all duration-200 ${
+                      className={`rounded-xl border-2 p-2.5 text-center transition-all duration-200 ${
                         active ? "border-accent bg-accent/10" : "border-border bg-elevated hover:border-text-muted hover:bg-hover"
                       }`}
                     >
@@ -1215,7 +1215,7 @@ export default function SettingsPage() {
               <ThemeImportExport />
 
               {editingCustomTheme && (
-                <div className="rounded-2xl bg-elevated border border-border p-4 space-y-4">
+                <div className="rounded-xl bg-elevated border border-border p-4 space-y-4">
                   <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider">Custom Theme Editor</h4>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {Object.keys(customThemeColors).map((key) => {
@@ -1431,7 +1431,7 @@ export default function SettingsPage() {
             <section className="space-y-5">
               <div className="card p-6 space-y-5">
                 <div className="flex items-center gap-4">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                  <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <circle cx="12" cy="12" r="3" />
                       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -1508,7 +1508,7 @@ export default function SettingsPage() {
           {activeTab === "integrations" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
                   </svg>
@@ -1534,7 +1534,7 @@ export default function SettingsPage() {
               {activeTab === "integrations" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75" />
                   </svg>
@@ -1552,7 +1552,7 @@ export default function SettingsPage() {
                   <TeamList />
                 </>
               ) : (
-                <div className="rounded-2xl border border-border bg-elevated px-6 py-10 text-center">
+                <div className="rounded-xl border border-border bg-elevated px-6 py-10 text-center">
                   <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-accent/15 text-accent">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                   </div>
@@ -1570,7 +1570,7 @@ export default function SettingsPage() {
           {activeTab === "widgets" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                   </svg>
@@ -1608,7 +1608,7 @@ export default function SettingsPage() {
           {activeTab === "widgets" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="3" width="18" height="18" rx="2" />;<line x1="3" y1="9" x2="21" y2="9" />;<line x1="9" y1="3" x2="9" y2="21" />
                   </svg>
@@ -1644,7 +1644,7 @@ export default function SettingsPage() {
           {activeTab === "integrations" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                   </svg>
@@ -1654,7 +1654,7 @@ export default function SettingsPage() {
                   <p className="text-sm text-muted">API keys for LLM providers</p>
                 </div>
               </div>
-              <div className="rounded-2xl bg-elevated border border-border p-4 space-y-2 text-xs text-muted leading-relaxed">
+              <div className="rounded-xl bg-elevated border border-border p-4 space-y-2 text-xs text-muted leading-relaxed">
                 <p className="font-semibold text-secondary text-sm">What happens when you provide your API key?</p>
                 <ul className="list-disc list-inside space-y-1 ml-1">
                   <li>Keys are encrypted with <strong className="text-primary">Fernet (AES-128)</strong> before being stored on our servers.</li>
@@ -1722,7 +1722,7 @@ export default function SettingsPage() {
           {activeTab === "advanced" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 8V4 M8 12H4 M12 16v4 M16 12h4 M12 2v2 M12 22v-2 M2 12h2 M22 12h-2" />
                   </svg>
@@ -1747,7 +1747,7 @@ export default function SettingsPage() {
           {activeTab === "advanced" && (
             <section className="card p-6 space-y-5">
               <div className="flex items-center gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl "> 
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl "> 
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
                   </svg>

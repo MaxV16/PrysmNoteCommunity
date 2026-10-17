@@ -60,7 +60,7 @@ export function ReminderStack({
       data-testid="reminder-stack"
       className={`pointer-events-none fixed z-[9998] w-[min(20rem,calc(100vw-2rem))] flex-col gap-2 transition-shadow ${
           drawerOpen ? "bottom-4 left-4 hidden sm:flex" : `right-4 flex ${raised ? "bottom-24" : "bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] sm:bottom-4"}`
-      } ${highlight ? "rounded-2xl ring-2 ring-accent" : ""}`}
+      } ${highlight ? "rounded-xl ring-2 ring-accent" : ""}`}
     >
       {visible.map((reminder) => (
         <div

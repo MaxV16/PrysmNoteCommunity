@@ -88,7 +88,7 @@ export function OnboardingDiscoveryCard() {
 
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-20 w-[min(22rem,calc(100vw-2rem))]">
-      <div className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-border bg-surface p-4 shadow-lg">
+      <div className="pointer-events-auto flex items-start gap-3 rounded-xl border border-border bg-surface p-4 shadow-lg">
         <div className="gradient-bg flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[var(--on-gradient)]">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />

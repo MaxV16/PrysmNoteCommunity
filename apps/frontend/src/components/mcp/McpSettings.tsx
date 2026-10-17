@@ -96,7 +96,7 @@ export function McpSettings() {
       )}
 
       {createdToken && (
-        <div className="rounded-2xl border border-accent/30 bg-accent/10 p-4">
+        <div className="rounded-xl border border-accent/30 bg-accent/10 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-accent">Your new token (shown once)</p>
@@ -163,7 +163,7 @@ export function McpSettings() {
         </Link>
       </details>
 
-      <div className="rounded-2xl bg-elevated border border-border p-4">
+      <div className="rounded-xl bg-elevated border border-border p-4">
         <p className="text-xs font-medium text-secondary">Endpoint URL</p>
         <p className="mt-1 text-sm text-accent break-all">{MCP_ENDPOINT}</p>
       </div>

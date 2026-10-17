@@ -81,7 +81,7 @@ export function MediaCard({ item, region, onUpdate, onRemove, fetchProviders }: 
 
   return (
     <div
-      className={`flex overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition-colors hover:border-accent/40 ${
+      className={`flex overflow-hidden rounded-xl border border-border bg-surface shadow-sm transition-colors hover:border-accent/40 ${
         expanded ? "w-full flex-row" : "w-40 flex-col"
       }`}
     >

@@ -109,7 +109,7 @@ function BoardGroup({
         e.stopPropagation();
         onEmptyContextMenu?.(e, droppableId, title);
       }}
-      className={`flex w-full flex-col rounded-2xl border bg-surface/60 p-4 transition-colors ${
+      className={`flex w-full flex-col rounded-xl border bg-surface/60 p-4 transition-colors ${
         isOver ? "border-accent/60 ring-2 ring-accent/30" : "border-border"
       }`}
     >

@@ -30,7 +30,7 @@ class ErrorBoundaryInner extends React.Component<
         this.props.fallback || (
           <div className="flex h-full items-center justify-center bg-base p-8 text-center text-sm text-danger">
             <div className="flex flex-col items-center gap-3">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-danger/10 text-danger">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-danger/10 text-danger">
                 <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
                   <path d="M12 9v4M12 17h.01" />

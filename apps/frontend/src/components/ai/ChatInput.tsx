@@ -48,7 +48,7 @@ export function ChatInput({ onSend, disabled, additionalAction }: ChatInputProps
           onChange={(e) => setInput(e.target.value.slice(0, MAX_LENGTH))}
           onKeyDown={handleKeyDown}
           placeholder="What would you like me to do? e.g., 'Schedule GP appointment next Monday at 12pm'"
-          className="input-field resize-none pr-12 text-sm rounded-2xl shadow-inner"
+          className="input-field resize-none pr-12 text-sm rounded-xl shadow-inner"
           rows={1}
           disabled={disabled}
           autoFocus

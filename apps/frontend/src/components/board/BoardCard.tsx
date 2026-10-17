@@ -174,7 +174,7 @@ export function BoardCard({
       }}
       className={`group relative flex ${
         width ? "" : "w-full"
-      } shrink-0 cursor-pointer flex-col rounded-2xl border border-border transition-colors duration-200 ${spanClass ?? ""}`}
+      } shrink-0 cursor-pointer flex-col rounded-xl border border-border transition-colors duration-200 ${spanClass ?? ""}`}
       style={{
         width: width ?? undefined,
         marginTop: topOffset,
@@ -189,7 +189,7 @@ export function BoardCard({
       }}
     >
       <div
-        className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+        className="pointer-events-none absolute inset-0 rounded-xl opacity-0 transition-opacity duration-200 group-hover:opacity-100"
         style={{ boxShadow: `0 0 18px ${color}26` }}
       />
       <DecorativeLayer kind={decoration} color={color} />

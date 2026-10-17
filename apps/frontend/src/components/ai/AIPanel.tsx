@@ -408,7 +408,7 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 text-center sm:px-6">
-            <div className="gradient-bg flex h-14 w-14 items-center justify-center rounded-2xl text-2xl">
+            <div className="gradient-bg flex h-14 w-14 items-center justify-center rounded-xl text-2xl">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--on-gradient)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             </div>
             <p className="mt-3 text-sm font-semibold text-primary">Turn words into a plan</p>

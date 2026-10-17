@@ -130,7 +130,7 @@ export default function LoginPage() {
         <div className="card p-8 relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1 gradient-bg opacity-60" />
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-accent/10">
               <BrandMark size={32} />
             </div>
             <h1 className="text-xl font-bold gradient-text">Welcome back</h1>

@@ -153,7 +153,7 @@ export function MobileTaskActionBar({ sectionKind = "timeline" }: MobileTaskActi
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-3 pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
-      <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-border bg-surface p-2 shadow-lg slide-up">
+      <div className="pointer-events-auto w-full max-w-md rounded-xl border border-border bg-surface p-2 shadow-lg slide-up">
         <div className="mb-1 flex items-center gap-2 px-2">
           <span className="min-w-0 flex-1 truncate text-xs font-semibold text-primary" title={task.title}>
             {task.title}

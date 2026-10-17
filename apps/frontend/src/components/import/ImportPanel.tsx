@@ -167,7 +167,7 @@ export function ImportPanel() {
   return (
     <section className="card p-6 space-y-5">
       <div className="flex items-center gap-4">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-2xl">
+        <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-accent/15 text-2xl">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="17 8 12 3 7 8" />
@@ -190,7 +190,7 @@ export function ImportPanel() {
         role="button"
         tabIndex={0}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
-        className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors ${
+        className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors ${
           dragging ? "border-accent bg-accent/10" : "border-border bg-elevated hover:border-accent/50"
         }`}
       >
@@ -311,14 +311,14 @@ export function ImportPanel() {
       )}
 
       {undoNotice && (
-        <div className="rounded-2xl border border-border bg-elevated p-4 scale-in">
+        <div className="rounded-xl border border-border bg-elevated p-4 scale-in">
           <p className="text-sm font-semibold text-primary">Import undone</p>
           <p className="mt-1 text-xs text-secondary">{undoNotice}</p>
         </div>
       )}
 
       {result && (
-        <div className="rounded-2xl border border-border bg-elevated p-4 space-y-3 scale-in">
+        <div className="rounded-xl border border-border bg-elevated p-4 space-y-3 scale-in">
           <p className="text-sm font-semibold text-primary">Import complete</p>
           {resultLine && (
             <p className="text-xs text-secondary">{resultLine}</p>
