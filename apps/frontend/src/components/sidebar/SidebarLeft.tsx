@@ -40,7 +40,7 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
 
   if (collapsed) {
     return (
-      <div className="flex h-full w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-surface py-3">
+      <div className="app-chrome flex h-full w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-surface py-3">
         <button
           onClick={onToggle}
           aria-label="Expand sidebar"
@@ -148,7 +148,7 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
   }
 
   return (
-    <div className="flex h-full w-56 shrink-0 flex-col overflow-hidden border-r border-border bg-surface lg:w-60" data-tour="sidebar">
+    <div className="app-chrome flex h-full w-56 shrink-0 flex-col overflow-hidden border-r border-border bg-surface lg:w-60" data-tour="sidebar">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">

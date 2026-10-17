@@ -1,6 +1,6 @@
 import tokens from "@/design-tokens.json";
 
-export type ThemeName = "dark" | "light" | "parchment" | "fog" | "dracula" | "nord" | "monokai" | "slate" | "coffee" | "solarized" | "github-dark" | "tokyo" | "ocean" | "forest" | "sunset" | "custom";
+export type ThemeName = "dark" | "light" | "parchment" | "fog" | "dusk" | "dracula" | "nord" | "monokai" | "slate" | "coffee" | "solarized" | "github-dark" | "tokyo" | "ocean" | "forest" | "sunset" | "custom";
 
 export interface ThemeColors {
   base: string;
@@ -21,6 +21,12 @@ export interface ThemeColors {
   "shadow-lg": string;
   "accent-glow": string;
   "on-gradient"?: string;
+  /* Optional chrome pair for mixed themes (dark sidebar over light content). */
+  "chrome-bg"?: string;
+  "chrome-border"?: string;
+  "chrome-text"?: string;
+  "chrome-text-secondary"?: string;
+  "chrome-text-muted"?: string;
 }
 
 export interface Theme {

@@ -15,6 +15,14 @@
   --text-primary: #F1ECFA;
   --text-secondary: #BFB4D4;
   --text-muted: #8B809F;
+  /* App chrome (sidebar, rails). Defaults mirror the theme so every existing
+     theme renders exactly as before. A mixed theme sets these to a contrasting
+     pair, giving a dark sidebar over light content. */
+  --chrome-bg: var(--bg-surface);
+  --chrome-border: var(--border);
+  --chrome-text: var(--text-primary);
+  --chrome-text-secondary: var(--text-secondary);
+  --chrome-text-muted: var(--text-muted);
   /* One accent, soft violet. Used only for primary action, active nav and the
      focus ring. Text on the accent is dark, never white. */
   --accent: #9B7BFF;
@@ -66,6 +74,21 @@
      independently of the interface size so readability can be tuned on its own. */
   --font-scale: 1;
   color-scheme: dark;
+}
+
+/* Re-point the shared tokens inside the app chrome so every existing utility
+   (text-primary, text-secondary, border, bg-surface) follows the chrome pair
+   without touching component code. */
+.app-chrome {
+  color: var(--chrome-text);
+  --bg-base: var(--chrome-bg);
+  --bg-surface: var(--chrome-bg);
+  --bg-elevated: color-mix(in srgb, var(--chrome-bg) 82%, var(--chrome-text) 6%);
+  --bg-hover: color-mix(in srgb, var(--chrome-bg) 74%, var(--chrome-text) 10%);
+  --border: var(--chrome-border);
+  --text-primary: var(--chrome-text);
+  --text-secondary: var(--chrome-text-secondary);
+  --text-muted: var(--chrome-text-muted);
 }
 
 /* Theme definitions moved to themes.css */

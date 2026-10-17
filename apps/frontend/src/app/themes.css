@@ -226,3 +226,38 @@
   --shadow-glow: 0 1px 3px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }
+
+/* Mixed theme: light content with a dark chrome (sidebar) so panels read as a
+   dark rail around a bright canvas. */
+:root[data-theme="dusk"] {
+  --bg-base: #F7F5FB;
+  --bg-surface: #FFFFFF;
+  --bg-elevated: #EFEBF6;
+  --bg-hover: #E6E0F1;
+  --border: #DAD3E8;
+  --text-primary: #1A1526;
+  --text-secondary: #4C4461;
+  --text-muted: #7A718F;
+  --accent: #7C5CE0;
+  --accent-hover: #6A4BCB;
+  --accent-glow: rgba(124, 92, 224, 0.16);
+  --grad-from: #7C5CE0;
+  --grad-via: #7C5CE0;
+  --grad-to: #7C5CE0;
+  --on-gradient: #FFFFFF;
+  --shadow-glow-strong: 0 2px 10px rgba(26, 21, 38, 0.12);
+  --danger: #B42318;
+  --success: #2F7A47;
+  --warning: #A8571A;
+  --weekend-tint: rgba(80, 60, 120, 0.05);
+  --shadow-sm: 0 1px 2px rgba(26, 21, 38, 0.08);
+  --shadow-md: 0 4px 12px rgba(26, 21, 38, 0.10);
+  --shadow-lg: 0 12px 32px rgba(26, 21, 38, 0.14);
+  --shadow-glow: 0 1px 3px rgba(26, 21, 38, 0.10);
+  --chrome-bg: #17131F;
+  --chrome-border: #2C2540;
+  --chrome-text: #F1ECFA;
+  --chrome-text-secondary: #B9AECE;
+  --chrome-text-muted: #857A9B;
+  color-scheme: light;
+}

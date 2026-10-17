@@ -118,6 +118,34 @@
         "on-gradient": "#FFFFFF"
       }
     },
+    "dusk": {
+      "label": "Dusk",
+      "colors": {
+        "base": "#F7F5FB",
+        "surface": "#FFFFFF",
+        "elevated": "#EFEBF6",
+        "hover": "#E6E0F1",
+        "border": "#DAD3E8",
+        "primary": "#1A1526",
+        "secondary": "#4C4461",
+        "muted": "#7A718F",
+        "accent": "#7C5CE0",
+        "accent-hover": "#6A4BCB",
+        "danger": "#B42318",
+        "success": "#2F7A47",
+        "warning": "#A8571A",
+        "shadow-sm": "0 1px 2px rgba(26,21,38,0.08)",
+        "shadow-md": "0 4px 12px rgba(26,21,38,0.10)",
+        "shadow-lg": "0 12px 32px rgba(26,21,38,0.14)",
+        "accent-glow": "rgba(124,92,224,0.16)",
+        "on-gradient": "#FFFFFF",
+        "chrome-bg": "#17131F",
+        "chrome-border": "#2C2540",
+        "chrome-text": "#F1ECFA",
+        "chrome-text-secondary": "#B9AECE",
+        "chrome-text-muted": "#857A9B"
+      }
+    },
     "dracula": {
       "label": "Dracula Night",
       "colors": {

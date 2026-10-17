@@ -58,6 +58,12 @@ function applyThemeColors(colors: ThemeColors, extra?: Record<string, string>) {
     "--on-gradient",
     colors["on-gradient"] ?? (luminance(colors.accent) > 0.35 ? "#1a1a2e" : "#ffffff"),
   );
+  const chromeKeys = ["chrome-bg", "chrome-border", "chrome-text", "chrome-text-secondary", "chrome-text-muted"] as const;
+  for (const key of chromeKeys) {
+    const value = colors[key];
+    if (value) root.style.setProperty("--" + key, value);
+    else root.style.removeProperty("--" + key);
+  }
   if (extra) {
     for (const [name, value] of Object.entries(extra)) {
       if (KNOWN_CSS_VARS.has(name)) {
