@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   updateTask: vi.fn().mockResolvedValue(undefined),
   showToast: vi.fn(),
   addNoteWithContent: vi.fn(),
+  updateNotifPrefs: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("next/dynamic", () => ({ default: () => () => null }));
@@ -25,6 +26,23 @@ vi.mock("@/components/sticky/StickyNoteBoard", () => ({
 }));
 vi.mock("@/lib/api", () => ({
   api: { get: vi.fn().mockResolvedValue([]), post: vi.fn(), delete: vi.fn(), patch: vi.fn() },
+}));
+vi.mock("@/lib/notifications", () => ({
+  useNotificationPrefs: () => ({
+    prefs: {
+      inapp_reminders: true,
+      reminder_time: "20:00",
+      email_reminders: false,
+      due_alerts: true,
+      email_digest: false,
+      push_enabled: false,
+      sound: true,
+    },
+    update: mocks.updateNotifPrefs,
+    loaded: true,
+  }),
+  requestNotificationPermission: vi.fn().mockResolvedValue(true),
+  getDefaultReminderTime: () => "20:00",
 }));
 
 const baseTask = {
@@ -155,5 +173,33 @@ describe("TaskDetailDrawer footer comment button", () => {
 
     await user.click(comments);
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("TaskDetailDrawer reminders", () => {
+  it("sets a per-task reminder with a time and channels", async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Set task reminder" }));
+    await waitFor(() => expect(screen.getByTestId("drawer-reminder-date")).toBeTruthy());
+    expect(screen.getByTestId("drawer-reminder-time")).toBeTruthy();
+
+    await user.click(screen.getByTestId("drawer-reminder-channel-email"));
+    await user.click(screen.getByRole("button", { name: "Save reminder" }));
+
+    expect(mocks.updateTask).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({
+        reminder_enabled: true,
+        reminder_at: expect.any(String),
+        reminder_email: true,
+      })
+    );
+  });
+
+  it("shows an existing scheduled reminder as a summary", () => {
+    renderDrawer({ reminder_enabled: true, reminder_at: "2026-10-20T09:00:00Z" });
+    expect(screen.getByTestId("drawer-reminder-toggle")).toBeTruthy();
   });
 });

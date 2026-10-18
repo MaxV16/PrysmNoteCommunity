@@ -5,6 +5,11 @@ import { useAppStore } from "@/stores/app-store";
 import { useTasks } from "@/hooks/useTasks";
 import { useNotificationPrefs, showSystemNotification } from "@/lib/notifications";
 import { getDesktopBridge, openDesktopNotification } from "@/lib/desktop-bridge";
+import {
+  nativeNotificationsSupported,
+  reconcileNativeReminders,
+  type NativeReminderRow,
+} from "@/lib/capbridge";
 import { playReminderPing } from "@/lib/sounds";
 import { api } from "@/lib/api";
 import { toLocalDateString } from "@/lib/utils";
@@ -15,6 +20,19 @@ export interface InAppReminder {
   taskId: string;
   title: string;
   dueDate: string;
+  /** Scheduled per-task reminders are one-off; daily ones come from the digest. */
+  source?: "daily" | "scheduled";
+}
+
+interface ScheduledReminderRow {
+  id: string;
+  title: string;
+  due_date: string | null;
+  start_date: string | null;
+  reminder_at: string;
+  reminder_inapp: boolean;
+  reminder_push: boolean;
+  reminder_email: boolean;
 }
 
 interface ReminderCandidate {
@@ -34,6 +52,7 @@ const CHECK_INTERVAL = 60_000;
 const SNOOZE_MS = 60 * 60 * 1000;
 const RAN_PREFIX = "prysm_reminder_ran_";
 const REMINDED_PREFIX = "prysm_reminded_";
+const SCHEDULED_PREFIX = "prysm_task_reminded_";
 // Hard cap on reminder cards shown at once: an unbounded stack of overdue tasks
 // used to cover the whole screen. Overflow is surfaced as a single "+N more".
 export const REMINDER_CAP = 5;
@@ -98,6 +117,13 @@ function pruneStorage(today: string) {
         if (DATE_ONLY.test(datePart) && datePart !== today && datePart < cutoff) {
           doomed.push(key);
         }
+      } else if (key.startsWith(SCHEDULED_PREFIX)) {
+        const parts = key.split("__");
+        const stamp = parts.length > 1 ? parts[parts.length - 1] : "";
+        const parsed = new Date(stamp);
+        if (!Number.isNaN(parsed.getTime()) && parsed.getTime() < Date.now() - PRUNE_AFTER_DAYS * 86_400_000) {
+          doomed.push(key);
+        }
       }
     }
     for (const key of doomed) localStorage.removeItem(key);
@@ -155,6 +181,7 @@ export function useInAppReminders() {
   const [reminders, setReminders] = useState<InAppReminder[]>([]);
   const snoozeTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const evaluatingRef = useRef(false);
+  const evaluatingScheduledRef = useRef(false);
 
   const evaluate = useCallback(async () => {
     if (!prefs.inapp_reminders) return;
@@ -224,13 +251,146 @@ export function useInAppReminders() {
     return () => clearInterval(id);
   }, [loaded, evaluate]);
 
+  /**
+   * Scheduled per-task reminders: unlike the daily digest above, these fire at
+   * the exact time the user picked in the task drawer. The bounded server query
+   * covers tasks outside the loaded window; the cached task list is the offline
+   * fallback. Every reminder time is delivered once per device (the key includes
+   * the timestamp, so rescheduling it makes it eligible again).
+   */
+  const evaluateScheduled = useCallback(async () => {
+    if (evaluatingScheduledRef.current) return;
+    evaluatingScheduledRef.current = true;
+    try {
+      let rows: ScheduledReminderRow[];
+      try {
+        const response = await api.get<ScheduledReminderRow[]>(
+          "/notifications/due-reminders"
+        );
+        rows = Array.isArray(response) ? response : [];
+      } catch {
+        rows = tasks
+          .filter(
+            (t) =>
+              !!t.reminder_at &&
+              !t.deleted_at &&
+              !t.is_archived &&
+              t.reminder_enabled !== false &&
+              !isDoneOrCancelled(t.status)
+          )
+          .map((t) => ({
+            id: t.id,
+            title: t.title,
+            due_date: t.due_date,
+            start_date: t.start_date,
+            reminder_at: t.reminder_at as string,
+            reminder_inapp: t.reminder_inapp ?? true,
+            reminder_push: !!t.reminder_push,
+            reminder_email: !!t.reminder_email,
+          }));
+      }
+
+      const now = Date.now();
+      const fresh = (rows || []).filter((row) => {
+        const at = new Date(row.reminder_at).getTime();
+        if (Number.isNaN(at) || at > now) return false;
+        return !safeGet(`${SCHEDULED_PREFIX}${row.id}__${row.reminder_at}`);
+      });
+      if (fresh.length === 0) return;
+
+      const inApp = fresh.filter(
+        (row) => row.reminder_inapp && prefs.inapp_reminders
+      );
+      // On Android/iOS the OS already holds the scheduled local notification,
+      // so delivering through the WebView Notification API would duplicate it.
+      const push = fresh.filter(
+        (row) =>
+          row.reminder_push && prefs.push_enabled && !nativeNotificationsSupported()
+      );
+      // Mark only the reminders that had a client-side channel enabled; an
+      // email-only reminder stays eligible if the user later adds one.
+      for (const row of [...inApp, ...push]) {
+        safeSet(`${SCHEDULED_PREFIX}${row.id}__${row.reminder_at}`, "1");
+      }
+
+      if (inApp.length > 0) {
+        setReminders((prev) => {
+          const existing = new Set(prev.map((r) => r.taskId));
+          const next = inApp
+            .filter((row) => !existing.has(row.id))
+            .map<InAppReminder>((row) => ({
+              taskId: row.id,
+              title: row.title,
+              dueDate: (row.due_date ||
+                row.start_date ||
+                row.reminder_at.slice(0, 10)) as string,
+              source: "scheduled",
+            }));
+          if (next.length === 0) return prev;
+          return [...prev, ...next].sort(byDateThenTitle);
+        });
+      }
+
+      if (push.length > 0) {
+        if (getDesktopBridge()) {
+          for (const row of push) {
+            openDesktopNotification({ title: row.title, body: row.title });
+          }
+        } else {
+          for (const row of push) {
+            void showSystemNotification(row.title, row.title);
+          }
+        }
+      }
+
+      if ((inApp.length > 0 || push.length > 0) && prefs.sound) {
+        playReminderPing();
+      }
+    } finally {
+      evaluatingScheduledRef.current = false;
+    }
+  }, [tasks, prefs.inapp_reminders, prefs.push_enabled, prefs.sound]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    void evaluateScheduled();
+    const id = setInterval(() => void evaluateScheduled(), CHECK_INTERVAL);
+    return () => clearInterval(id);
+  }, [loaded, evaluateScheduled]);
+
+  /**
+   * Native only: make the OS notification schedule match the server's upcoming
+   * reminders. This is what keeps local notifications correct after edits made
+   * on another device (and cancels reminders that are no longer upcoming).
+   */
+  const reconcileNative = useCallback(async () => {
+    if (!nativeNotificationsSupported()) return;
+    try {
+      const rows = await api.get<NativeReminderRow[]>(
+        "/notifications/upcoming-reminders?limit=200"
+      );
+      if (Array.isArray(rows)) await reconcileNativeReminders(rows);
+    } catch {
+      // Offline or a transient failure: keep the existing OS schedule.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    void reconcileNative();
+  }, [loaded, reconcileNative]);
+
   // Cross-device sync: re-evaluate after the foreground task refresh so a task
   // added/edited elsewhere can surface here without a reload.
   useEffect(() => {
-    const onRefresh = () => void evaluate();
+    const onRefresh = () => {
+      void evaluate();
+      void evaluateScheduled();
+      void reconcileNative();
+    };
     window.addEventListener(FOREGROUND_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(FOREGROUND_REFRESH_EVENT, onRefresh);
-  }, [evaluate]);
+  }, [evaluate, evaluateScheduled, reconcileNative]);
 
   useEffect(() => {
     const timers = snoozeTimers.current;

@@ -221,6 +221,47 @@ describe("useInAppReminders", () => {
     expect(h.updateTask).toHaveBeenCalledWith("tomorrow", { status: "done" });
     expect(result.current.reminders).toHaveLength(0);
   });
+
+  it("fires a scheduled per-task reminder at its chosen time, once", async () => {
+    useAppStore.setState({
+      tasks: [
+        makeTask({
+          id: "scheduled",
+          title: "Scheduled task",
+          reminder_at: new Date(Date.now() - 60_000).toISOString(),
+          reminder_inapp: true,
+        }),
+      ],
+    });
+
+    const first = renderHook(() => useInAppReminders());
+    await waitFor(() => expect(first.result.current.reminders).toHaveLength(1));
+    expect(first.result.current.reminders[0]).toMatchObject({
+      taskId: "scheduled",
+      source: "scheduled",
+    });
+
+    // A second mount must not deliver the same reminder time again.
+    const second = renderHook(() => useInAppReminders());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(second.result.current.reminders).toHaveLength(0);
+  });
+
+  it("ignores a scheduled reminder that is still in the future", async () => {
+    useAppStore.setState({
+      tasks: [
+        makeTask({
+          id: "future-scheduled",
+          title: "Later task",
+          reminder_at: new Date(Date.now() + 3_600_000).toISOString(),
+          reminder_inapp: true,
+        }),
+      ],
+    });
+    const { result } = renderHook(() => useInAppReminders());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(result.current.reminders).toHaveLength(0);
+  });
 });
 
 describe("useInAppReminders system notifications", () => {
@@ -264,5 +305,25 @@ describe("useInAppReminders system notifications", () => {
     await waitFor(() => expect(result.current.reminders).toHaveLength(1));
 
     expect(h.showSystemNotification).toHaveBeenCalledWith("Tomorrow task", "Tomorrow task");
+  });
+
+  it("delivers a scheduled reminder through browser notifications when push is picked", async () => {
+    h.prefs.push_enabled = true;
+    useAppStore.setState({
+      tasks: [
+        makeTask({
+          id: "push-scheduled",
+          title: "Push reminder",
+          reminder_at: new Date(Date.now() - 60_000).toISOString(),
+          reminder_inapp: false,
+          reminder_push: true,
+        }),
+      ],
+    });
+
+    renderHook(() => useInAppReminders());
+    await waitFor(() =>
+      expect(h.showSystemNotification).toHaveBeenCalledWith("Push reminder", "Push reminder")
+    );
   });
 });

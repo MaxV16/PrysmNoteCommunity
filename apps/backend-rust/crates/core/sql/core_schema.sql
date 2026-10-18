@@ -566,6 +566,10 @@ CREATE TABLE public.tasks (
     list_id uuid,
     completed_at timestamp with time zone,
     reminder_enabled boolean DEFAULT false NOT NULL,
+    reminder_at timestamp with time zone,
+    reminder_inapp boolean DEFAULT true NOT NULL,
+    reminder_push boolean DEFAULT false NOT NULL,
+    reminder_email boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );

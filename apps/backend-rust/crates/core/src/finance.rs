@@ -1088,6 +1088,10 @@ fn build_finance_task(item: &ItemRow) -> crate::tasks::CreateTaskRequest {
         tag_ids: None,
         list_id: None,
         reminder_enabled: false,
+        reminder_at: None,
+        reminder_inapp: None,
+        reminder_push: None,
+        reminder_email: None,
     }
 }
 

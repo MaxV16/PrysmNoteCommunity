@@ -30,6 +30,11 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/notifications/prefs", get(get_prefs).patch(update_prefs))
         .route("/api/notifications/reminder-tasks", get(reminder_tasks))
+        .route("/api/notifications/due-reminders", get(due_reminders))
+        .route(
+            "/api/notifications/upcoming-reminders",
+            get(upcoming_reminders),
+        )
         .route("/api/notifications/vapid-public-key", get(vapid_public_key))
         .route(
             "/api/notifications/subscribe",
@@ -320,6 +325,132 @@ async fn reminder_tasks(
     Ok(Json(Value::Array(items)))
 }
 
+/// `GET /api/notifications/due-reminders` - tasks whose scheduled per-task
+/// reminder time has arrived. The client polls this while the app is open so a
+/// reminder still fires when its task is outside the loaded timeline window.
+async fn due_reminders(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+
+    let mut tx = state.pool.begin().await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
+
+    let rows = sqlx::query(
+        "SELECT id, title, due_date, start_date, reminder_at, reminder_inapp, \
+                reminder_push, reminder_email FROM tasks
+         WHERE user_id = $1
+           AND deleted_at IS NULL
+           AND is_archived = false
+           AND status::text NOT IN ('done', 'cancelled')
+           AND reminder_enabled = true
+           AND reminder_at IS NOT NULL
+           AND reminder_at <= now()
+         ORDER BY reminder_at ASC, title ASC
+         LIMIT 100",
+    )
+    .bind(user.user_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(db_error)?;
+
+    let items: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            let id: Uuid = row.try_get("id").unwrap();
+            let due: Option<NaiveDate> = row.try_get("due_date").unwrap();
+            let start: Option<NaiveDate> = row.try_get("start_date").unwrap();
+            let at: Option<chrono::DateTime<Utc>> = row.try_get("reminder_at").unwrap();
+            json!({
+                "id": id.to_string(),
+                "title": row.try_get::<String, _>("title").unwrap(),
+                "due_date": due.map(|d| d.format("%Y-%m-%d").to_string()),
+                "start_date": start.map(|d| d.format("%Y-%m-%d").to_string()),
+                "reminder_at": at.map(|dt| dt.to_rfc3339()),
+                "reminder_inapp": row.try_get::<bool, _>("reminder_inapp").unwrap(),
+                "reminder_push": row.try_get::<bool, _>("reminder_push").unwrap(),
+                "reminder_email": row.try_get::<bool, _>("reminder_email").unwrap(),
+            })
+        })
+        .collect();
+
+    tx.commit().await.map_err(db_error)?;
+    Ok(Json(Value::Array(items)))
+}
+
+/// Window covered by the upcoming-reminders query. The native clients mirror
+/// this bounded list into OS-local notifications, so it stays short enough to
+/// schedule without flooding the device.
+const UPCOMING_REMINDER_DAYS: i64 = 60;
+
+/// `GET /api/notifications/upcoming-reminders` - future per-task reminders for
+/// the current user. Android/iOS fetch this on startup and foreground refresh to
+/// reconcile their OS-local notification schedule, so reminders still fire when
+/// the app is closed.
+async fn upcoming_reminders(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<ReminderQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+    let limit = query.limit.unwrap_or(REMINDER_TASKS_MAX).clamp(1, REMINDER_TASKS_MAX);
+    let now = Utc::now();
+    let until = now + Duration::days(UPCOMING_REMINDER_DAYS);
+
+    let mut tx = state.pool.begin().await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
+
+    let rows = sqlx::query(
+        "SELECT id, title, due_date, start_date, reminder_at, reminder_inapp, \
+                reminder_push, reminder_email FROM tasks
+         WHERE user_id = $1
+           AND deleted_at IS NULL
+           AND is_archived = false
+           AND status::text NOT IN ('done', 'cancelled')
+           AND reminder_enabled = true
+           AND reminder_at IS NOT NULL
+           AND reminder_at > $2
+           AND reminder_at <= $3
+         ORDER BY reminder_at ASC, title ASC
+         LIMIT $4",
+    )
+    .bind(user.user_id)
+    .bind(now)
+    .bind(until)
+    .bind(limit)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(db_error)?;
+
+    let items: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            let id: Uuid = row.try_get("id").unwrap();
+            let due: Option<NaiveDate> = row.try_get("due_date").unwrap();
+            let start: Option<NaiveDate> = row.try_get("start_date").unwrap();
+            let at: Option<chrono::DateTime<Utc>> = row.try_get("reminder_at").unwrap();
+            json!({
+                "id": id.to_string(),
+                "title": row.try_get::<String, _>("title").unwrap(),
+                "due_date": due.map(|d| d.format("%Y-%m-%d").to_string()),
+                "start_date": start.map(|d| d.format("%Y-%m-%d").to_string()),
+                "reminder_at": at.map(|dt| dt.to_rfc3339()),
+                "reminder_inapp": row.try_get::<bool, _>("reminder_inapp").unwrap(),
+                "reminder_push": row.try_get::<bool, _>("reminder_push").unwrap(),
+                "reminder_email": row.try_get::<bool, _>("reminder_email").unwrap(),
+            })
+        })
+        .collect();
+
+    tx.commit().await.map_err(db_error)?;
+    Ok(Json(Value::Array(items)))
+}
+
 async fn vapid_public_key(State(state): State<AppState>) -> Json<Value> {
     Json(json!({ "public_key": state.settings.vapid_public_key() }))
 }
@@ -578,6 +709,103 @@ mod tests {
 
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(user.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+    }
+
+    async fn insert_reminder_task(
+        pool: &sqlx::PgPool,
+        user_id: Uuid,
+        title: &str,
+        status: &str,
+        reminder_at: chrono::DateTime<Utc>,
+    ) -> Uuid {
+        sqlx::query(
+            "INSERT INTO tasks \
+             (user_id, title, status, priority, sort_order, reminder_enabled, \
+              reminder_at, reminder_push) \
+             VALUES ($1, $2, $3::task_status, 0, 0, true, $4, true) \
+             RETURNING id",
+        )
+        .bind(user_id)
+        .bind(title)
+        .bind(status)
+        .bind(reminder_at)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .try_get("id")
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn upcoming_reminders_are_future_active_and_scoped() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let email = format!("rust-notif-upcoming-{}@test.local", uuid::Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .unwrap();
+        let other_email = format!("rust-notif-other-{}@test.local", uuid::Uuid::new_v4());
+        let other = crate::user::create_email_user(
+            &state.pool,
+            &other_email,
+            "not-a-real-hash",
+            None,
+        )
+        .await
+        .unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
+        let app = router().with_state(state.clone());
+
+        let now = Utc::now();
+        let soon = insert_reminder_task(&state.pool, user.id, "Soon", "todo", now + Duration::hours(1)).await;
+        let later = insert_reminder_task(&state.pool, user.id, "Later", "todo", now + Duration::hours(2)).await;
+        // Past, far outside the window, and finished tasks must all be excluded.
+        insert_reminder_task(&state.pool, user.id, "Past", "todo", now - Duration::hours(1)).await;
+        insert_reminder_task(&state.pool, user.id, "Far", "todo", now + Duration::days(90)).await;
+        insert_reminder_task(&state.pool, user.id, "Done", "done", now + Duration::hours(1)).await;
+        // Another user's reminder must never leak through.
+        insert_reminder_task(&state.pool, other.id, "Other", "todo", now + Duration::hours(1)).await;
+
+        let res = call(
+            &app,
+            "GET",
+            "/api/notifications/upcoming-reminders?limit=1",
+            &token,
+            None,
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let items = body_json(res).await;
+        let rows = items.as_array().unwrap();
+        assert_eq!(rows.len(), 1, "limit must be honored");
+        assert_eq!(rows[0]["id"], json!(soon.to_string()));
+        assert!(rows[0]["reminder_at"].is_string());
+
+        let res = call(
+            &app,
+            "GET",
+            "/api/notifications/upcoming-reminders?limit=200",
+            &token,
+            None,
+        )
+        .await;
+        let items = body_json(res).await;
+        let ids: Vec<String> = items
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, vec![soon.to_string(), later.to_string()]);
+
+        sqlx::query("DELETE FROM users WHERE id = ANY($1)")
+            .bind(&[user.id, other.id][..])
             .execute(&state.pool)
             .await
             .unwrap();

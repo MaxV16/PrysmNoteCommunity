@@ -1,6 +1,9 @@
 "use client";
 
 import { runBackHandler } from "@/lib/back-nav";
+import { api } from "@/lib/api";
+import { useAppStore } from "@/stores/app-store";
+import type { Task } from "@/types/task";
 
 /**
  * Thin typed wrapper around the Capacitor native bridge (`window.Capacitor`,
@@ -52,6 +55,39 @@ interface CapPlugin {
   addListener: (eventName: string, listener: (event: Record<string, unknown>) => void) => Promise<unknown>;
 }
 
+type PermissionDisplay = "prompt" | "prompt-with-rationale" | "granted" | "denied";
+
+interface LocalNotificationSchema {
+  id: number;
+  title: string;
+  body: string;
+  channelId?: string;
+  extra?: Record<string, unknown>;
+  schedule?: { at: Date; allowWhileIdle?: boolean };
+}
+
+interface PendingLocalNotification {
+  id: number;
+  extra?: Record<string, unknown>;
+}
+
+interface LocalNotificationsPlugin extends CapPlugin {
+  checkPermissions?: () => Promise<{ display?: PermissionDisplay }>;
+  requestPermissions?: () => Promise<{ display?: PermissionDisplay }>;
+  createChannel?: (channel: {
+    id: string;
+    name: string;
+    description?: string;
+    importance: number;
+    visibility?: number;
+    vibration?: boolean;
+    lights?: boolean;
+  }) => Promise<void>;
+  schedule?: (options: { notifications: LocalNotificationSchema[] }) => Promise<unknown>;
+  cancel?: (options: { notifications: { id: number }[] }) => Promise<void>;
+  getPending?: () => Promise<{ notifications?: PendingLocalNotification[] }>;
+}
+
 interface CapBridge {
   isNativePlatform: () => boolean;
   Plugins: {
@@ -62,6 +98,7 @@ interface CapBridge {
     };
     StatusBar?: CapPlugin & { setStyle?: (options: { style: "DARK" | "LIGHT" }) => Promise<void> };
     Keyboard?: CapPlugin;
+    LocalNotifications?: LocalNotificationsPlugin;
   };
 }
 
@@ -70,6 +107,243 @@ function getCapBridge(): CapBridge | null {
   const c = (window as unknown as { Capacitor?: CapBridge }).Capacitor;
   if (!c || typeof c.isNativePlatform !== "function" || !c.isNativePlatform()) return null;
   return c;
+}
+
+// ---------------------------------------------------------------------------
+// Local (OS) notifications for per-task reminders on Android / iOS.
+//
+// The native shell carries `@capacitor/local-notifications`, so a reminder can
+// be handed to the OS and still fire when the app is closed. No FCM/APNs
+// credentials are involved: these are device-local scheduled notifications.
+// ---------------------------------------------------------------------------
+
+const ANDROID_REMINDER_CHANNEL = "prysm-reminders";
+const RECONCILE_LIMIT = 64;
+let reminderChannelReady = false;
+
+/** The LocalNotifications plugin, or null outside the native shell. */
+function getLocalNotifications(): LocalNotificationsPlugin | null {
+  const c = getCapBridge();
+  const plugin = c?.Plugins?.LocalNotifications;
+  if (!plugin || typeof plugin.schedule !== "function") return null;
+  return plugin;
+}
+
+/** Stable positive 31-bit notification id derived from a task id. */
+export function reminderNotificationId(taskId: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < taskId.length; i += 1) {
+    hash ^= taskId.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) % 2147483647) || 1;
+}
+
+/** True when this build runs in a native shell that can schedule OS reminders. */
+export function nativeNotificationsSupported(): boolean {
+  return getLocalNotifications() !== null;
+}
+
+async function permissionGranted(plugin: LocalNotificationsPlugin): Promise<boolean> {
+  try {
+    const status = await plugin.checkPermissions?.();
+    return status?.display === "granted";
+  } catch {
+    return false;
+  }
+}
+
+async function ensureReminderChannel(plugin: LocalNotificationsPlugin): Promise<void> {
+  if (reminderChannelReady) return;
+  try {
+    await plugin.createChannel?.({
+      id: ANDROID_REMINDER_CHANNEL,
+      name: "Task reminders",
+      description: "Per-task reminders scheduled in Prysm Note",
+      importance: 4,
+      visibility: 1,
+      vibration: true,
+      lights: true,
+    });
+    reminderChannelReady = true;
+  } catch {
+    // No channel API on iOS (or an old shell): scheduling still works.
+  }
+}
+
+/**
+ * Ask the OS for notification permission (call from a user gesture, e.g. when
+ * the "Device" channel is selected). Returns true when allowed. Never throws.
+ */
+export async function requestNativeNotificationPermission(): Promise<boolean> {
+  const plugin = getLocalNotifications();
+  if (!plugin) return false;
+  try {
+    let display = (await plugin.checkPermissions?.())?.display;
+    if (display !== "granted") {
+      display = (await plugin.requestPermissions?.())?.display ?? display;
+    }
+    if (display === "granted") {
+      await ensureReminderChannel(plugin);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export interface NativeReminderInput {
+  taskId: string;
+  title: string;
+  body?: string;
+  /** ISO 8601 instant when the reminder should fire. */
+  at: string;
+}
+
+/**
+ * Schedule a one-off OS reminder. No-op (returns false) outside a native shell,
+ * without permission, for a past time, or when the plugin call fails.
+ */
+export async function scheduleNativeReminder(input: NativeReminderInput): Promise<boolean> {
+  const plugin = getLocalNotifications();
+  if (!plugin) return false;
+  const when = new Date(input.at);
+  if (Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) return false;
+  // Never prompt from a background sync: only schedule once the user granted it.
+  if (!(await permissionGranted(plugin))) return false;
+  await ensureReminderChannel(plugin);
+  try {
+    await plugin.schedule?.({
+      notifications: [
+        {
+          id: reminderNotificationId(input.taskId),
+          title: input.title || "Prysm Note",
+          body: input.body || "Task reminder",
+          channelId: ANDROID_REMINDER_CHANNEL,
+          extra: { taskId: input.taskId, prysm: true },
+          schedule: { at: when, allowWhileIdle: true },
+        },
+      ],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Cancel the OS reminder for a task, if one is scheduled. */
+export async function cancelNativeReminder(taskId: string): Promise<void> {
+  const plugin = getLocalNotifications();
+  if (!plugin) return;
+  try {
+    await plugin.cancel?.({ notifications: [{ id: reminderNotificationId(taskId) }] });
+  } catch {
+    // Nothing scheduled (or an old shell without cancel): nothing to undo.
+  }
+}
+
+export interface NativeReminderRow {
+  id: string;
+  title: string;
+  reminder_at: string;
+}
+
+/**
+ * Make the OS schedule match the server's upcoming reminders: cancel Prysm
+ * notifications that are no longer upcoming, then (re)schedule the rest. Runs
+ * on native startup and foreground refresh, bounded to RECONCILE_LIMIT entries.
+ */
+export async function reconcileNativeReminders(rows: NativeReminderRow[]): Promise<void> {
+  const plugin = getLocalNotifications();
+  if (!plugin) return;
+  if (!(await permissionGranted(plugin))) return;
+
+  const now = Date.now();
+  const upcoming = (rows || [])
+    .filter((row) => {
+      if (!row || typeof row.id !== "string" || !row.reminder_at) return false;
+      const at = new Date(row.reminder_at).getTime();
+      return !Number.isNaN(at) && at > now;
+    })
+    .slice(0, RECONCILE_LIMIT);
+  const wanted = new Set(upcoming.map((row) => reminderNotificationId(row.id)));
+
+  try {
+    const pending = (await plugin.getPending?.())?.notifications ?? [];
+    const stale = pending.filter(
+      (item) => item.extra?.prysm === true && !wanted.has(item.id)
+    );
+    if (stale.length > 0) {
+      await plugin.cancel?.({ notifications: stale.map((item) => ({ id: item.id })) });
+    }
+    if (upcoming.length === 0) return;
+    await ensureReminderChannel(plugin);
+    await plugin.schedule?.({
+      notifications: upcoming.map((row) => ({
+        id: reminderNotificationId(row.id),
+        title: row.title || "Prysm Note",
+        body: "Tap to open the task",
+        channelId: ANDROID_REMINDER_CHANNEL,
+        extra: { taskId: row.id, prysm: true },
+        schedule: { at: new Date(row.reminder_at), allowWhileIdle: true },
+      })),
+    });
+  } catch {
+    // A failed reconcile must never break the app; the next refresh retries.
+  }
+}
+
+/** Task shape needed to keep its OS reminder in sync. */
+export interface NativeReminderTask {
+  id: string;
+  title: string;
+  status: string;
+  reminder_enabled?: boolean;
+  reminder_at?: string | null;
+  reminder_push?: boolean;
+}
+
+/**
+ * Apply a saved task's reminder to the OS schedule. Active reminders (opt-in,
+ * future, Device channel, task not done/cancelled) are scheduled; everything
+ * else is cancelled so clearing or completing a task stops its notification.
+ */
+export async function syncNativeReminderForTask(task: NativeReminderTask): Promise<void> {
+  if (!nativeNotificationsSupported()) return;
+  const at = task.reminder_at ? new Date(task.reminder_at) : null;
+  const active =
+    Boolean(task.reminder_enabled) &&
+    Boolean(task.reminder_push) &&
+    task.status !== "done" &&
+    task.status !== "cancelled" &&
+    !!at &&
+    !Number.isNaN(at.getTime()) &&
+    at.getTime() > Date.now();
+  if (!active) {
+    await cancelNativeReminder(task.id);
+    return;
+  }
+  await scheduleNativeReminder({
+    taskId: task.id,
+    title: task.title,
+    body: "Tap to open the task",
+    at: task.reminder_at as string,
+  });
+}
+
+/** Open a task from a tapped OS notification (fetching it outside the window). */
+export async function openTaskFromReminder(taskId: string): Promise<void> {
+  if (!taskId) return;
+  if (!useAppStore.getState().tasks.some((task) => task.id === taskId)) {
+    try {
+      const task = await api.get<Task>(`/tasks/${taskId}`);
+      if (task) useAppStore.getState().mergeTasks([task]);
+    } catch {
+      // The drawer treats an unknown id as a no-op; nothing else to do.
+    }
+  }
+  useAppStore.getState().setSelectedTaskId(taskId);
 }
 
 /**
@@ -164,6 +438,21 @@ export function initCapbridge(): void {
   void c.Plugins.App.addListener("appUrlOpen", (event) => {
     handleMobileUrl(String(event?.url ?? ""));
   });
+
+  // Tapping an OS reminder opens its task. The payload id rides in `extra`, so
+  // a notification for a task outside the loaded timeline window still resolves.
+  const localNotifications = c.Plugins.LocalNotifications;
+  if (localNotifications) {
+    void localNotifications.addListener("localNotificationActionPerformed", (event) => {
+      const notification = event?.notification as
+        | { extra?: Record<string, unknown> }
+        | undefined;
+      const taskId = notification?.extra?.taskId;
+      if (typeof taskId === "string" && taskId) {
+        void openTaskFromReminder(taskId);
+      }
+    });
+  }
 
   // Hardware/systems back button: first let the in-app back stack close the
   // top-most overlay or leave a workspace, then fall back to history back, then

@@ -8,6 +8,21 @@ import { TIER_LABELS, TIER_VALUES, normalizePriority, type PriorityTier } from "
 import { applyEnd, parseEnd, type RecurrenceEnd } from "@/lib/recurrence";
 import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
+import {
+  TaskReminderFields,
+  defaultReminderAt,
+  taskReminderDraft,
+  type ReminderChannel,
+  type TaskReminderDraft,
+} from "./TaskReminderFields";
+import {
+  requestNotificationPermission,
+  useNotificationPrefs,
+} from "@/lib/notifications";
+import {
+  nativeNotificationsSupported,
+  requestNativeNotificationPermission,
+} from "@/lib/capbridge";
 
 interface TaskFormProps {
   onSubmit: (data: {
@@ -25,6 +40,10 @@ interface TaskFormProps {
     recurrence_end_date?: string;
     estimated_minutes?: number;
     reminder_enabled?: boolean;
+    reminder_at?: string | null;
+    reminder_inapp?: boolean;
+    reminder_push?: boolean;
+    reminder_email?: boolean;
     board_section_id?: string | null;
   }) => void;
   onCancel: () => void;
@@ -182,10 +201,28 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     initial?.estimated_minutes?.toString() || (initial ? "" : "30")
   );
-  const [reminderEnabled, setReminderEnabled] = useState<boolean>(
-    initial?.reminder_enabled ?? false
+  const [reminder, setReminder] = useState<TaskReminderDraft>(() =>
+    taskReminderDraft(initial)
   );
+  const { prefs: notifPrefs, update: updateNotifPrefs } = useNotificationPrefs();
   const [showAdvanced, setShowAdvanced] = useState(() => !!initial);
+
+  const handleChannelChange = (channel: ReminderChannel, enabled: boolean) => {
+    if (!enabled) return;
+    if (channel === "push") {
+      const request = nativeNotificationsSupported()
+        ? requestNativeNotificationPermission()
+        : requestNotificationPermission();
+      void request.then((granted) => {
+        if (granted && !notifPrefs.push_enabled) {
+          void updateNotifPrefs({ push_enabled: true });
+        }
+      });
+    }
+    if (channel === "email" && !notifPrefs.email_reminders) {
+      void updateNotifPrefs({ email_reminders: true });
+    }
+  };
 
   const initRecurrence = initial?.recurrence_rule || "";
   const [recurrencePreset, setRecurrencePreset] = useState(() => {
@@ -273,7 +310,13 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
       recurrence_rule: endApplied.recurrence_rule || undefined,
       recurrence_end_date: endApplied.recurrence_end_date || undefined,
       estimated_minutes: estimatedMinutes ? Number(estimatedMinutes) : undefined,
-      reminder_enabled: reminderEnabled,
+      reminder_enabled: reminder.enabled,
+      reminder_at: reminder.enabled
+        ? reminder.at || defaultReminderAt(due || start || today)
+        : null,
+      reminder_inapp: reminder.inapp,
+      reminder_push: reminder.push,
+      reminder_email: reminder.email,
       board_section_id: isEdit ? undefined : boardSectionId ?? undefined,
     });
   };
@@ -374,28 +417,12 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
           </select>
         </div>
       </div>
-      <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border bg-elevated px-3 py-2.5">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-            </svg>
-          </span>
-          <span className="min-w-0">
-            <span className="block text-sm text-secondary">Remind me</span>
-            <span className="block text-[11px] text-muted">Off by default; only tasks you mark are reminded.</span>
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          checked={reminderEnabled}
-          onChange={(e) => setReminderEnabled(e.target.checked)}
-          className="h-4 w-4 shrink-0"
-          style={{ accentColor: "var(--accent)" }}
-          data-testid="task-reminder-toggle"
-        />
-      </label>
+      <TaskReminderFields
+        value={reminder}
+        onChange={setReminder}
+        suggestedDate={dueDate || startDate || defaultDate || today}
+        onChannelChange={handleChannelChange}
+      />
       <button
         type="button"
         onClick={() => setShowAdvanced(!showAdvanced)}

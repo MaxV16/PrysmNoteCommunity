@@ -96,6 +96,18 @@ async fn main() {
             notification_interval,
         ));
 
+        // Per-task scheduled reminders (email + Web Push) every minute, so a
+        // reminder set for a specific clock time is not held back by the slower
+        // due-alert interval.
+        let task_reminder_pool = state.system_pool.clone();
+        let task_reminder_settings = (*state.settings).clone();
+        tokio::spawn(
+            prysm_core::notification_service::task_reminder_background_loop(
+                task_reminder_pool,
+                task_reminder_settings,
+            ),
+        );
+
         let gcal_pool = state.system_pool.clone();
         let gcal_settings = (*state.settings).clone();
         let gcal_interval = std::time::Duration::from_secs(state.settings.gcal_pull_interval());

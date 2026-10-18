@@ -9,6 +9,22 @@ import { useToast } from "@/lib/toast-context";
 import { registerBackHandler } from "@/lib/back-nav";
 import { useStickyBoard } from "@/components/sticky/StickyNoteBoard";
 import { TaskForm } from "./TaskForm";
+import {
+  TaskReminderFields,
+  defaultReminderAt,
+  describeReminder,
+  taskReminderDraft,
+  type ReminderChannel,
+  type TaskReminderDraft,
+} from "./TaskReminderFields";
+import {
+  requestNotificationPermission,
+  useNotificationPrefs,
+} from "@/lib/notifications";
+import {
+  nativeNotificationsSupported,
+  requestNativeNotificationPermission,
+} from "@/lib/capbridge";
 import { TaskChecklist } from "./TaskChecklist";
 import { TaskLinks } from "./TaskLinks";
 import { TaskTagsEditor } from "./TaskTagsEditor";
@@ -157,6 +173,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [subtasks, setSubtasks] = useState<Task[]>(task.subtasks || []);
   const [tags, setTags] = useState<TaskTag[]>(task.tags || []);
   const [dateOpen, setDateOpen] = useState(false);
+  const [reminderDraft, setReminderDraft] = useState<TaskReminderDraft>(() =>
+    taskReminderDraft(task)
+  );
+  const [reminderOpen, setReminderOpen] = useState(() =>
+    Boolean(task.reminder_at || task.reminder_enabled)
+  );
+  const { prefs: notifPrefs, update: updateNotifPrefs } = useNotificationPrefs();
   const datePillRef = useRef<HTMLButtonElement | null>(null);
   const titleOptionsRef = useRef<HTMLButtonElement | null>(null);
   const priorityRef = useRef<HTMLButtonElement | null>(null);
@@ -175,6 +198,13 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const isShared = sharedTeamIds.size > 0 || sharedUserIds.size > 0;
 
   const hasSubtasks = subtasks.length > 0;
+
+  // Keep the reminder draft in step with server saves (including a completion
+  // clearing reminder_at), while leaving an in-progress edit untouched.
+  useEffect(() => {
+    setReminderDraft(taskReminderDraft(task));
+    if (task.reminder_at || task.reminder_enabled) setReminderOpen(true);
+  }, [task]);
 
   // Description and subtasks share ONE page now, so the checklist is fetched as
   // soon as the drawer opens. Re-fetching on `task.updated_at` (and the store
@@ -418,6 +448,10 @@ const handleUpdate = async (data: {
     recurrence_rule?: string;
     recurrence_end_date?: string;
     reminder_enabled?: boolean;
+    reminder_at?: string | null;
+    reminder_inapp?: boolean;
+    reminder_push?: boolean;
+    reminder_email?: boolean;
     list_id?: string | null;
     estimated_minutes?: number | null;
     board_section_id?: string | null;
@@ -441,6 +475,17 @@ const handleUpdate = async (data: {
       fields.recurrence_end_date = data.recurrence_end_date ?? null;
     if (data.reminder_enabled !== undefined && data.reminder_enabled !== !!task.reminder_enabled)
       fields.reminder_enabled = data.reminder_enabled;
+    if (data.reminder_at !== undefined && data.reminder_at !== (task.reminder_at ?? null))
+      fields.reminder_at = data.reminder_at;
+    if (
+      data.reminder_inapp !== undefined &&
+      data.reminder_inapp !== (task.reminder_inapp ?? true)
+    )
+      fields.reminder_inapp = data.reminder_inapp;
+    if (data.reminder_push !== undefined && data.reminder_push !== !!task.reminder_push)
+      fields.reminder_push = data.reminder_push;
+    if (data.reminder_email !== undefined && data.reminder_email !== !!task.reminder_email)
+      fields.reminder_email = data.reminder_email;
     if (data.list_id !== undefined && (data.list_id || "") !== (task.list_id || ""))
       fields.list_id = data.list_id || null;
     if (data.estimated_minutes !== undefined && data.estimated_minutes !== (task.estimated_minutes ?? undefined))
@@ -481,6 +526,55 @@ const handleUpdate = async (data: {
       await stopTaskRecurrence(task.id);
     }
     await updateTask(task.id, fields);
+  };
+
+  const handleChannelChange = (channel: ReminderChannel, enabled: boolean) => {
+    if (!enabled) return;
+    if (channel === "push") {
+      // The native shell asks the OS directly: Web Notification permission is
+      // unavailable inside WKWebView and the reminder is scheduled natively.
+      const native = nativeNotificationsSupported();
+      const request = native
+        ? requestNativeNotificationPermission()
+        : requestNotificationPermission();
+      void request.then((granted) => {
+        if (granted) {
+          if (!notifPrefs.push_enabled) {
+            void updateNotifPrefs({ push_enabled: true });
+          }
+        } else {
+          showToast(
+            native
+              ? "Notifications are blocked for this device"
+              : "Notifications are blocked for this browser",
+            "error"
+          );
+        }
+      });
+    }
+    if (channel === "email" && !notifPrefs.email_reminders) {
+      void updateNotifPrefs({ email_reminders: true });
+    }
+  };
+
+  const handleSaveReminder = async () => {
+    try {
+      await updateTask(task.id, {
+        reminder_enabled: reminderDraft.enabled,
+        reminder_at: reminderDraft.enabled
+          ? reminderDraft.at || defaultReminderAt(task.due_date || task.start_date)
+          : null,
+        reminder_inapp: reminderDraft.inapp,
+        reminder_push: reminderDraft.push,
+        reminder_email: reminderDraft.email,
+      });
+      showToast(
+        reminderDraft.enabled ? "Reminder saved" : "Reminder turned off",
+        "info"
+      );
+    } catch {
+      showToast("Could not save the reminder", "error");
+    }
   };
 
   if (editing) {
@@ -599,6 +693,82 @@ const handleUpdate = async (data: {
           </button>
         </div>
       )}
+
+      {/* Per-task reminder: exact time plus the channels the user picked. */}
+      <div className="mt-3">
+        {reminderOpen ? (
+          <div className="space-y-2">
+            <TaskReminderFields
+              value={reminderDraft}
+              onChange={setReminderDraft}
+              suggestedDate={task.due_date || task.start_date}
+              onChannelChange={handleChannelChange}
+              idPrefix="drawer"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setReminderDraft(taskReminderDraft(task));
+                  setReminderOpen(false);
+                }}
+                className="btn bg-elevated border border-border px-3 py-1 text-xs text-secondary hover:bg-hover hover:text-primary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveReminder()}
+                className="btn btn-primary px-3 py-1 text-xs"
+              >
+                Save reminder
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setReminderDraft((prev) =>
+                prev.enabled
+                  ? prev
+                  : {
+                      ...prev,
+                      enabled: true,
+                      at:
+                        prev.at ||
+                        defaultReminderAt(task.due_date || task.start_date),
+                    }
+              );
+              setReminderOpen(true);
+            }}
+            className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-elevated px-3 py-2 text-left transition-colors hover:bg-hover"
+            aria-label="Set task reminder"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+                </svg>
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm text-secondary">Remind me</span>
+                <span className="block text-[11px] text-muted">
+                  {task.reminder_at
+                    ? describeReminder(task.reminder_at)
+                    : task.reminder_enabled
+                    ? "On"
+                    : "Off"}
+                </span>
+              </span>
+            </span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        )}
+      </div>
 
       {/* Title */}
       <div className="mt-3 flex items-start gap-2">

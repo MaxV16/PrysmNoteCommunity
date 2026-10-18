@@ -128,6 +128,17 @@ END $$;
 -- recurrence_parent_id, leaving parent_task_id exclusively for real subtasks.
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS recurrence_parent_id uuid;
 
+-- Per-task scheduled reminders: a one-off UTC fire time plus the delivery
+-- channels chosen for that task. reminder_enabled stays the master switch and
+-- existing rows keep their current behaviour (no reminder_at means the legacy
+-- due-date/global-time engine handles them).
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS reminder_at timestamp with time zone;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS reminder_inapp boolean NOT NULL DEFAULT true;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS reminder_push boolean NOT NULL DEFAULT false;
+ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS reminder_email boolean NOT NULL DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS ix_tasks_reminder_at ON public.tasks USING btree (reminder_at) WHERE reminder_at IS NOT NULL AND deleted_at IS NULL;
+
 DO $$
 BEGIN
     IF NOT EXISTS (

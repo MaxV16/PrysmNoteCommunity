@@ -37,6 +37,11 @@ export interface Task {
   is_archived: boolean;
   /** Per-task reminder opt-in; reminders are off unless this is true. */
   reminder_enabled?: boolean;
+  /** One-off reminder time (ISO 8601, UTC), or null when none is scheduled. */
+  reminder_at?: string | null;
+  reminder_inapp?: boolean;
+  reminder_push?: boolean;
+  reminder_email?: boolean;
   list_id: string | null;
   deleted_at: string | null;
   completed_at: string | null;

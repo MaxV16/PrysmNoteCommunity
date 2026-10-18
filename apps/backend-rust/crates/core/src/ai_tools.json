@@ -107,6 +107,22 @@
           "reminder_enabled": {
             "type": "boolean",
             "description": "set true only when the user asks to be reminded about this task (reminders are off by default)"
+          },
+          "reminder_at": {
+            "type": "string",
+            "description": "ISO 8601 date-time for a one-off reminder, e.g. 2026-10-18T09:00:00Z. Use when the user names a specific reminder time ('remind me at 9am'). Setting this turns reminder_enabled on automatically."
+          },
+          "reminder_inapp": {
+            "type": "boolean",
+            "description": "deliver the reminder as an in-app card while the app is open (default true)"
+          },
+          "reminder_push": {
+            "type": "boolean",
+            "description": "deliver the reminder as a browser or desktop system notification"
+          },
+          "reminder_email": {
+            "type": "boolean",
+            "description": "also email the reminder (honours the user's email reminders setting)"
           }
         },
         "required": [
@@ -119,7 +135,7 @@
     "type": "function",
     "function": {
       "name": "update_task",
-      "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} - do NOT delete the task. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date, start_time (HH:MM), end_time (HH:MM), list_id, reminder_enabled (true to remind the user about this task; reminders are off by default).",
+      "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} - do NOT delete the task. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date, start_time (HH:MM), end_time (HH:MM), list_id, reminder_enabled (true to remind the user about this task; reminders are off by default), reminder_at (ISO 8601 date-time), reminder_inapp, reminder_push, reminder_email. Set reminder_at to null to clear a scheduled reminder.",
       "parameters": {
         "type": "object",
         "properties": {

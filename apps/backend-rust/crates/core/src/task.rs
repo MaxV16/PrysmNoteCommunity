@@ -28,7 +28,8 @@ pub const STATUSES: [&str; 5] = ["backlog", "todo", "in_progress", "done", "canc
 pub const COLUMNS: &str = "id, user_id, parent_task_id, recurrence_parent_id, board_section_id, board_order, \
      title, description, status::text AS status, priority, start_date, due_date, \
      start_time, end_time, is_all_day, estimated_minutes, recurrence_rule, \
-     recurrence_end_date, sort_order, is_archived, reminder_enabled, list_id, \
+     recurrence_end_date, sort_order, is_archived, reminder_enabled, reminder_at, \
+     reminder_inapp, reminder_push, reminder_email, list_id, \
      deleted_at, completed_at, created_at, updated_at";
 
 /// A row of the `tasks` table.
@@ -55,6 +56,11 @@ pub struct Task {
     pub sort_order: i32,
     pub is_archived: bool,
     pub reminder_enabled: bool,
+    /// When a one-off reminder should fire (UTC), if one is scheduled.
+    pub reminder_at: Option<DateTime<Utc>>,
+    pub reminder_inapp: bool,
+    pub reminder_push: bool,
+    pub reminder_email: bool,
     pub list_id: Option<Uuid>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
@@ -87,6 +93,10 @@ impl Task {
             sort_order: row.try_get("sort_order")?,
             is_archived: row.try_get("is_archived")?,
             reminder_enabled: row.try_get("reminder_enabled")?,
+            reminder_at: row.try_get("reminder_at")?,
+            reminder_inapp: row.try_get("reminder_inapp")?,
+            reminder_push: row.try_get("reminder_push")?,
+            reminder_email: row.try_get("reminder_email")?,
             list_id: row.try_get("list_id")?,
             deleted_at: row.try_get("deleted_at")?,
             completed_at: row.try_get("completed_at")?,
@@ -121,6 +131,10 @@ pub fn task_json(task: &Task, tags: Option<&[serde_json::Value]>) -> serde_json:
         "sort_order": task.sort_order,
         "is_archived": task.is_archived,
         "reminder_enabled": task.reminder_enabled,
+        "reminder_at": task.reminder_at.map(|dt| dt.to_rfc3339()),
+        "reminder_inapp": task.reminder_inapp,
+        "reminder_push": task.reminder_push,
+        "reminder_email": task.reminder_email,
         "list_id": task.list_id.map(|u| u.to_string()),
         "deleted_at": task.deleted_at.map(|dt| dt.to_rfc3339()),
         "completed_at": task.completed_at.map(|dt| dt.to_rfc3339()),
@@ -178,6 +192,24 @@ pub fn parse_time(value: Option<&str>) -> Option<NaiveTime> {
         .or_else(|_| NaiveTime::parse_from_str(raw, "%H:%M"))
         .or_else(|_| NaiveTime::parse_from_str(raw, "%H%M"))
         .ok()
+}
+
+/// Parse an ISO-8601 (RFC3339) reminder timestamp, or a naive local datetime
+/// treated as UTC. Returns `None` on malformed input.
+pub fn parse_datetime(value: &str) -> Option<DateTime<Utc>> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f") {
+        return Some(ndt.and_utc());
+    }
+    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M") {
+        return Some(ndt.and_utc());
+    }
+    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S") {
+        return Some(ndt.and_utc());
+    }
+    None
 }
 
 /// Whether a string is a valid task status.

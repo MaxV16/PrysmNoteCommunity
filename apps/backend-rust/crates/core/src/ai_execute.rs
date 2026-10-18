@@ -906,6 +906,10 @@ fn build_create_request(
         tag_ids: None,
         list_id: resolved_list.or_else(|| args.get("list_id").and_then(safe_uuid)),
         reminder_enabled: arg_bool(args, "reminder_enabled"),
+        reminder_at: arg_str(args, "reminder_at").map(|s| s.to_string()),
+        reminder_inapp: args.get("reminder_inapp").and_then(|v| v.as_bool()),
+        reminder_push: args.get("reminder_push").and_then(|v| v.as_bool()),
+        reminder_email: args.get("reminder_email").and_then(|v| v.as_bool()),
     }
 }
 
@@ -1107,8 +1111,50 @@ async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
                     t.list_id = None;
                 }
             }
+            "reminder_enabled" => {
+                if let Some(enabled) = value.as_bool() {
+                    t.reminder_enabled = enabled;
+                    if !enabled {
+                        t.reminder_at = None;
+                    }
+                }
+            }
+            "reminder_at" => {
+                if value.is_null() {
+                    t.reminder_at = None;
+                } else if let Some(raw) = value.as_str() {
+                    match task::parse_datetime(raw) {
+                        Some(at) => {
+                            t.reminder_at = Some(at);
+                            t.reminder_enabled = true;
+                        }
+                        None => payloads.push(obj_str(&json!({
+                            "error": "reminder_at must be an ISO 8601 date-time"
+                        }))),
+                    }
+                }
+            }
+            "reminder_inapp" => {
+                if let Some(on) = value.as_bool() {
+                    t.reminder_inapp = on;
+                }
+            }
+            "reminder_push" => {
+                if let Some(on) = value.as_bool() {
+                    t.reminder_push = on;
+                }
+            }
+            "reminder_email" => {
+                if let Some(on) = value.as_bool() {
+                    t.reminder_email = on;
+                }
+            }
             _ => {}
         }
+    }
+
+    if t.status == "done" || t.status == "cancelled" {
+        t.reminder_at = None;
     }
 
     let completed = fields.get("status").and_then(|v| v.as_str()) == Some("done");
@@ -2240,7 +2286,8 @@ async fn tool_complete_task(state: &AppState, user_id: Uuid, args: &Value) -> To
         return ok_obj(json!({ "error": "Task not found" }));
     }
     sqlx::query(
-        "UPDATE tasks SET status = 'done'::task_status, completed_at = now(), updated_at = now() \
+        "UPDATE tasks SET status = 'done'::task_status, completed_at = now(), \
+         reminder_at = NULL, updated_at = now() \
          WHERE id = $1 AND user_id = $2",
     )
     .bind(task_id)
@@ -3235,6 +3282,26 @@ mod tests {
     }
 
     #[test]
+    fn build_create_request_carries_reminder_schedule_and_channels() {
+        let req = build_create_request(
+            &json!({
+                "title": "Call the bank",
+                "reminder_at": "2026-10-18T09:00:00Z",
+                "reminder_inapp": false,
+                "reminder_push": true,
+                "reminder_email": true
+            }),
+            "Call the bank",
+            None,
+            None,
+        );
+        assert_eq!(req.reminder_at.as_deref(), Some("2026-10-18T09:00:00Z"));
+        assert_eq!(req.reminder_inapp, Some(false));
+        assert_eq!(req.reminder_push, Some(true));
+        assert_eq!(req.reminder_email, Some(true));
+    }
+
+    #[test]
     fn build_create_request_uses_resolved_list_and_explicit_id() {
         let resolved = Uuid::new_v4();
         // A name the model supplied, already resolved server-side, wins.
@@ -3377,6 +3444,91 @@ mod tests {
         assert!(!committed);
         let payload = first_content(&results);
         assert!(payload.get("error").is_some());
+
+        for sql in ["DELETE FROM tasks WHERE user_id = $1", "DELETE FROM lists WHERE user_id = $1", "DELETE FROM users WHERE id = $1"] {
+            sqlx::query(sql)
+                .bind(user.id)
+                .execute(&state.pool)
+                .await
+                .expect("cleanup");
+        }
+    }
+
+    #[tokio::test]
+    async fn update_task_sets_and_clears_a_scheduled_reminder() {
+        let Some(state) = live_state() else {
+            return;
+        };
+        let email = format!("rust-ai-reminder-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .expect("create user");
+
+        let call = |id: &'static str, name: &'static str, args: Value| {
+            json!({
+                "id": id,
+                "function": { "name": name, "arguments": serde_json::to_string(&args).unwrap() },
+            })
+        };
+
+        let created = execute_tool_calls(
+            &state,
+            user.id,
+            &[call("c1", "create_task", json!({ "title": "Reminder target" }))],
+        )
+        .await;
+        let task_id = first_content(&created)["task"]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let updated = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c2",
+                "update_task",
+                json!({
+                    "task_id": task_id,
+                    "fields": {
+                        "reminder_at": "2026-10-18T09:00:00Z",
+                        "reminder_email": true
+                    }
+                }),
+            )],
+        )
+        .await;
+        assert_eq!(first_content(&updated)["updated"], true);
+
+        let detail = execute_tool_calls(
+            &state,
+            user.id,
+            &[call("c3", "get_task_details", json!({ "task_id": task_id }))],
+        )
+        .await;
+        let payload = first_content(&detail);
+        assert_eq!(payload["reminder_enabled"], true);
+        assert_eq!(payload["reminder_at"], "2026-10-18T09:00:00+00:00");
+        assert_eq!(payload["reminder_email"], true);
+
+        let cleared = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c4",
+                "update_task",
+                json!({ "task_id": task_id, "fields": { "reminder_at": null } }),
+            )],
+        )
+        .await;
+        assert_eq!(first_content(&cleared)["updated"], true);
+        let detail = execute_tool_calls(
+            &state,
+            user.id,
+            &[call("c5", "get_task_details", json!({ "task_id": task_id }))],
+        )
+        .await;
+        assert_eq!(first_content(&detail)["reminder_at"], Value::Null);
 
         for sql in ["DELETE FROM tasks WHERE user_id = $1", "DELETE FROM lists WHERE user_id = $1", "DELETE FROM users WHERE id = $1"] {
             sqlx::query(sql)

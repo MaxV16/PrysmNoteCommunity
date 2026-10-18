@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { track } from "@/lib/track";
 import { readTaskCache, readTaskCacheCursor, writeTaskCache } from "@/lib/task-cache";
 import { useAppStore } from "@/stores/app-store";
+import { syncNativeReminderForTask } from "@/lib/capbridge";
 import type { Task } from "@/types/task";
 
 // Module-level lazy-window state shared by every useTasks() consumer (the app
@@ -245,6 +246,8 @@ export function useTasks() {
       // form can close after a single round trip. The background refresh then
       // reconciles ordering/derived state without blocking the UI.
       useAppStore.getState().mergeTasks([data]);
+      // Keep a native OS reminder in sync with the saved task (no-op on web).
+      void syncNativeReminderForTask(data);
       void refreshTasksPreservingWindow();
       return data;
     },
@@ -261,6 +264,9 @@ export function useTasks() {
       // the whole task object mid-edit, which is why a description edit only
       // appeared after leaving and reopening the drawer on mobile.
       useAppStore.getState().mergeTasks([data]);
+      // Clearing the reminder or marking the task done/cancelled cancels the
+      // native OS notification; saving an active one schedules it.
+      void syncNativeReminderForTask(data);
       scheduleReconcile();
       return data;
     },

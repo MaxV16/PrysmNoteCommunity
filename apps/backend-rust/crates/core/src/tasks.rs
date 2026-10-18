@@ -130,6 +130,32 @@ pub(crate) struct CreateTaskRequest {
     pub(crate) list_id: Option<Uuid>,
     #[serde(default)]
     pub(crate) reminder_enabled: bool,
+    #[serde(default)]
+    pub(crate) reminder_at: Option<String>,
+    #[serde(default)]
+    pub(crate) reminder_inapp: Option<bool>,
+    #[serde(default)]
+    pub(crate) reminder_push: Option<bool>,
+    #[serde(default)]
+    pub(crate) reminder_email: Option<bool>,
+}
+
+/// Distinguishes an omitted field from an explicit JSON `null` so a PATCH can
+/// clear `reminder_at` without also clearing it on every unrelated update.
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(crate) enum NullableString {
+    Value(String),
+    Null,
+}
+
+impl NullableString {
+    fn into_option(self) -> Option<String> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Null => None,
+        }
+    }
 }
 
 fn default_status() -> String {
@@ -180,6 +206,14 @@ pub(crate) struct UpdateTaskRequest {
     pub(crate) list_id: Option<Uuid>,
     #[serde(default)]
     pub(crate) reminder_enabled: Option<bool>,
+    #[serde(default)]
+    pub(crate) reminder_at: Option<NullableString>,
+    #[serde(default)]
+    pub(crate) reminder_inapp: Option<bool>,
+    #[serde(default)]
+    pub(crate) reminder_push: Option<bool>,
+    #[serde(default)]
+    pub(crate) reminder_email: Option<bool>,
     #[serde(default)]
     pub(crate) tag_ids: Option<Vec<Uuid>>,
 }
@@ -278,6 +312,10 @@ struct NewTask {
     estimated_minutes: Option<i32>,
     list_id: Option<Uuid>,
     reminder_enabled: bool,
+    reminder_at: Option<DateTime<Utc>>,
+    reminder_inapp: bool,
+    reminder_push: bool,
+    reminder_email: bool,
     tag_ids: Option<Vec<Uuid>>,
 }
 
@@ -304,6 +342,12 @@ struct TaskPatch {
     board_order: Option<i32>,
     list_id: Option<Uuid>,
     reminder_enabled: Option<bool>,
+    /// `Some(None)` clears the scheduled reminder, `Some(Some(..))` sets it and
+    /// `None` leaves it unchanged.
+    reminder_at: Option<Option<DateTime<Utc>>>,
+    reminder_inapp: Option<bool>,
+    reminder_push: Option<bool>,
+    reminder_email: Option<bool>,
     tag_ids: Option<Vec<Uuid>>,
 }
 
@@ -340,16 +384,18 @@ fn parse_time_field(value: Option<&str>) -> Result<Option<NaiveTime>, ApiError> 
 }
 
 fn parse_datetime(value: &str) -> Option<DateTime<Utc>> {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(value) {
-        return Some(dt.with_timezone(&Utc));
+    task::parse_datetime(value)
+}
+
+fn parse_reminder_at(value: Option<&str>) -> Result<Option<DateTime<Utc>>, ApiError> {
+    match value.map(str::trim).filter(|raw| !raw.is_empty()) {
+        None => Ok(None),
+        Some(raw) => parse_datetime(raw).map(Some).ok_or_else(|| {
+            ApiError::Unprocessable(
+                "reminder_at must be an ISO 8601 date-time".to_string(),
+            )
+        }),
     }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f") {
-        return Some(ndt.and_utc());
-    }
-    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S") {
-        return Some(ndt.and_utc());
-    }
-    None
 }
 
 async fn list_owned(conn: &mut PgConnection, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
@@ -459,9 +505,9 @@ async fn insert_task(
         "INSERT INTO tasks (user_id, parent_task_id, board_section_id, title, description, \
          status, priority, start_date, due_date, start_time, end_time, recurrence_rule, \
          recurrence_end_date, estimated_minutes, list_id, reminder_enabled, is_all_day, \
-         is_archived, sort_order) \
+         is_archived, sort_order, reminder_at, reminder_inapp, reminder_push, reminder_email) \
          VALUES ($1, $2, $3, $4, $5, $6::task_status, $7, $8, $9, $10, $11, $12, $13, $14, \
-         $15, $16, false, false, 0) RETURNING id",
+         $15, $16, false, false, 0, $17, $18, $19, $20) RETURNING id",
     )
     .bind(user_id)
     .bind(new.parent_task_id)
@@ -479,6 +525,10 @@ async fn insert_task(
     .bind(new.estimated_minutes)
     .bind(list_id)
     .bind(new.reminder_enabled)
+    .bind(new.reminder_at)
+    .bind(new.reminder_inapp)
+    .bind(new.reminder_push)
+    .bind(new.reminder_email)
     .fetch_one(&mut *conn)
     .await
     .map_err(db_error)?;
@@ -492,6 +542,7 @@ pub(crate) async fn persist_task(conn: &mut PgConnection, t: &Task) -> Result<()
          due_date = $10, start_time = $11, end_time = $12, is_all_day = $13, \
          estimated_minutes = $14, recurrence_rule = $15, recurrence_end_date = $16, \
          sort_order = $17, is_archived = $18, reminder_enabled = $19, list_id = $20, \
+         reminder_at = $21, reminder_inapp = $22, reminder_push = $23, reminder_email = $24, \
          updated_at = now() WHERE id = $1",
     )
     .bind(t.id)
@@ -514,6 +565,10 @@ pub(crate) async fn persist_task(conn: &mut PgConnection, t: &Task) -> Result<()
     .bind(t.is_archived)
     .bind(t.reminder_enabled)
     .bind(t.list_id)
+    .bind(t.reminder_at)
+    .bind(t.reminder_inapp)
+    .bind(t.reminder_push)
+    .bind(t.reminder_email)
     .execute(&mut *conn)
     .await?;
     Ok(())
@@ -568,6 +623,7 @@ fn validate_create(req: CreateTaskRequest) -> Result<NewTask, ApiError> {
             "Priority must be between 1 and 3".to_string(),
         ));
     }
+    let reminder_at = parse_reminder_at(req.reminder_at.as_deref())?;
     Ok(NewTask {
         title,
         parent_task_id: req.parent_task_id,
@@ -583,7 +639,12 @@ fn validate_create(req: CreateTaskRequest) -> Result<NewTask, ApiError> {
         recurrence_end_date: parse_date_field(req.recurrence_end_date.as_deref())?,
         estimated_minutes: req.estimated_minutes,
         list_id: req.list_id,
-        reminder_enabled: req.reminder_enabled,
+        // Scheduling a time implies the master reminder switch is on.
+        reminder_enabled: req.reminder_enabled || reminder_at.is_some(),
+        reminder_at,
+        reminder_inapp: req.reminder_inapp.unwrap_or(true),
+        reminder_push: req.reminder_push.unwrap_or(false),
+        reminder_email: req.reminder_email.unwrap_or(false),
         tag_ids: req.tag_ids,
     })
 }
@@ -647,6 +708,13 @@ fn validate_update(req: UpdateTaskRequest) -> Result<TaskPatch, ApiError> {
         board_order: req.board_order,
         list_id: req.list_id,
         reminder_enabled: req.reminder_enabled,
+        reminder_at: match req.reminder_at {
+            None => None,
+            Some(value) => Some(parse_reminder_at(value.into_option().as_deref())?),
+        },
+        reminder_inapp: req.reminder_inapp,
+        reminder_push: req.reminder_push,
+        reminder_email: req.reminder_email,
         tag_ids: req.tag_ids,
     })
 }
@@ -834,6 +902,27 @@ async fn apply_patch(
     }
     if let Some(value) = patch.reminder_enabled {
         task.reminder_enabled = value;
+    }
+    if let Some(value) = patch.reminder_at {
+        if value.is_some() {
+            task.reminder_enabled = true;
+        }
+        task.reminder_at = value;
+    }
+    if let Some(value) = patch.reminder_inapp {
+        task.reminder_inapp = value;
+    }
+    if let Some(value) = patch.reminder_push {
+        task.reminder_push = value;
+    }
+    if let Some(value) = patch.reminder_email {
+        task.reminder_email = value;
+    }
+    // Turning the master switch off, or finishing/cancelling the task, stops any
+    // future one-off delivery (the existing daily due-date engine still honours
+    // reminder_enabled on its own).
+    if !task.reminder_enabled || task.status == "done" || task.status == "cancelled" {
+        task.reminder_at = None;
     }
 
     if let Some(parent) = patch.parent_task_id {
@@ -2742,6 +2831,108 @@ mod tests {
         .await;
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(body_json(res).await["priority"], 3);
+
+        sqlx::query("DELETE FROM tasks WHERE user_id = $1").bind(user.id).execute(&state.pool).await.unwrap();
+        sqlx::query("DELETE FROM users WHERE id = $1").bind(user.id).execute(&state.pool).await.unwrap();
+    }
+
+    /// A scheduled reminder round-trips through create, validates bad values
+    /// with a 422, can be edited/cleared, and is cleared when the task is done.
+    #[tokio::test]
+    async fn task_reminder_schedule_round_trip_and_validation() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let email = format!("rust-reminder-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .unwrap();
+        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
+        let app = router().with_state(state.clone());
+
+        // A reminder time turns the master switch on automatically.
+        let res = call(
+            app.clone(),
+            "POST",
+            "/api/tasks",
+            &token,
+            Some(json!({
+                "title": "Reminder task",
+                "reminder_at": "2026-10-18T09:00:00Z",
+                "reminder_email": true
+            })),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let created = body_json(res).await;
+        assert_eq!(created["reminder_enabled"], true);
+        assert_eq!(created["reminder_at"], "2026-10-18T09:00:00+00:00");
+        assert_eq!(created["reminder_email"], true);
+        assert_eq!(created["reminder_inapp"], true);
+        let task_id = created["id"].as_str().unwrap().to_string();
+
+        // Invalid timestamps are rejected instead of silently dropped.
+        let res = call(
+            app.clone(),
+            "PATCH",
+            &format!("/api/tasks/{task_id}"),
+            &token,
+            Some(json!({ "reminder_at": "not-a-date" })),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        // Rescheduling and channel edits persist.
+        let res = call(
+            app.clone(),
+            "PATCH",
+            &format!("/api/tasks/{task_id}"),
+            &token,
+            Some(json!({
+                "reminder_at": "2026-10-19T18:30:00Z",
+                "reminder_push": true,
+                "reminder_email": false
+            })),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let updated = body_json(res).await;
+        assert_eq!(updated["reminder_at"], "2026-10-19T18:30:00+00:00");
+        assert_eq!(updated["reminder_push"], true);
+        assert_eq!(updated["reminder_email"], false);
+
+        // An explicit null clears it.
+        let res = call(
+            app.clone(),
+            "PATCH",
+            &format!("/api/tasks/{task_id}"),
+            &token,
+            Some(json!({ "reminder_at": null })),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["reminder_at"], Value::Null);
+
+        // Completing the task also stops any scheduled reminder.
+        let res = call(
+            app.clone(),
+            "PATCH",
+            &format!("/api/tasks/{task_id}"),
+            &token,
+            Some(json!({ "reminder_at": "2026-10-20T09:00:00Z" })),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let res = call(
+            app.clone(),
+            "PATCH",
+            &format!("/api/tasks/{task_id}"),
+            &token,
+            Some(json!({ "status": "done" })),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_json(res).await["reminder_at"], Value::Null);
 
         sqlx::query("DELETE FROM tasks WHERE user_id = $1").bind(user.id).execute(&state.pool).await.unwrap();
         sqlx::query("DELETE FROM users WHERE id = $1").bind(user.id).execute(&state.pool).await.unwrap();

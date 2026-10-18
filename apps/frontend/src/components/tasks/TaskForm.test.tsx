@@ -12,6 +12,24 @@ vi.mock("@/stores/app-store", () => ({
   },
 }));
 
+vi.mock("@/lib/notifications", () => ({
+  useNotificationPrefs: () => ({
+    prefs: {
+      inapp_reminders: true,
+      reminder_time: "20:00",
+      email_reminders: false,
+      due_alerts: true,
+      email_digest: false,
+      push_enabled: false,
+      sound: true,
+    },
+    update: vi.fn(),
+    loaded: true,
+  }),
+  requestNotificationPermission: vi.fn().mockResolvedValue(true),
+  getDefaultReminderTime: () => "20:00",
+}));
+
 beforeEach(() => {
   useAppStore.mockReturnValue({ tags: [], lists: [], activeListId: null });
 });
@@ -82,6 +100,27 @@ describe("TaskForm", () => {
       expect.objectContaining({
         title: "Test task",
         estimated_minutes: 30,
+      })
+    );
+  });
+
+  it("submits a scheduled reminder with the picked channels", () => {
+    const onSubmit = vi.fn();
+    render(<TaskForm onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Reminder task" },
+    });
+    fireEvent.click(screen.getByTestId("task-reminder-toggle"));
+    fireEvent.click(screen.getByTestId("task-reminder-channel-email"));
+    fireEvent.click(screen.getByRole("button", { name: /create task/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Reminder task",
+        reminder_enabled: true,
+        reminder_at: expect.any(String),
+        reminder_email: true,
       })
     );
   });

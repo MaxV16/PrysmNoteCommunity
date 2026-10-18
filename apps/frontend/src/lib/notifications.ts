@@ -25,11 +25,33 @@ export const DEFAULT_PREFS: NotificationPrefs = {
 };
 
 const SOUND_KEY = "prysm_notif_sound";
+const REMINDER_TIME_KEY = "prysm_notif_reminder_time";
 
 export function setSoundLocal(value: boolean) {
   try {
     localStorage.setItem(SOUND_KEY, JSON.stringify(value));
   } catch {}
+}
+
+/**
+ * Cache the server reminder time locally so a task form opened before the prefs
+ * request finishes can still suggest the user's usual time.
+ */
+export function setReminderTimeLocal(value: string) {
+  try {
+    localStorage.setItem(REMINDER_TIME_KEY, value);
+  } catch {}
+}
+
+/** The last known global reminder time (HH:MM), defaulting to 20:00. */
+export function getDefaultReminderTime(): string {
+  if (typeof window === "undefined") return DEFAULT_PREFS.reminder_time;
+  try {
+    const raw = localStorage.getItem(REMINDER_TIME_KEY);
+    return raw && /^\d{2}:\d{2}$/.test(raw) ? raw : DEFAULT_PREFS.reminder_time;
+  } catch {
+    return DEFAULT_PREFS.reminder_time;
+  }
 }
 
 /** True when this environment can show a real system notification. */
@@ -155,7 +177,13 @@ export function useNotificationPrefs() {
     if (typeof window === "undefined") return DEFAULT_PREFS;
     try {
       const raw = localStorage.getItem(SOUND_KEY);
-      return { ...DEFAULT_PREFS, sound: raw === null ? true : raw === "true" };
+      const time = localStorage.getItem(REMINDER_TIME_KEY);
+      return {
+        ...DEFAULT_PREFS,
+        sound: raw === null ? true : raw === "true",
+        reminder_time:
+          time && /^\d{2}:\d{2}$/.test(time) ? time : DEFAULT_PREFS.reminder_time,
+      };
     } catch {
       return DEFAULT_PREFS;
     }
@@ -164,12 +192,19 @@ export function useNotificationPrefs() {
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .get<Partial<NotificationPrefs>>("/notifications/prefs")
+    const request = api.get<Partial<NotificationPrefs>>("/notifications/prefs");
+    if (!request || typeof request.then !== "function") {
+      setLoaded(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+    request
       .then((data) => {
-        if (cancelled) return;
+        if (cancelled || !data) return;
         setPrefs((prev) => ({ ...prev, ...data }));
         if (data.sound !== undefined) setSoundLocal(data.sound);
+        if (data.reminder_time !== undefined) setReminderTimeLocal(data.reminder_time);
       })
       .catch(() => {})
       .finally(() => {
@@ -184,12 +219,15 @@ export function useNotificationPrefs() {
     setPrefs((prev) => {
       const next = { ...prev, ...patch };
       if (patch.sound !== undefined) setSoundLocal(next.sound);
+      if (patch.reminder_time !== undefined) setReminderTimeLocal(next.reminder_time);
       return next;
     });
     try {
       const saved = await api.patch<NotificationPrefs>("/notifications/prefs", patch);
+      if (!saved) return false;
       setPrefs((prev) => ({ ...prev, ...saved }));
       setSoundLocal(saved.sound);
+      setReminderTimeLocal(saved.reminder_time);
       return true;
     } catch {
       return false;
