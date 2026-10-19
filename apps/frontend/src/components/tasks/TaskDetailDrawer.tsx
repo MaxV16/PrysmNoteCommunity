@@ -41,7 +41,11 @@ import { taskTimeLabel } from "@/lib/task-time";
 import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
-import { imageFrom, insertImageAtCursor } from "@/lib/upload";
+import {
+  imageSourceFrom,
+  insertImageAtCursor,
+  type ImageInsertSource,
+} from "@/lib/upload";
 
 import {
   TIER_COLORS,
@@ -169,6 +173,8 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   };
   const [editingDescription, setEditingDescription] = useState(false);
   const [descDraft, setDescDraft] = useState(task.description || "");
+  const [descUploading, setDescUploading] = useState(false);
+  const pendingPasteRef = useRef<ImageInsertSource | null>(null);
   const [busy, setBusy] = useState(false);
   const [subtasks, setSubtasks] = useState<Task[]>(task.subtasks || []);
   const [tags, setTags] = useState<TaskTag[]>(task.tags || []);
@@ -320,6 +326,8 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   };
 
   const handleDescriptionSave = async () => {
+    // An image upload is still resolving; keep the editor open so it lands.
+    if (descUploading) return;
     // Save FIRST, then close the editor. Closing first re-rendered the stale
     // `task.description` while the PATCH was in flight, so the new (formatted)
     // text only appeared after leaving and reopening the drawer.
@@ -340,16 +348,58 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
     setEditingDescription(true);
   };
 
-  const handleDescriptionImage = async (file: File | null) => {
-    if (!file) return;
+  const handleDescriptionImage = async (source: ImageInsertSource | null) => {
+    if (!source) return;
     const textarea = descTextareaRef.current;
     if (!textarea) return;
+    setDescUploading(true);
     try {
-      await insertImageAtCursor(textarea, file, setDescDraft);
+      await insertImageAtCursor(textarea, source, setDescDraft);
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Could not upload that image.", "error");
+    } finally {
+      setDescUploading(false);
     }
   };
+
+  // Paste an image anywhere in the open drawer (not just the focused editor):
+  // copying an image and pressing Cmd/Ctrl+V should attach it to the
+  // description instead of silently doing nothing. The editor's own onPaste
+  // handles the case where the textarea already has focus.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (editingDescription) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const source = imageSourceFrom(e.clipboardData);
+      if (!source) return;
+      e.preventDefault();
+      pendingPasteRef.current = source;
+      setDescDraft(task.description || "");
+      setEditingDescription(true);
+      requestAnimationFrame(() => {
+        descSectionRef.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+      });
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [editingDescription, task.description]);
+
+  // The editor mounts in the same render as the paste, so insert once its
+  // textarea ref exists (and keep the image if it is not ready yet).
+  useEffect(() => {
+    if (!editingDescription || !pendingPasteRef.current || !descTextareaRef.current) return;
+    const source = pendingPasteRef.current;
+    pendingPasteRef.current = null;
+    void handleDescriptionImage(source);
+  });
 
   // Escape / blur-cancel restores the saved text so a stray key cannot wipe it.
   const cancelDescriptionEdit = () => {
@@ -895,26 +945,28 @@ const handleUpdate = async (data: {
                   value={descDraft}
                   onChange={(e) => setDescDraft(e.target.value)}
                   onPaste={(e) => {
-                    const file = imageFrom(e.clipboardData);
-                    if (file) {
+                    const source = imageSourceFrom(e.clipboardData);
+                    if (source) {
                       e.preventDefault();
-                      void handleDescriptionImage(file);
+                      void handleDescriptionImage(source);
                     }
                   }}
                   onDragOver={(e) => {
-                    if (imageFrom(e.dataTransfer)) e.preventDefault();
+                    if (imageSourceFrom(e.dataTransfer)) e.preventDefault();
                   }}
                   onDrop={(e) => {
-                    const file = imageFrom(e.dataTransfer);
-                    if (file) {
+                    const source = imageSourceFrom(e.dataTransfer);
+                    if (source) {
                       e.preventDefault();
-                      void handleDescriptionImage(file);
+                      void handleDescriptionImage(source);
                     }
                   }}
                   onBlur={(e) => {
                     // Opening the image picker moves focus to its hidden file
                     // input; don't close the editor before the upload lands.
                     if (e.relatedTarget instanceof HTMLInputElement && e.relatedTarget.type === "file") return;
+                    // Wait for an in-flight image upload; saving now would drop it.
+                    if (descUploading) return;
                     void handleDescriptionSave();
                   }}
                   onKeyDown={(e) => {
@@ -933,12 +985,18 @@ const handleUpdate = async (data: {
                   className="input-field w-full bg-transparent text-sm"
                 />
                 <div className="mt-1 flex items-center justify-end gap-2">
+                  {descUploading && (
+                    <span role="status" className="text-[10px] text-secondary">
+                      Uploading image...
+                    </span>
+                  )}
                   <CharLimitHint value={descDraft} max={TASK_DESCRIPTION_MAX} className="mr-auto" />
                   <button
                     onClick={() => void handleDescriptionSave()}
                     onMouseDown={(e) => e.preventDefault()}
                     onPointerDown={(e) => e.preventDefault()}
-                    className="btn btn-primary px-3 py-1 text-xs"
+                    disabled={descUploading}
+                    className="btn btn-primary px-3 py-1 text-xs disabled:opacity-60"
                   >
                     Done
                   </button>

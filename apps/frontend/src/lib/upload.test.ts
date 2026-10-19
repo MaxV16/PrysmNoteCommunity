@@ -5,7 +5,14 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { api } from "@/lib/api";
-import { MAX_IMAGE_BYTES, imageFrom, insertImageAtCursor, uploadImage } from "./upload";
+import {
+  MAX_IMAGE_BYTES,
+  imageFrom,
+  imageSourceFrom,
+  imageUrlFrom,
+  insertImageAtCursor,
+  uploadImage,
+} from "./upload";
 
 const uploadMock = vi.mocked(api.upload);
 
@@ -75,5 +82,71 @@ describe("uploadImage", () => {
     expect(imageFrom(data)).toBe(png);
     expect(imageFrom(null)).toBeNull();
     expect(imageFrom({ files: [] } as unknown as DataTransfer)).toBeNull();
+  });
+
+  it("falls back to clipboard items when files is empty", () => {
+    const png = imageFile("screenshot.png");
+    const data = {
+      files: [],
+      items: [
+        { kind: "string", type: "text/plain", getAsFile: () => null },
+        { kind: "file", type: "image/png", getAsFile: () => png },
+      ],
+    } as unknown as DataTransfer;
+    expect(imageFrom(data)).toBe(png);
+  });
+
+  it("reads an image copied from a web page as a URL", () => {
+    const data = {
+      files: [],
+      items: [],
+      getData: (type: string) =>
+        type === "text/html"
+          ? '<meta charset="utf-8"><img src="https://example.com/photo.png" alt="x">'
+          : "",
+    } as unknown as DataTransfer;
+    expect(imageUrlFrom(data)).toBe("https://example.com/photo.png");
+    expect(imageSourceFrom(data)).toBe("https://example.com/photo.png");
+  });
+
+  it("accepts a copied image file URL from the uri list", () => {
+    const data = {
+      files: [],
+      items: [],
+      getData: (type: string) =>
+        type === "text/uri-list" ? "file:///Users/me/shot.webp\r\n" : "",
+    } as unknown as DataTransfer;
+    expect(imageUrlFrom(data)).toBe("file:///Users/me/shot.webp");
+  });
+
+  it("inserts a copied image URL without re-uploading it", async () => {
+    const textarea = document.createElement("textarea");
+    textarea.value = "note ";
+    const onChange = vi.fn();
+
+    await insertImageAtCursor(textarea, "/api/uploads/xyz", onChange);
+
+    expect(textarea.value).toBe("note ![xyz](/api/uploads/xyz)");
+    expect(uploadMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the pre-upload selection and text typed while an image uploads", async () => {
+    let finish: (value: { url: string }) => void = () => {};
+    uploadMock.mockImplementation(
+      () => new Promise<{ url: string }>((resolve) => (finish = resolve))
+    );
+    const textarea = document.createElement("textarea");
+    textarea.value = "before after";
+    textarea.setSelectionRange(7, 12);
+    const onChange = vi.fn();
+
+    const pending = insertImageAtCursor(textarea, imageFile("slow.png"), onChange);
+    // The user keeps typing while the upload is in flight.
+    textarea.value = "before after plus more";
+    finish({ url: "/api/uploads/slow" });
+    await pending;
+
+    expect(textarea.value.endsWith("![slow](/api/uploads/slow)")).toBe(true);
+    expect(onChange).toHaveBeenCalledWith("before after plus more![slow](/api/uploads/slow)");
   });
 });

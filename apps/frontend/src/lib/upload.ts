@@ -4,6 +4,9 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
+/** A file dropped/picked from disk, or an image URL copied from another app. */
+export type ImageInsertSource = File | string;
+
 function imageError(file: File): string | null {
   if (!IMAGE_TYPES.has(file.type)) return "Choose a PNG, JPEG, GIF, or WebP image.";
   if (file.size === 0) return "That image is empty.";
@@ -32,30 +35,174 @@ export async function uploadImage(file: File): Promise<string> {
   return absoluteUploadUrl(result.url);
 }
 
-/** Upload an image and insert markdown at the textarea's current selection. */
+function altFromName(name: string | undefined): string {
+  return (name || "image").replace(/\.[^.]+$/, "").trim() || "image";
+}
+
+function isUploadUrl(url: string): boolean {
+  if (url.startsWith("/api/uploads/")) return true;
+  try {
+    return new URL(url, typeof location !== "undefined" ? location.origin : "http://localhost")
+      .pathname.startsWith("/api/uploads/");
+  } catch {
+    return false;
+  }
+}
+
+function filenameFromUrl(url: string): string | undefined {
+  try {
+    const path = new URL(url, typeof location !== "undefined" ? location.origin : "http://localhost")
+      .pathname;
+    const name = path.split("/").filter(Boolean).pop();
+    return name ? decodeURIComponent(name) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Turn a File or an image URL into a private upload URL plus alt text.
+ *
+ * Copied images are common on the web: `Cmd/Ctrl+C` on an `<img>` puts the
+ * image URL in the clipboard HTML rather than a file. We fetch and re-upload
+ * those so the saved description never hotlinks a third-party page. Data URLs
+ * are uploaded the same way (a pasted screenshot can be huge in markdown), and
+ * if a remote image cannot be fetched (CORS) we fall back to using its URL so
+ * the paste still attaches something visible.
+ */
+async function resolveImage(source: ImageInsertSource): Promise<{ url: string; alt: string }> {
+  if (typeof source !== "string") {
+    const url = await uploadImage(source);
+    return { url, alt: altFromName(source.name) };
+  }
+
+  const src = source.trim();
+  if (!src) throw new Error("That image could not be read.");
+
+  // Already one of our own authenticated uploads: reference it directly.
+  if (isUploadUrl(src)) {
+    return { url: src, alt: altFromName(filenameFromUrl(src)) };
+  }
+
+  const uploadBlob = async (blob: Blob): Promise<string> => {
+    if (!blob.type.startsWith("image/")) throw new Error("That clipboard item is not an image.");
+    const file = new File([blob], filenameFromUrl(src) || "pasted-image", { type: blob.type });
+    return uploadImage(file);
+  };
+
+  if (/^data:image\//i.test(src)) {
+    const blob = await (await fetch(src)).blob();
+    return { url: await uploadBlob(blob), alt: "image" };
+  }
+
+  try {
+    const res = await fetch(src, { credentials: "omit" });
+    if (!res.ok) throw new Error(`Image request failed with ${res.status}`);
+    const blob = await res.blob();
+    return { url: await uploadBlob(blob), alt: altFromName(filenameFromUrl(src)) };
+  } catch (err) {
+    // A blob: URL only exists on the page that created it, so it cannot be
+    // shown later; surface the error instead of saving a dead link.
+    if (/^blob:/i.test(src)) {
+      throw err instanceof Error ? err : new Error("That image could not be read.");
+    }
+    // Remote images that block cross-origin reads still make a valid markdown
+    // link, which is better than silently dropping the user's paste.
+    return { url: src, alt: altFromName(filenameFromUrl(src)) };
+  }
+}
+
+/**
+ * Upload an image (or reuse a copied image URL) and insert markdown at the
+ * textarea's selection. The selection is captured BEFORE the network request,
+ * and the result is appended if the user typed while the upload was in flight,
+ * so a slow upload can neither lose the image nor overwrite newer text.
+ */
 export async function insertImageAtCursor(
   textarea: HTMLTextAreaElement,
-  file: File,
+  source: ImageInsertSource,
   onChange: (next: string) => void
 ): Promise<void> {
-  const url = await uploadImage(file);
-  const start = textarea.selectionStart ?? textarea.value.length;
+  const initialValue = textarea.value;
+  const start = textarea.selectionStart ?? initialValue.length;
   const end = textarea.selectionEnd ?? start;
-  const alt = (file.name || "image").replace(/\.[^.]+$/, "").trim() || "image";
+
+  const { url, alt } = await resolveImage(source);
   const markdown = `![${alt}](${url})`;
-  if (typeof textarea.setRangeText === "function") {
-    textarea.setRangeText(markdown, start, end, "end");
-  } else {
-    textarea.value = textarea.value.slice(0, start) + markdown + textarea.value.slice(end);
+  const current = textarea.value;
+  const at = current === initialValue ? start : current.length;
+  const next =
+    current === initialValue
+      ? current.slice(0, start) + markdown + current.slice(end)
+      : current + markdown;
+
+  textarea.value = next;
+  const caret = at + markdown.length;
+  if (typeof textarea.setSelectionRange === "function") {
+    textarea.setSelectionRange(caret, caret);
   }
-  onChange(textarea.value);
+  onChange(next);
   textarea.focus();
 }
 
-export function imageFrom(data: DataTransfer | null): File | null {
-  if (!data) return null;
-  for (const file of Array.from(data.files)) {
-    if (file.type.startsWith("image/")) return file;
+function fileFromItems(data: DataTransfer): File | null {
+  const items = data.items ? Array.from(data.items) : [];
+  for (const item of items) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile?.();
+    if (file) return file;
   }
   return null;
+}
+
+/** First image file in a clipboard/drop payload (files, then items). */
+export function imageFrom(data: DataTransfer | null): File | null {
+  if (!data) return null;
+  for (const file of Array.from(data.files ?? [])) {
+    if (file.type.startsWith("image/")) return file;
+  }
+  return fileFromItems(data);
+}
+
+function looksLikeImageUrl(value: string): boolean {
+  const url = value.trim();
+  if (!url) return false;
+  if (/^data:image\//i.test(url)) return true;
+  if (/^blob:/i.test(url)) return true;
+  if (isUploadUrl(url)) return true;
+  return /\.(png|jpe?g|gif|webp)(?:[?#]|$)/i.test(url);
+}
+
+/**
+ * First image URL in a clipboard/drop payload. Covers copying an image element
+ * from a browser (`text/html` carries an `<img src>`), copying an image file
+ * from Finder/Explorer (`text/uri-list`), and a bare image URL in plain text.
+ */
+export function imageUrlFrom(data: DataTransfer | null): string | null {
+  if (!data || typeof data.getData !== "function") return null;
+
+  const html = data.getData("text/html") || "";
+  if (html) {
+    try {
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const src = doc.querySelector("img")?.getAttribute("src")?.trim();
+      if (src) return src;
+    } catch {
+      // Ignore malformed clipboard HTML and try the simpler formats below.
+    }
+  }
+
+  const uriList = data.getData("text/uri-list") || "";
+  for (const line of uriList.split(/\r?\n/)) {
+    const value = line.trim();
+    if (value && !value.startsWith("#") && looksLikeImageUrl(value)) return value;
+  }
+
+  const text = (data.getData("text/plain") || "").trim();
+  return looksLikeImageUrl(text) ? text : null;
+}
+
+/** First image from a clipboard/drop payload, preferring a real file. */
+export function imageSourceFrom(data: DataTransfer | null): ImageInsertSource | null {
+  return imageFrom(data) ?? imageUrlFrom(data);
 }

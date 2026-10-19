@@ -7,6 +7,8 @@ import { DAY_HEADER_HEIGHT } from "./constants";
 interface TimelineHeaderProps {
   days: Date[];
   dayWidth?: number;
+  /** Live current day from `useTimeline`, so the highlight survives midnight. */
+  today?: Date;
 }
 
 /**
@@ -15,19 +17,25 @@ interface TimelineHeaderProps {
  * `data-is-today` update) instead of being unmounted and recreated, which was a
  * ~150ms freeze every time the slice moved.
  */
-export const TimelineHeader = memo(function TimelineHeader({ days, dayWidth = 120 }: TimelineHeaderProps) {
+export const TimelineHeader = memo(function TimelineHeader({
+  days,
+  dayWidth = 120,
+  today,
+}: TimelineHeaderProps) {
   const dayRows = useMemo(() => {
-    const today = todayStart();
+    const current = new Date(today ?? todayStart());
+    current.setHours(0, 0, 0, 0);
+    const currentMs = current.getTime();
     return days.map((day) => {
       const d = new Date(day);
       d.setHours(0, 0, 0, 0);
-      const isToday = d.getTime() === today.getTime();
+      const isToday = d.getTime() === currentMs;
       const isWeekend = d.getDay() === 0 || d.getDay() === 6;
       const dayName = d.toLocaleDateString("en-US", { weekday: "short" });
       const dayNum = d.getDate();
       return { dayName, dayNum, isToday, isWeekend };
     });
-  }, [days]);
+  }, [days, today]);
 
   return (
     <div className="flex border-b border-border bg-surface sticky top-0 z-30 shrink-0" style={{ width: "100%", minWidth: "max-content", height: DAY_HEADER_HEIGHT }}>

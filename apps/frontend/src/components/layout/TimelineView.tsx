@@ -1539,8 +1539,8 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
                   className="relative"
                   style={{ marginLeft: sliceStart * dayWidth, width: days.length * dayWidth }}
                 >
-                  <TimelineHeader days={days} dayWidth={dayWidth} />
-                <TimelineGrid days={days} dayWidth={dayWidth} />
+                  <TimelineHeader days={days} dayWidth={dayWidth} today={today} />
+                <TimelineGrid days={days} dayWidth={dayWidth} today={today} />
                 {timelineSections.length > 0 ? (
                   <>
                     {timelineSections.map((section) => {

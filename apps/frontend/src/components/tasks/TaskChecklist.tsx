@@ -23,7 +23,11 @@ import { Markdown } from "@/components/ai/Markdown";
 import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
 import { SUBTASK_TITLE_MAX, SUBTASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
-import { imageFrom, insertImageAtCursor } from "@/lib/upload";
+import {
+  imageSourceFrom,
+  insertImageAtCursor,
+  type ImageInsertSource,
+} from "@/lib/upload";
 
 interface TaskChecklistProps {
   subtasks: Task[];
@@ -93,6 +97,7 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
   const [editingDescription, setEditingDescription] = useState(false);
   const [descDraft, setDescDraft] = useState(sub.description || "");
   const [descError, setDescError] = useState<string | null>(null);
+  const [descUploading, setDescUploading] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const descRef = useRef<HTMLTextAreaElement | null>(null);
   const done = sub.status === "done";
@@ -130,6 +135,8 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
   };
 
   const saveDescription = async () => {
+    // Keep the editor open while the pasted image is still uploading.
+    if (descUploading) return;
     if (descDraft.length > SUBTASK_DESCRIPTION_MAX) {
       setDescError(`Description is ${(descDraft.length - SUBTASK_DESCRIPTION_MAX).toLocaleString()} characters over the limit.`);
       return;
@@ -143,14 +150,17 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
     }
   };
 
-  const handleDescriptionImage = async (file: File | null) => {
+  const handleDescriptionImage = async (source: ImageInsertSource | null) => {
     const ta = descRef.current;
-    if (!ta || !file) return;
+    if (!ta || !source) return;
     setDescError(null);
+    setDescUploading(true);
     try {
-      await insertImageAtCursor(ta, file, setDescDraft);
+      await insertImageAtCursor(ta, source, setDescDraft);
     } catch (err) {
       setDescError(err instanceof Error ? err.message : "Could not upload that image.");
+    } finally {
+      setDescUploading(false);
     }
   };
 
@@ -185,7 +195,7 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
       {editing ? (
         withToolbar ? (
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <MarkdownToolbar textareaRef={draftRef} onChange={setDraft} />
+            <MarkdownToolbar textareaRef={draftRef} onChange={setDraft} variant="inline" />
             <textarea
               ref={draftRef}
               autoFocus
@@ -287,21 +297,19 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                   value={descDraft}
                   onChange={(e) => setDescDraft(e.target.value)}
                   onPaste={(e) => {
-                    const file = imageFrom(e.clipboardData);
-                    if (!file) return;
+                    const source = imageSourceFrom(e.clipboardData);
+                    if (!source) return;
                     e.preventDefault();
-                    void handleDescriptionImage(file);
+                    void handleDescriptionImage(source);
                   }}
                   onDragOver={(e) => {
-                    if (Array.from(e.dataTransfer.items).some((i) => i.type.startsWith("image/"))) {
-                      e.preventDefault();
-                    }
+                    if (imageSourceFrom(e.dataTransfer)) e.preventDefault();
                   }}
                   onDrop={(e) => {
-                    const file = imageFrom(e.dataTransfer);
-                    if (!file) return;
+                    const source = imageSourceFrom(e.dataTransfer);
+                    if (!source) return;
                     e.preventDefault();
-                    void handleDescriptionImage(file);
+                    void handleDescriptionImage(source);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -323,12 +331,18 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                   </p>
                 )}
                 <div className="mt-1 flex items-center justify-end gap-2">
+                  {descUploading && (
+                    <span role="status" className="text-[10px] text-secondary">
+                      Uploading image...
+                    </span>
+                  )}
                   <CharLimitHint value={descDraft} max={SUBTASK_DESCRIPTION_MAX} className="mr-auto" />
                   <button
                     onClick={() => void saveDescription()}
                     onMouseDown={(e) => e.preventDefault()}
                     onPointerDown={(e) => e.preventDefault()}
-                    className="btn btn-primary px-3 py-1 text-xs"
+                    disabled={descUploading}
+                    className="btn btn-primary px-3 py-1 text-xs disabled:opacity-60"
                   >
                     Done
                   </button>
@@ -336,7 +350,7 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
               </div>
             ) : sub.description ? (
               <div className="ml-1 border-l-2 border-border/60 pl-2 text-xs text-secondary">
-                <Markdown>{sub.description}</Markdown>
+                <Markdown compact>{sub.description}</Markdown>
               </div>
             ) : null}
           </div>

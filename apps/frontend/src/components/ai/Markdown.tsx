@@ -22,7 +22,16 @@ import {
 // heuristics over real prose could mangle it. remark-breaks turns single
 // newlines into hard breaks so multi-line replies keep the author's line
 // structure without relying on `white-space: pre-wrap`.
-export function Markdown({ children, ai = false }: { children: string; ai?: boolean }) {
+export function Markdown({
+  children,
+  ai = false,
+  compact = false,
+}: {
+  children: string;
+  ai?: boolean;
+  /** Inline preview (subtask notes): smaller images and tighter spacing. */
+  compact?: boolean;
+}) {
   const source = ai
     ? protectDateLineBreaks(normalizeAssistantMarkdown(stripTextToolCalls(children)))
     : protectDateLineBreaks(children);
@@ -40,7 +49,9 @@ export function Markdown({ children, ai = false }: { children: string; ai?: bool
                 alt={alt ?? ""}
                 title={title}
                 loading="lazy"
-                className="my-2 max-h-80 max-w-full rounded-lg border border-border object-contain"
+                className={`${
+                  compact ? "my-1 max-h-40" : "my-2 max-h-80"
+                } max-w-full rounded-lg border border-border object-contain`}
               />
             );
           },

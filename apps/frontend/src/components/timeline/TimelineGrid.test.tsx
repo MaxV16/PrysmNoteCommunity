@@ -27,6 +27,32 @@ describe("TimelineGrid", () => {
     expect(todayCols).toHaveLength(1);
   });
 
+  it("moves the line when the live today changes across midnight", () => {
+    const day18 = new Date(2026, 9, 18);
+    const day19 = new Date(2026, 9, 19);
+    const days = [day18, day19];
+
+    const { container, rerender } = render(
+      <TimelineGrid days={days} today={new Date(2026, 9, 18)} />
+    );
+    const flaggedAt18 = () =>
+      Array.from(container.querySelectorAll('[data-day-column][data-is-today="true"]'));
+    expect(flaggedAt18()).toHaveLength(1);
+
+    // A session left open past midnight must show the new day's line instead of
+    // the day the grid first mounted.
+    rerender(<TimelineGrid days={days} today={new Date(2026, 9, 19)} />);
+    expect(flaggedAt18()).toHaveLength(1);
+    const indicator = container.querySelector("[data-today-indicator]") as HTMLElement | null;
+    expect(indicator).not.toBeNull();
+    expect(indicator!.parentElement?.getAttribute("data-is-today")).toBe("true");
+    expect(
+      Array.from(container.querySelectorAll("[data-day-column]")).indexOf(
+        indicator!.parentElement as HTMLElement
+      )
+    ).toBe(1);
+  });
+
   it("sizes day columns from the DAY_WIDTH constant", () => {
     const days = [new Date("2026-07-20"), new Date("2026-07-21")];
     const { container } = render(<TimelineGrid days={days} />);

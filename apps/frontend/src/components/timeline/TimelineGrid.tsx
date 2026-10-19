@@ -1,12 +1,25 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo } from "react";
 import { todayStart } from "@/lib/dates";
 import { DAY_HEADER_HEIGHT } from "./constants";
 
 interface TimelineGridProps {
   days: Date[];
   dayWidth?: number;
+  /**
+   * The live current day, owned by `useTimeline` (which re-resolves it on an
+   * interval and when the tab wakes). Reading `todayStart()` inside this
+   * component would freeze the marker on the day the timeline mounted, so a
+   * session left open across midnight kept the line on yesterday.
+   */
+  today?: Date;
+}
+
+function atLocalMidnight(value: Date): Date {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
 }
 
 /**
@@ -14,8 +27,12 @@ interface TimelineGridProps {
  * so a slice shift patches the 260 columns in place (updating `data-is-today`)
  * instead of recreating them, which caused a visible freeze while scrolling.
  */
-export const TimelineGrid = memo(function TimelineGrid({ days, dayWidth = 120 }: TimelineGridProps) {
-  const todayStr = useMemo(() => todayStart().toISOString(), []);
+export const TimelineGrid = memo(function TimelineGrid({
+  days,
+  dayWidth = 120,
+  today,
+}: TimelineGridProps) {
+  const todayMs = atLocalMidnight(today ?? todayStart()).getTime();
 
   return (
     <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{ top: DAY_HEADER_HEIGHT, minHeight: `calc(100% - ${DAY_HEADER_HEIGHT}px)`, backgroundColor: "var(--timeline-bg)" }}>
@@ -24,7 +41,7 @@ export const TimelineGrid = memo(function TimelineGrid({ days, dayWidth = 120 }:
         {days.map((day, index) => {
           const d = new Date(day);
           d.setHours(0, 0, 0, 0);
-          const isToday = d.toISOString() === todayStr;
+          const isToday = d.getTime() === todayMs;
           const dow = d.getDay();
           const isWeekend = dow === 0 || dow === 6;
           return (

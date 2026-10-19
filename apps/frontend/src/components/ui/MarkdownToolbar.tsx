@@ -262,6 +262,12 @@ interface MarkdownToolbarProps {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   onChange: (next: string) => void;
   className?: string;
+  /**
+   * `inline` keeps only single-line formatting (bold, italic, strike, code,
+   * link) and hides the image picker. Subtask titles are one line, so headings,
+   * lists, or embedded images there only break the row layout.
+   */
+  variant?: "full" | "inline";
 }
 
 /**
@@ -271,10 +277,21 @@ interface MarkdownToolbarProps {
  * Buttons prevent the mousedown focus change so the textarea never blurs (which
  * would otherwise commit a blur-to-save edit) before the action runs.
  */
-export function MarkdownToolbar({ textareaRef, onChange, className }: MarkdownToolbarProps) {
+export function MarkdownToolbar({
+  textareaRef,
+  onChange,
+  className,
+  variant = "full",
+}: MarkdownToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const inline = variant === "inline";
+  const actions = inline
+    ? ACTIONS.filter((action) =>
+        ["bold", "italic", "strikethrough", "code", "link"].includes(action.id)
+      )
+    : ACTIONS;
 
   const run = (action: MarkdownAction) => {
     const ta = textareaRef.current;
@@ -304,7 +321,7 @@ export function MarkdownToolbar({ textareaRef, onChange, className }: MarkdownTo
       aria-label="Formatting"
       className={`flex flex-wrap items-center gap-0.5 ${className ?? ""}`}
     >
-      {ACTIONS.map((action) => (
+      {actions.map((action) => (
         <button
           key={action.id}
           type="button"
@@ -318,35 +335,39 @@ export function MarkdownToolbar({ textareaRef, onChange, className }: MarkdownTo
           {action.icon}
         </button>
       ))}
-      <button
-        type="button"
-        aria-label={uploading ? "Uploading image" : "Add image"}
-        title={uploading ? "Uploading image..." : "Add image (PNG, JPEG, GIF, WebP up to 5 MB)"}
-        onMouseDown={(e) => e.preventDefault()}
-        onPointerDown={(e) => e.preventDefault()}
-        onClick={() => fileInputRef.current?.click()}
-        disabled={uploading}
-        className={ICON_BUTTON}
-      >
-        {uploading ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
-            <path d="M21 12a9 9 0 1 1-6.2-8.56" strokeLinecap="round" />
-          </svg>
-        ) : (
-          IMAGE_ICON
-        )}
-      </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/gif,image/webp"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          void handleImage(file);
-        }}
-      />
+      {!inline && (
+        <>
+          <button
+            type="button"
+            aria-label={uploading ? "Uploading image" : "Add image"}
+            title={uploading ? "Uploading image..." : "Add image (PNG, JPEG, GIF, WebP up to 5 MB)"}
+            onMouseDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className={ICON_BUTTON}
+          >
+            {uploading ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                <path d="M21 12a9 9 0 1 1-6.2-8.56" strokeLinecap="round" />
+              </svg>
+            ) : (
+              IMAGE_ICON
+            )}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              void handleImage(file);
+            }}
+          />
+        </>
+      )}
       {imageError && (
         <span role="alert" className="basis-full px-1 pt-0.5 text-[10px] text-danger">
           {imageError}
