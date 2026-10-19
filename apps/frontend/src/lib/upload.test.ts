@@ -12,6 +12,7 @@ import {
   imageUrlFrom,
   insertImageAtCursor,
   markdownImages,
+  removeMarkdownImage,
   uploadImage,
 } from "./upload";
 
@@ -23,14 +24,22 @@ function imageFile(name = "photo.png", type = "image/png", size = 4): File {
 
 describe("markdownImages", () => {
   it("finds every embedded image for the live editor preview", () => {
-    expect(
-      markdownImages("Text ![first](/api/uploads/a.png) more\n![second](https://x.test/b.jpg)")
-    ).toEqual([
-      { alt: "first", url: "/api/uploads/a.png" },
-      { alt: "second", url: "https://x.test/b.jpg" },
+    const first = "![first](/api/uploads/a.png)";
+    const second = "![second](https://x.test/b.jpg)";
+    expect(markdownImages(`Text ${first} more\n${second}`)).toEqual([
+      { alt: "first", url: "/api/uploads/a.png", markdown: first, start: 5 },
+      { alt: "second", url: "https://x.test/b.jpg", markdown: second, start: 5 + first.length + 6 },
     ]);
     expect(markdownImages("no images here")).toEqual([]);
     expect(markdownImages("")).toEqual([]);
+  });
+
+  it("removes exactly the image the preview points at", () => {
+    const text = "Before ![one](/api/uploads/a.png) middle ![two](/api/uploads/b.png) after";
+    const [one] = markdownImages(text);
+    expect(removeMarkdownImage(text, one)).toBe("Before middle ![two](/api/uploads/b.png) after");
+    const [, two] = markdownImages(text);
+    expect(removeMarkdownImage(text, two)).toBe("Before ![one](/api/uploads/a.png) middle after");
   });
 });
 

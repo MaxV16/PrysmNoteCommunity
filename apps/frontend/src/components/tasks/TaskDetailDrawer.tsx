@@ -45,6 +45,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import {
   imageSourceFrom,
   insertImageAtCursor,
+  removeMarkdownImage,
   type ImageInsertSource,
 } from "@/lib/upload";
 
@@ -966,6 +967,10 @@ const handleUpdate = async (data: {
                     // Opening the image picker moves focus to its hidden file
                     // input; don't close the editor before the upload lands.
                     if (e.relatedTarget instanceof HTMLInputElement && e.relatedTarget.type === "file") return;
+                    // Focus moving to a control inside this editor (the toolbar
+                    // or an image's remove/copy button) is not leaving it.
+                    const next = e.relatedTarget as Node | null;
+                    if (next && e.currentTarget.parentElement?.contains(next)) return;
                     // Wait for an in-flight image upload; saving now would drop it.
                     if (descUploading) return;
                     void handleDescriptionSave();
@@ -985,7 +990,13 @@ const handleUpdate = async (data: {
                   rows={6}
                   className="input-field w-full bg-transparent text-sm"
                 />
-                <MarkdownImagePreview text={descDraft} className="mt-1" />
+                <MarkdownImagePreview
+                  text={descDraft}
+                  className="mt-1"
+                  onRemove={(image) =>
+                    setDescDraft((prev) => removeMarkdownImage(prev, image))
+                  }
+                />
                 <div className="mt-1 flex items-center justify-end gap-2">
                   {descUploading && (
                     <span role="status" className="text-[10px] text-secondary">
@@ -1006,7 +1017,12 @@ const handleUpdate = async (data: {
               </div>
             ) : task.description ? (
               <div onClick={startDescriptionEdit} aria-label="Edit description" className="cursor-text">
-                <Markdown>{task.description}</Markdown>
+                <Markdown
+                  onImageActivate={() => startDescriptionEdit()}
+                  imageActionLabel="Edit description"
+                >
+                  {task.description}
+                </Markdown>
               </div>
             ) : (
               <button

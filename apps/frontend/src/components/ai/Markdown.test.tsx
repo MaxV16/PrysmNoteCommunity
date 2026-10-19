@@ -46,4 +46,28 @@ describe("Markdown images", () => {
       expect(writeText).toHaveBeenCalledWith("/api/uploads/pic.png")
     );
   });
+
+  it("opens the editor on click while keeping a separate copy button", async () => {
+    const onActivate = vi.fn();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText, write: vi.fn() },
+      configurable: true,
+    });
+    vi.stubGlobal("ClipboardItem", undefined);
+
+    render(
+      <Markdown onImageActivate={onActivate} imageActionLabel="Edit description">
+        {"![chart](/api/uploads/chart.png)"}
+      </Markdown>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit description: chart" }));
+    expect(onActivate).toHaveBeenCalledWith("/api/uploads/chart.png");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy image: chart" }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("/api/uploads/chart.png")
+    );
+  });
 });

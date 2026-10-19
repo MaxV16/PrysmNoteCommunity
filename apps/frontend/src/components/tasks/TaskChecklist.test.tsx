@@ -93,6 +93,12 @@ describe("TaskChecklist subtask formatting", () => {
     expect(
       await screen.findByRole("button", { name: "Copy image: pasted" })
     ).toBeTruthy();
+
+    // The preview must also let the image be removed without closing the
+    // formatter or touching the rest of the title.
+    fireEvent.click(screen.getByRole("button", { name: "Remove image pasted" }));
+    await waitFor(() => expect(textarea.value).toBe("hello"));
+    expect(screen.getByRole("toolbar", { name: "Formatting" })).toBeTruthy();
   });
 
   it("pastes an image into the add-subtask field", async () => {

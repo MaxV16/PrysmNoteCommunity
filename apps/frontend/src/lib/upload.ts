@@ -13,6 +13,10 @@ export type ImageInsertTarget = HTMLTextAreaElement | HTMLInputElement;
 export interface MarkdownImage {
   alt: string;
   url: string;
+  /** Exact markdown source, so a preview can remove precisely this image. */
+  markdown: string;
+  /** Offset of `markdown` in the source string. */
+  start: number;
 }
 
 function imageError(file: File): string | null {
@@ -227,7 +231,31 @@ export function markdownImages(text: string): MarkdownImage[] {
   if (!text) return images;
   for (const match of text.matchAll(MARKDOWN_IMAGE)) {
     const url = match[2]?.trim();
-    if (url) images.push({ alt: match[1] || "image", url });
+    if (url) {
+      images.push({
+        alt: match[1] || "image",
+        url,
+        markdown: match[0],
+        start: match.index ?? 0,
+      });
+    }
   }
   return images;
+}
+
+/** Remove one image exactly as it appears in the source text. */
+export function removeMarkdownImage(text: string, image: MarkdownImage): string {
+  const start = text.slice(image.start, image.start + image.markdown.length) === image.markdown
+    ? image.start
+    : text.indexOf(image.markdown);
+  if (start < 0) return text;
+  const before = text.slice(0, start);
+  const after = text.slice(start + image.markdown.length);
+  // Collapse the space left at the seam so "one ![x](...) two" becomes
+  // "one two", not "one  two", without touching spacing elsewhere.
+  const next =
+    /[ \t]$/.test(before) && /^[ \t]/.test(after)
+      ? before + after.replace(/^[ \t]+/, "")
+      : before + after;
+  return next.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n");
 }

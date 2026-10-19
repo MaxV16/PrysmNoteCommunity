@@ -27,6 +27,7 @@ import { CharLimitHint } from "@/components/ui/CharLimitHint";
 import {
   imageSourceFrom,
   insertImageAtCursor,
+  removeMarkdownImage,
   type ImageInsertSource,
 } from "@/lib/upload";
 
@@ -252,6 +253,10 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                 // The toolbar's image picker moves focus to a hidden file
                 // input; do not commit and close before the upload lands.
                 if (e.relatedTarget instanceof HTMLInputElement && e.relatedTarget.type === "file") return;
+                // Focus moving to a control inside this editor (the toolbar or
+                // an image's remove/copy button) is not leaving the editor.
+                const next = e.relatedTarget as Node | null;
+                if (next && e.currentTarget.parentElement?.contains(next)) return;
                 void commitEdit();
               }}
               onKeyDown={(e) => {
@@ -278,7 +283,12 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                 {titleError}
               </p>
             )}
-            <MarkdownImagePreview text={draft} />
+            <MarkdownImagePreview
+              text={draft}
+              onRemove={(image) =>
+                setDraft((prev) => removeMarkdownImage(prev, image))
+              }
+            />
             <CharLimitHint value={draft} max={SUBTASK_TITLE_MAX} className="mt-1" />
           </div>
         ) : (
@@ -304,7 +314,11 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                 void handleTitleImage(renameRef.current, source);
               }}
               onDoubleClick={(e) => e.stopPropagation()}
-              onBlur={() => void commitEdit()}
+              onBlur={(e) => {
+                const next = e.relatedTarget as Node | null;
+                if (next && e.currentTarget.parentElement?.contains(next)) return;
+                void commitEdit();
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   (e.target as HTMLInputElement).blur();
@@ -323,7 +337,12 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                 {titleError}
               </p>
             )}
-            <MarkdownImagePreview text={draft} />
+            <MarkdownImagePreview
+              text={draft}
+              onRemove={(image) =>
+                setDraft((prev) => removeMarkdownImage(prev, image))
+              }
+            />
             <CharLimitHint value={draft} max={SUBTASK_TITLE_MAX} className="mt-1" />
           </div>
         )
@@ -341,7 +360,13 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                   : ""
               }`}
             >
-              <Markdown compact>{sub.title}</Markdown>
+              <Markdown
+                compact
+                onImageActivate={() => startEditing(true)}
+                imageActionLabel="Edit subtask"
+              >
+                {sub.title}
+              </Markdown>
             </div>
             {isLong && (
               <button
@@ -417,7 +442,13 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                   rows={3}
                   className="input-field w-full bg-transparent text-xs"
                 />
-                <MarkdownImagePreview text={descDraft} className="mt-1" />
+                <MarkdownImagePreview
+                  text={descDraft}
+                  className="mt-1"
+                  onRemove={(image) =>
+                    setDescDraft((prev) => removeMarkdownImage(prev, image))
+                  }
+                />
                 {descError && (
                   <p role="alert" className="mt-1 text-[10px] text-danger">
                     {descError}
@@ -443,7 +474,13 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
               </div>
             ) : sub.description ? (
               <div className="ml-1 border-l-2 border-border/60 pl-2 text-xs text-secondary">
-                <Markdown compact>{sub.description}</Markdown>
+                <Markdown
+                  compact
+                  onImageActivate={() => startDescriptionEdit()}
+                  imageActionLabel="Edit description"
+                >
+                  {sub.description}
+                </Markdown>
               </div>
             ) : null}
           </div>
@@ -654,7 +691,13 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
             {newError}
           </p>
         )}
-        <MarkdownImagePreview text={newTitle} className="mt-1" />
+        <MarkdownImagePreview
+          text={newTitle}
+          className="mt-1"
+          onRemove={(image) =>
+            setNewTitle((prev) => removeMarkdownImage(prev, image))
+          }
+        />
         <CharLimitHint value={newTitle} max={SUBTASK_TITLE_MAX} className="mt-1" />
       </div>
     </div>
