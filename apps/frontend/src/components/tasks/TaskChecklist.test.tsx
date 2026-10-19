@@ -6,13 +6,20 @@ import type { Task } from "@/types/task";
 
 const mocks = vi.hoisted(() => ({
   updateTask: vi.fn().mockResolvedValue(undefined),
+  upload: vi.fn(),
 }));
 
 vi.mock("@/hooks/useTasks", () => ({
   useTasks: () => ({ updateTask: mocks.updateTask, fetchTasks: vi.fn() }),
 }));
 vi.mock("@/lib/api", () => ({
-  api: { get: vi.fn(), post: vi.fn(), delete: vi.fn(), patch: vi.fn() },
+  api: {
+    get: vi.fn(),
+    post: vi.fn(),
+    delete: vi.fn(),
+    patch: vi.fn(),
+    upload: mocks.upload,
+  },
 }));
 
 const sub = { id: "s1", title: "hello", status: "todo" } as unknown as Task;
@@ -21,6 +28,15 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
+
+function imageClipboard(name = "pasted.png"): DataTransfer {
+  const file = new File([new Uint8Array([1, 2, 3])], name, { type: "image/png" });
+  return {
+    files: [file],
+    items: [],
+    getData: () => "",
+  } as unknown as DataTransfer;
+}
 
 describe("TaskChecklist subtask formatting", () => {
   it("opens the formatter from the row button and saves markdown", async () => {
@@ -43,6 +59,52 @@ describe("TaskChecklist subtask formatting", () => {
 
     await waitFor(() => expect(mocks.updateTask).toHaveBeenCalledWith("s1", { title: "**hello**" }));
     await waitFor(() => expect(container.querySelector("strong")).toBeTruthy());
+  });
+
+  it("keeps the formatter open while text inside it is selected", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<TaskChecklist subtasks={[sub]} taskId="t1" />);
+
+    await user.click(screen.getByRole("button", { name: "Format hello" }));
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+
+    // Double-click is how a user selects a word. It used to bubble to the row
+    // and start a plain rename, which reset the draft and removed the toolbar.
+    fireEvent.doubleClick(textarea);
+
+    expect(screen.getByRole("toolbar", { name: "Formatting" })).toBeTruthy();
+    expect(container.querySelector("textarea")).toBe(textarea);
+  });
+
+  it("pastes an image into an existing subtask title and previews it", async () => {
+    mocks.upload.mockResolvedValue({ url: "/api/uploads/pasted.png" });
+    const user = userEvent.setup();
+    const { container } = render(<TaskChecklist subtasks={[sub]} taskId="t1" />);
+
+    await user.click(screen.getByRole("button", { name: "Format hello" }));
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+
+    fireEvent.paste(textarea, { clipboardData: imageClipboard() });
+
+    await waitFor(() =>
+      expect(textarea.value).toContain("![pasted](/api/uploads/pasted.png)")
+    );
+    expect(mocks.upload).toHaveBeenCalled();
+    expect(
+      await screen.findByRole("button", { name: "Copy image: pasted" })
+    ).toBeTruthy();
+  });
+
+  it("pastes an image into the add-subtask field", async () => {
+    mocks.upload.mockResolvedValue({ url: "/api/uploads/new.png" });
+    render(<TaskChecklist subtasks={[sub]} taskId="t1" />);
+
+    const input = screen.getByPlaceholderText("Add subtask...") as HTMLInputElement;
+    fireEvent.paste(input, { clipboardData: imageClipboard("new.png") });
+
+    await waitFor(() =>
+      expect(input.value).toBe("![new](/api/uploads/new.png)")
+    );
   });
 });
 

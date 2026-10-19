@@ -32,6 +32,27 @@ pub(crate) const MAX_TOOL_CALLS_PER_ROUND: usize = 20;
 
 const INBOX_ALIASES: [&str; 5] = ["inbox", "unscheduled", "no date", "no dates", "someday"];
 
+/// Every field `update_task` understands. Also used to recover a model that
+/// puts fields at the top level instead of inside the `fields` object, and to
+/// name the valid fields in an "unknown field" error.
+const UPDATE_TASK_FIELDS: &[&str] = &[
+    "title",
+    "description",
+    "status",
+    "priority",
+    "start_date",
+    "due_date",
+    "start_time",
+    "end_time",
+    "list_id",
+    "list_name",
+    "reminder_enabled",
+    "reminder_at",
+    "reminder_inapp",
+    "reminder_push",
+    "reminder_email",
+];
+
 const GENERIC_SUGGESTIONS: [&str; 5] = [
     "Define scope and requirements",
     "Break down into smaller steps",
@@ -409,6 +430,22 @@ async fn resolve_task_id(
     let Some(title) = raw.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
+    // Prefer a top-level task over a subtask with the same title: moving or
+    // completing a subtask when the user meant the parent looks like nothing
+    // happened in the main list.
+    let exact = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
+         AND parent_task_id IS NULL AND lower(title) = lower($2) \
+         ORDER BY updated_at DESC NULLS LAST LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(title)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(db_err)?;
+    if exact.is_some() {
+        return Ok(exact);
+    }
     let exact = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
          AND lower(title) = lower($2) ORDER BY updated_at DESC NULLS LAST LIMIT 1",
@@ -1036,13 +1073,40 @@ async fn tool_create_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
     Ok(payloads)
 }
 
+/// Read the update payload from `fields`. Models occasionally send the object
+/// as a JSON string, or forget the wrapper and put fields at the top level; both
+/// used to turn into a silent no-op that still reported `"updated": true`.
+fn update_fields_from_args(args: &Value) -> Map<String, Value> {
+    let mut fields = match args.get("fields") {
+        Some(Value::Object(map)) => map.clone(),
+        Some(Value::String(raw)) => serde_json::from_str::<Value>(raw)
+            .ok()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default(),
+        _ => Map::new(),
+    };
+    if fields.is_empty() {
+        if let Some(obj) = args.as_object() {
+            for key in UPDATE_TASK_FIELDS {
+                if let Some(value) = obj.get(*key) {
+                    fields.insert((*key).to_string(), value.clone());
+                }
+            }
+        }
+    }
+    fields
+}
+
 async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
     let raw_id = args.get("task_id").cloned().unwrap_or(Value::Null);
-    let fields = args
-        .get("fields")
-        .and_then(|f| f.as_object())
-        .cloned()
-        .unwrap_or_default();
+    let fields = update_fields_from_args(args);
+    if fields.is_empty() {
+        return ok_obj(json!({
+            "error": "No fields to update",
+            "hint": "Pass at least one supported field in the fields object, for example {\"fields\":{\"list_name\":\"Christmas\"}}.",
+            "valid_fields": UPDATE_TASK_FIELDS,
+        }));
+    }
 
     let mut tx = begin(state, user_id).await?;
     let Some(task_uuid) = resolve_task_id(&mut tx, user_id, &raw_id).await? else {
@@ -1058,40 +1122,141 @@ async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
     };
 
     let mut payloads: Vec<String> = Vec::new();
+    let mut applied: Vec<String> = Vec::new();
     for (key, value) in &fields {
         match key.as_str() {
-            "title" => {
-                if let Some(s) = value.as_str() {
-                    t.title = s.to_string();
+            "title" => match value.as_str().map(str::trim) {
+                Some(title) if !title.is_empty() => {
+                    t.title = title.to_string();
+                    applied.push(key.clone());
                 }
-            }
+                _ => payloads.push(obj_str(&json!({
+                    "error": "title must be a non-empty string"
+                }))),
+            },
             "description" => {
-                t.description = value.as_str().map(|s| s.to_string());
+                if value.is_null() {
+                    t.description = None;
+                    applied.push(key.clone());
+                } else if let Some(s) = value.as_str() {
+                    t.description = Some(s.to_string());
+                    applied.push(key.clone());
+                } else {
+                    payloads.push(obj_str(&json!({
+                        "error": "description must be a string or null"
+                    })));
+                }
             }
             "status" => {
-                if let Some(s) = value.as_str() {
-                    t.status = s.to_string();
+                let status = value.as_str().unwrap_or("");
+                if matches!(status, "backlog" | "todo" | "in_progress" | "done" | "cancelled") {
+                    t.status = status.to_string();
+                    applied.push(key.clone());
+                } else {
+                    payloads.push(obj_str(&json!({
+                        "error": "status must be one of backlog, todo, in_progress, done, cancelled"
+                    })));
                 }
             }
-            "priority" => {
-                t.priority = task::normalize_priority(value.as_i64());
-            }
+            "priority" => match value.as_i64() {
+                Some(priority) => {
+                    t.priority = task::normalize_priority(Some(priority));
+                    applied.push(key.clone());
+                }
+                None => payloads.push(obj_str(&json!({
+                    "error": "priority must be a number (1 = high, 2 = medium, 3 = low)"
+                }))),
+            },
             "start_date" => {
-                t.start_date = parse_date_arg(value.as_str());
+                if value.is_null() {
+                    t.start_date = None;
+                    applied.push(key.clone());
+                } else if let Some(raw) = value.as_str() {
+                    match parse_date_arg(Some(raw)) {
+                        Some(date) => {
+                            t.start_date = Some(date);
+                            applied.push(key.clone());
+                        }
+                        None => payloads.push(obj_str(&json!({
+                            "error": "start_date must be a YYYY-MM-DD date"
+                        }))),
+                    }
+                } else {
+                    payloads.push(obj_str(&json!({
+                        "error": "start_date must be a YYYY-MM-DD date or null"
+                    })));
+                }
             }
             "due_date" => {
-                t.due_date = parse_date_arg(value.as_str());
+                if value.is_null() {
+                    t.due_date = None;
+                    applied.push(key.clone());
+                } else if let Some(raw) = value.as_str() {
+                    match parse_date_arg(Some(raw)) {
+                        Some(date) => {
+                            t.due_date = Some(date);
+                            applied.push(key.clone());
+                        }
+                        None => payloads.push(obj_str(&json!({
+                            "error": "due_date must be a YYYY-MM-DD date"
+                        }))),
+                    }
+                } else {
+                    payloads.push(obj_str(&json!({
+                        "error": "due_date must be a YYYY-MM-DD date or null"
+                    })));
+                }
             }
             "start_time" => {
-                t.start_time = parse_time_arg(value.as_str());
+                if value.is_null() {
+                    t.start_time = None;
+                    applied.push(key.clone());
+                } else if let Some(raw) = value.as_str() {
+                    match parse_time_arg(Some(raw)) {
+                        Some(time) => {
+                            t.start_time = Some(time);
+                            applied.push(key.clone());
+                        }
+                        None => payloads.push(obj_str(&json!({
+                            "error": "start_time must be a clock time such as 14:00"
+                        }))),
+                    }
+                } else {
+                    payloads.push(obj_str(&json!({
+                        "error": "start_time must be a clock time such as 14:00, or null"
+                    })));
+                }
             }
             "end_time" => {
-                t.end_time = parse_time_arg(value.as_str());
+                if value.is_null() {
+                    t.end_time = None;
+                    applied.push(key.clone());
+                } else if let Some(raw) = value.as_str() {
+                    match parse_time_arg(Some(raw)) {
+                        Some(time) => {
+                            t.end_time = Some(time);
+                            applied.push(key.clone());
+                        }
+                        None => payloads.push(obj_str(&json!({
+                            "error": "end_time must be a clock time such as 15:00"
+                        }))),
+                    }
+                } else {
+                    payloads.push(obj_str(&json!({
+                        "error": "end_time must be a clock time such as 15:00, or null"
+                    })));
+                }
             }
             "list_id" => {
-                if !value.is_null() {
+                if value.is_null() {
+                    t.list_id = None;
+                    applied.push(key.clone());
+                } else {
                     let Some(list_uuid) = safe_uuid(value) else {
-                        payloads.push(obj_str(&json!({ "error": "List not found" })));
+                        payloads.push(obj_str(&json!({
+                            "error": "List not found",
+                            "hint": "When the user names a list, pass fields.list_name instead of a raw id."
+                        })));
                         continue;
                     };
                     let owned = sqlx::query_scalar::<_, i32>(
@@ -1103,58 +1268,112 @@ async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
                     .await
                     .map_err(db_err)?;
                     if owned.is_none() {
-                        payloads.push(obj_str(&json!({ "error": "List not found" })));
+                        payloads.push(obj_str(&json!({
+                            "error": "List not found",
+                            "hint": "When the user names a list, pass fields.list_name instead of a raw id."
+                        })));
                         continue;
                     }
                     t.list_id = Some(list_uuid);
-                } else {
-                    t.list_id = None;
+                    applied.push(key.clone());
                 }
             }
-            "reminder_enabled" => {
-                if let Some(enabled) = value.as_bool() {
+            "list_name" => {
+                let Some(name) = value.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+                    payloads.push(obj_str(&json!({
+                        "error": "list_name must be a non-empty string"
+                    })));
+                    continue;
+                };
+                match resolve_list_id_by_name(&mut *tx, user_id, name)
+                    .await
+                    .map_err(db_err)?
+                {
+                    Some(id) => {
+                        t.list_id = Some(id);
+                        applied.push(key.clone());
+                    }
+                    None => payloads.push(obj_str(
+                        &json!({ "error": format!("List '{name}' not found") }),
+                    )),
+                }
+            }
+            "reminder_enabled" => match value.as_bool() {
+                Some(enabled) => {
                     t.reminder_enabled = enabled;
                     if !enabled {
                         t.reminder_at = None;
                     }
+                    applied.push(key.clone());
                 }
-            }
+                None => payloads.push(obj_str(&json!({
+                    "error": "reminder_enabled must be true or false"
+                }))),
+            },
             "reminder_at" => {
                 if value.is_null() {
                     t.reminder_at = None;
+                    applied.push(key.clone());
                 } else if let Some(raw) = value.as_str() {
                     match task::parse_datetime(raw) {
                         Some(at) => {
                             t.reminder_at = Some(at);
                             t.reminder_enabled = true;
+                            applied.push(key.clone());
                         }
                         None => payloads.push(obj_str(&json!({
                             "error": "reminder_at must be an ISO 8601 date-time"
                         }))),
                     }
+                } else {
+                    payloads.push(obj_str(&json!({
+                        "error": "reminder_at must be an ISO 8601 date-time or null"
+                    })));
                 }
             }
-            "reminder_inapp" => {
-                if let Some(on) = value.as_bool() {
+            "reminder_inapp" => match value.as_bool() {
+                Some(on) => {
                     t.reminder_inapp = on;
+                    applied.push(key.clone());
                 }
-            }
-            "reminder_push" => {
-                if let Some(on) = value.as_bool() {
+                None => payloads.push(obj_str(&json!({
+                    "error": "reminder_inapp must be true or false"
+                }))),
+            },
+            "reminder_push" => match value.as_bool() {
+                Some(on) => {
                     t.reminder_push = on;
+                    applied.push(key.clone());
                 }
-            }
-            "reminder_email" => {
-                if let Some(on) = value.as_bool() {
+                None => payloads.push(obj_str(&json!({
+                    "error": "reminder_push must be true or false"
+                }))),
+            },
+            "reminder_email" => match value.as_bool() {
+                Some(on) => {
                     t.reminder_email = on;
+                    applied.push(key.clone());
                 }
-            }
-            _ => {}
+                None => payloads.push(obj_str(&json!({
+                    "error": "reminder_email must be true or false"
+                }))),
+            },
+            other => payloads.push(obj_str(&json!({
+                "error": format!("Unknown field: {other}"),
+                "valid_fields": UPDATE_TASK_FIELDS,
+            }))),
         }
     }
 
     if t.status == "done" || t.status == "cancelled" {
         t.reminder_at = None;
+    }
+
+    // Nothing valid was supplied: leave the task untouched and return only the
+    // errors, so the model can retry instead of believing a no-op succeeded.
+    if applied.is_empty() {
+        tx.rollback().await.ok();
+        return Ok(payloads);
     }
 
     let completed = fields.get("status").and_then(|v| v.as_str()) == Some("done");
@@ -1168,9 +1387,20 @@ async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
             .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
-    payloads.push(obj_str(
-        &json!({ "updated": true, "task_id": task_uuid.to_string() }),
-    ));
+    let had_error = payloads.iter().any(|p| {
+        serde_json::from_str::<Value>(p)
+            .map(|v| v.get("error").is_some())
+            .unwrap_or(false)
+    });
+    if had_error {
+        // Some fields did apply, but at least one failed. Report the partial
+        // result explicitly and never emit `updated: true`.
+        payloads.push(obj_str(&json!({ "partial": true, "applied": applied })));
+    } else {
+        payloads.push(obj_str(
+            &json!({ "updated": true, "task_id": task_uuid.to_string() }),
+        ));
+    }
     Ok(payloads)
 }
 
@@ -1398,6 +1628,11 @@ async fn tool_get_task_details(state: &AppState, user_id: Uuid, args: &Value) ->
         "priority": t.priority,
         "start_date": t.start_date.map(|d| d.to_string()),
         "due_date": t.due_date.map(|d| d.to_string()),
+        "reminder_enabled": t.reminder_enabled,
+        "reminder_at": t.reminder_at.map(|v| v.to_rfc3339()),
+        "reminder_inapp": t.reminder_inapp,
+        "reminder_push": t.reminder_push,
+        "reminder_email": t.reminder_email,
         "tags": tag_values,
         "links": links,
         "subtasks": subtasks,
@@ -3196,6 +3431,162 @@ mod tests {
         )
         .await;
         assert_eq!(first_content(&deleted)["deleted"], true);
+
+        for sql in [
+            "DELETE FROM tasks WHERE user_id = $1",
+            "DELETE FROM lists WHERE user_id = $1",
+            "DELETE FROM users WHERE id = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(user.id)
+                .execute(&state.pool)
+                .await
+                .expect("cleanup");
+        }
+    }
+
+    #[tokio::test]
+    async fn update_task_moves_to_list_by_name() {
+        let Some(state) = live_state() else {
+            return;
+        };
+        let email = format!("rust-ai-listname-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .expect("create user");
+
+        let call = |id: &'static str, name: &'static str, args: Value| {
+            json!({
+                "id": id,
+                "function": { "name": name, "arguments": serde_json::to_string(&args).unwrap() },
+            })
+        };
+
+        let list_id: String = sqlx::query_scalar(
+            "INSERT INTO lists (user_id, name, position) VALUES ($1, $2, 0) RETURNING id::text",
+        )
+        .bind(user.id)
+        .bind("christmas 26")
+        .fetch_one(&state.pool)
+        .await
+        .expect("create list");
+
+        let created = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c1",
+                "create_task",
+                json!({ "title": "Christmas task" }),
+            )],
+        )
+        .await;
+        let task_id = first_content(&created)["task"]["id"]
+            .as_str()
+            .expect("task id")
+            .to_string();
+
+        let updated = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c2",
+                "update_task",
+                json!({
+                    "task_id": "Christmas task",
+                    "fields": { "list_name": "christmas 26" },
+                }),
+            )],
+        )
+        .await;
+        assert_eq!(first_content(&updated)["updated"], true);
+
+        let moved_list_id: String =
+            sqlx::query_scalar("SELECT list_id::text FROM tasks WHERE id = $1 AND user_id = $2")
+                .bind(Uuid::parse_str(&task_id).unwrap())
+                .bind(user.id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("task list id");
+        assert_eq!(moved_list_id, list_id);
+
+        let missing = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c3",
+                "update_task",
+                json!({
+                    "task_id": "Christmas task",
+                    "fields": { "list_name": "no such list" },
+                }),
+            )],
+        )
+        .await;
+        let missing_payload = first_content(&missing);
+        assert!(missing_payload.get("updated").is_none());
+        assert!(missing_payload.get("error").is_some());
+
+        // Models sometimes omit the fields wrapper. Recover top-level fields
+        // instead of silently committing an empty update.
+        let top_level = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c4",
+                "update_task",
+                json!({ "task_id": "Christmas task", "status": "done" }),
+            )],
+        )
+        .await;
+        assert_eq!(first_content(&top_level)["updated"], true);
+        let status: String =
+            sqlx::query_scalar("SELECT status::text FROM tasks WHERE id = $1 AND user_id = $2")
+                .bind(Uuid::parse_str(&task_id).unwrap())
+                .bind(user.id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("task status");
+        assert_eq!(status, "done");
+
+        // An unknown field must fail loudly instead of being ignored while
+        // `updated: true` tells the model everything worked.
+        let unknown = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c5",
+                "update_task",
+                json!({
+                    "task_id": "Christmas task",
+                    "fields": { "colour": "red" },
+                }),
+            )],
+        )
+        .await;
+        let unknown_payload = first_content(&unknown);
+        assert!(unknown_payload.get("updated").is_none());
+        assert!(unknown_payload["error"]
+            .as_str()
+            .unwrap()
+            .contains("Unknown field"));
+
+        let empty = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c6",
+                "update_task",
+                json!({ "task_id": "Christmas task", "fields": {} }),
+            )],
+        )
+        .await;
+        let empty_payload = first_content(&empty);
+        assert!(empty_payload.get("updated").is_none());
+        assert!(empty_payload["error"]
+            .as_str()
+            .unwrap()
+            .contains("No fields to update"));
 
         for sql in [
             "DELETE FROM tasks WHERE user_id = $1",

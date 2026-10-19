@@ -135,7 +135,7 @@
     "type": "function",
     "function": {
       "name": "update_task",
-      "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} - do NOT delete the task. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date, start_time (HH:MM), end_time (HH:MM), list_id, reminder_enabled (true to remind the user about this task; reminders are off by default), reminder_at (ISO 8601 date-time), reminder_inapp, reminder_push, reminder_email. Set reminder_at to null to clear a scheduled reminder.",
+      "description": "Update task fields. IMPORTANT: when the user says a task is done, complete, finished or similar, set fields to {\"status\": \"done\"} - do NOT delete the task. To move a task to another list, set fields to {\"list_name\": \"<exact list name>\"}. Supported fields: title, description, status (backlog|todo|in_progress|done|cancelled), priority, start_date, due_date, start_time (HH:MM), end_time (HH:MM), list_id, list_name (a list name, resolved case-insensitively; prefer this when the user names a list), reminder_enabled (true to remind the user about this task; reminders are off by default), reminder_at (ISO 8601 date-time), reminder_inapp, reminder_push, reminder_email. Set reminder_at to null to clear a scheduled reminder. Returns {\"updated\": true} only when every field applied; on failure it returns an error (and \"partial\": true with the applied fields when only some applied).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -144,7 +144,7 @@
           },
           "fields": {
             "type": "object",
-            "description": "fields to update, e.g. {\"status\": \"done\"} to mark complete"
+            "description": "fields to update, e.g. {\"status\": \"done\"} to mark complete or {\"list_name\": \"Christmas\"} to move it to a list"
           }
         },
         "required": [

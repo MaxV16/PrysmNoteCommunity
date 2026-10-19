@@ -11,6 +11,7 @@ import {
   imageSourceFrom,
   imageUrlFrom,
   insertImageAtCursor,
+  markdownImages,
   uploadImage,
 } from "./upload";
 
@@ -19,6 +20,19 @@ const uploadMock = vi.mocked(api.upload);
 function imageFile(name = "photo.png", type = "image/png", size = 4): File {
   return new File([new Uint8Array(size)], name, { type });
 }
+
+describe("markdownImages", () => {
+  it("finds every embedded image for the live editor preview", () => {
+    expect(
+      markdownImages("Text ![first](/api/uploads/a.png) more\n![second](https://x.test/b.jpg)")
+    ).toEqual([
+      { alt: "first", url: "/api/uploads/a.png" },
+      { alt: "second", url: "https://x.test/b.jpg" },
+    ]);
+    expect(markdownImages("no images here")).toEqual([]);
+    expect(markdownImages("")).toEqual([]);
+  });
+});
 
 describe("uploadImage", () => {
   beforeEach(() => {

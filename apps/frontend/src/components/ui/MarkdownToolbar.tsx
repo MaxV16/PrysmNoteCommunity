@@ -264,8 +264,9 @@ interface MarkdownToolbarProps {
   className?: string;
   /**
    * `inline` keeps only single-line formatting (bold, italic, strike, code,
-   * link) and hides the image picker. Subtask titles are one line, so headings,
-   * lists, or embedded images there only break the row layout.
+   * link). The image picker stays available because subtasks can carry images
+   * in their markdown too; headings and lists remain hidden so a one-line
+   * subtask row cannot grow a block layout.
    */
   variant?: "full" | "inline";
 }
@@ -335,39 +336,35 @@ export function MarkdownToolbar({
           {action.icon}
         </button>
       ))}
-      {!inline && (
-        <>
-          <button
-            type="button"
-            aria-label={uploading ? "Uploading image" : "Add image"}
-            title={uploading ? "Uploading image..." : "Add image (PNG, JPEG, GIF, WebP up to 5 MB)"}
-            onMouseDown={(e) => e.preventDefault()}
-            onPointerDown={(e) => e.preventDefault()}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className={ICON_BUTTON}
-          >
-            {uploading ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
-                <path d="M21 12a9 9 0 1 1-6.2-8.56" strokeLinecap="round" />
-              </svg>
-            ) : (
-              IMAGE_ICON
-            )}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              void handleImage(file);
-            }}
-          />
-        </>
-      )}
+      <button
+        type="button"
+        aria-label={uploading ? "Uploading image" : "Add image"}
+        title={uploading ? "Uploading image..." : "Add image (PNG, JPEG, GIF, WebP up to 5 MB)"}
+        onMouseDown={(e) => e.preventDefault()}
+        onPointerDown={(e) => e.preventDefault()}
+        onClick={() => fileInputRef.current?.click()}
+        disabled={uploading}
+        className={ICON_BUTTON}
+      >
+        {uploading ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+            <path d="M21 12a9 9 0 1 1-6.2-8.56" strokeLinecap="round" />
+          </svg>
+        ) : (
+          IMAGE_ICON
+        )}
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          void handleImage(file);
+        }}
+      />
       {imageError && (
         <span role="alert" className="basis-full px-1 pt-0.5 text-[10px] text-danger">
           {imageError}

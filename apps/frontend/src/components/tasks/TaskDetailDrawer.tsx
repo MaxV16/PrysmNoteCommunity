@@ -31,6 +31,7 @@ import { TaskTagsEditor } from "./TaskTagsEditor";
 import { DateRecurrencePopover } from "./DateRecurrencePopover";
 import { describeRule } from "@/lib/recurrence";
 import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
+import { MarkdownImagePreview } from "@/components/ui/MarkdownImagePreview";
 import { Markdown } from "@/components/ai/Markdown";
 import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
@@ -984,6 +985,7 @@ const handleUpdate = async (data: {
                   rows={6}
                   className="input-field w-full bg-transparent text-sm"
                 />
+                <MarkdownImagePreview text={descDraft} className="mt-1" />
                 <div className="mt-1 flex items-center justify-end gap-2">
                   {descUploading && (
                     <span role="status" className="text-[10px] text-secondary">

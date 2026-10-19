@@ -133,6 +133,10 @@ ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS recurrence_parent_id uuid;
 -- existing rows keep their current behaviour (no reminder_at means the legacy
 -- due-date/global-time engine handles them).
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS reminder_at timestamp with time zone;
+-- Older databases (and the old bootstrap SQL) created is_all_day NOT NULL with
+-- no default, so inserts that omit it (the reminder engine test, scripts) fail.
+ALTER TABLE public.tasks ALTER COLUMN is_all_day SET DEFAULT false;
+ALTER TABLE public.tasks ALTER COLUMN is_archived SET DEFAULT false;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS reminder_inapp boolean NOT NULL DEFAULT true;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS reminder_push boolean NOT NULL DEFAULT false;
 ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS reminder_email boolean NOT NULL DEFAULT false;

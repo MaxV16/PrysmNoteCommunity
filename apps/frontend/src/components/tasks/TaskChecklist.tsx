@@ -21,6 +21,7 @@ import type { Task } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
 import { Markdown } from "@/components/ai/Markdown";
 import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
+import { MarkdownImagePreview } from "@/components/ui/MarkdownImagePreview";
 import { SUBTASK_TITLE_MAX, SUBTASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
 import {
@@ -98,7 +99,10 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
   const [descDraft, setDescDraft] = useState(sub.description || "");
   const [descError, setDescError] = useState<string | null>(null);
   const [descUploading, setDescUploading] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const [titleUploading, setTitleUploading] = useState(false);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const renameRef = useRef<HTMLInputElement | null>(null);
   const descRef = useRef<HTMLTextAreaElement | null>(null);
   const done = sub.status === "done";
   const isLong = sub.title.length > 140 || sub.title.includes("\n");
@@ -116,9 +120,14 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
   };
 
   const commitEdit = async () => {
+    // Keep the editor open while a pasted image is still uploading, otherwise
+    // the markdown would be saved without the image.
+    if (titleUploading) return;
     // Save before closing so the row cannot flash the stale title while the
-    // PATCH is in flight (same reason as the task description editor).
-    const next = draft.trim();
+    // PATCH is in flight (same reason as the task description editor). Read the
+    // live input value so an image inserted a moment ago is never dropped by a
+    // state update that has not rendered yet.
+    const next = (renameRef.current?.value ?? draftRef.current?.value ?? draft).trim();
     if (next.length > SUBTASK_TITLE_MAX) {
       // Keep the editor open so the over-limit counter stays visible.
       return;
@@ -150,6 +159,22 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
     }
   };
 
+  const handleTitleImage = async (
+    target: HTMLTextAreaElement | HTMLInputElement | null,
+    source: ImageInsertSource | null
+  ) => {
+    if (!target || !source) return;
+    setTitleError(null);
+    setTitleUploading(true);
+    try {
+      await insertImageAtCursor(target, source, setDraft);
+    } catch (err) {
+      setTitleError(err instanceof Error ? err.message : "Could not upload that image.");
+    } finally {
+      setTitleUploading(false);
+    }
+  };
+
   const handleDescriptionImage = async (source: ImageInsertSource | null) => {
     const ta = descRef.current;
     if (!ta || !source) return;
@@ -169,7 +194,13 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
       ref={setNodeRef}
       style={style}
       className="group flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-hover/60"
-      onDoubleClick={() => startEditing(false)}
+      onDoubleClick={() => {
+        // Double-clicking inside an editor is how users select a word or a
+        // paragraph. Starting a rename here used to reset the draft and close
+        // the formatter, so the toolbar vanished mid-selection.
+        if (editing || editingDescription) return;
+        startEditing(false);
+      }}
     >
       <button
         {...listeners}
@@ -201,7 +232,28 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
               autoFocus
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => void commitEdit()}
+              onPaste={(e) => {
+                const source = imageSourceFrom(e.clipboardData);
+                if (!source) return;
+                e.preventDefault();
+                void handleTitleImage(draftRef.current, source);
+              }}
+              onDragOver={(e) => {
+                if (imageSourceFrom(e.dataTransfer)) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                const source = imageSourceFrom(e.dataTransfer);
+                if (!source) return;
+                e.preventDefault();
+                void handleTitleImage(draftRef.current, source);
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onBlur={(e) => {
+                // The toolbar's image picker moves focus to a hidden file
+                // input; do not commit and close before the upload lands.
+                if (e.relatedTarget instanceof HTMLInputElement && e.relatedTarget.type === "file") return;
+                void commitEdit();
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -216,14 +268,42 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
               rows={2}
               className="input-field w-full bg-transparent px-1 py-0 text-sm"
             />
+            {titleUploading && (
+              <span role="status" className="text-[10px] text-secondary">
+                Uploading image...
+              </span>
+            )}
+            {titleError && (
+              <p role="alert" className="text-[10px] text-danger">
+                {titleError}
+              </p>
+            )}
+            <MarkdownImagePreview text={draft} />
             <CharLimitHint value={draft} max={SUBTASK_TITLE_MAX} className="mt-1" />
           </div>
         ) : (
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <input
+              ref={renameRef}
               autoFocus
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              onPaste={(e) => {
+                const source = imageSourceFrom(e.clipboardData);
+                if (!source) return;
+                e.preventDefault();
+                void handleTitleImage(renameRef.current, source);
+              }}
+              onDragOver={(e) => {
+                if (imageSourceFrom(e.dataTransfer)) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                const source = imageSourceFrom(e.dataTransfer);
+                if (!source) return;
+                e.preventDefault();
+                void handleTitleImage(renameRef.current, source);
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
               onBlur={() => void commitEdit()}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -233,6 +313,17 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
               }}
               className="input-field bg-transparent text-sm px-1 py-0"
             />
+            {titleUploading && (
+              <span role="status" className="text-[10px] text-secondary">
+                Uploading image...
+              </span>
+            )}
+            {titleError && (
+              <p role="alert" className="text-[10px] text-danger">
+                {titleError}
+              </p>
+            )}
+            <MarkdownImagePreview text={draft} />
             <CharLimitHint value={draft} max={SUBTASK_TITLE_MAX} className="mt-1" />
           </div>
         )
@@ -250,7 +341,7 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                   : ""
               }`}
             >
-              <Markdown>{sub.title}</Markdown>
+              <Markdown compact>{sub.title}</Markdown>
             </div>
             {isLong && (
               <button
@@ -311,6 +402,7 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                     e.preventDefault();
                     void handleDescriptionImage(source);
                   }}
+                  onDoubleClick={(e) => e.stopPropagation()}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                       e.preventDefault();
@@ -325,6 +417,7 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                   rows={3}
                   className="input-field w-full bg-transparent text-xs"
                 />
+                <MarkdownImagePreview text={descDraft} className="mt-1" />
                 {descError && (
                   <p role="alert" className="mt-1 text-[10px] text-danger">
                     {descError}
@@ -374,6 +467,9 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
 export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
   const [items, setItems] = useState<Task[]>(() => sortSubtasks(subtasks));
   const [newTitle, setNewTitle] = useState("");
+  const [newError, setNewError] = useState<string | null>(null);
+  const [newUploading, setNewUploading] = useState(false);
+  const newTitleRef = useRef<HTMLInputElement | null>(null);
   // Completed subtasks are hidden by default so the list stays focused on what
   // is left; the header toggle reveals them again.
   const [showCompleted, setShowCompleted] = useState(false);
@@ -397,19 +493,39 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
     );
   };
 
+  const handleNewImage = async (source: ImageInsertSource | null) => {
+    const input = newTitleRef.current;
+    if (!input || !source) return;
+    setNewError(null);
+    setNewUploading(true);
+    try {
+      await insertImageAtCursor(input, source, setNewTitle);
+    } catch (err) {
+      setNewError(err instanceof Error ? err.message : "Could not upload that image.");
+    } finally {
+      setNewUploading(false);
+    }
+  };
+
   const handleAdd = async () => {
+    if (newUploading) return;
     if (!newTitle.trim()) return;
     if (newTitle.trim().length > SUBTASK_TITLE_MAX) return;
-    const data = await api.post<{ id: string; title: string; status: string }>(`/tasks/${taskId}/subtasks`, {
-      title: newTitle.trim(),
-    });
-    setItems((prev) =>
-      sortSubtasks([
-        ...prev,
-        { ...data, status: data.status as Task["status"] } as Task,
-      ])
-    );
-    setNewTitle("");
+    setNewError(null);
+    try {
+      const data = await api.post<{ id: string; title: string; status: string }>(`/tasks/${taskId}/subtasks`, {
+        title: newTitle.trim(),
+      });
+      setItems((prev) =>
+        sortSubtasks([
+          ...prev,
+          { ...data, status: data.status as Task["status"] } as Task,
+        ])
+      );
+      setNewTitle("");
+    } catch (err) {
+      setNewError(err instanceof Error ? err.message : "Could not add that subtask.");
+    }
   };
 
   const handleDelete = async (sub: Task) => {
@@ -497,15 +613,48 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
       <div className="mt-2">
         <div className="flex gap-2">
           <input
+            ref={newTitleRef}
             type="text"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
+            onPaste={(e) => {
+              const source = imageSourceFrom(e.clipboardData);
+              if (!source) return;
+              e.preventDefault();
+              void handleNewImage(source);
+            }}
+            onDragOver={(e) => {
+              if (imageSourceFrom(e.dataTransfer)) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              const source = imageSourceFrom(e.dataTransfer);
+              if (!source) return;
+              e.preventDefault();
+              void handleNewImage(source);
+            }}
             placeholder="Add subtask..."
             className="input-field flex-1 text-xs"
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+            onKeyDown={(e) => e.key === "Enter" && void handleAdd()}
           />
-          <button onClick={handleAdd} className="btn btn-gradient px-2.5 py-1 text-xs rounded-lg">+</button>
+          <button
+            onClick={() => void handleAdd()}
+            disabled={newUploading}
+            className="btn btn-gradient px-2.5 py-1 text-xs rounded-lg disabled:opacity-60"
+          >
+            +
+          </button>
         </div>
+        {newUploading && (
+          <span role="status" className="mt-1 block text-[10px] text-secondary">
+            Uploading image...
+          </span>
+        )}
+        {newError && (
+          <p role="alert" className="mt-1 text-[10px] text-danger">
+            {newError}
+          </p>
+        )}
+        <MarkdownImagePreview text={newTitle} className="mt-1" />
         <CharLimitHint value={newTitle} max={SUBTASK_TITLE_MAX} className="mt-1" />
       </div>
     </div>

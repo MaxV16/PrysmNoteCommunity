@@ -17,7 +17,7 @@ use axum::http::HeaderMap;
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 use sqlx::{PgConnection, PgPool, Row};
 use uuid::Uuid;
@@ -158,6 +158,17 @@ impl NullableString {
     }
 }
 
+/// Deserialize a present field even when its JSON value is `null`. Plain
+/// `Option<T>` collapses both "missing" and `null` to `None`, which made an
+/// explicit `{"reminder_at": null}` indistinguishable from an omitted field and
+/// silently kept the old reminder.
+fn deserialize_present<'de, D>(deserializer: D) -> Result<Option<NullableString>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    NullableString::deserialize(deserializer).map(Some)
+}
+
 fn default_status() -> String {
     "backlog".to_string()
 }
@@ -206,7 +217,7 @@ pub(crate) struct UpdateTaskRequest {
     pub(crate) list_id: Option<Uuid>,
     #[serde(default)]
     pub(crate) reminder_enabled: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present")]
     pub(crate) reminder_at: Option<NullableString>,
     #[serde(default)]
     pub(crate) reminder_inapp: Option<bool>,

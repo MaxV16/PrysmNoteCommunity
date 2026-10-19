@@ -7,6 +7,14 @@ const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp
 /** A file dropped/picked from disk, or an image URL copied from another app. */
 export type ImageInsertSource = File | string;
 
+/** Textarea or single-line input that can receive an uploaded image. */
+export type ImageInsertTarget = HTMLTextAreaElement | HTMLInputElement;
+
+export interface MarkdownImage {
+  alt: string;
+  url: string;
+}
+
 function imageError(file: File): string | null {
   if (!IMAGE_TYPES.has(file.type)) return "Choose a PNG, JPEG, GIF, or WebP image.";
   if (file.size === 0) return "That image is empty.";
@@ -119,7 +127,7 @@ async function resolveImage(source: ImageInsertSource): Promise<{ url: string; a
  * so a slow upload can neither lose the image nor overwrite newer text.
  */
 export async function insertImageAtCursor(
-  textarea: HTMLTextAreaElement,
+  textarea: ImageInsertTarget,
   source: ImageInsertSource,
   onChange: (next: string) => void
 ): Promise<void> {
@@ -205,4 +213,21 @@ export function imageUrlFrom(data: DataTransfer | null): string | null {
 /** First image from a clipboard/drop payload, preferring a real file. */
 export function imageSourceFrom(data: DataTransfer | null): ImageInsertSource | null {
   return imageFrom(data) ?? imageUrlFrom(data);
+}
+
+const MARKDOWN_IMAGE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+
+/**
+ * Images already present in markdown text. Used to keep a live preview under an
+ * editor, so an attached image does not visually disappear while the raw
+ * markdown source is being edited.
+ */
+export function markdownImages(text: string): MarkdownImage[] {
+  const images: MarkdownImage[] = [];
+  if (!text) return images;
+  for (const match of text.matchAll(MARKDOWN_IMAGE)) {
+    const url = match[2]?.trim();
+    if (url) images.push({ alt: match[1] || "image", url });
+  }
+  return images;
 }
