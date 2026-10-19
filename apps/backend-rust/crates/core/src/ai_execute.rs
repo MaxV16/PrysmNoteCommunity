@@ -53,6 +53,8 @@ const UPDATE_TASK_FIELDS: &[&str] = &[
     "reminder_email",
 ];
 
+const UPDATE_SUBTASK_FIELDS: &[&str] = &["title", "description", "status", "priority"];
+
 const GENERIC_SUGGESTIONS: [&str; 5] = [
     "Define scope and requirements",
     "Break down into smaller steps",
@@ -1076,7 +1078,7 @@ async fn tool_create_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
 /// Read the update payload from `fields`. Models occasionally send the object
 /// as a JSON string, or forget the wrapper and put fields at the top level; both
 /// used to turn into a silent no-op that still reported `"updated": true`.
-fn update_fields_from_args(args: &Value) -> Map<String, Value> {
+fn update_fields_from_args(args: &Value, valid_fields: &[&str]) -> Map<String, Value> {
     let mut fields = match args.get("fields") {
         Some(Value::Object(map)) => map.clone(),
         Some(Value::String(raw)) => serde_json::from_str::<Value>(raw)
@@ -1087,7 +1089,7 @@ fn update_fields_from_args(args: &Value) -> Map<String, Value> {
     };
     if fields.is_empty() {
         if let Some(obj) = args.as_object() {
-            for key in UPDATE_TASK_FIELDS {
+            for key in valid_fields {
                 if let Some(value) = obj.get(*key) {
                     fields.insert((*key).to_string(), value.clone());
                 }
@@ -1099,7 +1101,7 @@ fn update_fields_from_args(args: &Value) -> Map<String, Value> {
 
 async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
     let raw_id = args.get("task_id").cloned().unwrap_or(Value::Null);
-    let fields = update_fields_from_args(args);
+    let fields = update_fields_from_args(args, UPDATE_TASK_FIELDS);
     if fields.is_empty() {
         return ok_obj(json!({
             "error": "No fields to update",
@@ -2255,11 +2257,14 @@ async fn tool_update_subtask(state: &AppState, user_id: Uuid, args: &Value) -> T
     let (Some(parent_id), Some(child_id)) = (safe_uuid(&raw_parent), safe_uuid(&raw_child)) else {
         return ok_obj(json!({ "error": "Subtask not found" }));
     };
-    let fields = args
-        .get("fields")
-        .and_then(|f| f.as_object())
-        .cloned()
-        .unwrap_or_default();
+    let fields = update_fields_from_args(args, UPDATE_SUBTASK_FIELDS);
+    if fields.is_empty() {
+        return ok_obj(json!({
+            "error": "No fields to update",
+            "hint": "Pass at least one of title, description, status, or priority in the fields object.",
+            "valid_fields": UPDATE_SUBTASK_FIELDS,
+        }));
+    }
 
     let mut tx = begin(state, user_id).await?;
     if task::find_task(&mut *tx, parent_id, user_id, false)
@@ -2281,38 +2286,96 @@ async fn tool_update_subtask(state: &AppState, user_id: Uuid, args: &Value) -> T
         tx.rollback().await.ok();
         return ok_obj(json!({ "error": "Subtask not found" }));
     }
+
+    let mut payloads: Vec<String> = Vec::new();
+    let mut applied: Vec<String> = Vec::new();
     for (key, value) in &fields {
         match key.as_str() {
-            "title" => {
-                if let Some(s) = value.as_str() {
-                    child.title = s.to_string();
+            "title" => match value.as_str().map(str::trim) {
+                Some(title) if !title.is_empty() => {
+                    child.title = title.to_string();
+                    applied.push(key.clone());
                 }
-            }
+                _ => payloads.push(obj_str(&json!({
+                    "error": "title must be a non-empty string"
+                }))),
+            },
             "description" => {
-                child.description = value.as_str().map(|s| s.to_string());
+                if value.is_null() {
+                    child.description = None;
+                    applied.push(key.clone());
+                } else if let Some(s) = value.as_str() {
+                    child.description = Some(s.to_string());
+                    applied.push(key.clone());
+                } else {
+                    payloads.push(obj_str(&json!({
+                        "error": "description must be a string or null"
+                    })));
+                }
             }
             "status" => {
-                if let Some(s) = value.as_str() {
-                    child.status = s.to_string();
+                let status = value.as_str().unwrap_or("");
+                if matches!(status, "backlog" | "todo" | "in_progress" | "done" | "cancelled") {
+                    child.status = status.to_string();
+                    applied.push(key.clone());
+                } else {
+                    payloads.push(obj_str(&json!({
+                        "error": "status must be one of backlog, todo, in_progress, done, cancelled"
+                    })));
                 }
             }
-            "priority" => {
-                child.priority = task::normalize_priority(value.as_i64());
-            }
-            _ => {}
+            "priority" => match value.as_i64() {
+                Some(priority) => {
+                    child.priority = task::normalize_priority(Some(priority));
+                    applied.push(key.clone());
+                }
+                None => payloads.push(obj_str(&json!({
+                    "error": "priority must be a number (1 = high, 2 = medium, 3 = low)"
+                }))),
+            },
+            other => payloads.push(obj_str(&json!({
+                "error": format!("Unknown field: {other}"),
+                "valid_fields": UPDATE_SUBTASK_FIELDS,
+            }))),
         }
     }
+
+    if applied.is_empty() {
+        tx.rollback().await.ok();
+        return Ok(payloads);
+    }
+
+    let completed = fields.get("status").and_then(|v| v.as_str()) == Some("done");
     tasks::persist_task(&mut *tx, &child).await.map_err(db_err)?;
+    if completed {
+        sqlx::query("UPDATE tasks SET completed_at = now() WHERE id = $1 AND user_id = $2")
+            .bind(child.id)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_err)?;
+    }
     tx.commit().await.map_err(db_err)?;
-    ok_obj(json!({
-        "updated": true,
-        "subtask": {
-            "id": child.id.to_string(),
-            "title": child.title,
-            "status": child.status,
-            "priority": child.priority,
-        },
-    }))
+
+    let had_error = payloads.iter().any(|p| {
+        serde_json::from_str::<Value>(p)
+            .map(|v| v.get("error").is_some())
+            .unwrap_or(false)
+    });
+    if had_error {
+        payloads.push(obj_str(&json!({ "partial": true, "applied": applied })));
+    } else {
+        payloads.push(obj_str(&json!({
+            "updated": true,
+            "subtask": {
+                "id": child.id.to_string(),
+                "title": child.title,
+                "status": child.status,
+                "priority": child.priority,
+            },
+        })));
+    }
+    Ok(payloads)
 }
 
 async fn tool_delete_subtask(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
@@ -3587,6 +3650,101 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("No fields to update"));
+
+        for sql in [
+            "DELETE FROM tasks WHERE user_id = $1",
+            "DELETE FROM lists WHERE user_id = $1",
+            "DELETE FROM users WHERE id = $1",
+        ] {
+            sqlx::query(sql)
+                .bind(user.id)
+                .execute(&state.pool)
+                .await
+                .expect("cleanup");
+        }
+    }
+
+    #[tokio::test]
+    async fn update_subtask_rejects_unknown_fields_and_accepts_top_level_fields() {
+        let Some(state) = live_state() else {
+            return;
+        };
+        let email = format!("rust-ai-subtask-update-{}@test.local", Uuid::new_v4());
+        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .expect("create user");
+
+        let call = |id: &'static str, name: &'static str, args: Value| {
+            json!({
+                "id": id,
+                "function": { "name": name, "arguments": serde_json::to_string(&args).unwrap() },
+            })
+        };
+
+        let created = execute_tool_calls(
+            &state,
+            user.id,
+            &[call("c1", "create_task", json!({ "title": "Subtask parent" }))],
+        )
+        .await;
+        let parent_id = first_content(&created)["task"]["id"]
+            .as_str()
+            .expect("parent id")
+            .to_string();
+
+        let child = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c2",
+                "create_subtask",
+                json!({ "task_id": parent_id, "title": "Child task" }),
+            )],
+        )
+        .await;
+        let child_id = first_content(&child)["subtask"]["id"]
+            .as_str()
+            .expect("child id")
+            .to_string();
+
+        let unknown = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c3",
+                "update_subtask",
+                json!({
+                    "task_id": parent_id,
+                    "subtask_id": child_id,
+                    "fields": { "colour": "red" },
+                }),
+            )],
+        )
+        .await;
+        let unknown_payload = first_content(&unknown);
+        assert!(unknown_payload.get("updated").is_none());
+        assert!(unknown_payload["error"]
+            .as_str()
+            .unwrap()
+            .contains("Unknown field"));
+
+        let updated = execute_tool_calls(
+            &state,
+            user.id,
+            &[call(
+                "c4",
+                "update_subtask",
+                json!({
+                    "task_id": parent_id,
+                    "subtask_id": child_id,
+                    "status": "done",
+                }),
+            )],
+        )
+        .await;
+        let updated_payload = first_content(&updated);
+        assert_eq!(updated_payload["updated"], true);
+        assert_eq!(updated_payload["subtask"]["status"], "done");
 
         for sql in [
             "DELETE FROM tasks WHERE user_id = $1",
