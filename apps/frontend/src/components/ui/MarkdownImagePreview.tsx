@@ -27,7 +27,7 @@ export function MarkdownImagePreview({
       {images.map((image, index) => (
         <div
           key={`${image.url}-${index}`}
-          className="group/imagepreview relative max-w-[180px] overflow-hidden rounded-lg border border-border/60 bg-base/40 p-1"
+          className="group/imagepreview relative min-h-8 min-w-8 max-w-[180px] rounded-lg border border-border/60 bg-base/40 p-1"
         >
           <Markdown compact>
             {`![${image.alt.replace(/[[\]]/g, "")}](${image.url})`}
