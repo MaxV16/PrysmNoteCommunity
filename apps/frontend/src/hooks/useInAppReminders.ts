@@ -211,14 +211,15 @@ export function useInAppReminders() {
       for (const candidate of fresh) {
         safeSet(`${REMINDED_PREFIX}${candidate.id}_${today}`, "1");
       }
-      // The Electron desktop app surfaces reminders as real OS notifications
-      // instead of the in-app card stack.
+      // The Electron desktop app surfaces reminders as real OS notifications.
+      // Keep the in-app cards as well: they are the fallback when the OS does
+      // not show the notification (unsigned macOS builds, notifications
+      // disabled in the OS, or a dropped reference in the main process).
       if (getDesktopBridge()) {
         const title =
           fresh.length === 1 ? fresh[0].title : `${fresh.length} tasks due soon`;
         const body = fresh.slice(0, 5).map((c) => c.title).join("\n");
         openDesktopNotification({ title, body });
-        return;
       }
       setReminders((prev) => {
         const existing = new Set(prev.map((r) => r.taskId));
@@ -232,7 +233,7 @@ export function useInAppReminders() {
         if (next.length === 0) return prev;
         return [...prev, ...next].sort(byDateThenTitle);
       });
-      if (prefs.push_enabled) {
+      if (prefs.push_enabled && !getDesktopBridge()) {
         const title =
           fresh.length === 1 ? fresh[0].title : `${fresh.length} tasks due soon`;
         const body = fresh.slice(0, 5).map((c) => c.title).join("\n");

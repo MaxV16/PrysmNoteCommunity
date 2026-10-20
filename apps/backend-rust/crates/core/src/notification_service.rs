@@ -250,6 +250,11 @@ pub async fn send_task_reminders(
            AND deleted_at IS NULL AND is_archived = false \
            AND status::text NOT IN ('done', 'cancelled') \
            AND (reminder_email = true OR reminder_push = true) \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM notification_logs l \
+             WHERE l.task_id = tasks.id AND l.kind = 'task_reminder' \
+               AND l.sent_at >= tasks.reminder_at \
+           ) \
          ORDER BY reminder_at ASC LIMIT 200",
     )
     .fetch_all(&mut *conn)
@@ -799,6 +804,87 @@ mod tests {
             count_task_reminder_logs(&pool, task_id).await,
             1,
             "a future reminder must not send"
+        );
+
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    /// A delivered in-app reminder keeps `reminder_at` set forever, so it used
+    /// to stay in the due scan and consume the query's LIMIT. Once enough of
+    /// them piled up, newer reminders fell off the end of the scan and never
+    /// fired. The NOT EXISTS filter must keep already-delivered rows out of the
+    /// LIMIT so a pending reminder still sends.
+    #[tokio::test]
+    async fn delivered_reminders_do_not_starve_pending_ones() {
+        let Some(settings) = live_settings().await else {
+            return;
+        };
+        let pool = crate::db::connect(&settings.database_url).await.unwrap();
+        let email = "scheduled-starve@example.com";
+        let user = crate::user::create_email_user(&pool, email, "not-a-real-hash", None)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_notification_prefs \
+             (user_id, inapp_reminders, reminder_time, email_reminders, due_alerts, email_digest, push_enabled, sound) \
+             VALUES ($1, true, '20:00', true, true, false, false, true) \
+             ON CONFLICT (user_id) DO UPDATE SET email_reminders = true, push_enabled = false",
+        )
+        .bind(user.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // More already-delivered in-app reminders than the query's LIMIT. Each
+        // keeps reminder_at set (it is also in-app) and gets a log at or after
+        // its time, so without the filter they fill the whole scan.
+        sqlx::query(
+            "INSERT INTO tasks \
+             (user_id, parent_task_id, title, description, status, priority, start_date, due_date, start_time, end_time, is_all_day, is_archived, sort_order, reminder_enabled, reminder_at, reminder_inapp, reminder_email) \
+             SELECT $1, NULL, 'Delivered ' || g, NULL, 'todo'::task_status, 0, NULL, NULL, NULL, NULL, false, false, 0, true, now() - ((g + 1) || ' minutes')::interval, true, true \
+             FROM generate_series(1, 205) AS g",
+        )
+        .bind(user.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO notification_logs (user_id, task_id, kind) \
+             SELECT $1, id, 'task_reminder' FROM tasks \
+             WHERE user_id = $1 AND title LIKE 'Delivered %'",
+        )
+        .bind(user.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // The newest reminder, due right now. It sorts after every delivered
+        // row, so the old LIMIT would have pushed it out of the scan.
+        let pending_id: Uuid = sqlx::query(
+            "INSERT INTO tasks \
+             (user_id, parent_task_id, title, description, status, priority, start_date, due_date, start_time, end_time, is_all_day, is_archived, sort_order, reminder_enabled, reminder_at, reminder_inapp, reminder_email) \
+             VALUES ($1, NULL, 'Pending reminder', NULL, 'todo'::task_status, 0, NULL, NULL, NULL, NULL, false, false, 0, true, now() - interval '1 minute', true, true) \
+             RETURNING id",
+        )
+        .bind(user.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .try_get("id")
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        send_task_reminders(&mut *tx, &settings).await.unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            count_task_reminder_logs(&pool, pending_id).await,
+            1,
+            "a pending reminder must send even when older delivered reminders exist"
         );
 
         sqlx::query("DELETE FROM users WHERE id = $1")

@@ -278,7 +278,7 @@ describe("useInAppReminders system notifications", () => {
     vi.unstubAllGlobals();
   });
 
-  it("delivers a native desktop notification instead of in-app cards", async () => {
+  it("delivers a native desktop notification and keeps the in-app card as a fallback", async () => {
     const showNotification = vi.fn();
     vi.stubGlobal("prysmDesktop", { isDesktop: true, showNotification });
     useAppStore.setState({
@@ -292,7 +292,10 @@ describe("useInAppReminders system notifications", () => {
       title: "Tomorrow task",
       body: "Tomorrow task",
     });
-    expect(result.current.reminders).toHaveLength(0);
+    // The OS notification is primary, but the in-app card stays as a fallback
+    // so a reminder is never lost when the OS does not surface it.
+    expect(result.current.reminders).toHaveLength(1);
+    expect(result.current.reminders[0].taskId).toBe("tomorrow");
   });
 
   it("shows a browser notification when system notifications are enabled", async () => {
