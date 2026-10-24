@@ -3,13 +3,26 @@
 export const MCP_ENDPOINT = "https://prysmnote.com/api/mcp";
 export const MCP_TOKEN_PLACEHOLDER = "prysm_live_YOUR_PAT_HERE";
 
+/**
+ * The MCP endpoint for the deployment this page is served from.
+ *
+ * The app is also self-hostable, so settings and docs must show the URL the
+ * user is actually on, not the hosted one.
+ */
+export function mcpEndpointFor(origin?: string): string {
+  if (!origin) return MCP_ENDPOINT;
+  return `${origin.replace(/\/+$/, "")}/api/mcp`;
+}
+
 export interface McpAppConfig {
   id: string;
   name: string;
   description: string;
   file: string;
   kind: "json" | "cli" | "plugin" | "markdown";
-  /** JSON string for `type: "http"` configs; the Authorization header uses MCP_TOKEN_PLACEHOLDER. */
+  /** "oauth" apps sign in through the browser; "token" apps need a PAT. */
+  auth: "oauth" | "token";
+  /** JSON string for `type: "http"` configs. */
   json?: string;
   /** CLI command string. */
   command?: string;
@@ -17,11 +30,21 @@ export interface McpAppConfig {
   text?: string;
 }
 
-const JSON_TEMPLATE = `{
+/** A remote server entry with no Authorization header: the client starts OAuth. */
+const OAUTH_JSON = (endpoint: string) => `{
+  "mcpServers": {
+    "prysm": {
+      "url": "${endpoint}"
+    }
+  }
+}`;
+
+/** Personal Access Token variant, for clients without OAuth support. */
+const TOKEN_JSON = (endpoint: string) => `{
   "mcpServers": {
     "prysm": {
       "type": "http",
-      "url": "${MCP_ENDPOINT}",
+      "url": "${endpoint}",
       "headers": {
         "Authorization": "Bearer ${MCP_TOKEN_PLACEHOLDER}"
       }
@@ -29,12 +52,12 @@ const JSON_TEMPLATE = `{
   }
 }`;
 
-const JSON_ARRAY_TEMPLATE = `{
+const TOKEN_JSON_ARRAY = (endpoint: string) => `{
   "mcp": [
     {
       "name": "prysm",
       "type": "http",
-      "url": "${MCP_ENDPOINT}",
+      "url": "${endpoint}",
       "headers": {
         "Authorization": "Bearer ${MCP_TOKEN_PLACEHOLDER}"
       }
@@ -42,153 +65,178 @@ const JSON_ARRAY_TEMPLATE = `{
   ]
 }`;
 
-const JSON_BODY_TEMPLATE = `{
-  "mcpServers": {
-    "prysm": {
-      "type": "http",
-      "url": "${MCP_ENDPOINT}",
-      "headers": {
-        "Authorization": "Bearer ${MCP_TOKEN_PLACEHOLDER}"
-      }
-    }
-  }
-}`;
-
-const OPENCODE_TEMPLATE = `{
+/** Build the per-app catalog for a given endpoint. */
+export function buildMcpApps(endpoint: string = MCP_ENDPOINT): McpAppConfig[] {
+  return [
+    {
+      id: "claude-code",
+      name: "Claude Code",
+      description: "One command in your terminal. The browser opens for sign-in.",
+      file: "terminal (claude mcp add)",
+      kind: "cli",
+      auth: "oauth",
+      command: `claude mcp add --transport http prysm ${endpoint}`,
+    },
+    {
+      id: "opencode",
+      name: "opencode",
+      description: "Add the server to your opencode config, then run opencode.",
+      file: "~/.config/opencode/opencode.json",
+      kind: "json",
+      auth: "oauth",
+      json: `{
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "prysm": {
       "type": "remote",
-      "url": "${MCP_ENDPOINT}",
-      "headers": {
-        "Authorization": "Bearer ${MCP_TOKEN_PLACEHOLDER}"
-      }
+      "url": "${endpoint}",
+      "enabled": true
     }
   }
-}`;
+}`,
+    },
+    {
+      id: "vscode",
+      name: "VS Code (GitHub Copilot)",
+      description: "Add it to your workspace, then start the server from the MCP view.",
+      file: ".vscode/mcp.json",
+      kind: "json",
+      auth: "oauth",
+      json: `{
+  "servers": {
+    "prysm": {
+      "type": "http",
+      "url": "${endpoint}"
+    }
+  }
+}`,
+    },
+    {
+      id: "cursor",
+      name: "Cursor",
+      description: "Add the server in Cursor settings; it opens the browser on first use.",
+      file: "~/.cursor/mcp.json",
+      kind: "json",
+      auth: "oauth",
+      json: `{
+  "mcpServers": {
+    "prysm": {
+      "url": "${endpoint}"
+    }
+  }
+}`,
+    },
+    {
+      id: "claude-desktop",
+      name: "Claude Desktop",
+      description: "Claude Desktop connects through the mcp-remote bridge, which also handles sign-in.",
+      file: "claude_desktop_config.json",
+      kind: "json",
+      auth: "oauth",
+      json: `{
+  "mcpServers": {
+    "prysm": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "${endpoint}"]
+    }
+  }
+}`,
+    },
+    {
+      id: "kilo",
+      name: "Kilo",
+      description: "Add the server to the Kilo MCP config.",
+      file: "kilo.jsonc",
+      kind: "json",
+      auth: "oauth",
+      json: OAUTH_JSON(endpoint),
+    },
+    {
+      id: "cline",
+      name: "Cline",
+      description: "Paste the entry into Cline's MCP settings, or paste a token if it asks for one.",
+      file: "cline_mcp_settings.json",
+      kind: "json",
+      auth: "token",
+      json: TOKEN_JSON(endpoint),
+    },
+    {
+      id: "roo-code",
+      name: "Roo Code",
+      description: "Paste the entry into Roo Code's MCP settings.",
+      file: "roo_mcp_settings.json",
+      kind: "json",
+      auth: "token",
+      json: TOKEN_JSON(endpoint),
+    },
+    {
+      id: "windsurf",
+      name: "Windsurf",
+      description: "Windsurf stores user-level MCP config in your home directory.",
+      file: "~/.codeium/windsurf/mcp_config.json",
+      kind: "json",
+      auth: "token",
+      json: TOKEN_JSON(endpoint),
+    },
+    {
+      id: "zed",
+      name: "Zed",
+      description: "Zed configures MCP servers in your settings.json under the \"mcp\" array.",
+      file: "settings.json",
+      kind: "json",
+      auth: "token",
+      json: TOKEN_JSON_ARRAY(endpoint),
+    },
+    {
+      id: "jetbrains",
+      name: "JetBrains IDEs",
+      description: "Add a new HTTP server in Settings > Tools > MCP Client.",
+      file: "Settings > Tools > MCP Client",
+      kind: "plugin",
+      auth: "token",
+      text: TOKEN_JSON(endpoint),
+    },
+    {
+      id: "continue",
+      name: "Continue.dev",
+      description: "Continue loads MCP servers from config.json.",
+      file: "~/.continue/config.json",
+      kind: "json",
+      auth: "token",
+      json: TOKEN_JSON(endpoint),
+    },
+    {
+      id: "gemini-cli",
+      name: "Gemini CLI",
+      description: "Add a Streamable HTTP server with the bearer token.",
+      file: "~/.gemini/settings.json",
+      kind: "json",
+      auth: "token",
+      json: TOKEN_JSON(endpoint),
+    },
+    {
+      id: "obsidian",
+      name: "Obsidian",
+      description: "Install a community MCP plugin (for example MCP Tools) and add this HTTP server.",
+      file: "Obsidian community plugin",
+      kind: "plugin",
+      auth: "token",
+      text: TOKEN_JSON(endpoint),
+    },
+    {
+      id: "raycast",
+      name: "Raycast",
+      description: "The Raycast MCP extension lets you add remote HTTP servers.",
+      file: "Raycast MCP extension",
+      kind: "plugin",
+      auth: "token",
+      text: `URL: ${endpoint}\nToken: ${MCP_TOKEN_PLACEHOLDER}`,
+    },
+  ];
+}
 
-export const MCP_APPS: McpAppConfig[] = [
-  {
-    id: "vscode",
-    name: "VS Code (GitHub Copilot MCP)",
-    description: "Add the server to your workspace so GitHub Copilot can read and update tasks.",
-    file: ".vscode/mcp.json",
-    kind: "json",
-    json: JSON_TEMPLATE,
-  },
-  {
-    id: "cursor",
-    name: "Cursor",
-    description: "Cursor reads MCP servers from the project settings file.",
-    file: ".cursor/mcp.json",
-    kind: "json",
-    json: JSON_TEMPLATE,
-  },
-  {
-    id: "windsurf",
-    name: "Windsurf",
-    description: "Windsurf stores user-level MCP config in your home directory.",
-    file: "~/.codeium/windsurf/mcp_config.json",
-    kind: "json",
-    json: JSON_TEMPLATE,
-  },
-  {
-    id: "claude-desktop",
-    name: "Claude Desktop",
-    description: "Add the server to the Claude Desktop app config to let Claude use your tasks.",
-    file: "claude_desktop_config.json",
-    kind: "json",
-    json: JSON_TEMPLATE,
-  },
-  {
-    id: "claude-code",
-    name: "Claude Code",
-    description: "Register the server with the Claude Code CLI in your terminal.",
-    file: "terminal (claude mcp add)",
-    kind: "cli",
-    command: `claude mcp add --transport http prysm ${MCP_ENDPOINT} --header "Authorization: Bearer ${MCP_TOKEN_PLACEHOLDER}"`,
-  },
-  {
-    id: "zed",
-    name: "Zed",
-    description: "Zed configures MCP servers in your settings.json under the \"mcp\" array.",
-    file: "settings.json",
-    kind: "json",
-    json: JSON_ARRAY_TEMPLATE,
-  },
-  {
-    id: "jetbrains",
-    name: "JetBrains IDEs",
-    description: "IntelliJ, PyCharm and WebStorm use the MCP Client plugin. Add a new HTTP server in Settings > Tools > MCP Client.",
-    file: "Settings > Tools > MCP Client",
-    kind: "plugin",
-    text: JSON_BODY_TEMPLATE,
-  },
-  {
-    id: "continue",
-    name: "Continue.dev",
-    description: "Continue loads MCP servers from config.json (the legacy mcpServers shape is still honored).",
-    file: "~/.continue/config.json",
-    kind: "json",
-    json: JSON_TEMPLATE,
-  },
-  {
-    id: "cline",
-    name: "Cline",
-    description: "Cline stores MCP servers in its settings file; paste the HTTP server entry.",
-    file: "cline_mcp_settings.json",
-    kind: "json",
-    json: JSON_TEMPLATE,
-  },
-  {
-    id: "roo-code",
-    name: "Roo Code",
-    description: "Roo Code stores MCP servers in its settings file; paste the HTTP server entry.",
-    file: "roo_mcp_settings.json",
-    kind: "json",
-    json: JSON_TEMPLATE,
-  },
-  {
-    id: "kilo",
-    name: "Kilo",
-    description: "Kilo loads MCP servers from its project config file.",
-    file: "kilo.json",
-    kind: "json",
-    json: JSON_TEMPLATE,
-  },
-  {
-    id: "opencode",
-    name: "opencode",
-    description: "opencode reads remote MCP servers from its global config (~/.config/opencode/opencode.jsonc) or a project opencode.json. Add this under the \"mcp\" key.",
-    file: "~/.config/opencode/opencode.jsonc",
-    kind: "json",
-    json: OPENCODE_TEMPLATE,
-  },
-  {
-    id: "gemini-cli",
-    name: "Gemini CLI",
-    description: "Gemini CLI accepts MCP servers through its settings. Add a Streamable HTTP server with the bearer token.",
-    file: "~/.gemini/settings.json",
-    kind: "json",
-    json: JSON_TEMPLATE,
-  },
-  {
-    id: "obsidian",
-    name: "Obsidian",
-    description: "Install a community MCP plugin (for example MCP Tools) and add this HTTP server.",
-    file: "Obsidian community plugin",
-    kind: "plugin",
-    text: JSON_TEMPLATE,
-  },
-  {
-    id: "raycast",
-    name: "Raycast",
-    description: "The Raycast MCP extension lets you add remote HTTP servers. Paste the URL and token.",
-    file: "Raycast MCP extension",
-    kind: "plugin",
-    text: `URL: ${MCP_ENDPOINT}\nToken: ${MCP_TOKEN_PLACEHOLDER}`,
-  },
-];
+/** The hosted defaults, used before the page knows its own origin. */
+export const MCP_APPS: McpAppConfig[] = buildMcpApps(MCP_ENDPOINT);
 
 export const MCP_EXAMPLE_PROMPTS = [
   "What tasks do I have tomorrow?",

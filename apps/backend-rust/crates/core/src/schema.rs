@@ -119,6 +119,12 @@ DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'prysm_system') THEN
         GRANT SELECT, UPDATE ON public.api_tokens TO prysm_system;
+        -- The MCP OAuth token endpoint (crates/ee/src/mcp_oauth.rs) reads a
+        -- user's token_version on the system pool, because an authorization
+        -- code is exchanged before any user context exists. Without this grant
+        -- the exchange silently failed with "invalid_grant" right after the
+        -- browser approval, so no AI app could ever finish connecting.
+        GRANT SELECT ON public.users TO prysm_system;
     END IF;
 END $$;
 

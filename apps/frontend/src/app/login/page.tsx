@@ -11,6 +11,7 @@ import { BrandMark } from "@/components/ui/BrandMark";
 import { FormStatus } from "@/components/ui/FormStatus";
 import { isWebAuthnSupported, loginWithPasskey } from "@/lib/webauthn";
 import { openDesktopPasskey } from "@/lib/desktop-bridge";
+import { needsFullNavigation, nextFromSearch } from "@/lib/safe-next";
 
 const SSO_ERROR_MESSAGES: Record<string, string> = {
   sso_not_configured: "SSO is not configured on this server yet.",
@@ -37,19 +38,34 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [passkeySupported, setPasskeySupported] = useState(false);
+  // Arriving from an MCP client's authorize request: say so, so the browser
+  // jump back to the app is expected rather than surprising.
+  const [pendingConnect, setPendingConnect] = useState(false);
   const { login } = useAuth();
   const router = useRouter();
 
   // Where to land after a successful sign-in. `next` is set by pages that bounce
-  // an unauthenticated deep link here (e.g. a returning OAuth callback carrying
-  // ?code=...), so the destination and its query string are not lost. Only
-  // same-site paths are honored (no scheme, no protocol-relative `//`).
+  // an unauthenticated deep link here (e.g. an MCP OAuth authorize request, or a
+  // returning OAuth callback carrying ?code=...), so the destination and its
+  // query string are not lost. Only same-site destinations are honored; a
+  // same-origin absolute URL (sent by older authorize responses) is normalized
+  // to its path and query.
   const nextDestination = useCallback((): string => {
     if (typeof window === "undefined") return "/";
-    const next = new URLSearchParams(window.location.search).get("next");
-    if (next && next.startsWith("/") && !next.startsWith("//")) return next;
-    return "/";
+    return nextFromSearch(window.location.search, window.location.origin);
   }, []);
+
+  // `next` may point at a backend route (`/api/...`, e.g. the MCP authorize
+  // request). The app router cannot render those, so hand those URLs to the
+  // browser; ordinary app routes keep client-side navigation.
+  const goNext = useCallback(() => {
+    const destination = nextDestination();
+    if (needsFullNavigation(destination)) {
+      window.location.assign(destination);
+      return;
+    }
+    router.push(destination);
+  }, [router, nextDestination]);
 
   const handlePasskey = useCallback(async (desktopNonce?: string) => {
     setError("");
@@ -61,13 +77,13 @@ export default function LoginPage() {
         window.location.href = res.redirect;
         return;
       }
-      router.push(nextDestination());
+      goNext();
     } catch (err) {
       setError(passkeyErrorMessage(err));
     } finally {
       setPasskeyLoading(false);
     }
-  }, [router, nextDestination]);
+  }, [goNext]);
 
   const startPasskey = useCallback(async () => {
     // In Electron, hand the ceremony to the system browser (in-window WebAuthn
@@ -83,6 +99,11 @@ export default function LoginPage() {
     const params = new URLSearchParams(window.location.search);
     const e = params.get("error");
     if (e && e in SSO_ERROR_MESSAGES) setSsoError(e as keyof typeof SSO_ERROR_MESSAGES);
+    setPendingConnect(
+      nextFromSearch(window.location.search, window.location.origin).includes(
+        "/mcp-oauth/authorize"
+      )
+    );
     // Desktop shell opens this page with ?passkey=1&redirect=desktop&nonce=...;
     // run the ceremony in this (system) browser, then bounce to the deep link.
     if (params.get("passkey") === "1" && params.get("redirect") === "desktop") {
@@ -98,7 +119,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push(nextDestination());
+      goNext();
     } catch (err) {
       if (err instanceof EmailNotVerifiedError) {
         setNeedsVerification(true);
@@ -133,8 +154,14 @@ export default function LoginPage() {
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-accent/10">
               <BrandMark size={32} />
             </div>
-            <h1 className="text-xl font-bold gradient-text">Welcome back</h1>
-            <p className="mt-1 text-sm text-muted">Sign in to Prysm Note</p>
+            <h1 className="text-xl font-bold gradient-text">
+              {pendingConnect ? "Finish connecting" : "Welcome back"}
+            </h1>
+            <p className="mt-1 text-sm text-muted">
+              {pendingConnect
+                ? "Sign in to approve your AI app, then you will be returned to it"
+                : "Sign in to Prysm Note"}
+            </p>
           </div>
 
           {error && (

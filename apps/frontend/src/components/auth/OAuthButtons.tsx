@@ -2,6 +2,7 @@
 
 import { openMobileSso } from "@/lib/capbridge";
 import { openDesktopSso } from "@/lib/desktop-bridge";
+import { nextFromSearch } from "@/lib/safe-next";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -12,9 +13,14 @@ async function startSso(provider: "google" | "github") {
   // no-ops and the normal redirect runs.
   if (await openDesktopSso(provider)) return;
   if (await openMobileSso(provider)) return;
+  // Carry the same-site destination (e.g. an MCP authorize request) through the
+  // provider round-trip; the backend stores it in a short-lived cookie and
+  // returns the browser there after sign-in.
+  const next = nextFromSearch(window.location.search, window.location.origin);
+  const suffix = next && next !== "/" ? `?next=${encodeURIComponent(next)}` : "";
   // The start endpoint 307-redirects the browser to the provider, and the SSO
   // callback sets the session cookies and bounces back to the app.
-  window.location.href = `${API_URL}/auth/oauth/${provider}/start`;
+  window.location.href = `${API_URL}/auth/oauth/${provider}/start${suffix}`;
 }
 
 export function OAuthButtons() {

@@ -16,6 +16,10 @@ use crate::ratelimit::RateLimiter;
 use crate::{app_login_codes, blacklist, cookies, jwt, user, AppState};
 
 const STATE_COOKIE: &str = "oauth_state";
+/// Where to land after a successful SSO round-trip (e.g. an MCP authorize
+/// request the user was bounced to /login for). Short-lived and HttpOnly.
+const NEXT_COOKIE: &str = "oauth_next";
+const NEXT_COOKIE_MAX_AGE: u32 = 600;
 const GITHUB_SCOPES: &str = "read:user user:email";
 const MOBILE_STATE_PREFIX: &str = "mobile:";
 const DESKTOP_STATE_PREFIX: &str = "desktop:";
@@ -36,6 +40,8 @@ pub fn mobile_router() -> Router<AppState> {
 struct StartQuery {
     redirect: Option<String>,
     nonce: Option<String>,
+    /// Same-site path to return to after sign-in (set by the login page).
+    next: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -84,6 +90,48 @@ fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Validate a post-login destination before it goes into a cookie: same-site
+/// paths only, and nothing that could break out of the cookie value.
+fn safe_next_cookie_value(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    if !value.starts_with('/') || value.starts_with("//") || value.starts_with("/\\") {
+        return None;
+    }
+    if value
+        .chars()
+        .any(|c| c.is_whitespace() || matches!(c, ';' | ',' | '"' | '\\'))
+    {
+        return None;
+    }
+    Some(value.chars().take(2048).collect())
+}
+
+fn next_cookie(value: &str, secure: bool) -> String {
+    let mut cookie = format!(
+        "{NEXT_COOKIE}={value}; Max-Age={NEXT_COOKIE_MAX_AGE}; Path=/; HttpOnly; SameSite=Lax"
+    );
+    if secure {
+        cookie.push_str("; Secure");
+    }
+    cookie
+}
+
+fn clear_next_cookie(secure: bool) -> String {
+    let mut cookie = format!("{NEXT_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax");
+    if secure {
+        cookie.push_str("; Secure");
+    }
+    cookie
+}
+
+/// Resolve where to send the browser after a successful SSO callback.
+/// The short-lived cookie wins (it was set by `/start`); the provider's
+/// `return` parameter is the legacy fallback; anything unsafe is `/`.
+fn post_login_path(headers: &HeaderMap, query_return: Option<&str>) -> String {
+    safe_next_cookie_value(cookie_value(headers, NEXT_COOKIE).as_deref())
+        .unwrap_or_else(|| sanitize_return(query_return))
 }
 
 fn redirect(status: StatusCode, location: &str) -> Response {
@@ -292,6 +340,12 @@ async fn start(
     let _ = headers;
     let mut response = redirect(StatusCode::FOUND, &url);
     append_cookie(&mut response, &state_cookie(&cookie_value, secure));
+    // Carry a same-site destination (e.g. an MCP authorize request) through the
+    // provider round-trip, so signing in with Google or GitHub does not drop it.
+    match safe_next_cookie_value(query.next.as_deref()) {
+        Some(next) => append_cookie(&mut response, &next_cookie(&next, secure)),
+        None => append_cookie(&mut response, &clear_next_cookie(secure)),
+    }
     response
 }
 
@@ -303,7 +357,7 @@ async fn callback(
 ) -> Response {
     let mut provider = provider_path.clone();
     let secure = state.settings.is_production();
-    let return_url = sanitize_return(query.return_url.as_deref());
+    let return_url = post_login_path(&headers, query.return_url.as_deref());
 
     if let Some(error) = query.error.as_deref() {
         if !error.is_empty() {
@@ -421,6 +475,7 @@ async fn callback(
         }
     };
     append_cookie(&mut response, &clear_state_cookie(secure));
+    append_cookie(&mut response, &clear_next_cookie(secure));
     response
 }
 
@@ -768,8 +823,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_reports_unconfigured() {
-        let mut settings = test_settings();
+    async fn start_carries_a_same_site_next_through_sso() {
+        let state = AppState::lazy(test_settings());
+        let response = get(
+            state,
+            "/api/auth/oauth/google/start?next=%2Fapi%2Fee%2Fmcp-oauth%2Fauthorize%3Fclient_id%3Dabc",
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FOUND);
+        // The login page's `next` (an MCP authorize request) is kept in a
+        // short-lived HttpOnly cookie, so a Google/GitHub sign-in returns to it
+        // instead of dropping the user on "/".
+        assert!(set_cookies(&response)
+            .iter()
+            .any(|c| c.starts_with("oauth_next=/api/ee/mcp-oauth/authorize?client_id=abc")
+                && c.contains("HttpOnly")));
+    }
+
+    #[tokio::test]
+    async fn start_ignores_an_offsite_next() {
+        let state = AppState::lazy(test_settings());
+        let response = get(
+            state,
+            "/api/auth/oauth/google/start?next=https%3A%2F%2Fevil.example%2Fsteal",
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FOUND);
+        let cookies = set_cookies(&response);
+        assert!(!cookies.iter().any(|c| c.starts_with("oauth_next=/")));
+        assert!(cookies.iter().any(|c| c.starts_with("oauth_next=;")));
+    }
+
+    #[test]
+    fn post_login_path_prefers_the_cookie_and_stays_same_site() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::COOKIE,
+            HeaderValue::from_static("oauth_next=/api/ee/mcp-oauth/authorize?x=1"),
+        );
+        assert_eq!(
+            post_login_path(&headers, None),
+            "/api/ee/mcp-oauth/authorize?x=1"
+        );
+
+        // No cookie: the legacy `return` query is honored when it is same-site.
+        let empty = HeaderMap::new();
+        assert_eq!(post_login_path(&empty, Some("/settings?tab=mcp")), "/settings?tab=mcp");
+        assert_eq!(post_login_path(&empty, Some("https://evil.example")), "/");
+        assert_eq!(post_login_path(&empty, None), "/");
+
+        // An unsafe cookie value is ignored entirely.
+        let mut bad = HeaderMap::new();
+        bad.insert(
+            axum::http::header::COOKIE,
+            HeaderValue::from_static("oauth_next=//evil.example/x"),
+        );
+        assert_eq!(post_login_path(&bad, None), "/");
+    }
+
+    #[test]
+    fn next_cookie_values_reject_header_breaking_input() {
+        assert_eq!(
+            safe_next_cookie_value(Some("/api/ee/mcp-oauth/authorize?a=b&c=d")),
+            Some("/api/ee/mcp-oauth/authorize?a=b&c=d".to_string())
+        );
+        assert_eq!(safe_next_cookie_value(Some("//evil.example")), None);
+        assert_eq!(safe_next_cookie_value(Some("/x\r\nSet-Cookie: a=b")), None);
+        assert_eq!(safe_next_cookie_value(Some("https://prysmnote.com/x")), None);
+        assert_eq!(safe_next_cookie_value(None), None);
+    }
+
+    #[tokio::test]
+    async fn start_reports_unconfigured() {        let mut settings = test_settings();
         settings.google_client_id = String::new();
         settings.google_client_secret = String::new();
         let state = AppState::lazy(settings);

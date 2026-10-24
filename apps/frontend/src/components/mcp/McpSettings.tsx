@@ -5,8 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { CodeBlock } from "@/components/mcp/CodeBlock";
 import { McpAppGrid } from "@/components/mcp/McpAppGrid";
+import { useMcpEndpoint } from "@/hooks/useMcpEndpoint";
 import { api } from "@/lib/api";
-import { MCP_ENDPOINT } from "@/lib/mcp-apps";
 import { useToast } from "@/lib/toast-context";
 
 interface ApiToken {
@@ -20,6 +20,7 @@ interface ApiToken {
 
 export function McpSettings() {
   const { showToast } = useToast();
+  const endpoint = useMcpEndpoint();
   const [tokens, setTokens] = useState<ApiToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
@@ -75,8 +76,9 @@ export function McpSettings() {
       <div>
         <h2 className="text-lg font-bold text-primary">AI Connect (MCP)</h2>
         <p className="text-sm text-muted">
-          Give external AI apps (VS Code, Cursor, Claude, Kilo, ...) secure access to your tasks,
-          watchlist and habits over the Model Context Protocol.
+          Connect external AI apps (Claude Code, opencode, VS Code, Cursor, Claude, Kilo, ...) to
+          your tasks, watchlist and habits over the Model Context Protocol. Most apps sign in
+          through the browser, so there is no token to copy.
         </p>
         <Link href="/docs" className="mt-1 inline-block text-xs text-accent hover:underline">
           Full setup guides and docs
@@ -128,51 +130,72 @@ export function McpSettings() {
         </div>
       )}
 
+      <div className="rounded-xl bg-elevated border border-border p-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="text-xs font-medium text-secondary">Server URL</p>
+          <Link href="/docs" className="text-[11px] text-accent hover:underline">
+            Setup guides
+          </Link>
+        </div>
+        <CodeBlock code={endpoint} compact />
+        <p className="mt-2 text-xs text-muted">
+          Paste this one URL into your AI app. The first request opens a sign-in tab: choose
+          Allow access once and you land back in the app, already connected.
+        </p>
+      </div>
+
       <details className="card p-6">
         <summary className="cursor-pointer list-none">
-          <span className="text-sm font-semibold text-primary">How to connect an AI app</span>
+          <span className="text-sm font-semibold text-primary">How it works</span>
           <span className="mt-1 block text-xs text-muted">
-            Auto sign-in for VS Code, Cursor and Kilo, or a token for anything else.
+            One URL, one browser approval, no token to manage.
           </span>
         </summary>
         <ol className="mt-4 space-y-3 text-sm text-secondary">
           <li className="flex gap-2">
             <span className="text-muted">1.</span>
-            <span>
-              Copy the Endpoint URL below:{" "}
-              <code className="rounded bg-elevated px-1 text-xs">{MCP_ENDPOINT}</code>
-            </span>
+            <span>Add the server URL above to your AI app (exact configs are below).</span>
           </li>
           <li className="flex gap-2">
             <span className="text-muted">2.</span>
             <span>
-              Add it to your AI app&apos;s MCP config. VS Code, Cursor and Kilo support OAuth auto
-              sign-in (approve in the browser, no tokens to manage).
+              Use the app. A browser tab opens on Prysm Note: sign in and choose Allow access.
             </span>
           </li>
           <li className="flex gap-2">
             <span className="text-muted">3.</span>
             <span>
-              For apps without OAuth (Claude Desktop, some CLIs) create a token below and paste it
-              as the bearer value.
+              You are returned to the app automatically and it stays connected, refreshing on its
+              own. Revoke access any time below or from this page.
             </span>
           </li>
         </ol>
+        <p className="mt-3 text-xs text-muted">
+          Apps without browser sign-in accept a Personal Access Token instead. Claude Code,
+          opencode, VS Code, Cursor, Claude Desktop and Kilo use the browser flow.
+        </p>
         <Link href="/docs" className="mt-4 inline-block text-xs text-accent hover:underline">
           Full setup guides and docs
         </Link>
       </details>
 
-      <div className="rounded-xl bg-elevated border border-border p-4">
-        <p className="text-xs font-medium text-secondary">Endpoint URL</p>
-        <p className="mt-1 text-sm text-accent break-all">{MCP_ENDPOINT}</p>
-      </div>
+      <section className="card p-6 space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-primary">App configurations</h3>
+          <p className="text-xs text-muted">
+            Copy-paste for your app. Start with the browser sign-in group; a token is only needed
+            for apps that cannot do OAuth.
+          </p>
+        </div>
+        <McpAppGrid endpoint={endpoint} />
+      </section>
 
       <section className="card p-6 space-y-4">
         <div>
           <h3 className="text-sm font-semibold text-primary">Personal Access Tokens</h3>
           <p className="text-xs text-muted">
-            One token per app is best - you can revoke them individually.
+            Only needed for apps without browser sign-in. One token per app is best, so you can
+            revoke them individually.
           </p>
         </div>
 
@@ -230,16 +253,6 @@ export function McpSettings() {
             ))}
           </div>
         )}
-      </section>
-
-      <section className="card p-6 space-y-4">
-        <div>
-          <h3 className="text-sm font-semibold text-primary">App configurations</h3>
-          <p className="text-xs text-muted">
-            Ready-to-paste configs. Swap the placeholder for a token you created.
-          </p>
-        </div>
-        <McpAppGrid />
       </section>
     </div>
   );
