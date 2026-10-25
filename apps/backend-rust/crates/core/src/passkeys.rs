@@ -138,7 +138,13 @@ fn webauthn(state: &AppState) -> Result<WebauthnCore, ApiError> {
 }
 
 /// Store a `webauthn_challenge` cookie of the form `flow:payload:user_id`.
-fn set_challenge_cookie(response: &mut Response, flow: &str, payload: &str, user_id: &str, secure: bool) {
+fn set_challenge_cookie(
+    response: &mut Response,
+    flow: &str,
+    payload: &str,
+    user_id: &str,
+    secure: bool,
+) {
     let value = format!("{flow}:{payload}:{user_id}");
     let cookie = cookies::build_cookie(CHALLENGE_COOKIE, &value, CHALLENGE_TTL, secure);
     if let Ok(header) = HeaderValue::from_str(&cookie) {
@@ -210,13 +216,19 @@ fn cose_key_to_cbor(key: &COSEKey) -> Result<Vec<u8>, ApiError> {
     match &key.key {
         COSEKeyType::EC_EC2(ec) => {
             map.insert(serde_cbor::Value::Integer(1), serde_cbor::Value::Integer(2));
-            map.insert(serde_cbor::Value::Integer(3), serde_cbor::Value::Integer(alg));
+            map.insert(
+                serde_cbor::Value::Integer(3),
+                serde_cbor::Value::Integer(alg),
+            );
             let crv = match ec.curve {
                 webauthn_rs_core::proto::ECDSACurve::SECP256R1 => 1,
                 webauthn_rs_core::proto::ECDSACurve::SECP384R1 => 2,
                 webauthn_rs_core::proto::ECDSACurve::SECP521R1 => 3,
             };
-            map.insert(serde_cbor::Value::Integer(-1), serde_cbor::Value::Integer(crv));
+            map.insert(
+                serde_cbor::Value::Integer(-1),
+                serde_cbor::Value::Integer(crv),
+            );
             map.insert(
                 serde_cbor::Value::Integer(-2),
                 serde_cbor::Value::Bytes(ec.x.as_ref().to_vec()),
@@ -228,7 +240,10 @@ fn cose_key_to_cbor(key: &COSEKey) -> Result<Vec<u8>, ApiError> {
         }
         COSEKeyType::RSA(rsa) => {
             map.insert(serde_cbor::Value::Integer(1), serde_cbor::Value::Integer(3));
-            map.insert(serde_cbor::Value::Integer(3), serde_cbor::Value::Integer(alg));
+            map.insert(
+                serde_cbor::Value::Integer(3),
+                serde_cbor::Value::Integer(alg),
+            );
             map.insert(
                 serde_cbor::Value::Integer(-1),
                 serde_cbor::Value::Bytes(rsa.n.as_ref().to_vec()),
@@ -240,12 +255,18 @@ fn cose_key_to_cbor(key: &COSEKey) -> Result<Vec<u8>, ApiError> {
         }
         COSEKeyType::EC_OKP(okp) => {
             map.insert(serde_cbor::Value::Integer(1), serde_cbor::Value::Integer(1));
-            map.insert(serde_cbor::Value::Integer(3), serde_cbor::Value::Integer(alg));
+            map.insert(
+                serde_cbor::Value::Integer(3),
+                serde_cbor::Value::Integer(alg),
+            );
             let crv = match okp.curve {
                 webauthn_rs_core::proto::EDDSACurve::ED25519 => 6,
                 _ => 6,
             };
-            map.insert(serde_cbor::Value::Integer(-1), serde_cbor::Value::Integer(crv));
+            map.insert(
+                serde_cbor::Value::Integer(-1),
+                serde_cbor::Value::Integer(crv),
+            );
             map.insert(
                 serde_cbor::Value::Integer(-2),
                 serde_cbor::Value::Bytes(okp.x.as_ref().to_vec()),
@@ -261,7 +282,9 @@ fn cose_key_from_cbor(bytes: &[u8]) -> Result<COSEKey, ApiError> {
     COSEKey::try_from(&value).map_err(|_| ApiError::Unauthorized(SIGN_IN_FAILED.into()))
 }
 
-fn transports_from_str(value: Option<&str>) -> Option<Vec<webauthn_rs_core::proto::AuthenticatorTransport>> {
+fn transports_from_str(
+    value: Option<&str>,
+) -> Option<Vec<webauthn_rs_core::proto::AuthenticatorTransport>> {
     let raw = value?;
     let items: Vec<_> = raw
         .split(',')
@@ -299,14 +322,12 @@ fn aaguid_from_attestation(attestation_object: &[u8]) -> Option<String> {
     let serde_cbor::Value::Map(map) = value else {
         return None;
     };
-    let auth_data = map
-        .iter()
-        .find_map(|(k, v)| match (k, v) {
-            (serde_cbor::Value::Text(key), serde_cbor::Value::Bytes(bytes)) if key == "authData" => {
-                Some(bytes.clone())
-            }
-            _ => None,
-        })?;
+    let auth_data = map.iter().find_map(|(k, v)| match (k, v) {
+        (serde_cbor::Value::Text(key), serde_cbor::Value::Bytes(bytes)) if key == "authData" => {
+            Some(bytes.clone())
+        }
+        _ => None,
+    })?;
     if auth_data.len() < 53 {
         return None;
     }
@@ -333,7 +354,11 @@ async fn register_options(
         .map_err(db_error)?;
     let exclude: Vec<CredentialID> = existing
         .iter()
-        .filter_map(|pk| b64url_decode(&pk.credential_id).ok().map(CredentialID::from))
+        .filter_map(|pk| {
+            b64url_decode(&pk.credential_id)
+                .ok()
+                .map(CredentialID::from)
+        })
         .collect();
 
     let user = user::get_by_id(&state.pool, auth_user.user_id)
@@ -342,7 +367,10 @@ async fn register_options(
         .ok_or_else(|| ApiError::Unauthorized("Not authenticated".into()))?;
 
     let user_handle = user.id.to_string();
-    let display_name = user.display_name.clone().unwrap_or_else(|| user.email.clone());
+    let display_name = user
+        .display_name
+        .clone()
+        .unwrap_or_else(|| user.email.clone());
     let builder = core
         .new_challenge_register_builder(user_handle.as_bytes(), &user.email, &display_name)
         .map_err(|_| ApiError::Internal("failed to start registration".into()))?
@@ -358,7 +386,8 @@ async fn register_options(
         &serde_json::to_vec(&reg_state)
             .map_err(|_| ApiError::Internal("failed to encode state".into()))?,
     );
-    let mut response = Json(serde_json::to_value(&challenge).unwrap_or(Value::Null)).into_response();
+    let mut response =
+        Json(serde_json::to_value(&challenge).unwrap_or(Value::Null)).into_response();
     set_challenge_cookie(
         &mut response,
         "register",
@@ -392,7 +421,8 @@ async fn register_verify(
         return Ok(response);
     }
 
-    let state_bytes = b64url_decode(&payload).map_err(|_| ApiError::BadRequest(CHALLENGE_EXPIRED.into()))?;
+    let state_bytes =
+        b64url_decode(&payload).map_err(|_| ApiError::BadRequest(CHALLENGE_EXPIRED.into()))?;
     let reg_state: RegistrationState = match serde_json::from_slice(&state_bytes) {
         Ok(value) => value,
         Err(_) => {
@@ -456,9 +486,8 @@ async fn register_verify(
         return Ok(response);
     }
 
-    let public_key = cose_key_to_cbor(&verified.cred).map_err(|_| {
-        ApiError::Internal("failed to encode credential public key".into())
-    })?;
+    let public_key = cose_key_to_cbor(&verified.cred)
+        .map_err(|_| ApiError::Internal("failed to encode credential public key".into()))?;
     let aaguid = aaguid_from_attestation(&raw_attestation);
     let name = req
         .name
@@ -517,7 +546,8 @@ async fn rename_passkey(
     Json(req): Json<RenamePasskeyRequest>,
 ) -> Result<Response, ApiError> {
     let auth_user = require_user(&state, &headers)?;
-    let id = Uuid::parse_str(&passkey_id).map_err(|_| ApiError::NotFound("Passkey not found".into()))?;
+    let id =
+        Uuid::parse_str(&passkey_id).map_err(|_| ApiError::NotFound("Passkey not found".into()))?;
     passkey::get_for_user(&state.pool, id, auth_user.user_id)
         .await
         .map_err(db_error)?
@@ -544,7 +574,8 @@ async fn delete_passkey(
     Path(passkey_id): Path<String>,
 ) -> Result<Response, ApiError> {
     let auth_user = require_user(&state, &headers)?;
-    let id = Uuid::parse_str(&passkey_id).map_err(|_| ApiError::NotFound("Passkey not found".into()))?;
+    let id =
+        Uuid::parse_str(&passkey_id).map_err(|_| ApiError::NotFound("Passkey not found".into()))?;
     if !passkey::delete(&state.pool, id, auth_user.user_id)
         .await
         .map_err(db_error)?
@@ -567,7 +598,8 @@ async fn login_options(State(state): State<AppState>) -> Result<Response, ApiErr
         &serde_json::to_vec(&auth_state)
             .map_err(|_| ApiError::Internal("failed to encode state".into()))?,
     );
-    let mut response = Json(serde_json::to_value(&challenge).unwrap_or(Value::Null)).into_response();
+    let mut response =
+        Json(serde_json::to_value(&challenge).unwrap_or(Value::Null)).into_response();
     set_challenge_cookie(
         &mut response,
         "login",
@@ -690,8 +722,9 @@ async fn login_verify(
     }
 
     let sub = user.id.to_string();
-    let access = crate::jwt::encode_access(&state.settings.jwt_secret_key, &sub, user.token_version)
-        .map_err(|err| ApiError::Internal(err))?;
+    let access =
+        crate::jwt::encode_access(&state.settings.jwt_secret_key, &sub, user.token_version)
+            .map_err(|err| ApiError::Internal(err))?;
     let refresh =
         crate::jwt::encode_refresh(&state.settings.jwt_secret_key, &sub, user.token_version)
             .map_err(|err| ApiError::Internal(err))?;
@@ -741,8 +774,14 @@ mod tests {
     fn cose_ec2_bytes(x: &[u8], y: &[u8]) -> Vec<u8> {
         let mut map: BTreeMap<serde_cbor::Value, serde_cbor::Value> = BTreeMap::new();
         map.insert(serde_cbor::Value::Integer(1), serde_cbor::Value::Integer(2));
-        map.insert(serde_cbor::Value::Integer(3), serde_cbor::Value::Integer(-7));
-        map.insert(serde_cbor::Value::Integer(-1), serde_cbor::Value::Integer(1));
+        map.insert(
+            serde_cbor::Value::Integer(3),
+            serde_cbor::Value::Integer(-7),
+        );
+        map.insert(
+            serde_cbor::Value::Integer(-1),
+            serde_cbor::Value::Integer(1),
+        );
         map.insert(
             serde_cbor::Value::Integer(-2),
             serde_cbor::Value::Bytes(x.to_vec()),
@@ -769,11 +808,7 @@ mod tests {
             let cose = cose_ec2_bytes(&point_bytes[1..33], &point_bytes[33..65]);
             let key = PKey::from_ec_key(ec_key).unwrap();
             let cred_id = Uuid::new_v4().as_bytes().to_vec();
-            Self {
-                key,
-                cred_id,
-                cose,
-            }
+            Self { key, cred_id, cose }
         }
 
         fn sign(&self, data: &[u8]) -> Vec<u8> {
@@ -939,11 +974,12 @@ mod tests {
         };
         let app = build_router(state.clone(), None);
         let email = format!("rust-passkey-{}@test.local", Uuid::new_v4());
-        let user = user::create_email_user(&state.pool, &email, "not-a-real-hash", Some("Key Tester"))
-            .await
-            .unwrap();
-        let access = crate::jwt::encode_access(SECRET, &user.id.to_string(), user.token_version)
-            .unwrap();
+        let user =
+            user::create_email_user(&state.pool, &email, "not-a-real-hash", Some("Key Tester"))
+                .await
+                .unwrap();
+        let access =
+            crate::jwt::encode_access(SECRET, &user.id.to_string(), user.token_version).unwrap();
         let auth = vec![format!("access_token={access}")];
 
         let authn = SoftAuthenticator::new();
@@ -962,7 +998,10 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let cookie = challenge_cookie(&res);
         let options = body_json(res).await;
-        let challenge = options["publicKey"]["challenge"].as_str().unwrap().to_string();
+        let challenge = options["publicKey"]["challenge"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
         // register/verify -> stored passkey.
         let mut register_cookies = auth.clone();
@@ -1005,7 +1044,12 @@ mod tests {
         // login/options (public) -> fresh challenge + cookie.
         let res = call(
             &app,
-            request("POST", "/api/auth/passkey/login/options", &[], Some(json!({}))),
+            request(
+                "POST",
+                "/api/auth/passkey/login/options",
+                &[],
+                Some(json!({})),
+            ),
         )
         .await;
         assert_eq!(res.status(), StatusCode::OK);
@@ -1034,7 +1078,12 @@ mod tests {
         // login/verify with a desktop nonce -> deep-link handoff.
         let res = call(
             &app,
-            request("POST", "/api/auth/passkey/login/options", &[], Some(json!({}))),
+            request(
+                "POST",
+                "/api/auth/passkey/login/options",
+                &[],
+                Some(json!({})),
+            ),
         )
         .await;
         let desktop_cookie = challenge_cookie(&res);
@@ -1065,7 +1114,12 @@ mod tests {
         // delete -> 204, then empty list.
         let res = call(
             &app,
-            request("DELETE", &format!("/api/auth/passkey/{passkey_id}"), &auth, None),
+            request(
+                "DELETE",
+                &format!("/api/auth/passkey/{passkey_id}"),
+                &auth,
+                None,
+            ),
         )
         .await;
         assert_eq!(res.status(), StatusCode::NO_CONTENT);

@@ -45,14 +45,31 @@ pub fn safe_paths() -> &'static [&'static str] {
     ]
 }
 
-/// Best-effort client IP, matching Python's precedence: Cloudflare's
-/// `CF-Connecting-IP`, then the first `X-Forwarded-For` entry, else `unknown`.
+/// Best-effort client IP.
+///
+/// Trust model:
+/// - `CF-Connecting-IP` is set by Cloudflare and overwritten on every proxied
+///   request, so it is the most trustworthy value. Prefer it when valid.
+/// - A request carrying `cf-ray` came through Cloudflare. If the CF header is
+///   missing or malformed, do NOT fall back to `X-Forwarded-For`: nginx uses
+///   `$proxy_add_x_forwarded_for`, which keeps a client-supplied value first,
+///   so trusting XFF here would let a caller spoof its IP past the rate
+///   limiter. Return `unknown` instead.
+/// - Only when the request did not come from Cloudflare (no `cf-ray`) do we
+///   fall back to the first `X-Forwarded-For` entry, which is the direct
+///   reverse-proxy hop in local/dev setups.
 pub fn client_ip(headers: &HeaderMap) -> String {
-    if let Some(v) = headers.get("cf-connecting-ip").and_then(|v| v.to_str().ok()) {
+    if let Some(v) = headers
+        .get("cf-connecting-ip")
+        .and_then(|v| v.to_str().ok())
+    {
         let v = v.trim();
         if v.parse::<std::net::IpAddr>().is_ok() {
             return v.to_string();
         }
+    }
+    if headers.contains_key("cf-ray") {
+        return "unknown".to_string();
     }
     if let Some(v) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
         if let Some(first) = v.split(',').next() {
@@ -67,9 +84,10 @@ pub fn client_ip(headers: &HeaderMap) -> String {
 
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     let raw = headers.get(header::COOKIE).and_then(|v| v.to_str().ok())?;
-    raw.split(';')
-        .map(|part| part.trim())
-        .find_map(|part| part.strip_prefix(&format!("{name}=")).map(|v| v.to_string()))
+    raw.split(';').map(|part| part.trim()).find_map(|part| {
+        part.strip_prefix(&format!("{name}="))
+            .map(|v| v.to_string())
+    })
 }
 
 /// Constant-time-ish comparison (length checked first) for CSRF token equality.
@@ -223,10 +241,7 @@ pub async fn cors(State(state): State<AppState>, req: Request, next: Next) -> Re
             }
         };
         set(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
-        set(
-            header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
-            "true".to_string(),
-        );
+        set(header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "true".to_string());
         set(header::ACCESS_CONTROL_ALLOW_METHODS, method);
         set(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
@@ -247,14 +262,22 @@ pub async fn cors(State(state): State<AppState>, req: Request, next: Next) -> Re
                 }
             };
             set(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
-            set(
-                header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
-                "true".to_string(),
-            );
+            set(header::ACCESS_CONTROL_ALLOW_CREDENTIALS, "true".to_string());
             set(header::VARY, "Origin".to_string());
         }
     }
     res
+}
+
+/// Paths exempt from the per-IP API rate limiter. This is [`safe_paths`] minus
+/// MCP: `/api/mcp` is CSRF-exempt because it is Bearer-only, but it must still
+/// be rate limited, otherwise PAT guessing and tool-call floods would bypass the
+/// limiter entirely.
+fn rate_limit_exempt(path: &str) -> bool {
+    if path == "/api/mcp" || path.starts_with("/api/mcp/") {
+        return false;
+    }
+    safe_paths().contains(&path)
 }
 
 /// Per-IP API rate limit (`rl:api`), 120/min by default; skips non-`/api`
@@ -266,7 +289,7 @@ pub async fn api_rate_limit(State(state): State<AppState>, req: Request, next: N
     let path = req.uri().path().to_string();
     let method = req.method().clone();
     let skip = !path.starts_with("/api/")
-        || safe_paths().contains(&path.as_str())
+        || rate_limit_exempt(&path)
         || path.ends_with("/callback")
         || matches!(method, Method::OPTIONS | Method::HEAD);
     if skip {
@@ -338,7 +361,11 @@ connect-src {connect_src}; frame-ancestors 'none'; base-uri 'self'; form-action 
 /// Rejects bodies whose declared `Content-Length` exceeds [`MAX_BODY_SIZE`].
 pub async fn body_limit(req: Request, next: Next) -> Response {
     if let Some(value) = req.headers().get(header::CONTENT_LENGTH) {
-        let size = match value.to_str().ok().and_then(|s| s.trim().parse::<usize>().ok()) {
+        let size = match value
+            .to_str()
+            .ok()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+        {
             Some(size) => size,
             None => {
                 return (
@@ -365,7 +392,10 @@ pub async fn publish_events(State(state): State<AppState>, req: Request, next: N
     let method = req.method().clone();
     let path = req.uri().path().to_string();
     let headers = req.headers().clone();
-    let resource = if matches!(method, Method::POST | Method::PUT | Method::PATCH | Method::DELETE) {
+    let resource = if matches!(
+        method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    ) {
         match_resource(&path)
     } else {
         None
@@ -401,6 +431,28 @@ pub async fn touch_activity(State(state): State<AppState>, req: Request, next: N
         }
     }
     res
+}
+
+/// Reject an access token whose `jti` is on the blacklist. Runs for every
+/// authenticated request (not just `/api/auth/me`), so a logged-out or
+/// password-changed token dies immediately instead of living out its 15-minute
+/// TTL. Unauthenticated requests pass through untouched; malformed tokens are
+/// left for the route's normal authentication to reject.
+pub async fn reject_revoked(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    if let Some(token) = auth::token_from_headers(req.headers()) {
+        if let Ok(claims) = crate::jwt::decode(&state.settings.jwt_secret_key, &token) {
+            if claims.token_type == crate::jwt::ACCESS
+                && crate::revocation::is_revoked(&state.pool, &state.cache, &claims.jti, claims.exp)
+                    .await
+            {
+                return crate::error::ApiError::Unauthorized(
+                    "Could not validate credentials".to_string(),
+                )
+                .into_response();
+            }
+        }
+    }
+    next.run(req).await
 }
 
 #[cfg(test)]
@@ -453,7 +505,10 @@ mod tests {
     async fn safe_request_without_csrf_cookie_receives_one() {
         let state = AppState::lazy(settings());
         let app = Router::new()
-            .route("/api/health", get(|| async { Json(json!({ "status": "ok" })) }))
+            .route(
+                "/api/health",
+                get(|| async { Json(json!({ "status": "ok" })) }),
+            )
             .with_state(state.clone())
             .layer(axum::middleware::from_fn_with_state(state, csrf));
         let res = call(
@@ -477,7 +532,10 @@ mod tests {
     async fn unsafe_request_without_token_is_forbidden() {
         let state = AppState::lazy(settings());
         let app = Router::new()
-            .route("/api/tasks", axum::routing::post(|| async { Json(json!({})) }))
+            .route(
+                "/api/tasks",
+                axum::routing::post(|| async { Json(json!({})) }),
+            )
             .with_state(state.clone())
             .layer(axum::middleware::from_fn_with_state(state, csrf));
         let res = call(
@@ -496,7 +554,10 @@ mod tests {
     async fn unsafe_request_with_mismatched_token_is_forbidden() {
         let state = AppState::lazy(settings());
         let app = Router::new()
-            .route("/api/tasks", axum::routing::post(|| async { Json(json!({})) }))
+            .route(
+                "/api/tasks",
+                axum::routing::post(|| async { Json(json!({})) }),
+            )
             .with_state(state.clone())
             .layer(axum::middleware::from_fn_with_state(state, csrf));
         let res = call(
@@ -517,7 +578,10 @@ mod tests {
     async fn unsafe_request_with_matching_token_passes() {
         let state = AppState::lazy(settings());
         let app = Router::new()
-            .route("/api/tasks", axum::routing::post(|| async { Json(json!({})) }))
+            .route(
+                "/api/tasks",
+                axum::routing::post(|| async { Json(json!({})) }),
+            )
             .with_state(state.clone())
             .layer(axum::middleware::from_fn_with_state(state, csrf));
         let res = call(
@@ -538,7 +602,10 @@ mod tests {
     async fn disallowed_origin_is_forbidden() {
         let state = AppState::lazy(settings());
         let app = Router::new()
-            .route("/api/tasks", axum::routing::post(|| async { Json(json!({})) }))
+            .route(
+                "/api/tasks",
+                axum::routing::post(|| async { Json(json!({})) }),
+            )
             .with_state(state.clone())
             .layer(axum::middleware::from_fn_with_state(state, csrf));
         let res = call(
@@ -560,7 +627,10 @@ mod tests {
     async fn cors_preflight_is_answered_for_allowed_origin() {
         let state = AppState::lazy(settings());
         let app = Router::new()
-            .route("/api/auth/register", axum::routing::post(|| async { Json(json!({})) }))
+            .route(
+                "/api/auth/register",
+                axum::routing::post(|| async { Json(json!({})) }),
+            )
             .with_state(state.clone())
             .layer(axum::middleware::from_fn_with_state(state, cors));
         let res = call(
@@ -600,7 +670,10 @@ mod tests {
     async fn cors_headers_are_added_to_simple_requests() {
         let state = AppState::lazy(settings());
         let app = Router::new()
-            .route("/api/health", get(|| async { Json(json!({ "status": "ok" })) }))
+            .route(
+                "/api/health",
+                get(|| async { Json(json!({ "status": "ok" })) }),
+            )
             .with_state(state.clone())
             .layer(axum::middleware::from_fn_with_state(state, cors));
         let res = call(
@@ -625,7 +698,10 @@ mod tests {
     async fn cors_omits_headers_for_disallowed_origin() {
         let state = AppState::lazy(settings());
         let app = Router::new()
-            .route("/api/health", get(|| async { Json(json!({ "status": "ok" })) }))
+            .route(
+                "/api/health",
+                get(|| async { Json(json!({ "status": "ok" })) }),
+            )
             .with_state(state.clone())
             .layer(axum::middleware::from_fn_with_state(state, cors));
         let res = call(
@@ -655,22 +731,71 @@ mod tests {
 
         let first = call(
             app.clone(),
-            Request::builder().uri("/api/tasks").body(Body::empty()).unwrap(),
+            Request::builder()
+                .uri("/api/tasks")
+                .body(Body::empty())
+                .unwrap(),
         )
         .await;
         assert_eq!(first.status(), StatusCode::OK);
         let second = call(
             app,
-            Request::builder().uri("/api/tasks").body(Body::empty()).unwrap(),
+            Request::builder()
+                .uri("/api/tasks")
+                .body(Body::empty())
+                .unwrap(),
         )
         .await;
         assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
+    /// `/api/mcp` must stay CSRF-exempt (Bearer-only) but may not be exempt
+    /// from the per-IP limiter: otherwise token guessing and tool floods run
+    /// unmetered.
+    #[tokio::test]
+    async fn mcp_is_rate_limited_even_though_it_is_csrf_exempt() {
+        let mut settings = settings();
+        settings.api_rate_limit_per_min = 1;
+        let state = AppState::lazy(settings);
+        let app = Router::new()
+            .route(
+                "/api/mcp",
+                axum::routing::post(|| async { Json(json!({})) }),
+            )
+            .with_state(state.clone())
+            .layer(axum::middleware::from_fn_with_state(state, api_rate_limit));
+
+        let first = call(
+            app.clone(),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/mcp")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(first.status(), StatusCode::OK);
+        let second = call(
+            app,
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/mcp")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+        // The CSRF exemption list is unchanged: MCP still skips the double submit.
+        assert!(safe_paths().contains(&"/api/mcp"));
+    }
+
     #[tokio::test]
     async fn oversized_body_is_rejected() {
         let app = Router::new()
-            .route("/api/tasks", axum::routing::post(|| async { Json(json!({})) }))
+            .route(
+                "/api/tasks",
+                axum::routing::post(|| async { Json(json!({})) }),
+            )
             .layer(axum::middleware::from_fn(body_limit));
         let res = call(
             app,
@@ -685,13 +810,43 @@ mod tests {
         assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
+    #[test]
+    fn client_ip_prefers_cloudflare_and_ignores_spoofable_xff() {
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-connecting-ip", HeaderValue::from_static("203.0.113.7"));
+        headers.insert("x-forwarded-for", HeaderValue::from_static("1.2.3.4"));
+        assert_eq!(client_ip(&headers), "203.0.113.7");
+
+        // Through Cloudflare but without a valid CF header: do not trust XFF.
+        let mut headers = HeaderMap::new();
+        headers.insert("cf-ray", HeaderValue::from_static("abc-AMS"));
+        headers.insert("x-forwarded-for", HeaderValue::from_static("1.2.3.4"));
+        assert_eq!(client_ip(&headers), "unknown");
+
+        // Not through Cloudflare (local/dev reverse proxy): first XFF hop.
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("1.2.3.4, 10.0.0.1"),
+        );
+        assert_eq!(client_ip(&headers), "1.2.3.4");
+
+        assert_eq!(client_ip(&HeaderMap::new()), "unknown");
+    }
+
     #[tokio::test]
     async fn security_headers_are_present() {
         let state = AppState::lazy(settings());
         let app = Router::new()
-            .route("/api/health", get(|| async { Json(json!({ "status": "ok" })) }))
+            .route(
+                "/api/health",
+                get(|| async { Json(json!({ "status": "ok" })) }),
+            )
             .with_state(state.clone())
-            .layer(axum::middleware::from_fn_with_state(state, security_headers));
+            .layer(axum::middleware::from_fn_with_state(
+                state,
+                security_headers,
+            ));
         let res = call(
             app,
             Request::builder()

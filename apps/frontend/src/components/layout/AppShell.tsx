@@ -195,6 +195,28 @@ export function AppShell() {
   const countdownOn = false;
 
   const smallScreen = useMediaQuery("(max-width: 767px)");
+  // Height of the mobile tab bar, published as `--tabbar-h` so phone overlays
+  // (sidebar drawer, task drawer) can stop right above it instead of covering
+  // it. Measured instead of hardcoded: the bar grows with the safe-area inset.
+  const [tabBarHeight, setTabBarHeight] = useState(0);
+  const tabBarRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = tabBarRef.current;
+    if (!smallScreen || !el) {
+      setTabBarHeight(0);
+      return;
+    }
+    const measure = () => setTabBarHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [smallScreen]);
+
   const isSidebarCollapsed = smallScreen ? true : sidebarCollapsed;
   const setSidebarCollapsedState = (v: boolean) => {
     if (!smallScreen) setSidebarCollapsed(v);
@@ -330,7 +352,11 @@ export function AppShell() {
   }, []);
 
   return (
-    <div data-app-shell className="flex h-dvh max-h-dvh w-screen flex-col overflow-hidden bg-base">
+    <div
+      data-app-shell
+      className="flex h-dvh max-h-dvh w-screen flex-col overflow-hidden bg-base"
+      style={{ "--tabbar-h": `${tabBarHeight}px` } as React.CSSProperties}
+    >
       <InstallBanner smallScreen={smallScreen} autoOpenGuide={installRequested} />
 
       <div className="flex min-h-0 min-w-0 flex-1">
@@ -348,13 +374,18 @@ export function AppShell() {
       {sidebarOn && smallScreen && sidebarOpen && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-black/40"
+            className="fixed inset-x-0 top-0 z-40 bg-black/40"
+            style={{ bottom: "var(--tabbar-h, 0px)" }}
             aria-hidden
             onClick={() => setSidebarOpen(false)}
           />
-          <div className="fixed inset-y-0 left-0 z-40 slide-in-left pt-safe pb-safe">
+          <div
+            className="fixed left-0 top-0 z-40 w-[min(19rem,86vw)] slide-in-left pt-safe"
+            style={{ bottom: "var(--tabbar-h, 0px)" }}
+          >
             <SidebarLeft
               collapsed={false}
+              variant="drawer"
               onToggle={() => setSidebarOpen(false)}
               view={view}
               onSelectView={handleSelectView}
@@ -406,7 +437,7 @@ export function AppShell() {
                 data-ai-dock
                 className={
                   smallScreen
-                    ? "absolute inset-y-0 right-0 z-30 w-[min(22rem,92vw)] pt-safe pb-safe shadow-lg"
+                    ? "absolute inset-0 z-30 flex w-full flex-col bg-surface shadow-lg"
                     : `relative h-full min-h-0 shrink-0 border-l border-border ${
                         aiResize.isEnabled ? "" : "w-[22.5rem]"
                       }`
@@ -435,17 +466,20 @@ export function AppShell() {
       </div>
 
       {smallScreen && (
-        <MobileTabBar
-          view={view}
-          onSelectView={handleSelectView}
-          onOpenAi={openAi}
-          showFinance={financeOn}
-          showWatchlist={watchlistOn}
-          showHabits={habitsOn}
-          showQuadrant={quadrantOn}
-          showFocus={focusOn}
-          showCountdown={countdownOn}
-        />
+        <div ref={tabBarRef} data-testid="mobile-tab-bar-wrap" className="shrink-0">
+          <MobileTabBar
+            view={view}
+            aiOpen={aiOpen}
+            onSelectView={handleSelectView}
+            onOpenAi={openAi}
+            showFinance={financeOn}
+            showWatchlist={watchlistOn}
+            showHabits={habitsOn}
+            showQuadrant={quadrantOn}
+            showFocus={focusOn}
+            showCountdown={countdownOn}
+          />
+        </div>
       )}
 
       <ReminderStack

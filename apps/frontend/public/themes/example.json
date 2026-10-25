@@ -1,0 +1,30 @@
+{
+  "format": "prysm-theme",
+  "formatVersion": 1,
+  "name": "Deep Ocean",
+  "author": "you",
+  "version": "1.0",
+  "vars": {
+    "--bg-base": "#05070d",
+    "--bg-surface": "#0a0e18",
+    "--bg-elevated": "#111827",
+    "--bg-hover": "#1b2436",
+    "--border": "#243149",
+    "--text-primary": "#f2f6ff",
+    "--text-secondary": "#c3cfe4",
+    "--text-muted": "#8ea1c0",
+    "--accent": "#5AA9FF",
+    "--accent-hover": "#78b8ff",
+    "--grad-from": "#5AA9FF",
+    "--grad-via": "#78b8ff",
+    "--grad-to": "#9ac9ff",
+    "--on-gradient": "#04101f",
+    "--danger": "#ff5d6c",
+    "--success": "#2ed573",
+    "--warning": "#ffb340",
+    "--radius-md": "6px",
+    "--radius-xl": "12px",
+    "--shadow-sm": "0 2px 8px rgba(0,0,0,0.45)",
+    "--shadow-lg": "0 16px 48px rgba(0,0,0,0.6)"
+  }
+}

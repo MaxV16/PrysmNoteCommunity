@@ -715,7 +715,7 @@ const handleUpdate = async (data: {
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
+            className="pointer-coarse:h-11 pointer-coarse:w-11 flex h-7 w-7 items-center justify-center rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"
             aria-label="Close"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -724,102 +724,6 @@ const handleUpdate = async (data: {
             </svg>
           </button>
         </div>
-      </div>
-
-      {(task.recurrence_rule || task.recurrence_parent_id) && (
-        <div className="mt-2 flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full bg-elevated px-2 py-0.5 text-[11px] text-secondary">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8" />
-              <path d="M20 4v4h-4" />
-              <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16" />
-              <path d="M4 20v-4h4" />
-            </svg>
-            {task.recurrence_rule ? describeRule(task.recurrence_rule) || "Repeats" : "Repeats"}
-          </span>
-          <button
-            onClick={handleStopRecurrence}
-            className="text-[11px] text-secondary transition-colors hover:text-primary"
-          >
-            Stop repeating
-          </button>
-        </div>
-      )}
-
-      {/* Per-task reminder: exact time plus the channels the user picked. */}
-      <div className="mt-3">
-        {reminderOpen ? (
-          <div className="space-y-2">
-            <TaskReminderFields
-              value={reminderDraft}
-              onChange={setReminderDraft}
-              suggestedDate={task.due_date || task.start_date}
-              onChannelChange={handleChannelChange}
-              idPrefix="drawer"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setReminderDraft(taskReminderDraft(task));
-                  setReminderOpen(false);
-                }}
-                className="btn bg-elevated border border-border px-3 py-1 text-xs text-secondary hover:bg-hover hover:text-primary"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSaveReminder()}
-                className="btn btn-primary px-3 py-1 text-xs"
-              >
-                Save reminder
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setReminderDraft((prev) =>
-                prev.enabled
-                  ? prev
-                  : {
-                      ...prev,
-                      enabled: true,
-                      at:
-                        prev.at ||
-                        defaultReminderAt(task.due_date || task.start_date),
-                    }
-              );
-              setReminderOpen(true);
-            }}
-            className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-elevated px-3 py-2 text-left transition-colors hover:bg-hover"
-            aria-label="Set task reminder"
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                  <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-                </svg>
-              </span>
-              <span className="min-w-0">
-                <span className="block text-sm text-secondary">Remind me</span>
-                <span className="block text-[11px] text-muted">
-                  {task.reminder_at
-                    ? describeReminder(task.reminder_at)
-                    : task.reminder_enabled
-                    ? "On"
-                    : "Off"}
-                </span>
-              </span>
-            </span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </button>
-        )}
       </div>
 
       {/* Title */}
@@ -915,6 +819,102 @@ const handleUpdate = async (data: {
             />
           </PopoverMenu>
         </div>
+      </div>
+
+      {(task.recurrence_rule || task.recurrence_parent_id) && (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full bg-elevated px-2 py-0.5 text-[11px] text-secondary">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 12a8 8 0 0 1 13.7-5.6L20 8" />
+              <path d="M20 4v4h-4" />
+              <path d="M20 12a8 8 0 0 1-13.7 5.6L4 16" />
+              <path d="M4 20v-4h4" />
+            </svg>
+            {task.recurrence_rule ? describeRule(task.recurrence_rule) || "Repeats" : "Repeats"}
+          </span>
+          <button
+            onClick={handleStopRecurrence}
+            className="text-[11px] text-secondary transition-colors hover:text-primary"
+          >
+            Stop repeating
+          </button>
+        </div>
+      )}
+
+      {/* Per-task reminder: exact time plus the channels the user picked. */}
+      <div className="mt-2.5">
+        {reminderOpen ? (
+          <div className="space-y-2">
+            <TaskReminderFields
+              value={reminderDraft}
+              onChange={setReminderDraft}
+              suggestedDate={task.due_date || task.start_date}
+              onChannelChange={handleChannelChange}
+              idPrefix="drawer"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setReminderDraft(taskReminderDraft(task));
+                  setReminderOpen(false);
+                }}
+                className="btn bg-elevated border border-border px-3 py-1 text-xs text-secondary hover:bg-hover hover:text-primary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveReminder()}
+                className="btn btn-primary px-3 py-1 text-xs"
+              >
+                Save reminder
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setReminderDraft((prev) =>
+                prev.enabled
+                  ? prev
+                  : {
+                      ...prev,
+                      enabled: true,
+                      at:
+                        prev.at ||
+                        defaultReminderAt(task.due_date || task.start_date),
+                    }
+              );
+              setReminderOpen(true);
+            }}
+            className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-elevated px-3 py-2 text-left transition-colors hover:bg-hover"
+            aria-label="Set task reminder"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+                </svg>
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm text-secondary">Remind me</span>
+                <span className="block text-[11px] text-muted">
+                  {task.reminder_at
+                    ? describeReminder(task.reminder_at)
+                    : task.reminder_enabled
+                    ? "On"
+                    : "Off"}
+                </span>
+              </span>
+            </span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Content: description then subtasks, all on one page. No flex-1 so the
@@ -1035,14 +1035,6 @@ const handleUpdate = async (data: {
         </div>
 
         <div className="mt-5 border-t border-border pt-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <Label>Subtasks</Label>
-            {hasSubtasks && (
-              <span className="text-[11px] text-muted">
-                {subtasks.filter((s) => s.status === "done").length}/{subtasks.length}
-              </span>
-            )}
-          </div>
           <TaskChecklist subtasks={subtasks} taskId={task.id} />
         </div>
       </div>
@@ -1076,8 +1068,13 @@ const handleUpdate = async (data: {
         </button>
       )}
 
-      {/* Footer */}
-      <div className="mt-4 border-t border-border/60 pt-3">
+      {/* Footer: status + secondary actions, pinned to the bottom of the sheet
+          so it stays reachable without scrolling past the whole task. */}
+      <div
+        data-testid="task-drawer-actions"
+        className="sticky bottom-0 z-10 -mx-4 -mb-3 mt-auto border-t border-border bg-surface px-4 pb-2 pt-2"
+        style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.5rem)" }}
+      >
         <div className="flex items-center justify-between gap-2">
           <div>
             <button
@@ -1237,12 +1234,19 @@ function DrawerShell({ onClose, title, dimmed, resizeKey, children }: DrawerShel
 
   return (
     <div
-      className="fixed inset-0 z-40 flex justify-end"
+      className="fixed inset-x-0 top-0 z-40 flex justify-end"
+      data-testid="task-drawer"
       // In the Electron desktop shell the top strip holds the OS window
       // controls: start the overlay below it (so the strip stays draggable and
       // the buttons stay visible) and mark the overlay no-drag so the close
       // button is clickable on macOS instead of starting a window drag.
-      style={{ top: "var(--desktop-titlebar, 0px)", WebkitAppRegion: "no-drag" } as CSSProperties}
+      // On phones the sheet stops above the bottom tab bar (--tabbar-h) so the
+      // primary navigation is never covered by the task sheet.
+      style={{
+        top: "var(--desktop-titlebar, 0px)",
+        bottom: "var(--tabbar-h, 0px)",
+        WebkitAppRegion: "no-drag",
+      } as CSSProperties}
     >
       <div
         className="h-full flex-1 bg-black/40"
@@ -1273,7 +1277,7 @@ function DrawerShell({ onClose, title, dimmed, resizeKey, children }: DrawerShel
             </button>
           </div>
         ) : null}
-        <div className={`flex flex-1 flex-col overflow-y-auto px-4 py-3 transition-opacity ${dimmed ? "opacity-50" : ""}`}>{children}</div>
+        <div className={`flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 py-3 transition-opacity ${dimmed ? "opacity-50" : ""}`}>{children}</div>
       </div>
     </div>
   );

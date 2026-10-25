@@ -149,7 +149,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
     backgroundColor: colors.bg,
     backgroundClip: "padding-box",
     borderRadius: 4,
-    padding: "6px 12px",
+    padding: "6px 10px",
     display: "flex",
     alignItems: "center",
     cursor: "move",
@@ -234,7 +234,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
           just outside the edges). */}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden" style={{ maxWidth: 320 }}>
         {timeLabel && (
-          <span className="shrink-0 rounded-full bg-black/20 px-1.5 py-0.5 text-[9px] font-semibold" style={{ color: "var(--bar-ink)" }}>
+          <span className="hidden shrink-0 rounded-full bg-black/20 px-1.5 py-0.5 text-[9px] font-semibold sm:inline-block" style={{ color: "var(--bar-ink)" }}>
             {timeLabel}
           </span>
         )}
@@ -243,12 +243,12 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
             {TIER_LABELS[tier]}
           </span>
         )}
-        <span className="truncate text-sm text-scale-sm font-medium" style={{ color: "var(--bar-ink)" }}>
+        <span className="task-bar-label truncate font-medium" style={{ color: "var(--bar-ink)" }}>
           {task.title}
         </span>
       </div>
       {task.tags && task.tags.length > 0 && (
-        <span className="ml-auto flex shrink-0 gap-0.5 pl-2">
+        <span className="ml-auto hidden shrink-0 gap-0.5 pl-2 sm:flex">
           {task.tags.slice(0, 3).map((tag) => (
             <span
               key={tag.id}

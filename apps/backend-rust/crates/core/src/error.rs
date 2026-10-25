@@ -56,7 +56,17 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status();
-        let detail = self.to_string();
+        // A 5xx detail is internal by definition: it can carry SQL fragments,
+        // table/column names, sqlx driver text or provider payloads. Log the
+        // real message and return a fixed body so nothing about the schema or
+        // the upstream service leaks to the caller.
+        let detail = match self {
+            ApiError::Internal(detail) => {
+                tracing::error!(error = %detail, "internal error");
+                "Internal server error".to_string()
+            }
+            other => other.to_string(),
+        };
         (status, Json(json!({ "detail": detail }))).into_response()
     }
 }
@@ -79,8 +89,30 @@ mod tests {
 
     #[test]
     fn statuses_are_mapped() {
-        assert_eq!(ApiError::Unauthorized("x".into()).status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(ApiError::Conflict("x".into()).status(), StatusCode::CONFLICT);
-        assert_eq!(ApiError::Internal("x".into()).status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            ApiError::Unauthorized("x".into()).status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            ApiError::Conflict("x".into()).status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            ApiError::Internal("x".into()).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    /// A 5xx must never echo its detail: internal messages can name tables,
+    /// columns or the database driver. Only the fixed body is exposed.
+    #[tokio::test]
+    async fn internal_errors_do_not_leak_their_detail() {
+        let resp = ApiError::Internal("database error: relation \"users\" does not exist".into())
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert_eq!(text, r#"{"detail":"Internal server error"}"#);
+        assert!(!text.contains("relation"));
     }
 }

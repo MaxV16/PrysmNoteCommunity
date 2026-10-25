@@ -8,7 +8,8 @@ import {
   dateForDayIndex,
   initialSliceStart,
 } from "@/lib/timeline-window";
-import { ZOOM_LEVELS, type ZoomLevel, DEFAULT_ZOOM } from "@/components/timeline/constants";
+import { ZOOM_LEVELS, DEFAULT_ZOOM } from "@/components/timeline/constants";
+import { usePersistentZoom } from "@/hooks/usePersistentZoom";
 
 /**
  * Timeline state for a fixed, very wide day strip.
@@ -20,7 +21,13 @@ import { ZOOM_LEVELS, type ZoomLevel, DEFAULT_ZOOM } from "@/components/timeline
  */
 export function useTimeline() {
   const [sliceStart, setSliceStart] = useState(() => initialSliceStart());
-  const [zoom, setZoom] = useState<ZoomLevel>(DEFAULT_ZOOM);
+  // Per-device zoom, persisted under `prysm-zoom-timeline` and read before the
+  // first paint so a returning user keeps their chosen density.
+  const { zoom, setZoom, zoomIn, zoomOut, reset: resetZoom } = usePersistentZoom(
+    "timeline",
+    ZOOM_LEVELS,
+    DEFAULT_ZOOM
+  );
   // `today` re-resolves on its own so a session left open across midnight keeps
   // showing the real current day instead of staying on the day the app was
   // opened until a hard refresh. It refreshes on a short interval (only while
@@ -66,25 +73,12 @@ export function useTimeline() {
     setSliceStart(clampSliceStart(start));
   }, []);
 
-  const changeZoom = useCallback((nextZoom: ZoomLevel) => {
-    setZoom(nextZoom);
-  }, []);
-
-  const zoomIn = useCallback(() => {
-    setZoom((current) => {
-      const idx = ZOOM_LEVELS.indexOf(current);
-      if (idx < ZOOM_LEVELS.length - 1) return ZOOM_LEVELS[idx + 1];
-      return current;
-    });
-  }, []);
-
-  const zoomOut = useCallback(() => {
-    setZoom((current) => {
-      const idx = ZOOM_LEVELS.indexOf(current);
-      if (idx > 0) return ZOOM_LEVELS[idx - 1];
-      return current;
-    });
-  }, []);
+  const changeZoom = useCallback(
+    (nextZoom: number) => {
+      setZoom(nextZoom);
+    },
+    [setZoom]
+  );
 
   return {
     visibleRange,
@@ -96,6 +90,7 @@ export function useTimeline() {
     setZoom: changeZoom,
     zoomIn,
     zoomOut,
+    resetZoom,
     zoomLevels: ZOOM_LEVELS,
   };
 }

@@ -89,8 +89,8 @@ async function dismissTour(page) {
   }
 }
 
-// The phone toolbar is a single scroll row; the view switcher and the period
-// nav must sit fully inside the viewport without scrolling (they were the
+// The phone toolbar is a single scroll row; the view switcher and the primary
+// buttons must sit fully inside the viewport without scrolling (they were the
 // controls clipped in half). Measure without scrollIntoViewIfNeeded so a
 // clipped control still reports an out-of-viewport box.
 async function assertToolbarControlsInViewport(page) {
@@ -98,7 +98,6 @@ async function assertToolbarControlsInViewport(page) {
   await page.getByTestId("timeline-toolbar").evaluate((el) => { el.scrollLeft = 0; });
   const controls = [
     ["view switcher", page.getByTestId("view-mode-toggle")],
-    ["period nav", page.getByRole("button", { name: "Previous period" })],
     ["+ New", page.getByTestId("new-task-button")],
   ];
   for (const [name, locator] of controls) {
@@ -110,12 +109,26 @@ async function assertToolbarControlsInViewport(page) {
       `${name} right edge should be in view (right=${box.x + box.width}, viewport=${vw})`
     );
   }
-  // The view switcher is the only path to Kanban/Calendar/List/Board on a phone.
+  // The view switcher is the only path to Kanban/Calendar/List/Board on a phone,
+  // and the period nav lives inside that same menu on phones. The menu must be
+  // fully inside the viewport (never clipped) and its period controls reachable.
   await page.getByTestId("view-mode-toggle").click();
-  await page.getByRole("menu").waitFor({ state: "visible", timeout: 5000 });
+  const menu = page.getByRole("menu");
+  await menu.waitFor({ state: "visible", timeout: 5000 });
+  const menuBox = await menu.boundingBox();
+  const vh = page.viewportSize().height;
+  assert(menuBox, "the view menu should have a bounding box");
+  assert(menuBox.y >= -1, `menu top should be in view (y=${menuBox.y})`);
+  assert(
+    menuBox.y + menuBox.height <= vh + 1,
+    `menu bottom should be in view (bottom=${menuBox.y + menuBox.height}, viewport=${vh})`
+  );
+  const prev = menu.getByRole("button", { name: "Previous period" });
+  await prev.waitFor({ state: "visible", timeout: 5000 });
+  const prevBox = await prev.boundingBox();
+  assert(prevBox && prevBox.y >= -1 && prevBox.y + prevBox.height <= vh + 1, "period nav should be reachable inside the menu");
   await page.keyboard.press("Escape");
-  await page
-    .getByRole("menu")
+  await menu
     .waitFor({ state: "hidden", timeout: 5000 })
     .catch(() => undefined);
 }
@@ -366,7 +379,7 @@ async function main() {
   const aiButton = page.locator('button[aria-label="AI"]').first();
   await aiButton.waitFor({ state: "visible" });
   await aiButton.click();
-  await page.getByText("AI Command").first().waitFor({ state: "visible", timeout: 10000 });
+  await page.getByTestId("ai-panel-header").waitFor({ state: "visible", timeout: 10000 });
   // The open drawer covers its own toggle on mobile; close it with the header
   // close button (the real phone gesture).
   await page.getByRole("button", { name: "Close AI panel" }).click();

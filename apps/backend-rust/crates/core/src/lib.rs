@@ -96,15 +96,17 @@ pub mod preferences;
 pub mod push_service;
 pub mod ratelimit;
 pub mod recurring;
+pub mod refresh_tokens;
+pub mod revocation;
 pub mod risk;
 pub mod schema;
 pub mod search;
 pub mod tags;
-pub mod tokens;
 pub mod task;
 pub mod task_links;
 pub mod tasks;
 pub mod teams;
+pub mod tokens;
 pub mod uploads;
 pub mod user;
 pub mod watchlist;
@@ -208,6 +210,10 @@ pub fn build_router(state: AppState, ee: Option<&dyn EeExtension>) -> Router {
     router
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
+            middleware::reject_revoked,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
             middleware::publish_events,
         ))
         .layer(axum::middleware::from_fn_with_state(
@@ -227,7 +233,10 @@ pub fn build_router(state: AppState, ee: Option<&dyn EeExtension>) -> Router {
             state.clone(),
             middleware::csrf,
         ))
-        .layer(axum::middleware::from_fn_with_state(state, middleware::cors))
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            middleware::cors,
+        ))
 }
 
 /// `GET /api/health` - liveness/version probe, byte-compatible with the Python

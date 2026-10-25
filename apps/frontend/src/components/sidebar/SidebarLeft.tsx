@@ -18,9 +18,22 @@ interface SidebarLeftProps {
   onToggle: () => void;
   view: WorkspaceView;
   onSelectView: (v: WorkspaceView) => void;
+  /**
+   * "desktop" renders the permanent column (optionally collapsed to an icon
+   * rail). "drawer" fills the slide-in mobile panel: full width, comfortable
+   * rows and a close affordance instead of a collapse chevron.
+   */
+  variant?: "desktop" | "drawer";
 }
 
-export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: SidebarLeftProps) {
+export function SidebarLeft({
+  collapsed,
+  onToggle,
+  view,
+  onSelectView,
+  variant = "desktop",
+}: SidebarLeftProps) {
+  const isDrawer = variant === "drawer";
   const { user, logout } = useAuth();
   const tagsOn = useUiModule("tagList");
   const financeOn = useUiModule("finance");
@@ -157,28 +170,33 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
 
   return (
     <div
-      className={`app-chrome relative flex h-full shrink-0 flex-col overflow-hidden border-r border-border bg-surface ${
-        sidebarResize.isEnabled ? "" : "w-56 lg:w-60"
+      className={`app-chrome relative flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-border bg-surface ${
+        isDrawer ? "w-full" : sidebarResize.isEnabled ? "" : "w-56 lg:w-60"
       }`}
-      style={sidebarResize.isEnabled ? { width: sidebarResize.width } : undefined}
+      style={!isDrawer && sidebarResize.isEnabled ? { width: sidebarResize.width } : undefined}
       data-tour="sidebar"
+      data-variant={variant}
     >
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between px-4 py-3">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <BrandMark size={28} />
-          <div className="leading-tight">
-            <h1 className="text-sm font-bold text-primary">Prysm Note</h1>
+          <div className="min-w-0 leading-tight">
+            <h1 className="truncate text-sm font-bold text-primary">Prysm Note</h1>
             <span className="text-[10px] text-muted">Tasks &amp; plans</span>
           </div>
         </div>
         <button
           onClick={onToggle}
-          className="icon-btn"
-          title="Collapse sidebar"
-          aria-label="Collapse sidebar"
+          className="icon-btn pointer-coarse:h-11 pointer-coarse:w-11"
+          title={isDrawer ? "Close menu" : "Collapse sidebar"}
+          aria-label={isDrawer ? "Close menu" : "Collapse sidebar"}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          {isDrawer ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          )}
         </button>
       </div>
 
@@ -207,21 +225,35 @@ export function SidebarLeft({ collapsed, onToggle, view, onSelectView }: Sidebar
           </button>
         )}
 
-        <div className="relative flex items-center gap-1">
+        {isDrawer ? (
           <button
             onClick={handleLogout}
-            className="icon-btn"
-            title="Log out"
-            aria-label="Log out"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+            <span className="flex-1 text-left">Log out</span>
           </button>
-        </div>
+        ) : (
+          <div className="relative flex items-center gap-1">
+            <button
+              onClick={handleLogout}
+              className="icon-btn"
+              title="Log out"
+              aria-label="Log out"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+          </div>
+        )}
       </div>
       <div
         {...sidebarResize.handleProps}
         data-resize-handle="sidebar"
-        className="absolute inset-y-0 right-0 z-20 hidden w-1.5 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/40 sm:block"
+        className={`absolute inset-y-0 right-0 z-20 hidden w-1.5 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-accent/40 ${
+          isDrawer ? "" : "sm:block"
+        }`}
       />
     </div>
   );

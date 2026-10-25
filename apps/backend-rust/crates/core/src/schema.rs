@@ -201,6 +201,24 @@ SELECT o.id, tt.tag_id
 ON CONFLICT DO NOTHING;
 ALTER TABLE public.task_tags FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.tasks FORCE ROW LEVEL SECURITY;
+
+-- Refresh-token rotation lineage. Only the SHA-256 hash of each token is
+-- stored (never the raw token); `family_id` groups every rotation of one login
+-- so reuse of a rotated token can revoke the lineage. No RLS: the refresh path
+-- runs before a user session exists and every query is keyed by the hash.
+CREATE TABLE IF NOT EXISTS public.refresh_tokens (
+    token_hash character varying(64) NOT NULL,
+    family_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    issued_at timestamp with time zone DEFAULT now() NOT NULL,
+    rotated_at timestamp with time zone,
+    revoked_at timestamp with time zone,
+    PRIMARY KEY (token_hash)
+);
+
+CREATE INDEX IF NOT EXISTS ix_refresh_tokens_family_id ON public.refresh_tokens USING btree (family_id);
+CREATE INDEX IF NOT EXISTS ix_refresh_tokens_expires_at ON public.refresh_tokens USING btree (expires_at);
 "#;
 
 /// Provisions the core schema on a fresh database.
@@ -216,14 +234,18 @@ pub async fn ensure_schema(pool: &PgPool, system_pool: &PgPool) -> Result<(), sq
     match bootstrap(system_pool).await {
         Ok(()) => {}
         Err(err) => {
-            tracing::warn!("schema bootstrap via the system pool failed ({err}); retrying on the app pool");
+            tracing::warn!(
+                "schema bootstrap via the system pool failed ({err}); retrying on the app pool"
+            );
             bootstrap(pool).await?;
         }
     }
     match migrate(pool).await {
         Ok(()) => Ok(()),
         Err(err) => {
-            tracing::warn!("schema migrations via the app pool failed ({err}); retrying on the system pool");
+            tracing::warn!(
+                "schema migrations via the app pool failed ({err}); retrying on the system pool"
+            );
             migrate(system_pool).await
         }
     }

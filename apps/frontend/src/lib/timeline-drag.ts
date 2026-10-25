@@ -22,6 +22,91 @@ export function dragOffsetPx(input: { dx: number; scrollDelta?: number }): numbe
 }
 
 /**
+ * Pointer position in the canvas' *content* coordinate space.
+ *
+ * A pointer's screen x is stable, but the content under it moves whenever the
+ * canvas scrolls (native pan, momentum, a scrollbar drag, or the drag engine's
+ * own edge auto-scroll). Adding the CURRENT `scrollLeft` converts the pointer
+ * to the content coordinate it is actually over, which is what a drop must use.
+ * The old engine trusted a single `startScrollLeft` sample plus an accumulated
+ * delta, so a native scroll that arrived late (a Windows precision touchscreen
+ * pan or its momentum) left the baseline stale and teleported the bar and the
+ * viewport. Sampling the live offset makes the baseline impossible to go stale.
+ */
+export function pointerContentX(input: {
+  clientX: number;
+  bodyLeft: number;
+  scrollLeft: number;
+}): number {
+  const value = input.clientX - input.bodyLeft + input.scrollLeft;
+  return Number.isFinite(value) ? value : 0;
+}
+
+/** Raw pixel offset between the press anchor and the pointer, in content space. */
+export function dragOffsetFromContent(input: {
+  startContentX: number;
+  pointerContentX: number;
+}): number {
+  const total = input.pointerContentX - input.startContentX;
+  return Number.isFinite(total) ? total : 0;
+}
+
+/**
+ * Whole days a bar would move if dropped with the pointer at
+ * `pointerContentX`.
+ *
+ * The anchor is the pointer's content position at press, so the result is the
+ * day delta of the pointer itself. It is deliberately independent of the bar's
+ * rendered pixel width: the same gesture lands on the same day whether the
+ * canvas scrolled under the finger or the viewport zoomed mid-drag.
+ */
+export function dragDaysFromContent(input: {
+  startContentX: number;
+  pointerContentX: number;
+  dayWidth: number;
+}): number {
+  const { dayWidth } = input;
+  if (!Number.isFinite(dayWidth) || dayWidth <= 0) return 0;
+  const days = Math.round(
+    dragOffsetFromContent(input) / dayWidth
+  );
+  return days === 0 ? 0 : days;
+}
+
+/**
+ * Where inside its own rendered rect a bar was grabbed, in content pixels.
+ * Used so a bar grabbed near its end still lands with the grabbed point (not
+ * its left edge) under the pointer, and so a bar whose screen rect shifted
+ * mid-gesture cannot offset the day math.
+ */
+export function grabOffsetWithinBar(input: {
+  startContentX: number;
+  barContentLeft: number;
+}): number {
+  const value = input.startContentX - input.barContentLeft;
+  return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Day delta for a bar anchored by its own left edge: the bar's target left is
+ * `pointerContentX - grabOffsetPx`, and the delta is measured from the bar's
+ * pre-drag content left. With a consistent grab offset this equals
+ * `dragDaysFromContent`, but expressing it from the bar rect is the contract
+ * the pointer engine uses, so a stale screen position cannot leak in.
+ */
+export function dragDaysForBar(input: {
+  pointerContentX: number;
+  barContentLeft: number;
+  grabOffsetPx: number;
+  dayWidth: number;
+}): number {
+  if (!Number.isFinite(input.dayWidth) || input.dayWidth <= 0) return 0;
+  const targetLeft = input.pointerContentX - input.grabOffsetPx;
+  const days = Math.round((targetLeft - input.barContentLeft) / input.dayWidth);
+  return days === 0 ? 0 : days;
+}
+
+/**
  * Snap a raw pixel offset to the nearest whole day column. Used by the resize
  * preview so the bar (and its live date badge) land on day boundaries while the
  * handle is dragged, exactly where the drop commits, instead of sliding

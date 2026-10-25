@@ -12,6 +12,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
@@ -24,6 +25,7 @@ use crate::error::ApiError;
 use crate::jwt;
 use crate::password;
 use crate::ratelimit::RateLimiter;
+use crate::refresh_tokens;
 use crate::user;
 use crate::AppState;
 
@@ -60,6 +62,68 @@ async fn track_failed_login(ip: &str) {
             .block(&format!("authblock:{ip}"), IP_BLOCK_DURATION)
             .await;
     }
+}
+
+/// Failures before per-identifier backoff engages.
+const LOGIN_FREE_FAILURES: u32 = 5;
+/// Per-identifier failure window (also the decay window for the counter).
+const LOGIN_FAIL_WINDOW: Duration = Duration::from_secs(3600);
+/// Upper bound on the per-identifier exponential delay.
+const LOGIN_MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// Process-wide per-account login backoff (`rl:login`), layered on top of the
+/// per-IP limiter. Distributed credential stuffing targets one mailbox from
+/// many IPs, so keying on the normalized email closes that gap. The delay is
+/// exponential but capped, never a permanent lock, so a victim cannot be
+/// locked out of their own account indefinitely.
+fn login_limiter() -> &'static RateLimiter {
+    static LIMITER: OnceLock<RateLimiter> = OnceLock::new();
+    LIMITER.get_or_init(|| RateLimiter::from_env("rl:login"))
+}
+
+fn login_fail_key(email: &str) -> String {
+    format!("emailfail:{email}")
+}
+
+fn login_backoff_key(email: &str) -> String {
+    format!("loginbackoff:{email}")
+}
+
+/// Whether this email is currently in backoff. Keyed only on the normalized
+/// email, so the answer is identical for existing and non-existing accounts.
+async fn login_backoff_active(email: &str) -> bool {
+    login_limiter().is_blocked(&login_backoff_key(email)).await
+}
+
+/// Delay for a given consecutive failure count: 5 free failures, then 1s,
+/// 2s, 4s, 8s, 16s, capped at 30s.
+fn login_backoff_delay(count: u32) -> Option<Duration> {
+    if count <= LOGIN_FREE_FAILURES {
+        return None;
+    }
+    let step = (count - LOGIN_FREE_FAILURES - 1).min(5);
+    let seconds = (1u64 << step).min(LOGIN_MAX_BACKOFF.as_secs());
+    Some(Duration::from_secs(seconds))
+}
+
+/// Record a failed password check for `email` and escalate the delay:
+/// 5 free failures, then 1s, 2s, 4s, 8s, 16s, capped at 30s.
+async fn track_failed_email(email: &str) {
+    let count = login_limiter()
+        .count(&login_fail_key(email), LOGIN_FAIL_WINDOW)
+        .await;
+    if let Some(delay) = login_backoff_delay(count) {
+        login_limiter()
+            .block(&login_backoff_key(email), delay)
+            .await;
+    }
+}
+
+/// A successful login (or a completed password reset) clears both the failure
+/// counter and the pending delay.
+async fn clear_login_backoff(email: &str) {
+    login_limiter().clear(&login_fail_key(email)).await;
+    login_limiter().clear(&login_backoff_key(email)).await;
 }
 
 #[derive(Deserialize)]
@@ -126,6 +190,13 @@ fn mail_limiter() -> &'static RateLimiter {
 /// only engages when Redis is configured: a single-writer VM must never be
 /// locked out of its own signup page by the in-memory fallback, and the test
 /// suite (no Redis) stays deterministic.
+///
+/// Deliberate fail-open: without Redis this throttle does nothing. The
+/// compensating control is Cloudflare Turnstile (`verify_turnstile`, enforced
+/// whenever `TURNSTILE_SECRET_KEY` is configured) plus the EE risk engine on
+/// the private build. Do not "fix" this by enabling the in-memory fallback:
+/// that would let one noisy client exhaust a shared budget and lock real
+/// signups out of a single-worker deployment.
 fn signup_limiter() -> &'static RateLimiter {
     static LIMITER: OnceLock<RateLimiter> = OnceLock::new();
     LIMITER.get_or_init(|| RateLimiter::from_env("rl:signup"))
@@ -155,13 +226,24 @@ async fn verify_turnstile(secret: &str, token: &str, ip: Option<&str>) -> bool {
     if let Some(ip) = ip {
         form.push(("remoteip", ip));
     }
-    let client = match reqwest::Client::builder().timeout(Duration::from_secs(10)).build() {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
         Ok(client) => client,
         Err(_) => return true,
     };
-    match client.post(TURNSTILE_SITEVERIFY_URL).form(&form).send().await {
+    match client
+        .post(TURNSTILE_SITEVERIFY_URL)
+        .form(&form)
+        .send()
+        .await
+    {
         Ok(resp) => match resp.json::<Value>().await {
-            Ok(data) => data.get("success").and_then(Value::as_bool).unwrap_or(false),
+            Ok(data) => data
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             Err(_) => true,
         },
         Err(_) => true,
@@ -174,7 +256,11 @@ async fn enforce_signup_rate_limit(headers: &HeaderMap, email: &str) -> Result<(
         return Ok(());
     }
     let ip = crate::middleware::client_ip(headers);
-    if signup_limiter().count(&format!("ip:{ip}"), SIGNUP_IP_WINDOW).await > SIGNUP_IP_LIMIT {
+    if signup_limiter()
+        .count(&format!("ip:{ip}"), SIGNUP_IP_WINDOW)
+        .await
+        > SIGNUP_IP_LIMIT
+    {
         return Err(ApiError::TooManyRequests(
             "Too many signups from this address - try again later".into(),
         ));
@@ -198,11 +284,19 @@ const MAIL_LIMIT: u32 = 5;
 
 async fn enforce_mail_rate_limit(headers: &HeaderMap, email: &str) -> Result<(), ApiError> {
     let ip = crate::middleware::client_ip(headers);
-    if mail_limiter().count(&format!("email:{email}"), MAIL_WINDOW).await > MAIL_LIMIT {
-        return Err(ApiError::TooManyRequests("Too many requests - try again later".into()));
+    if mail_limiter()
+        .count(&format!("email:{email}"), MAIL_WINDOW)
+        .await
+        > MAIL_LIMIT
+    {
+        return Err(ApiError::TooManyRequests(
+            "Too many requests - try again later".into(),
+        ));
     }
     if mail_limiter().count(&format!("ip:{ip}"), MAIL_WINDOW).await > MAIL_LIMIT {
-        return Err(ApiError::TooManyRequests("Too many requests - try again later".into()));
+        return Err(ApiError::TooManyRequests(
+            "Too many requests - try again later".into(),
+        ));
     }
     Ok(())
 }
@@ -226,8 +320,14 @@ fn send_verification_email(settings: &crate::config::Settings, user: &user::User
     let settings = settings.clone();
     let to = user.email.clone();
     tokio::spawn(async move {
-        let _ = crate::email::send_email(&settings, &to, "[Prysm Note] Verify your email", &body, None)
-            .await;
+        let _ = crate::email::send_email(
+            &settings,
+            &to,
+            "[Prysm Note] Verify your email",
+            &body,
+            None,
+        )
+        .await;
     });
 }
 
@@ -286,7 +386,7 @@ pub(crate) fn user_json(user: &user::User) -> Value {
 
 /// Build a JSON response carrying both auth cookies. The cookies are appended
 /// (not inserted) so the access and refresh Set-Cookie headers both survive.
-pub(crate) fn session_response(user: &user::User, access: &str, refresh: &str, secure: bool) -> Response {
+fn session_response(user: &user::User, access: &str, refresh: &str, secure: bool) -> Response {
     let [access_cookie, refresh_cookie] = cookies::auth_cookies(access, refresh, secure);
     let mut response = Json(user_json(user)).into_response();
     let headers = response.headers_mut();
@@ -297,6 +397,30 @@ pub(crate) fn session_response(user: &user::User, access: &str, refresh: &str, s
         headers.append(SET_COOKIE, value);
     }
     response
+}
+
+/// Mint and persist a refresh token. `family` continues an existing rotation
+/// lineage; `None` starts a new one (a fresh login or a re-authenticated
+/// device). Only the token hash is stored by [`refresh_tokens::store_issued`].
+async fn issue_refresh(
+    state: &AppState,
+    user_id: uuid::Uuid,
+    token_version: i32,
+    family: Option<uuid::Uuid>,
+) -> Result<String, ApiError> {
+    let family = family.unwrap_or_else(uuid::Uuid::new_v4);
+    let token = jwt::encode_refresh_with_family(
+        &state.settings.jwt_secret_key,
+        &user_id.to_string(),
+        token_version,
+        &family.to_string(),
+    )
+    .map_err(token_error)?;
+    let expires_at = Utc::now().timestamp() + jwt::REFRESH_TTL_SECS;
+    refresh_tokens::store_issued(&state.pool, &token, user_id, family, expires_at)
+        .await
+        .map_err(db_error)?;
+    Ok(token)
 }
 
 async fn register(
@@ -326,7 +450,9 @@ async fn register(
     // network. The EE risk engine (absent in core) handles signup abuse.
 
     if !valid_email(&email) {
-        return Err(ApiError::Unprocessable("Enter a valid email address".into()));
+        return Err(ApiError::Unprocessable(
+            "Enter a valid email address".into(),
+        ));
     }
     if !(PASSWORD_MIN..=PASSWORD_MAX).contains(&req.password.len()) {
         return Err(ApiError::Unprocessable(
@@ -393,12 +519,13 @@ async fn register(
 
     let user_id = created.id.to_string();
     crate::lifecycle::touch_activity(&state, created.id);
-    let access =
-        jwt::encode_access(&state.settings.jwt_secret_key, &user_id, created.token_version)
-            .map_err(token_error)?;
-    let refresh =
-        jwt::encode_refresh(&state.settings.jwt_secret_key, &user_id, created.token_version)
-            .map_err(token_error)?;
+    let access = jwt::encode_access(
+        &state.settings.jwt_secret_key,
+        &user_id,
+        created.token_version,
+    )
+    .map_err(token_error)?;
+    let refresh = issue_refresh(&state, created.id, created.token_version, None).await?;
     Ok(session_response(
         &created,
         &access,
@@ -413,10 +540,7 @@ async fn login(
     Json(req): Json<LoginRequest>,
 ) -> Result<Response, ApiError> {
     let ip = crate::middleware::client_ip(&headers);
-    if auth_limiter()
-        .is_blocked(&format!("authblock:{ip}"))
-        .await
-    {
+    if auth_limiter().is_blocked(&format!("authblock:{ip}")).await {
         return Ok((
             StatusCode::TOO_MANY_REQUESTS,
             Json(json!({ "detail": "IP blocked" })),
@@ -425,6 +549,15 @@ async fn login(
     }
 
     let email = normalize_email(&req.email);
+    // Per-account backoff, checked before the password hash. It is keyed only
+    // on the normalized email and returns the same 429 for known and unknown
+    // addresses, so it cannot be used to enumerate accounts.
+    if login_backoff_active(&email).await {
+        return Err(ApiError::TooManyRequests(
+            "Too many attempts - try again shortly".into(),
+        ));
+    }
+
     let found = user::get_by_email(&state.pool, &email)
         .await
         .map_err(db_error)?;
@@ -439,16 +572,18 @@ async fn login(
         (Some(row), true) => row,
         _ => {
             track_failed_login(&ip).await;
+            track_failed_email(&email).await;
             return Err(ApiError::Unauthorized("Invalid credentials".into()));
         }
     };
+
+    clear_login_backoff(&email).await;
 
     let user_id = user.id.to_string();
     crate::lifecycle::touch_activity(&state, user.id);
     let access = jwt::encode_access(&state.settings.jwt_secret_key, &user_id, user.token_version)
         .map_err(token_error)?;
-    let refresh = jwt::encode_refresh(&state.settings.jwt_secret_key, &user_id, user.token_version)
-        .map_err(token_error)?;
+    let refresh = issue_refresh(&state, user.id, user.token_version, None).await?;
     Ok(session_response(
         &user,
         &access,
@@ -486,12 +621,16 @@ fn append_cookies(response: &mut Response, cookies: &[String]) {
     }
 }
 
-/// Blacklist every token presented on the request (best effort).
+/// Blacklist every token presented on the request (best effort) and revoke the
+/// refresh family so every rotation of that login dies too.
 async fn blacklist_presented(state: &AppState, headers: &HeaderMap) {
     for token in presented_tokens(headers) {
         if let Ok(claims) = jwt::decode(&state.settings.jwt_secret_key, &token) {
             if let Ok(user_id) = uuid::Uuid::parse_str(&claims.sub) {
                 let _ = blacklist::add(&state.pool, &claims.jti, user_id, claims.exp).await;
+            }
+            if claims.token_type == jwt::REFRESH {
+                let _ = refresh_tokens::revoke_family_for_token(&state.pool, &token).await;
             }
         }
     }
@@ -531,7 +670,9 @@ async fn change_password(
         .map(|hash| password::verify_password(&req.current_password, hash))
         .unwrap_or(false);
     if !current_ok {
-        return Err(ApiError::Unauthorized("Current password is incorrect".into()));
+        return Err(ApiError::Unauthorized(
+            "Current password is incorrect".into(),
+        ));
     }
 
     let new_hash = password::hash_password(&req.new_password)
@@ -542,13 +683,13 @@ async fn change_password(
         .ok_or_else(|| ApiError::Unauthorized("Could not validate credentials".into()))?;
 
     // Invalidate every token minted before the change, then re-mint this
-    // device's cookies so the caller stays signed in.
+    // device's cookies so the caller stays signed in. A new rotation family is
+    // started; the old refresh families are dead because `token_version` moved.
     blacklist_presented(&state, &headers).await;
     let sub = updated.id.to_string();
     let access = jwt::encode_access(&state.settings.jwt_secret_key, &sub, updated.token_version)
         .map_err(token_error)?;
-    let refresh = jwt::encode_refresh(&state.settings.jwt_secret_key, &sub, updated.token_version)
-        .map_err(token_error)?;
+    let refresh = issue_refresh(&state, updated.id, updated.token_version, None).await?;
     Ok(session_response(
         &updated,
         &access,
@@ -561,9 +702,8 @@ async fn verify_email(
     State(state): State<AppState>,
     Json(req): Json<VerifyEmailRequest>,
 ) -> Result<Response, ApiError> {
-    let claims = jwt::decode_extra(&state.settings.jwt_secret_key, &req.token).map_err(|_| {
-        ApiError::BadRequest("Invalid or expired link".into())
-    })?;
+    let claims = jwt::decode_extra(&state.settings.jwt_secret_key, &req.token)
+        .map_err(|_| ApiError::BadRequest("Invalid or expired link".into()))?;
     if claims.token_type != "verify" {
         return Err(ApiError::BadRequest("Invalid or expired link".into()));
     }
@@ -592,8 +732,7 @@ async fn verify_email(
     let sub = user.id.to_string();
     let access = jwt::encode_access(&state.settings.jwt_secret_key, &sub, user.token_version)
         .map_err(token_error)?;
-    let refresh = jwt::encode_refresh(&state.settings.jwt_secret_key, &sub, user.token_version)
-        .map_err(token_error)?;
+    let refresh = issue_refresh(&state, user.id, user.token_version, None).await?;
     let [access_cookie, refresh_cookie] =
         cookies::auth_cookies(&access, &refresh, state.settings.is_production());
     let mut response = Json(json!({
@@ -621,9 +760,14 @@ async fn resend_verification(
     let email = normalize_email(&req.email);
     // Always the same response so the endpoint cannot enumerate accounts.
     if enforce_mail_rate_limit(&headers, &email).await.is_err() {
-        return Err(ApiError::TooManyRequests("Too many requests - try again later".into()));
+        return Err(ApiError::TooManyRequests(
+            "Too many requests - try again later".into(),
+        ));
     }
-    if let Some(account) = user::get_by_email(&state.pool, &email).await.map_err(db_error)? {
+    if let Some(account) = user::get_by_email(&state.pool, &email)
+        .await
+        .map_err(db_error)?
+    {
         if account.password_hash.is_some() && !account.email_verified {
             send_verification_email(&state.settings, &account);
         }
@@ -638,11 +782,16 @@ async fn forgot_password(
 ) -> Result<Json<Value>, ApiError> {
     let email = normalize_email(&req.email);
     if enforce_mail_rate_limit(&headers, &email).await.is_err() {
-        return Err(ApiError::TooManyRequests("Too many requests - try again later".into()));
+        return Err(ApiError::TooManyRequests(
+            "Too many requests - try again later".into(),
+        ));
     }
 
     // Always the same response so the endpoint cannot enumerate accounts.
-    let Some(account) = user::get_by_email(&state.pool, &email).await.map_err(db_error)? else {
+    let Some(account) = user::get_by_email(&state.pool, &email)
+        .await
+        .map_err(db_error)?
+    else {
         return Ok(Json(json!({"status": "sent"})));
     };
     if account.password_hash.is_none() {
@@ -660,16 +809,24 @@ async fn forgot_password(
     ) else {
         return Ok(Json(json!({"status": "sent"})));
     };
-    let reset_url = format!("{}/reset-password?token={}", state.settings.app_origin, token);
+    let reset_url = format!(
+        "{}/reset-password?token={}",
+        state.settings.app_origin, token
+    );
     let body = format!(
         "We received a request to reset the password for your Prysm Note account.\n\nOpen the link below to choose a new password (valid for 30 minutes):\n\n{reset_url}\n\nIf you didn't request this, you can safely ignore this email - your password won't change."
     );
     let settings = state.settings.clone();
     let to = account.email.clone();
     tokio::spawn(async move {
-        let _ =
-            crate::email::send_email(&settings, &to, "[Prysm Note] Reset your password", &body, None)
-                .await;
+        let _ = crate::email::send_email(
+            &settings,
+            &to,
+            "[Prysm Note] Reset your password",
+            &body,
+            None,
+        )
+        .await;
     });
     Ok(Json(json!({"status": "sent"})))
 }
@@ -687,7 +844,8 @@ async fn reset_password(
         ));
     }
 
-    let claims = jwt::decode_extra(&state.settings.jwt_secret_key, &req.token).map_err(|_| invalid())?;
+    let claims =
+        jwt::decode_extra(&state.settings.jwt_secret_key, &req.token).map_err(|_| invalid())?;
     if claims.token_type != "reset" {
         return Err(invalid());
     }
@@ -715,6 +873,9 @@ async fn reset_password(
         .await
         .map_err(db_error)?
         .ok_or_else(invalid)?;
+    // A completed reset clears any pending per-account login backoff so the
+    // owner is never left waiting on a delay built up by an attacker.
+    clear_login_backoff(&normalize_email(&account.email)).await;
     Ok(Json(json!({"status": "password_reset"})))
 }
 
@@ -752,14 +913,18 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Va
         .await
         .map_err(db_error)?
     {
-        return Err(ApiError::Unauthorized("Could not validate credentials".into()));
+        return Err(ApiError::Unauthorized(
+            "Could not validate credentials".into(),
+        ));
     }
     let user = user::get_by_id(&state.pool, auth_user.user_id)
         .await
         .map_err(db_error)?
         .ok_or_else(|| ApiError::Unauthorized("Could not validate credentials".into()))?;
     if user.token_version != auth_user.token_version {
-        return Err(ApiError::Unauthorized("Could not validate credentials".into()));
+        return Err(ApiError::Unauthorized(
+            "Could not validate credentials".into(),
+        ));
     }
     Ok(Json(user_json(&user)))
 }
@@ -798,6 +963,16 @@ async fn refresh(
     if claims.token_type != jwt::REFRESH {
         return Err(unauthorized());
     }
+    // A refresh token revoked by logout (or by a password change) must not be
+    // able to mint new credentials. Logout blacklists the presented refresh
+    // `jti`, so honour it here; otherwise the "logged out" device keeps a
+    // seven-day key to the account.
+    if blacklist::contains(&state.pool, &claims.jti)
+        .await
+        .map_err(db_error)?
+    {
+        return Err(unauthorized());
+    }
     let user_id = uuid::Uuid::parse_str(&claims.sub).map_err(|_| unauthorized())?;
     let user = user::get_by_id(&state.pool, user_id)
         .await
@@ -807,12 +982,30 @@ async fn refresh(
         return Err(unauthorized());
     }
 
+    // Rotation + reuse detection. The presented token is consumed under a row
+    // lock; a replay inside the grace window is accepted (two tabs racing), a
+    // replay after it revokes the whole family. A stolen token therefore stops
+    // working as soon as the legitimate client refreshes.
+    let family_hint = claims
+        .fid
+        .as_deref()
+        .and_then(|fid| uuid::Uuid::parse_str(fid).ok());
+    let family =
+        match refresh_tokens::consume(&state.pool, &token, user.id, claims.exp, family_hint)
+            .await
+            .map_err(db_error)?
+        {
+            refresh_tokens::Consume::Fresh(family)
+            | refresh_tokens::Consume::ReplayedWithinGrace(family) => family,
+            refresh_tokens::Consume::Reused | refresh_tokens::Consume::Revoked => {
+                return Err(unauthorized())
+            }
+        };
+
     let sub = user.id.to_string();
     let access = jwt::encode_access(&state.settings.jwt_secret_key, &sub, user.token_version)
         .map_err(token_error)?;
-    let new_refresh =
-        jwt::encode_refresh(&state.settings.jwt_secret_key, &sub, user.token_version)
-            .map_err(token_error)?;
+    let new_refresh = issue_refresh(&state, user.id, user.token_version, Some(family)).await?;
     Ok(session_response(
         &user,
         &access,
@@ -824,13 +1017,13 @@ async fn refresh(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::StatusCode;
-    use uuid::Uuid;
     use crate::config::Settings;
     use crate::{build_router, AppState};
     use axum::body::Body;
     use axum::http::Request;
+    use axum::http::StatusCode;
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     async fn live_state() -> Option<AppState> {
         let url = std::env::var("DATABASE_URL").ok()?;
@@ -846,8 +1039,7 @@ mod tests {
             webauthn_rp_id: String::new(),
             webauthn_rp_name: "Prysm Note".into(),
             webauthn_origins: String::new(),
-            oauth_redirect_uri:
-                "http://localhost:3000/api/auth/oauth/google/callback".into(),
+            oauth_redirect_uri: "http://localhost:3000/api/auth/oauth/google/callback".into(),
             google_client_id: String::new(),
             google_client_secret: String::new(),
             github_client_id: String::new(),
@@ -926,11 +1118,13 @@ mod tests {
         };
         let app = build_router(state.clone(), None);
         let ip = format!("203.0.113.{}", (Uuid::new_v4().as_bytes()[0] % 250) + 1);
-        for _ in 0..FAILED_LOGIN_LIMIT {
+        for index in 0..FAILED_LOGIN_LIMIT {
             let res = post_json_from_ip(
                 &app,
                 "/api/auth/login",
-                json!({ "email": "nobody@test.local", "password": "wrongwrong" }),
+                // A fresh email each time so the per-account backoff does not
+                // fire before the IP threshold this test exercises.
+                json!({ "email": format!("nobody-{index}@test.local"), "password": "wrongwrong" }),
                 &ip,
             )
             .await;
@@ -1231,6 +1425,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn refresh_rejects_a_logged_out_token() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let app = build_router(state.clone(), None);
+        let email = format!("rust-refresh-{}@test.local", Uuid::new_v4());
+        let created = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
+            .await
+            .expect("create user");
+
+        let refresh = jwt::encode_refresh(
+            &state.settings.jwt_secret_key,
+            &created.id.to_string(),
+            created.token_version,
+        )
+        .unwrap();
+        let claims = jwt::decode(&state.settings.jwt_secret_key, &refresh).unwrap();
+
+        let first = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": refresh }),
+        )
+        .await;
+        assert_eq!(first.status(), StatusCode::OK);
+
+        // Logout blacklists the presented refresh jti; a replay must not mint
+        // new credentials.
+        blacklist::add(&state.pool, &claims.jti, created.id, claims.exp)
+            .await
+            .expect("blacklist");
+        let replay = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": refresh }),
+        )
+        .await;
+        assert_eq!(replay.status(), StatusCode::UNAUTHORIZED);
+
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(created.id)
+            .execute(&state.pool)
+            .await
+            .expect("cleanup");
+        sqlx::query("DELETE FROM token_blacklist WHERE jti = $1")
+            .bind(&claims.jti)
+            .execute(&state.pool)
+            .await
+            .expect("cleanup blacklist");
+    }
+
+    #[tokio::test]
     async fn register_rejects_an_invalid_email() {
         let Some(state) = live_state().await else {
             return;
@@ -1280,7 +1526,12 @@ mod tests {
 
         // Forgot password always answers sent, for unknown and known addresses.
         let unknown = format!("rust-unknown-{}@test.local", Uuid::new_v4());
-        let res = post_json(&app, "/api/auth/forgot-password", json!({ "email": unknown })).await;
+        let res = post_json(
+            &app,
+            "/api/auth/forgot-password",
+            json!({ "email": unknown }),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::OK);
         let res = post_json(&app, "/api/auth/forgot-password", json!({ "email": email })).await;
         assert_eq!(res.status(), StatusCode::OK);
@@ -1326,5 +1577,341 @@ mod tests {
         assert!(verify_turnstile("", "any-token", Some("1.2.3.4")).await);
         // With a secret an empty token is rejected before any network call.
         assert!(!verify_turnstile("a-secret", "", None).await);
+    }
+
+    #[test]
+    fn login_backoff_escalates_and_caps() {
+        assert_eq!(login_backoff_delay(0), None);
+        assert_eq!(login_backoff_delay(LOGIN_FREE_FAILURES), None);
+        assert_eq!(login_backoff_delay(6), Some(Duration::from_secs(1)));
+        assert_eq!(login_backoff_delay(7), Some(Duration::from_secs(2)));
+        assert_eq!(login_backoff_delay(8), Some(Duration::from_secs(4)));
+        assert_eq!(login_backoff_delay(9), Some(Duration::from_secs(8)));
+        assert_eq!(login_backoff_delay(10), Some(Duration::from_secs(16)));
+        assert_eq!(login_backoff_delay(11), Some(Duration::from_secs(30)));
+        assert_eq!(login_backoff_delay(50), Some(Duration::from_secs(30)));
+    }
+
+    #[tokio::test]
+    async fn refresh_rotation_allows_grace_then_revokes_the_family() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let app = build_router(state.clone(), None);
+        let email = format!("rust-rotate-{}@test.local", Uuid::new_v4());
+
+        let registered = post_json(
+            &app,
+            "/api/auth/register",
+            json!({ "email": email, "password": "password123" }),
+        )
+        .await;
+        assert_eq!(registered.status(), StatusCode::OK);
+        let first = refresh_cookie(&registered).expect("refresh cookie");
+        let first_value = first
+            .strip_prefix("refresh_token=")
+            .unwrap_or(&first)
+            .to_string();
+
+        let rotated = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": first_value }),
+        )
+        .await;
+        assert_eq!(rotated.status(), StatusCode::OK);
+        let second = refresh_cookie(&rotated).expect("rotated refresh cookie");
+        let second_value = second
+            .strip_prefix("refresh_token=")
+            .unwrap_or(&second)
+            .to_string();
+        assert_ne!(first_value, second_value);
+
+        // Two tabs racing the same cookie inside the grace window both win.
+        let racing = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": first_value }),
+        )
+        .await;
+        assert_eq!(racing.status(), StatusCode::OK);
+
+        // Age the rotation past the window: replay is reuse and kills lineage.
+        let hash = crate::api_token::hash_token(&first_value);
+        sqlx::query(
+            "UPDATE refresh_tokens SET rotated_at = now() - interval '2 minutes' \
+             WHERE token_hash = $1",
+        )
+        .bind(&hash)
+        .execute(&state.pool)
+        .await
+        .expect("age rotation");
+
+        let reused = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": first_value }),
+        )
+        .await;
+        assert_eq!(reused.status(), StatusCode::UNAUTHORIZED);
+
+        // Every token in the family is now dead, including the legitimate one.
+        let family_dead = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": second_value }),
+        )
+        .await;
+        assert_eq!(family_dead.status(), StatusCode::UNAUTHORIZED);
+
+        let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
+            .bind(&email)
+            .fetch_one(&state.pool)
+            .await
+            .expect("user id");
+        let _ = sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&state.pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user_id)
+            .execute(&state.pool)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn logout_revokes_access_tokens_on_non_auth_routes() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let app = build_router(state.clone(), None);
+        let email = format!("rust-revoke-{}@test.local", Uuid::new_v4());
+
+        let registered = post_json(
+            &app,
+            "/api/auth/register",
+            json!({ "email": email, "password": "password123" }),
+        )
+        .await;
+        assert_eq!(registered.status(), StatusCode::OK);
+        let access = access_cookie(&registered).expect("access cookie");
+
+        // A valid token works on a normal authenticated route.
+        let ok = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/tags")
+                    .header("cookie", access.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ok.status(), StatusCode::OK);
+
+        // Logout blacklists it and invalidates the cache immediately.
+        let logged_out = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/auth/logout")
+                    .header("cookie", access.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(logged_out.status(), StatusCode::OK);
+
+        let rejected = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/tags")
+                    .header("cookie", access.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            rejected.status(),
+            StatusCode::UNAUTHORIZED,
+            "a logged-out access token must be rejected everywhere"
+        );
+
+        // A still-valid token from another login keeps working.
+        let logged_in = post_json(
+            &app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "password123" }),
+        )
+        .await;
+        let fresh = access_cookie(&logged_in).expect("fresh access cookie");
+        let still_ok = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/tags")
+                    .header("cookie", fresh)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(still_ok.status(), StatusCode::OK);
+
+        let _ = sqlx::query(
+            "DELETE FROM refresh_tokens WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+        )
+        .bind(&email)
+        .execute(&state.pool)
+        .await;
+        let _ = sqlx::query("DELETE FROM users WHERE email = $1")
+            .bind(&email)
+            .execute(&state.pool)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn per_account_backoff_engages_then_success_clears_it() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let app = build_router(state.clone(), None);
+        let email = format!("rust-backoff-{}@test.local", Uuid::new_v4());
+        let _ = post_json(
+            &app,
+            "/api/auth/register",
+            json!({ "email": email, "password": "password123" }),
+        )
+        .await;
+        let ip = format!("198.51.100.{}", (Uuid::new_v4().as_bytes()[0] % 250) + 1);
+
+        for _ in 0..LOGIN_FREE_FAILURES {
+            let res = post_json_from_ip(
+                &app,
+                "/api/auth/login",
+                json!({ "email": email, "password": "wrong-password" }),
+                &ip,
+            )
+            .await;
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        }
+        // Sixth failure crosses the free threshold and sets a 1s delay.
+        let sixth = post_json_from_ip(
+            &app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "wrong-password" }),
+            &ip,
+        )
+        .await;
+        assert_eq!(sixth.status(), StatusCode::UNAUTHORIZED);
+        assert!(login_backoff_active(&email).await);
+
+        // While delayed even a correct password is refused with 429.
+        let delayed = post_json_from_ip(
+            &app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "password123" }),
+            &ip,
+        )
+        .await;
+        assert_eq!(delayed.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // After the 1s window a correct login works and clears the counter.
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        let success = post_json_from_ip(
+            &app,
+            "/api/auth/login",
+            json!({ "email": email, "password": "password123" }),
+            &ip,
+        )
+        .await;
+        assert_eq!(success.status(), StatusCode::OK);
+        assert!(!login_backoff_active(&email).await);
+
+        let _ = sqlx::query(
+            "DELETE FROM refresh_tokens WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+        )
+        .bind(&email)
+        .execute(&state.pool)
+        .await;
+        let _ = sqlx::query("DELETE FROM users WHERE email = $1")
+            .bind(&email)
+            .execute(&state.pool)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn account_backoff_does_not_reveal_whether_the_account_exists() {
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let app = build_router(state.clone(), None);
+        let known = format!("rust-known-{}@test.local", Uuid::new_v4());
+        let unknown = format!("rust-unknown-{}@test.local", Uuid::new_v4());
+        let _ = post_json(
+            &app,
+            "/api/auth/register",
+            json!({ "email": known, "password": "password123" }),
+        )
+        .await;
+
+        async fn hit_seven(app: &Router, email: &str, ip: &str) -> Response {
+            let mut last = None;
+            for _ in 0..6 {
+                last = Some(
+                    post_json_from_ip(
+                        app,
+                        "/api/auth/login",
+                        json!({ "email": email, "password": "wrong-password" }),
+                        ip,
+                    )
+                    .await,
+                );
+            }
+            assert_eq!(last.unwrap().status(), StatusCode::UNAUTHORIZED);
+            post_json_from_ip(
+                app,
+                "/api/auth/login",
+                json!({ "email": email, "password": "wrong-password" }),
+                ip,
+            )
+            .await
+        }
+
+        let ip_a = format!("198.51.100.{}", (Uuid::new_v4().as_bytes()[0] % 200) + 1);
+        let ip_b = format!("203.0.113.{}", (Uuid::new_v4().as_bytes()[0] % 200) + 1);
+        let known_res = hit_seven(&app, &known, &ip_a).await;
+        let unknown_res = hit_seven(&app, &unknown, &ip_b).await;
+        assert_eq!(known_res.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(unknown_res.status(), StatusCode::TOO_MANY_REQUESTS);
+        let known_body = axum::body::to_bytes(known_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let unknown_body = axum::body::to_bytes(unknown_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            known_body, unknown_body,
+            "responses must be indistinguishable"
+        );
+
+        let _ = sqlx::query(
+            "DELETE FROM refresh_tokens WHERE user_id = (SELECT id FROM users WHERE email = $1)",
+        )
+        .bind(&known)
+        .execute(&state.pool)
+        .await;
+        let _ = sqlx::query("DELETE FROM users WHERE email = $1")
+            .bind(&known)
+            .execute(&state.pool)
+            .await;
     }
 }

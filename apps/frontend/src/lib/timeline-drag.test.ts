@@ -5,7 +5,12 @@ import {
   applyResizeDays,
   computeDragDays,
   daysBetween,
+  dragDaysForBar,
+  dragDaysFromContent,
+  dragOffsetFromContent,
   dragOffsetPx,
+  grabOffsetWithinBar,
+  pointerContentX,
   resizePreviewRange,
   resizePreviewSpan,
   snapOffsetPx,
@@ -266,5 +271,57 @@ describe("daysBetween", () => {
     expect(daysBetween(null, "2026-10-15")).toBeNull();
     expect(daysBetween("2026-10-12", undefined)).toBeNull();
     expect(daysBetween("nope", "2026-10-15")).toBeNull();
+  });
+});
+
+describe("pointer content-space drag geometry", () => {
+  it("converts a screen pointer to the content under it", () => {
+    // body at x=40, scrolled 200px → screen 90 is content 250.
+    expect(pointerContentX({ clientX: 90, bodyLeft: 40, scrollLeft: 200 })).toBe(250);
+    expect(pointerContentX({ clientX: 90, bodyLeft: 0, scrollLeft: 0 })).toBe(90);
+  });
+
+  it("is scroll-independent: a stationary pointer over a scrolled canvas moves by the scroll", () => {
+    const start = pointerContentX({ clientX: 100, bodyLeft: 0, scrollLeft: 0 });
+    const after = pointerContentX({ clientX: 100, bodyLeft: 0, scrollLeft: 56 });
+    expect(dragOffsetFromContent({ startContentX: start, pointerContentX: after })).toBe(56);
+    expect(
+      dragDaysFromContent({ startContentX: start, pointerContentX: after, dayWidth: 28 })
+    ).toBe(2);
+  });
+
+  it("never double-counts a scroll that also moved the pointer", () => {
+    // Pointer +28px AND the canvas scrolled +28px: content moved 56px, exactly
+    // one day of net movement, not two.
+    const start = pointerContentX({ clientX: 100, bodyLeft: 0, scrollLeft: 0 });
+    const end = pointerContentX({ clientX: 128, bodyLeft: 0, scrollLeft: 28 });
+    expect(dragDaysFromContent({ startContentX: start, pointerContentX: end, dayWidth: 28 })).toBe(2);
+  });
+
+  it("anchors the drop on the grabbed point inside the bar, not its left edge", () => {
+    // A 3-day bar at content 0, grabbed 40px from its left (day 1.43 at 28px).
+    const pointerAtPress = 40;
+    const grab = grabOffsetWithinBar({ startContentX: pointerAtPress, barContentLeft: 0 });
+    expect(grab).toBe(40);
+    // Pointer moved +56px content; the bar's target left is 56, two days on.
+    expect(
+      dragDaysForBar({
+        pointerContentX: pointerAtPress + 56,
+        barContentLeft: 0,
+        grabOffsetPx: grab,
+        dayWidth: 28,
+      })
+    ).toBe(2);
+  });
+
+  it("uses the CURRENT day width, so a zoom mid-drag cannot change the day under the pointer", () => {
+    const start = 0;
+    expect(dragDaysFromContent({ startContentX: start, pointerContentX: 140, dayWidth: 28 })).toBe(5);
+    expect(dragDaysFromContent({ startContentX: start, pointerContentX: 140, dayWidth: 70 })).toBe(2);
+  });
+
+  it("degrades safely for an invalid day width", () => {
+    expect(dragDaysFromContent({ startContentX: 0, pointerContentX: 50, dayWidth: 0 })).toBe(0);
+    expect(dragDaysForBar({ pointerContentX: 50, barContentLeft: 0, grabOffsetPx: 0, dayWidth: NaN })).toBe(0);
   });
 });

@@ -40,7 +40,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/tokens", get(list_tokens).post(create_token))
         .route("/api/tokens/", get(list_tokens).post(create_token))
-        .route("/api/tokens/{token_id}", axum::routing::delete(revoke_token))
+        .route(
+            "/api/tokens/{token_id}",
+            axum::routing::delete(revoke_token),
+        )
 }
 
 fn db_error(err: sqlx::Error) -> ApiError {
@@ -128,11 +131,11 @@ async fn revoke_token(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
     use crate::config;
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     fn live_state() -> Option<AppState> {
         let url = std::env::var("DATABASE_URL").ok()?;
@@ -141,7 +144,13 @@ mod tests {
         Some(AppState::lazy(settings))
     }
 
-    async fn call(app: &Router, method: &str, uri: &str, token: &str, body: Option<Value>) -> (StatusCode, Value) {
+    async fn call(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        token: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
         let mut builder = Request::builder()
             .method(method)
             .uri(uri)
@@ -154,7 +163,9 @@ mod tests {
             .unwrap();
         let res = app.clone().oneshot(request).await.unwrap();
         let status = res.status();
-        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
         (status, value)
     }
@@ -168,8 +179,9 @@ mod tests {
         let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .expect("create user");
-        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
-            .unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
         let app = router().with_state(state.clone());
 
         let (status, created) = call(
@@ -196,8 +208,7 @@ mod tests {
         assert_eq!(revoked["revoked"], true);
 
         // Revoking again is a no-op that still succeeds (row exists, owned).
-        let (status, _) =
-            call(&app, "DELETE", &format!("/api/tokens/{id}"), &token, None).await;
+        let (status, _) = call(&app, "DELETE", &format!("/api/tokens/{id}"), &token, None).await;
         assert_eq!(status, StatusCode::OK);
 
         sqlx::query("DELETE FROM users WHERE id = $1")

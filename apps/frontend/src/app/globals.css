@@ -430,6 +430,16 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
     color: var(--text-muted);
   }
 
+  /* Group label inside a popover / overflow menu. */
+  .menu-section-label {
+    padding: 0.5rem 1rem 0.25rem;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
   /* Secondary icon button with a tooltip-friendly label. */
   .icon-btn {
     @apply inline-flex items-center justify-center;
@@ -495,4 +505,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 .text-scale-num { font-size: calc(1.125rem * var(--font-scale, 1)); }
 @media (min-width: 768px) {
   .text-scale-num { font-size: calc(1.5rem * var(--font-scale, 1)); }
+}
+/* Timeline bar label. Phone day columns are ~88px wide, so the label drops a
+   step to keep more of the task title visible while still scaling with the
+   user's Font Size setting. Declared after .text-scale-sm so it wins. */
+.task-bar-label { font-size: calc(0.875rem * var(--font-scale, 1)); }
+@media (max-width: 767px) {
+  .task-bar-label { font-size: calc(0.75rem * var(--font-scale, 1)); }
 }

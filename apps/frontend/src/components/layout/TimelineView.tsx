@@ -28,7 +28,8 @@ import { useLocalBool } from "@/lib/use-local-bool";
 import { useRouter } from "next/navigation";
 import { parseLocalDate, toLocalDateString } from "@/lib/utils";
 import type { Task, TaskStatus } from "@/types/task";
-import { useResponsiveDayWidth, DAY_HEADER_HEIGHT, SECTION_HEADER_HEIGHT, MIN_LANE_HEIGHT, type ZoomLevel } from "@/components/timeline/constants";
+import { useResponsiveDayWidth, DAY_HEADER_HEIGHT, SECTION_HEADER_HEIGHT, MIN_LANE_HEIGHT } from "@/components/timeline/constants";
+import { zoomPercent } from "@/lib/view-zoom";
 import { computeLaneLayout } from "@/components/timeline/lane-layout";
 import { PREF_DEFAULT_VIEW } from "@/lib/preferences";
 import { usePreferencesStore } from "@/stores/preferences-store";
@@ -87,7 +88,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
   const activeListId = useAppStore((s) => s.activeListId);
   const lists = useAppStore((s) => s.lists);
-  const { days, visibleRange, sliceStart, moveSlice, today, zoom, zoomIn, zoomOut, zoomLevels } = useTimeline();
+  const { days, visibleRange, sliceStart, moveSlice, today, zoom, zoomIn, zoomOut, resetZoom } = useTimeline();
   const { createTask, persistTask, fetchRange, fetchTasks } = useTasks();
   const { busy: batchDeleting, softDeleteWithUndo } = useBatchDelete();
   const { showToast } = useToast();
@@ -368,6 +369,37 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   // so the canvas does not jump.
   const lastWheelZoomRef = useRef(0);
   const zoomAnchorRef = useRef<{ dayIndex: number; offsetX: number } | null>(null);
+
+  // Keyboard zoom: Ctrl/Cmd + = / - steps the ladder, Ctrl/Cmd + 0 resets. It is
+  // disabled while typing so a search field never eats the shortcut.
+  useEffect(() => {
+    if (safeMode !== "timeline") return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault();
+        zoomIn();
+      } else if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        zoomOut();
+      } else if (e.key === "0") {
+        e.preventDefault();
+        resetZoom();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [safeMode, zoomIn, zoomOut, resetZoom]);
   useEffect(() => {
     if (safeMode !== "timeline") {
       hasParkedRef.current = false;
@@ -873,6 +905,78 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     [onSelectionBoxMove]
   );
 
+  // Two-finger pinch on the canvas. The canvas' `touch-action` is pan-x pan-y
+  // (pinch-zoom NOT included), so the browser leaves pinch to us while still
+  // owning one-finger panning. A pinch that starts on a bar is aborted by the
+  // bar engine's second-pointer guard, so it can only ever zoom the canvas.
+  const pinchRef = useRef<{
+    pointers: Map<number, { x: number; y: number }>;
+    startDistance: number;
+    active: boolean;
+  } | null>(null);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const zoomActionsRef = useRef({ zoomIn, zoomOut });
+  zoomActionsRef.current = { zoomIn, zoomOut };
+
+  const updatePinch = useCallback(() => {
+    const pinch = pinchRef.current;
+    if (!pinch || pinch.pointers.size < 2) return;
+    const [a, b] = Array.from(pinch.pointers.values());
+    const distance = Math.hypot(a.x - b.x, a.y - b.y);
+    if (distance <= 0) return;
+    if (!pinch.active) {
+      pinch.active = true;
+      pinch.startDistance = distance;
+      return;
+    }
+    const ratio = distance / pinch.startDistance;
+    if (ratio >= 1.3) {
+      zoomActionsRef.current.zoomIn();
+      pinch.startDistance = distance;
+    } else if (ratio <= 0.77) {
+      zoomActionsRef.current.zoomOut();
+      pinch.startDistance = distance;
+    }
+  }, []);
+
+  const onCanvasTouchPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType !== "touch") return;
+      const pinch = pinchRef.current ?? {
+        pointers: new Map<number, { x: number; y: number }>(),
+        startDistance: 0,
+        active: false,
+      };
+      pinchRef.current = pinch;
+      pinch.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      updatePinch();
+    },
+    [updatePinch]
+  );
+
+  const onCanvasTouchPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const pinch = pinchRef.current;
+      if (!pinch || e.pointerType !== "touch") return;
+      if (!pinch.pointers.has(e.pointerId)) return;
+      pinch.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      updatePinch();
+    },
+    [updatePinch]
+  );
+
+  const onCanvasTouchPointerUp = useCallback((e: React.PointerEvent) => {
+    const pinch = pinchRef.current;
+    if (!pinch) return;
+    pinch.pointers.delete(e.pointerId);
+    if (pinch.pointers.size < 2) {
+      pinch.active = false;
+      pinch.startDistance = 0;
+    }
+    if (pinch.pointers.size === 0) pinchRef.current = null;
+  }, []);
+
   const onTimelinePointerDown = useCallback(
     (e: React.PointerEvent) => {
       const body = bodyRef.current;
@@ -1100,13 +1204,17 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   }, [visibleRange, fetchRange, safeMode]);
 
   const viewModeLabel = safeMode === "timeline" ? "Timeline" : safeMode === "kanban" ? "Kanban" : safeMode === "calendar" ? "Calendar" : safeMode === "list" ? "List" : "Board";
+  // One shared row style for the overflow menu: a full-width, comfortably
+  // tappable target that reads the same on desktop and on a phone.
+  const menuRow =
+    "pointer-coarse:min-h-11 flex w-full items-center gap-2 px-4 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary";
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-base">
       {/* Toolbar - a single non-wrapping row. The controls a phone needs most
           stay inline; every secondary action lives in the always-present
           "More" menu so nothing ever stacks or clips at any width. */}
-      <div className="flex flex-nowrap items-center gap-x-1.5 overflow-x-auto border-b border-border bg-surface px-2 py-2 shrink-0 [scrollbar-width:none] sm:gap-x-3 sm:px-3" data-testid="timeline-toolbar">
+      <div className="flex flex-nowrap items-center gap-x-1.5 overflow-x-auto border-b border-border bg-surface px-2 py-2 shrink-0 [scrollbar-width:none] max-[359px]:flex-wrap max-[359px]:gap-y-1.5 sm:gap-x-3 sm:px-3" data-testid="timeline-toolbar">
         {onOpenSidebar && (
           <button
             onClick={onOpenSidebar}
@@ -1215,6 +1323,45 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           </div>
         )}
 
+        {/* Zoom: a compact segmented pill on pointer/wide screens. On phones it
+            lives in the View menu below so the single-row toolbar never has to
+            scroll horizontally. The middle button resets to 100%. */}
+        {safeMode === "timeline" && (
+          <div
+            className="hidden shrink-0 items-center gap-0.5 rounded-full bg-elevated p-0.5 sm:flex"
+            data-testid="timeline-zoom"
+          >
+            <button
+              onClick={zoomOut}
+              aria-label="Zoom out timeline"
+              className="relative flex h-6 w-6 items-center justify-center rounded-full text-secondary hover:bg-hover hover:text-primary pointer-coarse:after:absolute pointer-coarse:after:-inset-3 pointer-coarse:after:content-['']"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+            <button
+              onClick={resetZoom}
+              aria-label={`Reset timeline zoom (${zoomPercent(zoom)})`}
+              title="Reset zoom"
+              data-testid="timeline-zoom-level"
+              className="min-w-[3.25rem] rounded-full px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-secondary transition-colors hover:bg-hover hover:text-primary"
+            >
+              {zoomPercent(zoom)}
+            </button>
+            <button
+              onClick={zoomIn}
+              aria-label="Zoom in timeline"
+              className="relative flex h-6 w-6 items-center justify-center rounded-full text-secondary hover:bg-hover hover:text-primary pointer-coarse:after:absolute pointer-coarse:after:-inset-3 pointer-coarse:after:content-['']"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <line x1="12" y1="5" x2="12" y2="19" />
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Secondary actions: inline on wide screens, in the More menu below
             on narrower ones so the row never wraps or clips. */}
         {!smallScreen && (
@@ -1278,18 +1425,26 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         </button>
 
         {/* The view switcher and every secondary action live in this menu, on
-            every screen size, so the bar stays a single tidy row. */}
+            every screen size, so the bar stays a single tidy row. On phones the
+            trigger doubles as a chip showing the current view, so the active
+            mode is always visible instead of hidden behind an ellipsis. */}
         <button
           ref={mobileMenuButtonRef}
           onClick={() => setMobileMenuOpen((v) => !v)}
-          className="pointer-coarse:h-11 pointer-coarse:w-11 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-secondary transition-colors hover:bg-hover hover:text-primary"
-          aria-label="More actions"
+          className="pointer-coarse:h-11 flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2 text-secondary transition-colors hover:bg-hover hover:text-primary md:w-8 md:px-0"
+          aria-label="View and more actions"
           aria-haspopup="menu"
           aria-expanded={mobileMenuOpen}
           data-testid="view-mode-toggle"
           data-tour="view-switcher"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <span className="flex max-w-[6rem] items-center gap-1 md:hidden">
+            <span className="truncate text-[11px] font-semibold text-primary">{viewModeLabel}</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="hidden md:block" aria-hidden>
             <circle cx="12" cy="5" r="1.7" />
             <circle cx="12" cy="12" r="1.7" />
             <circle cx="12" cy="19" r="1.7" />
@@ -1300,43 +1455,139 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           triggerRef={mobileMenuButtonRef}
           align="right"
           onClose={() => setMobileMenuOpen(false)}
-          className="w-48"
+          className="w-60 max-w-[calc(100vw-1rem)]"
         >
           <button
             onClick={() => { setMobileMenuOpen(false); openTaskForm(); }}
-            className="block w-full px-4 py-2 text-left text-xs font-semibold text-primary transition-colors hover:bg-hover"
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-primary transition-colors hover:bg-hover"
           >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
             New task
           </button>
+
+          <p className="menu-section-label">View</p>
+          {timelineOn && (
+            <button
+              onClick={() => { onViewModeChange("timeline"); setMobileMenuOpen(false); }}
+              className={`${menuRow} ${viewMode === "timeline" ? "font-semibold text-accent" : ""}`}
+            >
+              <span className="flex-1">Timeline</span>
+              {viewMode === "timeline" && <MenuCheck />}
+            </button>
+          )}
+          {kanbanOn && (
+            <button
+              onClick={() => { onViewModeChange("kanban"); setMobileMenuOpen(false); }}
+              className={`${menuRow} ${viewMode === "kanban" ? "font-semibold text-accent" : ""}`}
+            >
+              <span className="flex-1">Kanban</span>
+              {viewMode === "kanban" && <MenuCheck />}
+            </button>
+          )}
+          {calendarOn && (
+            <button
+              onClick={() => { onViewModeChange("calendar"); setMobileMenuOpen(false); }}
+              className={`${menuRow} ${viewMode === "calendar" ? "font-semibold text-accent" : ""}`}
+            >
+              <span className="flex-1">Calendar</span>
+              {viewMode === "calendar" && <MenuCheck />}
+            </button>
+          )}
+          {listOn && (
+            <button
+              onClick={() => { onViewModeChange("list"); setMobileMenuOpen(false); }}
+              className={`${menuRow} ${viewMode === "list" ? "font-semibold text-accent" : ""}`}
+            >
+              <span className="flex-1">List</span>
+              {viewMode === "list" && <MenuCheck />}
+            </button>
+          )}
+          {boardOn && (
+            <button
+              onClick={() => { onViewModeChange("board"); setMobileMenuOpen(false); }}
+              className={`${menuRow} ${viewMode === "board" ? "font-semibold text-accent" : ""}`}
+            >
+              <span className="flex-1">Board</span>
+              {viewMode === "board" && <MenuCheck />}
+            </button>
+          )}
+
+          {safeMode === "timeline" && (
+            <>
+              <p className="menu-section-label">Zoom</p>
+              <div className="flex items-center gap-1 px-3 pb-2">
+                <button
+                  onClick={zoomOut}
+                  aria-label="Zoom out timeline"
+                  className="pointer-coarse:min-h-11 flex h-8 flex-1 items-center justify-center rounded-lg bg-elevated text-secondary transition-colors hover:bg-hover hover:text-primary"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+                <button
+                  onClick={resetZoom}
+                  aria-label={`Reset timeline zoom (${zoomPercent(zoom)})`}
+                  data-testid="view-menu-zoom-level"
+                  className="pointer-coarse:min-h-11 flex h-8 flex-[1.6] items-center justify-center rounded-lg bg-elevated text-xs font-semibold tabular-nums text-primary transition-colors hover:bg-hover"
+                >
+                  {zoomPercent(zoom)}
+                </button>
+                <button
+                  onClick={zoomIn}
+                  aria-label="Zoom in timeline"
+                  className="pointer-coarse:min-h-11 flex h-8 flex-1 items-center justify-center rounded-lg bg-elevated text-secondary transition-colors hover:bg-hover hover:text-primary"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                  </svg>
+                </button>
+              </div>
+            </>
+          )}
+
           {smallScreen && safeMode === "timeline" && (
-            <div className="flex items-center justify-between gap-2 border-y border-border px-4 py-2">
-              <button
-                onClick={() => { setMobileMenuOpen(false); navigatePeriod("prev"); }}
-                className="btn bg-elevated border border-border px-2.5 py-1 text-xs text-secondary hover:text-primary"
-                aria-label="Previous period"
-              >
-                ‹
-              </button>
-              <button
-                onClick={() => { setMobileMenuOpen(false); navigatePeriod("today"); }}
-                className="flex-1 rounded-full px-2 py-1 text-xs font-medium text-secondary transition-colors hover:bg-hover hover:text-primary"
-                aria-label="Go to today"
-              >
-                Today
-              </button>
-              <button
-                onClick={() => { setMobileMenuOpen(false); navigatePeriod("next"); }}
-                className="btn bg-elevated border border-border px-2.5 py-1 text-xs text-secondary hover:text-primary"
-                aria-label="Next period"
-              >
-                ›
-              </button>
+            <div className="border-y border-border px-3 py-2">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => { setMobileMenuOpen(false); navigatePeriod("prev"); }}
+                  className="pointer-coarse:h-9 flex h-8 flex-1 items-center justify-center rounded-lg bg-elevated text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+                  aria-label="Previous period"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <polyline points="15 18 9 12 15 6" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); navigatePeriod("today"); }}
+                  className="pointer-coarse:h-9 flex h-8 flex-[2] items-center justify-center rounded-lg bg-elevated text-xs font-medium text-secondary transition-colors hover:bg-hover hover:text-primary"
+                  aria-label="Go to today"
+                >
+                  Today
+                </button>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); navigatePeriod("next"); }}
+                  className="pointer-coarse:h-9 flex h-8 flex-1 items-center justify-center rounded-lg bg-elevated text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+                  aria-label="Next period"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+              </div>
+              <p className="mt-1.5 text-center text-[10px] font-medium text-muted">{monthLabel}</p>
             </div>
           )}
+
+          <p className="menu-section-label">Actions</p>
           {safeMode === "timeline" && (
             <button
               onClick={() => { setMobileMenuOpen(false); setSelectionMode((v) => !v); }}
-              className="block w-full px-4 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+              className={menuRow}
             >
               {selectionMode ? "Done selecting" : "Select tasks"}
             </button>
@@ -1344,7 +1595,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           {safeMode === "timeline" && timelineSections.length > 0 && (
             <button
               onClick={() => { setMobileMenuOpen(false); toggleSectionsRail(); }}
-              className="block w-full px-4 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+              className={menuRow}
             >
               {sectionsRail ? "Expand sections" : "Collapse sections"}
             </button>
@@ -1355,7 +1606,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
               void refreshTasksPreservingWindow();
               window.dispatchEvent(new CustomEvent(FOREGROUND_REFRESH_EVENT));
             }}
-            className="block w-full px-4 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+            className={menuRow}
           >
             Refresh
           </button>
@@ -1365,90 +1616,48 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
                 setMobileMenuOpen(false);
                 void addTimelineSection({ title: `Section ${timelineSections.length + 1}` });
               }}
-              className="block w-full px-4 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+              className={menuRow}
               aria-label="Add section"
             >
               New section
             </button>
           )}
           <button
-            onClick={() => { setMobileMenuOpen(false); router.push("/settings"); }}
-            className="block w-full px-4 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+            onClick={() => { setMobileMenuOpen(false); window.dispatchEvent(new CustomEvent("prysm:show-reminders")); }}
+            className={menuRow}
           >
-            Settings
+            Notifications
           </button>
           {stickyOn && (
             <button
               onClick={() => { setMobileMenuOpen(false); openStickyNote(); }}
-              className="block w-full px-4 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+              className={menuRow}
             >
               Notes
             </button>
           )}
           <button
-            onClick={() => { setMobileMenuOpen(false); window.dispatchEvent(new CustomEvent("prysm:show-reminders")); }}
-            className="block w-full px-4 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+            onClick={() => { setMobileMenuOpen(false); router.push("/settings"); }}
+            className={menuRow}
           >
-            Notifications
+            Settings
           </button>
-          <div className="mt-1 border-t border-border pt-1">
-            {timelineOn && (
-              <button
-                onClick={() => { onViewModeChange("timeline"); setMobileMenuOpen(false); }}
-                className={`block w-full px-4 py-2 text-left text-xs transition-colors hover:bg-hover ${viewMode === "timeline" ? "text-accent font-semibold" : "text-secondary"}`}
-              >
-                Timeline
-              </button>
-            )}
-            {kanbanOn && (
-              <button
-                onClick={() => { onViewModeChange("kanban"); setMobileMenuOpen(false); }}
-                className={`block w-full px-4 py-2 text-left text-xs transition-colors hover:bg-hover ${viewMode === "kanban" ? "text-accent font-semibold" : "text-secondary"}`}
-              >
-                Kanban
-              </button>
-            )}
-            {calendarOn && (
-              <button
-                onClick={() => { onViewModeChange("calendar"); setMobileMenuOpen(false); }}
-                className={`block w-full px-4 py-2 text-left text-xs transition-colors hover:bg-hover ${viewMode === "calendar" ? "text-accent font-semibold" : "text-secondary"}`}
-              >
-                Calendar
-              </button>
-            )}
-            {listOn && (
-              <button
-                onClick={() => { onViewModeChange("list"); setMobileMenuOpen(false); }}
-                className={`block w-full px-4 py-2 text-left text-xs transition-colors hover:bg-hover ${viewMode === "list" ? "text-accent font-semibold" : "text-secondary"}`}
-              >
-                List
-              </button>
-            )}
-            {boardOn && (
-              <button
-                onClick={() => { onViewModeChange("board"); setMobileMenuOpen(false); }}
-                className={`block w-full px-4 py-2 text-left text-xs transition-colors hover:bg-hover ${viewMode === "board" ? "text-accent font-semibold" : "text-secondary"}`}
-              >
-                Board
-              </button>
-            )}
-          </div>
-          <div className="mt-1 border-t border-border pt-1">
-            {defaultView === safeMode ? (
-              <div className="flex w-full items-center px-4 py-2 text-xs text-muted">
-                <span>Default view</span>
-                <svg className="ml-auto text-accent" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-              </div>
-            ) : (
-              <button
-                onClick={() => { setPreference(PREF_DEFAULT_VIEW, safeMode); setMobileMenuOpen(false); }}
-                data-testid="set-default-view"
-                className="block w-full px-4 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
-              >
-                Set as default view
-              </button>
-            )}
-          </div>
+
+          <p className="menu-section-label">Default</p>
+          {defaultView === safeMode ? (
+            <div className="flex w-full items-center gap-2 px-4 py-2 text-xs text-muted">
+              <span className="flex-1">Default view</span>
+              <MenuCheck />
+            </div>
+          ) : (
+            <button
+              onClick={() => { setPreference(PREF_DEFAULT_VIEW, safeMode); setMobileMenuOpen(false); }}
+              data-testid="set-default-view"
+              className={menuRow}
+            >
+              Set {viewModeLabel} as default view
+            </button>
+          )}
         </PopoverMenu>
       </div>
 
@@ -1522,7 +1731,13 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
               userSelect: "none",
               WebkitUserSelect: "none",
             }}
-            onPointerDown={onTimelinePointerDown}
+            onPointerDown={(e) => {
+              onCanvasTouchPointerDown(e);
+              onTimelinePointerDown(e);
+            }}
+            onPointerMove={onCanvasTouchPointerMove}
+            onPointerUp={onCanvasTouchPointerUp}
+            onPointerCancel={onCanvasTouchPointerUp}
             onDragStart={(e) => e.preventDefault()}
             draggable={false}
             onContextMenu={openCanvasMenu}
@@ -1733,5 +1948,25 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         <TaskContextMenu menu={menu?.state ?? null} onClose={() => setMenu(null)} onNewTask={handleEmptyNewTask} />
       </ContextMenu>
     </div>
+  );
+}
+
+/** Small check mark used by the overflow menu for the active view / default. */
+function MenuCheck() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0 text-accent"
+      aria-hidden
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
   );
 }

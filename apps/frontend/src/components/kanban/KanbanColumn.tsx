@@ -11,6 +11,7 @@ import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
 import type { BoardSection } from "@/lib/board-sections";
 import type { CardLayout } from "@/lib/preferences";
+import { scaledPx } from "@/lib/view-zoom";
 import { KanbanCard } from "./KanbanCard";
 import { KanbanAddCard } from "./KanbanAddCard";
 
@@ -24,6 +25,8 @@ interface KanbanColumnProps {
   onRemove: () => void;
   onEmptyContextMenu?: (e: React.MouseEvent, section: BoardSection) => void;
   onCardContextMenu?: (e: React.MouseEvent, task: Task) => void;
+  /** Column density, 0.75 to 1.5. Widens or narrows the column, never the text. */
+  zoom?: number;
 }
 
 export function KanbanColumn({
@@ -36,6 +39,7 @@ export function KanbanColumn({
   onRemove,
   onEmptyContextMenu,
   onCardContextMenu,
+  zoom = 1,
 }: KanbanColumnProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(section.title);
@@ -56,10 +60,13 @@ export function KanbanColumn({
       ref={setNodeRef}
       data-testid="kanban-column"
       className={`flex h-full flex-shrink-0 flex-col rounded-xl bg-surface border transition-colors ${
-        cardLayout === "side_by_side"
-          ? "w-full min-w-[280px] lg:min-w-[640px]"
-          : "w-[280px] shrink-0"
+        cardLayout === "side_by_side" ? "w-full" : "shrink-0"
       } ${isOver ? "border-accent ring-2 ring-accent/30" : "border-border"}`}
+      style={
+        cardLayout === "side_by_side"
+          ? { minWidth: scaledPx(280, zoom, 240, 520) }
+          : { width: scaledPx(280, zoom, 220, 420) }
+      }
     >
       <div className="mb-1 flex items-center gap-2 px-4 pt-3 pb-2">
         <span

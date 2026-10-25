@@ -35,7 +35,11 @@ impl RateLimiter {
 
     /// A limiter that uses `redis` when it is configured, else stays in-process.
     pub fn with_redis(name: &'static str, redis: RedisPool) -> Self {
-        let redis = if redis.is_configured() { Some(redis) } else { None };
+        let redis = if redis.is_configured() {
+            Some(redis)
+        } else {
+            None
+        };
         Self {
             name,
             entries: Mutex::new(BTreeMap::new()),
@@ -162,6 +166,37 @@ impl RateLimiter {
             None => false,
         }
     }
+
+    /// Forget every counter and block for `key` (used when a login succeeds or
+    /// a password reset completes). Best-effort, like the other operations.
+    pub async fn clear(&self, key: &str) {
+        let full = format!("{}:{}", self.name, key);
+        if let Some(redis) = &self.redis {
+            if let Some(mut conn) = redis.connection().await {
+                let block = format!("{}:block:{}", self.name, key);
+                let _ = redis::cmd("DEL")
+                    .arg(&full)
+                    .arg(&block)
+                    .query_async::<i64>(&mut conn)
+                    .await;
+                return;
+            }
+        }
+        {
+            let mut guard = match self.entries.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            guard.remove(&full);
+        }
+        {
+            let mut guard = match self.blocks.lock() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            guard.remove(key);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -198,8 +233,14 @@ mod tests {
         limiter.count("fresh", window).await;
 
         let guard = limiter.entries.lock().unwrap();
-        assert!(!guard.contains_key("test-prune:stale"), "expired key must be evicted");
-        assert!(guard.contains_key("test-prune:fresh"), "live key must remain");
+        assert!(
+            !guard.contains_key("test-prune:stale"),
+            "expired key must be evicted"
+        );
+        assert!(
+            guard.contains_key("test-prune:fresh"),
+            "live key must remain"
+        );
     }
 
     #[tokio::test]

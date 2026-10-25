@@ -375,6 +375,101 @@ describe("useTimelineBarDrag edge auto-scroll gate", () => {
   });
 });
 
+describe("useTimelineBarDrag live scroll anchoring and aborts", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 16)
+    );
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("lands on the day under the pointer when the canvas scrolls mid-drag", () => {
+    const h = setup();
+    // dayWidth is 28 in the harness.
+    down(h.bar, "touch", 100, 100);
+    advance(400); // hold pickup
+    // The container scrolls (native Windows pan / momentum) while the finger
+    // stays put. The content under the finger is now two days later, so the
+    // drop must be +2 days, not a random day derived from a stale baseline.
+    h.body.scrollLeft = 56;
+    up(100, 100, "touch");
+    expect(h.commits).toHaveLength(1);
+    expect(h.commits[0].days).toBe(2);
+  });
+
+  it("does not double-count when the pointer and the canvas both move", () => {
+    const h = setup();
+    down(h.bar, "touch", 100, 100);
+    advance(400);
+    h.body.scrollLeft = 28;
+    move(128, 100, "touch");
+    up(128, 100, "touch");
+    expect(h.commits).toHaveLength(1);
+    // dx (28) + scroll (28) = 56px = 2 days, each counted once.
+    expect(h.commits[0].days).toBe(2);
+  });
+
+  it("aborts and restores the bar on pointercancel", () => {
+    const h = setup();
+    down(h.bar, "mouse", 100, 100);
+    move(160, 100);
+    expect(h.bar.style.transform).toContain("translate3d");
+    act(() => {
+      window.dispatchEvent(
+        pointerEvent("pointercancel", { pointerId: 1, pointerType: "mouse", clientX: 160, clientY: 100 })
+      );
+    });
+    expect(h.commits).toHaveLength(0);
+    expect(h.getByTestId("dragging").textContent).toBe("false");
+    expect(h.bar.style.transform).toBe("");
+  });
+
+  it("aborts on window blur and never commits", () => {
+    const h = setup();
+    down(h.bar, "touch", 100, 100);
+    advance(400);
+    move(160, 100, "touch");
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+    });
+    expect(h.commits).toHaveLength(0);
+    expect(h.getByTestId("dragging").textContent).toBe("false");
+    // The terminal pointerup that follows a blur must not resurrect the drag.
+    up(160, 100, "touch");
+    expect(h.commits).toHaveLength(0);
+  });
+
+  it("aborts a touch drag when a second pointer lands (pinch never grabs the bar)", () => {
+    const h = setup();
+    down(h.bar, "touch", 100, 100);
+    advance(400);
+    move(130, 100, "touch");
+    act(() => {
+      h.bar.dispatchEvent(
+        pointerEvent("pointerdown", {
+          button: 0,
+          pointerId: 2,
+          pointerType: "touch",
+          clientX: 160,
+          clientY: 100,
+          isPrimary: false,
+        })
+      );
+    });
+    expect(h.getByTestId("dragging").textContent).toBe("false");
+    up(130, 100, "touch");
+    expect(h.commits).toHaveLength(0);
+    expect(h.longPresses).toHaveLength(0);
+  });
+});
+
 describe("useTimelineBarDrag drop-onto-task uses the pointer column", () => {
   beforeEach(() => {
     vi.useFakeTimers();

@@ -11,6 +11,7 @@ import { useSubscription } from "@/hooks/use-subscription";
 import { TeamList } from "@/components/collaborate/TeamList";
 import { ImportPanel } from "@/components/import/ImportPanel";
 import { ThemeImportExport } from "@/components/settings/ThemeImportExport";
+import { ThemeTokenImport } from "@/components/settings/ThemeTokenImport";
 import { PasskeysSettings } from "@/components/settings/PasskeysSettings";
 import { FinanceSettings } from "@/components/finance/FinanceSettings";
 import { McpSettings } from "@/components/mcp/McpSettings";
@@ -1213,6 +1214,15 @@ export default function SettingsPage() {
               </button>
 
               <ThemeImportExport />
+
+              <div className="space-y-2">
+                <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider">Set any token</h4>
+                <p className="text-xs text-muted">
+                  Import a JSON theme that redefines any design token in the app, or export the theme you are
+                  using now. This works for every plan.
+                </p>
+                <ThemeTokenImport />
+              </div>
 
               {editingCustomTheme && (
                 <div className="rounded-xl bg-elevated border border-border p-4 space-y-4">

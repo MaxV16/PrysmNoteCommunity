@@ -11,6 +11,8 @@ interface MobileTabBarProps {
   view: WorkspaceView;
   onSelectView: (v: WorkspaceView) => void;
   onOpenAi: () => void;
+  /** True while the AI drawer is open, so its tab shows the active state. */
+  aiOpen?: boolean;
   showFinance: boolean;
   showWatchlist: boolean;
   showHabits: boolean;
@@ -35,7 +37,7 @@ function TabButton({
       onClick={onClick}
       aria-label={label}
       aria-current={active ? "page" : undefined}
-      className="flex min-w-0 flex-1 basis-0 flex-col items-center gap-0.5 px-0.5 py-1 transition-colors"
+      className="pointer-coarse:min-h-11 flex min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 py-1 transition-colors"
     >
       <span
         className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
@@ -132,7 +134,7 @@ const WORKSPACE_VIEWS: PanelView[] = [
  * Watchlist) live behind the More sheet and appear only when their module is
  * enabled. The Capture slot is the prominent mic entry to the voice diary.
  */
-export function MobileTabBar({ view, onSelectView, onOpenAi, showFinance, showWatchlist, showHabits, showQuadrant, showFocus, showCountdown }: MobileTabBarProps) {
+export function MobileTabBar({ view, aiOpen, onSelectView, onOpenAi, showFinance, showWatchlist, showHabits, showQuadrant, showFocus, showCountdown }: MobileTabBarProps) {
   const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -155,14 +157,18 @@ export function MobileTabBar({ view, onSelectView, onOpenAi, showFinance, showWa
 
   return (
     <>
-      <nav className="flex shrink-0 items-center gap-1 border-t border-border bg-surface pl-safe pr-safe px-2 pt-1.5 pb-safe" aria-label="Primary">
+      <nav
+        data-testid="mobile-tab-bar"
+        className="flex shrink-0 items-center gap-1 border-t border-border bg-surface pl-safe pr-safe px-2 pt-1.5 pb-safe"
+        aria-label="Primary"
+      >
         <TabButton
           label="Today"
           active={view === "timeline"}
           onClick={() => onSelectView("timeline")}
           icon={ICONS.today}
         />
-        <TabButton label="Chat" active={false} onClick={onOpenAi} icon={ICONS.chat} />
+        <TabButton label="Chat" active={Boolean(aiOpen)} onClick={onOpenAi} icon={ICONS.chat} />
         <TabButton
           label="More"
           active={workspaceActive}
@@ -176,33 +182,38 @@ export function MobileTabBar({ view, onSelectView, onOpenAi, showFinance, showWa
           {entries.length === 0 ? (
             <p className="px-1 py-2 text-sm text-secondary">No extra workspaces are enabled.</p>
           ) : (
-            entries.map((v) => {
-              const isActive = view === v;
-              return (
-                <button
-                  key={v}
-                  onClick={() => selectWorkspace(v)}
-                  aria-current={isActive ? "page" : undefined}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition-colors ${
-                    isActive ? "bg-accent/10 font-semibold text-accent" : "text-primary hover:bg-hover"
-                  }`}
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-elevated text-secondary">
-                    {ICONS[v]}
-                  </span>
-                  <span className="flex-1 text-left">
-                    {v === "watchlist" ? "Shows & Movies" : v.charAt(0).toUpperCase() + v.slice(1)}
-                  </span>
-                  {isActive ? (
-                    <span className="text-accent" aria-hidden>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
+            <>
+              <p className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                Workspaces
+              </p>
+              {entries.map((v) => {
+                const isActive = view === v;
+                return (
+                  <button
+                    key={v}
+                    onClick={() => selectWorkspace(v)}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`pointer-coarse:min-h-11 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition-colors ${
+                      isActive ? "bg-accent/10 font-semibold text-accent" : "text-primary hover:bg-hover"
+                    }`}
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-elevated text-secondary">
+                      {ICONS[v]}
                     </span>
-                  ) : null}
-                </button>
-              );
-            })
+                    <span className="flex-1 text-left">
+                      {v === "watchlist" ? "Shows & Movies" : v.charAt(0).toUpperCase() + v.slice(1)}
+                    </span>
+                    {isActive ? (
+                      <span className="text-accent" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </>
           )}
         </div>
       </Modal>

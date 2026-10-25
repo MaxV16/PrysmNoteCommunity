@@ -225,7 +225,7 @@ export function ListView() {
           onClick={handleSelectAll}
           title={allVisibleSelected ? "Deselect all visible" : "Select all visible"}
           aria-label="Select all visible tasks"
-          className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition-colors ${
+          className={`relative flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition-colors pointer-coarse:after:absolute pointer-coarse:after:-inset-3 pointer-coarse:after:content-[''] ${
             allVisibleSelected ? "bg-accent border-accent" : "border-border hover:border-accent/50"
           }`}
         >
@@ -259,14 +259,15 @@ export function ListView() {
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-          className="input-field text-xs w-24 shrink-0 sm:w-28"
+          aria-label="Sort tasks"
+          className="input-field h-9 text-xs w-[5.5rem] shrink-0 sm:h-10 sm:w-28"
         >
           <option value="date">By Date</option>
           <option value="priority">By Priority</option>
         </select>
         <button
           onClick={() => setShowTaskForm(true)}
-          className="btn btn-primary px-4 py-1.5 text-xs shrink-0"
+          className="btn btn-primary pointer-coarse:min-h-9 px-3 py-2 text-xs shrink-0 sm:px-4 sm:py-1.5"
         >
           + New
         </button>
@@ -367,7 +368,7 @@ export function ListView() {
                   <button
                     onClick={(e) => { e.stopPropagation(); handleToggleStatus(task); }}
                     aria-label={isDone ? `Mark ${task.title} as not done` : `Mark ${task.title} as done`}
-                    className={`h-4 w-4 rounded border-2 shrink-0 flex items-center justify-center transition-colors ${
+                    className={`relative h-4 w-4 shrink-0 rounded border-2 flex items-center justify-center transition-colors pointer-coarse:after:absolute pointer-coarse:after:-inset-3 pointer-coarse:after:content-[''] ${
                       isDone ? "bg-accent border-accent" : "border-border hover:border-accent/50"
                     }`}
                   >
@@ -386,9 +387,10 @@ export function ListView() {
                       {task.title}
                     </span>
                     {(task.due_date || task.start_date) && (
-                      <span className="text-[10px] text-muted mt-0.5 block">
-                        {task.start_date && `From ${formatDate(new Date(task.start_date + "T00:00:00"), { includeYear: false })} `}
-                        {task.due_date && `${task.start_date ? "→ " : ""}Due ${formatDate(new Date(task.due_date + "T00:00:00"), { includeYear: false })}`}
+                      <span className="mt-0.5 block truncate text-[10px] text-muted">
+                        {task.due_date
+                          ? `${task.start_date && task.start_date !== task.due_date ? `From ${formatDate(new Date(task.start_date + "T00:00:00"), { includeYear: false })} ` : ""}Due ${formatDate(new Date(task.due_date + "T00:00:00"), { includeYear: false })}`
+                          : `From ${formatDate(new Date(task.start_date! + "T00:00:00"), { includeYear: false })}`}
                         {taskTimeLabel(task) && ` · ${taskTimeLabel(task)}`}
                       </span>
                     )}

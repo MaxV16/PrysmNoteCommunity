@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import type { ThemeName, ThemeColors, BackgroundPreset, CustomTheme } from "@/types/theme";
 import { THEMES, FONT_PRESETS, BACKGROUND_PRESETS, DEFAULT_THEME, DEFAULT_FONT } from "@/types/theme";
-import { KNOWN_CSS_VARS } from "@/lib/theme-vars";
+import { computeVarChanges, parseThemeDocument, type ThemeParseResult } from "@/lib/theme-import";
 
 const CUSTOM_THEME_KEY = "prysm-custom-theme";
 const FONT_KEY = "prysm-font";
@@ -29,6 +29,8 @@ interface ThemeContextValue {
   clearBackground: () => void;
   customTheme: CustomTheme | null;
   setCustomTheme: (colors: CustomTheme | null) => void;
+  /** Validate and apply a theme document. Returns the parser result so the UI can list errors. */
+  importCustomTheme: (text: string) => ThemeParseResult;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -81,13 +83,21 @@ function applyThemeColors(colors: ThemeColors, extra?: Record<string, string>) {
       root.style.setProperty("--" + key, value);
     }
   }
-  if (extra) {
-    for (const [name, value] of Object.entries(extra)) {
-      if (KNOWN_CSS_VARS.has(name)) {
-        root.style.setProperty(name, value);
-        appliedExtras.add(name);
-      }
-    }
+  if (extra) applyExtras(extra);
+}
+
+// Apply an arbitrary token map in one O(keys) pass, removing tokens that the
+// previous map set and this one does not (so switching themes leaks nothing).
+function applyExtras(extra: Record<string, string> | undefined) {
+  const root = document.documentElement;
+  const { set, remove } = computeVarChanges(appliedExtras, extra);
+  for (const name of remove) {
+    root.style.removeProperty(name);
+    appliedExtras.delete(name);
+  }
+  for (const [name, value] of set) {
+    root.style.setProperty(name, value);
+    appliedExtras.add(name);
   }
 }
 
@@ -110,6 +120,16 @@ function luminance(hex: string): number {
     return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
   });
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+// Strip display-only fields so a CustomTheme can be spread back into a palette.
+function colorsOnly(theme: CustomTheme): ThemeColors {
+  const colors: Record<string, string> = {};
+  for (const [key, value] of Object.entries(theme)) {
+    if (key === "label" || key === "extra") continue;
+    if (typeof value === "string") colors[key] = value;
+  }
+  return colors as unknown as ThemeColors;
 }
 
 function sanitizeFontName(fontName: string): string {
@@ -306,6 +326,32 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (colors) setThemeNameState("custom");
   }, []);
 
+  const importCustomTheme = useCallback(
+    (text: string): ThemeParseResult => {
+      // Validation is pure and cheap (32 KB / 200 key ceilings); nothing is
+      // written to the DOM or localStorage unless the document is fully valid.
+      const result = parseThemeDocument(text);
+      if (!result.ok) return result;
+
+      const builtin =
+        (themeName !== "custom" ? THEMES[themeName] : undefined) ?? THEMES[DEFAULT_THEME];
+      const base = customTheme ? colorsOnly(customTheme) : builtin.colors;
+      // Tokens are merged as extras: `applyThemeColors` writes the base palette
+      // first, then this map in one pass, so an imported `--accent` wins.
+      const extra = { ...(customTheme?.extra ?? {}), ...result.theme.vars };
+      const next: CustomTheme = { ...base, extra };
+      const label = result.theme.name ?? customTheme?.label;
+      if (label) next.label = label;
+
+      setCustomThemeState(next);
+      ls.set(CUSTOM_THEME_KEY, next);
+      ls.setStr("prysm-theme", "custom");
+      setThemeNameState("custom");
+      return result;
+    },
+    [customTheme, themeName],
+  );
+
   const value = useMemo(
     () => ({
       themeName,
@@ -320,6 +366,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       clearBackground,
       customTheme,
       setCustomTheme,
+      importCustomTheme,
     }),
     [
       themeName,
@@ -333,6 +380,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       clearBackground,
       customTheme,
       setCustomTheme,
+      importCustomTheme,
     ]
   );
 

@@ -193,7 +193,12 @@ async fn search_multi(settings: &Settings, query: &str) -> Vec<Value> {
     if trimmed.is_empty() {
         return Vec::new();
     }
-    let Some(data) = tmdb_get(settings, "/search/multi", &[("query", trimmed), ("language", "en-US")]).await
+    let Some(data) = tmdb_get(
+        settings,
+        "/search/multi",
+        &[("query", trimmed), ("language", "en-US")],
+    )
+    .await
     else {
         return Vec::new();
     };
@@ -229,7 +234,10 @@ async fn movie_details(settings: &Settings, tmdb_id: i32) -> Option<Value> {
     tmdb_get(
         settings,
         &format!("/movie/{tmdb_id}"),
-        &[("language", "en-US"), ("append_to_response", "belongs_to_collection")],
+        &[
+            ("language", "en-US"),
+            ("append_to_response", "belongs_to_collection"),
+        ],
     )
     .await
 }
@@ -238,13 +246,22 @@ async fn tv_details(settings: &Settings, tmdb_id: i32) -> Option<Value> {
     tmdb_get(
         settings,
         &format!("/tv/{tmdb_id}"),
-        &[("language", "en-US"), ("append_to_response", "next_episode_to_air")],
+        &[
+            ("language", "en-US"),
+            ("append_to_response", "next_episode_to_air"),
+        ],
     )
     .await
 }
 
 async fn collection(settings: &Settings, tmdb_id: i64) -> Vec<Value> {
-    match tmdb_get(settings, &format!("/collection/{tmdb_id}"), &[("language", "en-US")]).await {
+    match tmdb_get(
+        settings,
+        &format!("/collection/{tmdb_id}"),
+        &[("language", "en-US")],
+    )
+    .await
+    {
         Some(data) => data
             .get("parts")
             .and_then(|p| p.as_array())
@@ -303,8 +320,12 @@ async fn has_theatrical_release(settings: &Settings, tmdb_id: i32) -> bool {
     if !has_key(settings) {
         return false;
     }
-    let Some(data) =
-        tmdb_get(settings, &format!("/movie/{tmdb_id}/release_dates"), &[("language", "en-US")]).await
+    let Some(data) = tmdb_get(
+        settings,
+        &format!("/movie/{tmdb_id}/release_dates"),
+        &[("language", "en-US")],
+    )
+    .await
     else {
         return false;
     };
@@ -312,7 +333,10 @@ async fn has_theatrical_release(settings: &Settings, tmdb_id: i32) -> bool {
         for region in regions {
             if let Some(releases) = region.get("release_dates").and_then(|r| r.as_array()) {
                 for rd in releases {
-                    if matches!(rd.get("release_type").and_then(|t| t.as_i64()), Some(2) | Some(3)) {
+                    if matches!(
+                        rd.get("release_type").and_then(|t| t.as_i64()),
+                        Some(2) | Some(3)
+                    ) {
                         return true;
                     }
                 }
@@ -352,7 +376,9 @@ async fn compute_upcoming(settings: &Settings, tmdb_id: i32, media_type: &str) -
             Some(s) => format!("Season {s} airs"),
             None => "New episode airs".to_string(),
         };
-        return vec![json!({ "label": label, "date": air_date, "extra": next_ep.and_then(|e| e.get("name")).cloned().unwrap_or(Value::Null) })];
+        return vec![
+            json!({ "label": label, "date": air_date, "extra": next_ep.and_then(|e| e.get("name")).cloned().unwrap_or(Value::Null) }),
+        ];
     }
 
     let Some(details) = movie_details(settings, tmdb_id).await else {
@@ -409,9 +435,9 @@ async fn resolve_add_identity(
     }
     if !title.is_empty() && has_key(settings) {
         let results = search_multi(settings, title).await;
-        let matched = results.iter().find(|r| {
-            r.get("media_type").and_then(|m| m.as_str()) == Some(media_type)
-        });
+        let matched = results
+            .iter()
+            .find(|r| r.get("media_type").and_then(|m| m.as_str()) == Some(media_type));
         if let Some(match_item) = matched {
             let resolved_id = match_item
                 .get("tmdb_id")
@@ -426,11 +452,19 @@ async fn resolve_add_identity(
                 .get("poster_path")
                 .and_then(|p| p.as_str())
                 .map(|s| s.to_string());
-            let year = match_item.get("release_year").and_then(|y| y.as_i64()).map(|y| y as i32);
+            let year = match_item
+                .get("release_year")
+                .and_then(|y| y.as_i64())
+                .map(|y| y as i32);
             return (resolved_id, resolved_title, poster, year);
         }
     }
-    (synthetic_tmdb_id(media_type, title), title.to_string(), None, None)
+    (
+        synthetic_tmdb_id(media_type, title),
+        title.to_string(),
+        None,
+        None,
+    )
 }
 
 /// Populate title/poster/year/upcoming for a freshly added item (no-op without
@@ -469,7 +503,10 @@ async fn fetch_metadata(
             .map(|s| s.to_string());
     }
     let poster_out = if poster_path.is_none() {
-        details.get("poster_path").and_then(|p| p.as_str()).map(|s| s.to_string())
+        details
+            .get("poster_path")
+            .and_then(|p| p.as_str())
+            .map(|s| s.to_string())
     } else {
         None
     };
@@ -604,7 +641,9 @@ pub async fn refresh_due_items(pool: &PgPool, settings: &Settings) -> i64 {
         tasks.spawn(async move {
             let _permit = permit.acquire_owned().await.ok()?;
             let mut tx = pool.begin().await.ok()?;
-            let refreshed = refresh_item_metadata(&mut tx, &settings, item_id).await.ok()?;
+            let refreshed = refresh_item_metadata(&mut tx, &settings, item_id)
+                .await
+                .ok()?;
             tx.commit().await.ok()?;
             Some(refreshed)
         });
@@ -674,7 +713,9 @@ pub(crate) async fn svc_list_watchlist(
     status: Option<String>,
 ) -> Result<Value, ApiError> {
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let rows = if let Some(status) = status {
         sqlx::query(&format!(
             "SELECT {COLUMNS} FROM watchlist_items WHERE user_id = $1 AND status = $2 \
@@ -699,10 +740,7 @@ pub(crate) async fn svc_list_watchlist(
     Ok(Value::Array(items))
 }
 
-pub(crate) async fn svc_search_titles(
-    state: &AppState,
-    query: String,
-) -> Result<Value, ApiError> {
+pub(crate) async fn svc_search_titles(state: &AppState, query: String) -> Result<Value, ApiError> {
     let results = search_multi(&state.settings, &query).await;
     Ok(Value::Array(results))
 }
@@ -731,7 +769,9 @@ pub(crate) async fn svc_add_watchlist_item(
     payload: WatchlistAddRequest,
 ) -> Result<Value, ApiError> {
     if !VALID_MEDIA_TYPES.contains(&payload.media_type.as_str()) {
-        return Err(ApiError::Unprocessable("media_type must be movie or tv".to_string()));
+        return Err(ApiError::Unprocessable(
+            "media_type must be movie or tv".to_string(),
+        ));
     }
     if let Some(status) = &payload.status {
         if !VALID_STATUSES.contains(&status.as_str()) {
@@ -745,8 +785,13 @@ pub(crate) async fn svc_add_watchlist_item(
         ));
     }
 
-    let (tmdb_id, resolved_title, search_poster, search_year) =
-        resolve_add_identity(&state.settings, &payload.media_type, &title, payload.tmdb_id).await;
+    let (tmdb_id, resolved_title, search_poster, search_year) = resolve_add_identity(
+        &state.settings,
+        &payload.media_type,
+        &title,
+        payload.tmdb_id,
+    )
+    .await;
     let resolved_title = if resolved_title.trim().is_empty() {
         title.clone()
     } else {
@@ -754,7 +799,9 @@ pub(crate) async fn svc_add_watchlist_item(
     };
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
 
     let duplicate: Option<Uuid> = if is_synthetic(tmdb_id) {
         sqlx::query_scalar(
@@ -783,7 +830,9 @@ pub(crate) async fn svc_add_watchlist_item(
 
     let poster_path = payload.poster_path.or(search_poster);
     let release_year = payload.release_year.or(search_year);
-    let status = payload.status.unwrap_or_else(|| "plan_to_watch".to_string());
+    let status = payload
+        .status
+        .unwrap_or_else(|| "plan_to_watch".to_string());
 
     let inserted = sqlx::query(
         "INSERT INTO watchlist_items \
@@ -830,7 +879,9 @@ async fn add_item(
     Json(payload): Json<WatchlistAddRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
-    Ok(Json(svc_add_watchlist_item(&state, user.user_id, payload).await?))
+    Ok(Json(
+        svc_add_watchlist_item(&state, user.user_id, payload).await?,
+    ))
 }
 
 pub(crate) async fn svc_update_watchlist_item(
@@ -840,7 +891,9 @@ pub(crate) async fn svc_update_watchlist_item(
     body: Value,
 ) -> Result<Value, ApiError> {
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
 
     let Some(mut item) = find_item(&mut *tx, id, user_id).await? else {
         return Err(ApiError::NotFound("Watchlist item not found".to_string()));
@@ -866,7 +919,10 @@ pub(crate) async fn svc_update_watchlist_item(
     }
     let mut set_notes: Option<String> = None;
     if obj.contains_key("notes") {
-        set_notes = obj.get("notes").and_then(|n| n.as_str()).map(|s| s.to_string());
+        set_notes = obj
+            .get("notes")
+            .and_then(|n| n.as_str())
+            .map(|s| s.to_string());
     }
     let mut set_watched: Option<Option<NaiveDate>> = None;
     if let Some(raw) = obj.get("watched_at") {
@@ -922,7 +978,9 @@ async fn update_item(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let id = task::require_uuid(&item_id)?;
-    Ok(Json(svc_update_watchlist_item(&state, user.user_id, id, body).await?))
+    Ok(Json(
+        svc_update_watchlist_item(&state, user.user_id, id, body).await?,
+    ))
 }
 
 pub(crate) async fn svc_remove_watchlist_item(
@@ -931,7 +989,9 @@ pub(crate) async fn svc_remove_watchlist_item(
     id: Uuid,
 ) -> Result<(), ApiError> {
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let result = sqlx::query("DELETE FROM watchlist_items WHERE id = $1 AND user_id = $2")
         .bind(id)
         .bind(user_id)
@@ -967,7 +1027,9 @@ async fn get_providers(
     let region = q.region.unwrap_or_else(|| "US".to_string());
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let Some(item) = find_item(&mut *tx, id, user.user_id).await? else {
         return Err(ApiError::NotFound("Watchlist item not found".to_string()));
     };
@@ -1008,7 +1070,10 @@ mod tests {
         let b = synthetic_tmdb_id("movie", "dune");
         assert_eq!(a, b);
         assert!(is_synthetic(a));
-        assert_ne!(synthetic_tmdb_id("movie", "dune"), synthetic_tmdb_id("tv", "dune"));
+        assert_ne!(
+            synthetic_tmdb_id("movie", "dune"),
+            synthetic_tmdb_id("tv", "dune")
+        );
         assert!(!is_synthetic(550));
     }
 
@@ -1019,7 +1084,10 @@ mod tests {
             Some("https://image.tmdb.org/t/p/w500/abc.jpg".to_string())
         );
         assert_eq!(poster_url(None), None);
-        assert_eq!(poster_url(Some("")), Some("https://image.tmdb.org/t/p/w500".to_string()));
+        assert_eq!(
+            poster_url(Some("")),
+            Some("https://image.tmdb.org/t/p/w500".to_string())
+        );
     }
 
     async fn live_state() -> Option<AppState> {
@@ -1081,7 +1149,9 @@ mod tests {
     }
 
     async fn body_json(res: axum::response::Response) -> Value {
-        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         serde_json::from_slice(&bytes).unwrap_or(Value::Null)
     }
 
@@ -1095,8 +1165,9 @@ mod tests {
         let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
-            .unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
 
         let res = call(
             app.clone(),
@@ -1190,7 +1261,9 @@ mod tests {
 
         // A manual (synthetic) entry must never be stamped or updated, whether
         // or not a TMDB key is present.
-        let changed = refresh_item_metadata(&mut tx, &state.settings, id).await.unwrap();
+        let changed = refresh_item_metadata(&mut tx, &state.settings, id)
+            .await
+            .unwrap();
         assert!(!changed);
         tx.commit().await.unwrap();
 

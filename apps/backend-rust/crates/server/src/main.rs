@@ -23,6 +23,13 @@ async fn main() {
         .init();
 
     let settings = Settings::from_env();
+    if let Err(err) = settings.validate() {
+        eprintln!("fatal configuration error: {err}");
+        std::process::exit(1);
+    }
+    for warning in settings.startup_warnings() {
+        tracing::warn!("configuration: {warning}");
+    }
     let pool = prysm_core::db::connect(&settings.database_url)
         .await
         .expect("failed to connect to the database");
@@ -44,10 +51,9 @@ async fn main() {
     // advisory-lock leadership (one worker per fleet); followers serve HTTP only.
     let mut leader = prysm_core::loop_leader::BackgroundLeader::follower();
     if state.settings.run_background_loops() {
-        leader = prysm_core::loop_leader::BackgroundLeader::try_acquire(
-            &state.settings.database_url,
-        )
-        .await;
+        leader =
+            prysm_core::loop_leader::BackgroundLeader::try_acquire(&state.settings.database_url)
+                .await;
     } else {
         tracing::info!("PRYSM_RUN_BACKGROUND_LOOPS disabled; no background loops started");
     }
@@ -87,14 +93,15 @@ async fn main() {
 
         let notification_pool = state.system_pool.clone();
         let notification_settings = (*state.settings).clone();
-        let notification_interval = std::time::Duration::from_secs(
-            state.settings.notification_loop_interval,
+        let notification_interval =
+            std::time::Duration::from_secs(state.settings.notification_loop_interval);
+        tokio::spawn(
+            prysm_core::notification_service::notification_background_loop(
+                notification_pool,
+                notification_settings,
+                notification_interval,
+            ),
         );
-        tokio::spawn(prysm_core::notification_service::notification_background_loop(
-            notification_pool,
-            notification_settings,
-            notification_interval,
-        ));
 
         // Per-task scheduled reminders (email + Web Push) every minute, so a
         // reminder set for a specific clock time is not held back by the slower
@@ -187,9 +194,7 @@ async fn main() {
             tokio::spawn(prysm_ee::loops::trial_notice_background_loop(
                 trial_pool,
                 trial_settings,
-                std::time::Duration::from_secs(
-                    prysm_ee::loops::TRIAL_NOTICE_LOOP_INTERVAL_SECONDS,
-                ),
+                std::time::Duration::from_secs(prysm_ee::loops::TRIAL_NOTICE_LOOP_INTERVAL_SECONDS),
             ));
         }
     }

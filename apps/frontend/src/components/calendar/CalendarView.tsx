@@ -26,6 +26,8 @@ import { TIER_COLORS, normalizePriority } from "@/lib/priority";
 import { taskTimeLabel } from "@/lib/task-time";
 import { calendarOffset, daysBetweenISO, weekdayHeaders } from "@/lib/dates";
 import { toLocalDateString } from "@/lib/utils";
+import { usePersistentZoom } from "@/hooks/usePersistentZoom";
+import { CALENDAR_ZOOM_LEVELS, zoomPercent } from "@/lib/view-zoom";
 
 const PRIORITY_COLORS = TIER_COLORS;
 
@@ -68,6 +70,8 @@ interface CalendarDayCellProps {
   isDropTarget: boolean;
   isDragging: boolean;
   dragTaskIds: string[];
+  /** Month density, 0.8 to 1.4. Scales the day number and chips only. */
+  zoom: number;
 }
 
 function CalendarDayCell({
@@ -87,6 +91,7 @@ function CalendarDayCell({
   isDropTarget,
   isDragging,
   dragTaskIds,
+  zoom,
 }: CalendarDayCellProps) {
   const [visibleCount, setVisibleCount] = useState(3);
   const shown = Math.min(visibleCount, dayTasks.length);
@@ -121,9 +126,14 @@ function CalendarDayCell({
     >
       <div className="flex items-start justify-between gap-1 shrink-0">
         <span
-          className={`inline-flex items-center justify-center text-xs font-medium w-6 h-6 rounded-full ${
+          className={`inline-flex items-center justify-center rounded-full font-medium ${
             isToday ? "gradient-bg text-[var(--on-gradient)]" : "text-secondary"
           }`}
+          style={{
+            width: Math.round(24 * zoom),
+            height: Math.round(24 * zoom),
+            fontSize: Math.max(10, Math.round(12 * zoom)),
+          }}
         >
           {d}
         </span>
@@ -160,13 +170,14 @@ function CalendarDayCell({
                 e.stopPropagation();
                 onOpenCardMenu(e, task);
               }}
-              className={`truncate text-[10px] text-scale-2xs rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110 transition-opacity ${
+              className={`truncate text-scale-2xs rounded px-1 py-0.5 leading-tight cursor-pointer hover:brightness-110 transition-opacity ${
                 selectedTaskIds.includes(task.id) ? "ring-1 ring-accent" : ""
               } ${dragged ? "opacity-40" : ""}`}
               style={{
                 backgroundColor: `color-mix(in srgb, ${PRIORITY_COLORS[normalizePriority(task.priority)] || "var(--text-muted)"} 24%, transparent)`,
                 borderLeft: `2px solid ${PRIORITY_COLORS[normalizePriority(task.priority)] || "var(--text-muted)"}`,
                 color: "var(--text-primary)",
+                fontSize: Math.max(9, Math.round(10 * zoom)),
                 touchAction: "none",
                 ...(dragged
                   ? { cursor: "grabbing", pointerEvents: "none" as const }
@@ -230,6 +241,12 @@ export function CalendarView() {
   const { createTask, fetchTasks } = useTasks();
   const { showToast } = useToast();
   const [viewDate, setViewDate] = useState(() => new Date());
+  // Month density, persisted per device under `prysm-zoom-calendar`.
+  const { zoom, zoomIn, zoomOut, reset: resetZoom } = usePersistentZoom(
+    "calendar",
+    CALENDAR_ZOOM_LEVELS,
+    1
+  );
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [formDefaultDate, setFormDefaultDate] = useState<Date | null>(null);
   const [menu, setMenu] = useState<{
@@ -545,6 +562,38 @@ export function CalendarView() {
           </button>
         </div>
         <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-0.5 rounded-full bg-elevated p-0.5"
+            data-testid="calendar-zoom"
+          >
+            <button
+              onClick={zoomOut}
+              aria-label="Zoom out calendar"
+              className="pointer-coarse:min-h-9 relative flex h-6 w-6 items-center justify-center rounded-full text-secondary hover:bg-hover hover:text-primary"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+            <button
+              onClick={resetZoom}
+              aria-label={`Reset calendar zoom (${zoomPercent(zoom)})`}
+              title="Reset zoom"
+              className="pointer-coarse:min-h-9 min-w-[3.25rem] rounded-full px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-secondary transition-colors hover:bg-hover hover:text-primary"
+            >
+              {zoomPercent(zoom)}
+            </button>
+            <button
+              onClick={zoomIn}
+              aria-label="Zoom in calendar"
+              className="pointer-coarse:min-h-9 relative flex h-6 w-6 items-center justify-center rounded-full text-secondary hover:bg-hover hover:text-primary"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <line x1="12" y1="5" x2="12" y2="19" />
+              </svg>
+            </button>
+          </div>
           {selectedTaskIds.length > 0 && (
             <div className="flex items-center gap-1.5 rounded-full bg-elevated border border-border px-2 py-1">
               <span className="text-[10px] font-medium text-secondary">
@@ -671,6 +720,7 @@ export function CalendarView() {
               isDropTarget={dragTarget === ds}
               isDragging={dragging}
               dragTaskIds={dragIds}
+              zoom={zoom}
             />
           );
         })}

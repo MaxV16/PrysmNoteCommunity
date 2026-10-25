@@ -31,6 +31,11 @@ pub struct Claims {
     pub jti: String,
     /// Token version; a password change bumps it and invalidates old tokens.
     pub tv: i32,
+    /// Refresh-token family id. Every rotation of one login shares this id so
+    /// reuse detection can revoke the whole lineage. Absent on access tokens
+    /// and on refresh tokens minted before rotation support.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fid: Option<String>,
 }
 
 /// Sign an arbitrary claim set with HS256.
@@ -54,12 +59,27 @@ pub fn encode_access(secret: &str, user_id: &str, token_version: i32) -> Result<
             token_type: ACCESS.to_string(),
             jti: Uuid::new_v4().to_string(),
             tv: token_version,
+            fid: None,
         },
     )
 }
 
-/// Mint a refresh token for `user_id` at `token_version`.
+/// Mint a refresh token for `user_id` at `token_version` with a fresh family
+/// id. Every subsequent rotation carries the family forward via
+/// [`encode_refresh_with_family`] so reuse of any rotated token can revoke the
+/// whole lineage.
 pub fn encode_refresh(secret: &str, user_id: &str, token_version: i32) -> Result<String, String> {
+    let family = Uuid::new_v4().to_string();
+    encode_refresh_with_family(secret, user_id, token_version, &family)
+}
+
+/// Mint a refresh token that continues an existing rotation family.
+pub fn encode_refresh_with_family(
+    secret: &str,
+    user_id: &str,
+    token_version: i32,
+    family_id: &str,
+) -> Result<String, String> {
     let now = Utc::now().timestamp();
     encode(
         secret,
@@ -69,6 +89,7 @@ pub fn encode_refresh(secret: &str, user_id: &str, token_version: i32) -> Result
             token_type: REFRESH.to_string(),
             jti: Uuid::new_v4().to_string(),
             tv: token_version,
+            fid: Some(family_id.to_string()),
         },
     )
 }
@@ -160,12 +181,10 @@ mod tests {
     // unchanged.
     const PY_ACCESS_HEADER: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
     const PY_ACCESS_PAYLOAD: &str = "eyJzdWIiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEiLCJleHAiOjQxMDI0NDQ4MDAsInR5cGUiOiJhY2Nlc3MiLCJqdGkiOiIyMjIyMjIyMi0yMjIyLTIyMjItMjIyMi0yMjIyMjIyMjIyMjIiLCJ0diI6Mn0";
-    const PY_ACCESS_SIG: &str =
-        "xosJ8gf7rfHppAf5cqHQ-V4txf9U4lX2mz441TUlRDk";
+    const PY_ACCESS_SIG: &str = "xosJ8gf7rfHppAf5cqHQ-V4txf9U4lX2mz441TUlRDk";
     const PY_REFRESH_HEADER: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
     const PY_REFRESH_PAYLOAD: &str = "eyJzdWIiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEiLCJleHAiOjQxMDI0NDQ4MDAsInR5cGUiOiJyZWZyZXNoIiwianRpIjoiMzMzMzMzMzMtMzMzMy0zMzMzLTMzMzMtMzMzMzMzMzMzMzMzIiwidHYiOjJ9";
-    const PY_REFRESH_SIG: &str =
-        "Ipw7BmuoNZuGUHUDRMjSbecEdXQVDDU-eolir16Zqco";
+    const PY_REFRESH_SIG: &str = "Ipw7BmuoNZuGUHUDRMjSbecEdXQVDDU-eolir16Zqco";
 
     fn py_access_token() -> String {
         format!("{PY_ACCESS_HEADER}.{PY_ACCESS_PAYLOAD}.{PY_ACCESS_SIG}")

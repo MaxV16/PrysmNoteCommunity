@@ -227,81 +227,13 @@ const FRAGMENT_LINE_SKIP_START: [&str; 7] = ["```", "~~~", "#", ">", "|", "`", "
 /// Inflected/function words the dictionary omits (it stores base forms), so a
 /// reflow never welds "is an" or "has been" together.
 const INFLECTED_STOP: &[&str] = &[
-    "i",
-    "is",
-    "am",
-    "are",
-    "was",
-    "were",
-    "been",
-    "has",
-    "had",
-    "does",
-    "did",
-    "you",
-    "we",
-    "they",
-    "he",
-    "she",
-    "me",
-    "him",
-    "her",
-    "us",
-    "them",
-    "my",
-    "our",
-    "your",
-    "their",
-    "this",
-    "that",
-    "these",
-    "those",
-    "who",
-    "whom",
-    "whose",
-    "which",
-    "what",
-    "when",
-    "where",
-    "why",
-    "how",
-    "than",
-    "then",
-    "now",
-    "here",
-    "there",
-    "not",
-    "no",
-    "yes",
-    "so",
-    "if",
-    "but",
-    "yet",
-    "nor",
-    "all",
-    "some",
-    "any",
-    "each",
-    "every",
-    "few",
-    "more",
-    "most",
-    "other",
-    "such",
-    "own",
-    "same",
-    "both",
-    "must",
-    "shall",
-    "should",
-    "would",
-    "could",
-    "might",
-    "cannot",
-    "ive",
-    "youve",
-    "weve",
-    "theyve",
+    "i", "is", "am", "are", "was", "were", "been", "has", "had", "does", "did", "you", "we",
+    "they", "he", "she", "me", "him", "her", "us", "them", "my", "our", "your", "their", "this",
+    "that", "these", "those", "who", "whom", "whose", "which", "what", "when", "where", "why",
+    "how", "than", "then", "now", "here", "there", "not", "no", "yes", "so", "if", "but", "yet",
+    "nor", "all", "some", "any", "each", "every", "few", "more", "most", "other", "such", "own",
+    "same", "both", "must", "shall", "should", "would", "could", "might", "cannot", "ive", "youve",
+    "weve", "theyve",
 ];
 
 fn common_words_set() -> &'static HashSet<&'static str> {
@@ -332,7 +264,10 @@ fn is_fragment_line(stripped: &str) -> bool {
     if stripped.chars().any(char::is_whitespace) {
         return false;
     }
-    if FRAGMENT_LINE_SKIP_START.iter().any(|p| stripped.starts_with(p)) {
+    if FRAGMENT_LINE_SKIP_START
+        .iter()
+        .any(|p| stripped.starts_with(p))
+    {
         return false;
     }
     if fragment_line_skip_re().is_match(stripped) {
@@ -623,7 +558,10 @@ fn strip_quote_padding(line: &str) -> String {
     while i < chars.len() {
         let c = chars[i];
         if is_quote(c) {
-            let prev_ok = out.last().map(|p| !p.is_ascii_alphanumeric()).unwrap_or(true);
+            let prev_ok = out
+                .last()
+                .map(|p| !p.is_ascii_alphanumeric())
+                .unwrap_or(true);
             if prev_ok {
                 let mut j = i + 1;
                 let mut had_space = false;
@@ -631,10 +569,7 @@ fn strip_quote_padding(line: &str) -> String {
                     had_space = true;
                     j += 1;
                 }
-                if had_space
-                    && j < chars.len()
-                    && !chars[j].is_whitespace()
-                    && !is_quote(chars[j])
+                if had_space && j < chars.len() && !chars[j].is_whitespace() && !is_quote(chars[j])
                 {
                     let mut k = j + 1;
                     let mut found: Option<usize> = None;
@@ -647,8 +582,16 @@ fn strip_quote_padding(line: &str) -> String {
                                         nc.is_whitespace()
                                             || matches!(
                                                 nc,
-                                                '"' | ',' | '.' | ';' | ':' | '!' | '?' | ')'
-                                                    | ']' | '%' | '>'
+                                                '"' | ','
+                                                    | '.'
+                                                    | ';'
+                                                    | ':'
+                                                    | '!'
+                                                    | '?'
+                                                    | ')'
+                                                    | ']'
+                                                    | '%'
+                                                    | '>'
                                             )
                                     }
                                 };
@@ -763,7 +706,9 @@ fn is_valid_join(tokens: &[&str], i: usize, k: usize) -> bool {
     if !(4..=24).contains(&joined.chars().count()) || !is_common_word(&joined.to_lowercase()) {
         return false;
     }
-    tokens[i..i + k].iter().any(|t| !is_common_word(&t.to_lowercase()))
+    tokens[i..i + k]
+        .iter()
+        .any(|t| !is_common_word(&t.to_lowercase()))
 }
 
 fn rejoin_length(tokens: &[&str], i: usize) -> usize {
@@ -788,7 +733,11 @@ fn rejoin_run(tokens: &[&str], gaps: &[&str]) -> String {
     let mut i = 0;
     let mut prev_end: isize = -1;
     while i < tokens.len() {
-        let gap = if prev_end == -1 { "" } else { gaps[prev_end as usize] };
+        let gap = if prev_end == -1 {
+            ""
+        } else {
+            gaps[prev_end as usize]
+        };
         let k = rejoin_length(tokens, i);
         if k >= 2 {
             result.push_str(gap);
@@ -871,7 +820,11 @@ fn split_merged_words(line: &str) -> String {
                 break;
             }
         }
-        let at = if first_clean != -1 { first_clean } else { first_valid };
+        let at = if first_clean != -1 {
+            first_clean
+        } else {
+            first_valid
+        };
         if at == -1 {
             return tok.to_string();
         }
@@ -904,8 +857,9 @@ fn clean_line(line: &str) -> String {
     }
     {
         static RE: OnceLock<Regex> = OnceLock::new();
-        let re = RE
-            .get_or_init(|| Regex::new(r"(\w+)[ \t]+([\x{2018}\x{2019}'])[ \t]*(\w{1,3})\b").unwrap());
+        let re = RE.get_or_init(|| {
+            Regex::new(r"(\w+)[ \t]+([\x{2018}\x{2019}'])[ \t]*(\w{1,3})\b").unwrap()
+        });
         line = re.replace_all(&line, "${1}${2}${3}").into_owned();
     }
 
@@ -963,7 +917,12 @@ fn repair_line_broken_dates(text: &str) -> String {
                 if let (Some(h), Some(t)) = (head_re.find(line), tail_re.captures(nxt)) {
                     let joined = format!("{}-{}", &h.as_str()[..4], &t[1]);
                     let group1_end = t.get(1).unwrap().end();
-                    out.push(format!("{}{}{}", &line[..h.start()], joined, &nxt[group1_end..]));
+                    out.push(format!(
+                        "{}{}{}",
+                        &line[..h.start()],
+                        joined,
+                        &nxt[group1_end..]
+                    ));
                     i += 2;
                     continue;
                 }
@@ -1015,8 +974,14 @@ mod tests {
             normalize_reply_markdown("Give me a title ( e .g . daily , weekly )"),
             "Give me a title (e.g. daily, weekly)"
         );
-        assert_eq!(normalize_reply_markdown("I 'll create it"), "I'll create it");
-        assert_eq!(normalize_reply_markdown("I can 't do that ."), "I can't do that.");
+        assert_eq!(
+            normalize_reply_markdown("I 'll create it"),
+            "I'll create it"
+        );
+        assert_eq!(
+            normalize_reply_markdown("I can 't do that ."),
+            "I can't do that."
+        );
         assert_eq!(
             normalize_reply_markdown("then I 'll delete them one by one ."),
             "then I'll delete them one by one."
@@ -1055,7 +1020,10 @@ mod tests {
             normalize_reply_markdown("4 \u{2013} 1 2 (recurs daily)"),
             "4-12 (recurs daily)"
         );
-        assert_eq!(normalize_reply_markdown("May 2 9 th , 2 0 2 7"), "May 29th, 2027");
+        assert_eq!(
+            normalize_reply_markdown("May 2 9 th , 2 0 2 7"),
+            "May 29th, 2027"
+        );
         assert_eq!(normalize_reply_markdown("4 pm to 1 2 am"), "4pm to 12am");
     }
 
@@ -1106,8 +1074,14 @@ mod tests {
             normalize_reply_markdown("I 've finished the setup ."),
             "I've finished the setup."
         );
-        assert_eq!(normalize_reply_markdown("due next month ."), "due next month.");
-        assert_eq!(normalize_reply_markdown("Due Date : 2026-09-05"), "Due Date: 2026-09-05");
+        assert_eq!(
+            normalize_reply_markdown("due next month ."),
+            "due next month."
+        );
+        assert_eq!(
+            normalize_reply_markdown("Due Date : 2026-09-05"),
+            "Due Date: 2026-09-05"
+        );
     }
 
     #[test]
@@ -1129,15 +1103,95 @@ mod tests {
     #[test]
     fn normalize_reply_markdown_reflows_one_token_per_line() {
         let raw = [
-            "I", "'m", "sorry", "for", "any", "inconven", "ience", ",", "but", "I", "currently",
-            "don", "'t", "have", "the", "tools", "to", "assist", "with", "changing", "your",
-            "payment", "date", ".", "However", ",", "I", "can", "guide", "you", "on", "how", "to",
-            "do", "it", "yourself", ".", "You", "should", "be", "able", "to", "change", "your",
-            "payment", "date", "by", "logging", "into", "your", "credit", "card", "account",
-            "online", "or", "by", "contacting", "your", "credit", "card", "iss", "uer", "'s",
-            "customer", "service", ".", "They", "can", "walk", "you", "through", "the", "process",
-            "of", "updating", "your", "payment", "date", "to", "the", "", "", "2", "4", "th", "of",
-            "each", "month", ".",
+            "I",
+            "'m",
+            "sorry",
+            "for",
+            "any",
+            "inconven",
+            "ience",
+            ",",
+            "but",
+            "I",
+            "currently",
+            "don",
+            "'t",
+            "have",
+            "the",
+            "tools",
+            "to",
+            "assist",
+            "with",
+            "changing",
+            "your",
+            "payment",
+            "date",
+            ".",
+            "However",
+            ",",
+            "I",
+            "can",
+            "guide",
+            "you",
+            "on",
+            "how",
+            "to",
+            "do",
+            "it",
+            "yourself",
+            ".",
+            "You",
+            "should",
+            "be",
+            "able",
+            "to",
+            "change",
+            "your",
+            "payment",
+            "date",
+            "by",
+            "logging",
+            "into",
+            "your",
+            "credit",
+            "card",
+            "account",
+            "online",
+            "or",
+            "by",
+            "contacting",
+            "your",
+            "credit",
+            "card",
+            "iss",
+            "uer",
+            "'s",
+            "customer",
+            "service",
+            ".",
+            "They",
+            "can",
+            "walk",
+            "you",
+            "through",
+            "the",
+            "process",
+            "of",
+            "updating",
+            "your",
+            "payment",
+            "date",
+            "to",
+            "the",
+            "",
+            "",
+            "2",
+            "4",
+            "th",
+            "of",
+            "each",
+            "month",
+            ".",
         ]
         .join("\n");
         assert_eq!(
@@ -1186,7 +1240,10 @@ mod tests {
             normalize_reply_markdown("several\nconflicting\ntasks\non\nthe\nsame\nday"),
             "several conflicting tasks on the same day"
         );
-        assert_eq!(normalize_reply_markdown("in\nthe\nsame\nday"), "in the same day");
+        assert_eq!(
+            normalize_reply_markdown("in\nthe\nsame\nday"),
+            "in the same day"
+        );
         assert_eq!(normalize_reply_markdown("at\n\n\n3\np\n.m\n."), "at 3 p.m.");
         assert_eq!(
             normalize_reply_markdown("priority\n(\npriority\n\n1\n)\n."),
@@ -1206,8 +1263,14 @@ mod tests {
         );
         assert_eq!(normalize_reply_markdown("3\np\n.\nm\n."), "3 p.m.");
         assert_eq!(normalize_reply_markdown("3 p . m ."), "3 p.m.");
-        assert_eq!(normalize_reply_markdown("at 4 p . m . tomorrow"), "at 4 p.m. tomorrow");
-        assert_eq!(normalize_reply_markdown("e . g . daily , weekly"), "e.g. daily, weekly");
+        assert_eq!(
+            normalize_reply_markdown("at 4 p . m . tomorrow"),
+            "at 4 p.m. tomorrow"
+        );
+        assert_eq!(
+            normalize_reply_markdown("e . g . daily , weekly"),
+            "e.g. daily, weekly"
+        );
         assert_eq!(
             normalize_reply_markdown("several conflictingtasks"),
             "several conflicting tasks"
@@ -1221,12 +1284,75 @@ mod tests {
     #[test]
     fn normalize_reply_markdown_exact_user_reported_task_reply() {
         let raw = [
-            "I", "'ve", "created", "the", "task", "\"", "1", "2", "3", "test", "\"", "for",
-            "tomorrow", "at", "", "", "3", "p", ".m", ".", "However", ",", "there", "are",
-            "several", "conflicting", "tasks", "on", "the", "same", "day", ",", "some", "of",
-            "which", "have", "higher", "priority", "(", "priority", "", "", "1", ")", ".", "Here",
-            "are", "the", "conflicting", "tasks", ":", "ne", "xo", "(", "priority", "", "1", ",",
-            "due", "Sep", "", "2", "0", ",", "2", "0", "2", "6", ")",
+            "I",
+            "'ve",
+            "created",
+            "the",
+            "task",
+            "\"",
+            "1",
+            "2",
+            "3",
+            "test",
+            "\"",
+            "for",
+            "tomorrow",
+            "at",
+            "",
+            "",
+            "3",
+            "p",
+            ".m",
+            ".",
+            "However",
+            ",",
+            "there",
+            "are",
+            "several",
+            "conflicting",
+            "tasks",
+            "on",
+            "the",
+            "same",
+            "day",
+            ",",
+            "some",
+            "of",
+            "which",
+            "have",
+            "higher",
+            "priority",
+            "(",
+            "priority",
+            "",
+            "",
+            "1",
+            ")",
+            ".",
+            "Here",
+            "are",
+            "the",
+            "conflicting",
+            "tasks",
+            ":",
+            "ne",
+            "xo",
+            "(",
+            "priority",
+            "",
+            "1",
+            ",",
+            "due",
+            "Sep",
+            "",
+            "2",
+            "0",
+            ",",
+            "2",
+            "0",
+            "2",
+            "6",
+            ")",
         ]
         .join("\n");
         assert_eq!(
@@ -1345,8 +1471,8 @@ mod tests {
             ),
         ];
         for (raw, tool, key, val) in cases {
-            let parsed =
-                parse_text_tool_calls(raw).unwrap_or_else(|| panic!("no tool call parsed in {raw}"));
+            let parsed = parse_text_tool_calls(raw)
+                .unwrap_or_else(|| panic!("no tool call parsed in {raw}"));
             assert_eq!(parsed[0]["function"]["name"], *tool, "wrong tool for {raw}");
             let args: Value =
                 serde_json::from_str(parsed[0]["function"]["arguments"].as_str().unwrap()).unwrap();

@@ -86,12 +86,26 @@ pub async fn ee_dispatch(
 /// signal an HTTP mutation would. Read-only tools and EE tools return `None`.
 pub fn mutation_resource(tool_name: &str) -> Option<&'static str> {
     match tool_name {
-        "create_task" | "update_task" | "delete_task" | "batch_delete_tasks"
-        | "delete_matching_tasks" | "reschedule_task" | "batch_create_tasks" | "add_event"
-        | "cancel_task_by_keywords" | "complete_task" | "duplicate_task" | "restore_task"
-        | "add_tag_to_task" | "create_subtask" | "update_subtask" | "delete_subtask"
-        | "reorder_subtasks" | "convert_description_to_subtasks"
-        | "convert_subtasks_to_description" | "link_tasks" => Some("tasks"),
+        "create_task"
+        | "update_task"
+        | "delete_task"
+        | "batch_delete_tasks"
+        | "delete_matching_tasks"
+        | "reschedule_task"
+        | "batch_create_tasks"
+        | "add_event"
+        | "cancel_task_by_keywords"
+        | "complete_task"
+        | "duplicate_task"
+        | "restore_task"
+        | "add_tag_to_task"
+        | "create_subtask"
+        | "update_subtask"
+        | "delete_subtask"
+        | "reorder_subtasks"
+        | "convert_description_to_subtasks"
+        | "convert_subtasks_to_description"
+        | "link_tasks" => Some("tasks"),
         "organize_timeline_into_sections" => Some("board_sections"),
         "create_list" | "rename_list" | "delete_list" => Some("lists"),
         "add_watchlist_item" | "update_watchlist_item" | "remove_watchlist_item" => {
@@ -240,8 +254,10 @@ fn confirmation_question_patterns() -> &'static Regex {
 fn question_only_start() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
-        Regex::new(r"(?i)^(?:what|who|when|where|why|how|is|are|can|could|would|will|do|does|did)\b")
-            .expect("valid question regex")
+        Regex::new(
+            r"(?i)^(?:what|who|when|where|why|how|is|are|can|could|would|will|do|does|did)\b",
+        )
+        .expect("valid question regex")
     })
 }
 
@@ -290,7 +306,10 @@ pub fn has_hallucinated_action(content: &str) -> bool {
 /// honest-failure fallback so read-only questions are never rewritten.
 pub fn has_mutation_intent(user_message: &str) -> bool {
     let lower = user_message.trim().to_lowercase();
-    if ["is ", "are ", "was ", "were "].iter().any(|p| lower.starts_with(p)) {
+    if ["is ", "are ", "was ", "were "]
+        .iter()
+        .any(|p| lower.starts_with(p))
+    {
         return false;
     }
     mutation_intent_patterns().is_match(user_message)
@@ -311,7 +330,10 @@ pub fn is_confirmation_question(content: &str) -> bool {
         "confirm to proceed",
         "pending confirmation",
     ];
-    if TRAILING_CONFIRMATIONS.iter().any(|phrase| lower.contains(phrase)) {
+    if TRAILING_CONFIRMATIONS
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+    {
         return true;
     }
     content.contains('?') && confirmation_question_patterns().is_match(content)
@@ -360,7 +382,11 @@ mod tests {
     fn core_tools_exclude_enterprise_names() {
         let names: Vec<&str> = tool_definitions()
             .iter()
-            .filter_map(|t| t.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()))
+            .filter_map(|t| {
+                t.get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+            })
             .collect();
         assert!(names.contains(&"search_tasks"));
         assert!(names.contains(&"list_habits"));
@@ -404,9 +430,15 @@ mod tests {
     #[test]
     fn needs_tool_retry_flags_refusals_and_actions() {
         assert!(needs_tool_retry("", "create a task"));
-        assert!(needs_tool_retry("I don't have access to that", "create a task"));
+        assert!(needs_tool_retry(
+            "I don't have access to that",
+            "create a task"
+        ));
         assert!(needs_tool_retry("I've created the task", "create a task"));
-        assert!(!needs_tool_retry("It is sunny today", "what is the weather"));
+        assert!(!needs_tool_retry(
+            "It is sunny today",
+            "what is the weather"
+        ));
     }
 
     #[test]
@@ -438,7 +470,10 @@ mod tests {
             "restore the deleted task",
             "record a payment",
         ] {
-            assert!(has_mutation_intent(message), "expected mutation intent: {message}");
+            assert!(
+                has_mutation_intent(message),
+                "expected mutation intent: {message}"
+            );
         }
         for message in [
             "what do I have tomorrow?",
@@ -451,7 +486,10 @@ mod tests {
             "is the report finished",
             "",
         ] {
-            assert!(!has_mutation_intent(message), "unexpected mutation intent: {message}");
+            assert!(
+                !has_mutation_intent(message),
+                "unexpected mutation intent: {message}"
+            );
         }
     }
 
@@ -465,7 +503,10 @@ mod tests {
             "I will delete it once you confirm.",
             "Proceed?",
         ] {
-            assert!(is_confirmation_question(content), "expected confirmation: {content}");
+            assert!(
+                is_confirmation_question(content),
+                "expected confirmation: {content}"
+            );
         }
         for content in [
             "I've deleted it.",
@@ -473,7 +514,10 @@ mod tests {
             "Should I delete it",
             "I found 2 tasks.",
         ] {
-            assert!(!is_confirmation_question(content), "unexpected confirmation: {content}");
+            assert!(
+                !is_confirmation_question(content),
+                "unexpected confirmation: {content}"
+            );
         }
     }
 
@@ -595,7 +639,10 @@ mod tests {
 
         let no_retry = [
             ("It is 18 degrees and sunny.", "what is the weather"),
-            ("Recurrence repeats a task on a schedule.", "explain how recurrence works"),
+            (
+                "Recurrence repeats a task on a schedule.",
+                "explain how recurrence works",
+            ),
             ("A task is a unit of work.", "what is a task"),
             ("Yes, that is possible.", "can I share a list"),
             ("Use the plus button.", "how do I add a task"),
@@ -679,7 +726,10 @@ mod tests {
             "I've added the tag",
             "I will move it to backlog",
         ] {
-            assert!(has_hallucinated_action(text), "expected hallucination: {text}");
+            assert!(
+                has_hallucinated_action(text),
+                "expected hallucination: {text}"
+            );
         }
 
         for text in [
@@ -716,7 +766,10 @@ mod tests {
         assert!(names.iter().all(|n| !n.trim().is_empty()));
         assert!(names.len() <= 64, "toolset unexpectedly large");
         for function in functions {
-            assert!(function.get("description").and_then(Value::as_str).is_some());
+            assert!(function
+                .get("description")
+                .and_then(Value::as_str)
+                .is_some());
             assert!(function.get("parameters").is_some());
         }
     }
@@ -742,7 +795,11 @@ mod tests {
             "create-task",
             "delete_everything",
         ] {
-            assert_eq!(mutation_resource(name), None, "unexpected resource for {name}");
+            assert_eq!(
+                mutation_resource(name),
+                None,
+                "unexpected resource for {name}"
+            );
         }
         let writes = [
             ("create_task", "tasks"),
@@ -767,7 +824,11 @@ mod tests {
             ("create_list", "lists"),
         ];
         for (name, expected) in writes {
-            assert_eq!(mutation_resource(name), Some(expected), "wrong resource for {name}");
+            assert_eq!(
+                mutation_resource(name),
+                Some(expected),
+                "wrong resource for {name}"
+            );
         }
     }
 }

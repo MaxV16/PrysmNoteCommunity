@@ -322,7 +322,11 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 overflow-y-auto max-h-[70dvh] pb-safe" style={{ minHeight: 0 }}>
+    <form
+      onSubmit={handleSubmit}
+      className="flex min-h-full flex-col gap-4"
+      data-testid="task-form"
+    >
       <div>
         <label className="text-xs font-medium text-secondary mb-1.5 block">Task Title</label>
         <input
@@ -346,19 +350,21 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
         />
         <CharLimitHint value={description} max={TASK_DESCRIPTION_MAX} className="mt-1" />
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
-        <div className="flex-1">
+
+      <SectionLabel>Schedule</SectionLabel>
+      <div className="grid min-w-0 grid-cols-2 gap-2">
+        <div className="min-w-0">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Start Date</label>
           <CalendarPicker value={startDate} onChange={setStartDate} placeholder="Not set" />
         </div>
-        <div className="flex-1">
+        <div className="min-w-0">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Due Date</label>
           <CalendarPicker value={dueDate} onChange={setDueDate} placeholder="Not set" />
         </div>
       </div>
       {dateError && <p className="-mt-2 text-xs text-danger">{dateError}</p>}
-      <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
-        <div className="flex-1">
+      <div className="grid min-w-0 grid-cols-2 gap-2">
+        <div className="min-w-0">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Start Time</label>
           <input
             type="time"
@@ -367,7 +373,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
             className="input-field text-xs h-10"
           />
         </div>
-        <div className="flex-1">
+        <div className="min-w-0">
           <label className="text-xs font-medium text-secondary mb-1.5 block">End Time</label>
           <input
             type="time"
@@ -378,8 +384,10 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
         </div>
       </div>
       {timeError && <p className="-mt-2 text-xs text-danger">{timeError}</p>}
-      <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
-        <div className="flex-1">
+
+      <SectionLabel>Organize</SectionLabel>
+      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className="min-w-0">
           <label className="text-xs font-medium text-secondary mb-1.5 block">List</label>
           <select
             value={listId}
@@ -392,7 +400,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
             ))}
           </select>
         </div>
-        <div className="flex-1">
+        <div className="min-w-0">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Status</label>
           <select
             value={status}
@@ -404,7 +412,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
             ))}
           </select>
         </div>
-        <div className="flex-1">
+        <div className="col-span-2 min-w-0 sm:col-span-1">
           <label className="text-xs font-medium text-secondary mb-1.5 block">Priority</label>
           <select
             value={priority}
@@ -417,16 +425,21 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
           </select>
         </div>
       </div>
-      <TaskReminderFields
-        value={reminder}
-        onChange={setReminder}
-        suggestedDate={dueDate || startDate || defaultDate || today}
-        onChannelChange={handleChannelChange}
-      />
+
+      <div className="border-t border-border/60 pt-3">
+        <TaskReminderFields
+          value={reminder}
+          onChange={setReminder}
+          suggestedDate={dueDate || startDate || defaultDate || today}
+          onChannelChange={handleChannelChange}
+        />
+      </div>
+
       <button
         type="button"
         onClick={() => setShowAdvanced(!showAdvanced)}
-        className="flex items-center gap-1.5 text-xs text-secondary hover:text-primary transition-colors self-start"
+        aria-expanded={showAdvanced}
+        className="pointer-coarse:min-h-11 flex items-center gap-1.5 self-start text-xs text-secondary hover:text-primary transition-colors"
       >
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
           className={`transition-transform ${showAdvanced ? "rotate-90" : ""}`}
@@ -437,122 +450,140 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
       </button>
       {showAdvanced && (
         <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
-        <div className="flex-1">
-          <label className="text-xs font-medium text-secondary mb-1.5 block">Recurrence</label>
-          <select
-            value={recurrencePreset}
-            onChange={(e) => handlePresetChange(e.target.value)}
-            className="input-field text-xs h-10"
-          >
-            {RECURRENCE_PRESETS.map((p) => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
-        </div>
-        {recurrencePreset === "custom" && (
-          <div className="flex-1">
-            <label className="text-xs font-medium text-secondary mb-1.5 block">RRULE</label>
-            <input
-              type="text"
-              value={recurrenceRule}
-              onChange={(e) => setRecurrenceRule(e.target.value)}
-              placeholder="FREQ=DAILY"
-              className="input-field text-xs h-10"
-            />
-          </div>
-        )}
-        <div className="w-full sm:w-auto">
-          <label className="text-xs font-medium text-secondary mb-1.5 block">Duration (mins)</label>
-          <input
-            type="number"
-            value={estimatedMinutes}
-            onChange={(e) => setEstimatedMinutes(e.target.value)}
-            placeholder="30"
-            className="input-field text-xs h-10 w-full sm:w-24"
-            min={1}
-          />
-        </div>
-      </div>
-      {recurrencePreset !== "none" && (
-        <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
-          <div className="flex-1">
-            <label className="text-xs font-medium text-secondary mb-1.5 block">Ends</label>
-            <select
-              value={recurrenceEnd.kind}
-              onChange={(e) => {
-                const kind = e.target.value as RecurrenceEnd["kind"];
-                if (kind === "never") setRecurrenceEnd({ kind: "never" });
-                else if (kind === "date")
-                  setRecurrenceEnd({ kind: "date", date: startDate || toLocalDateString() });
-                else setRecurrenceEnd({ kind: "count", count: 10 });
-              }}
-              className="input-field text-xs h-10"
-            >
-              <option value="never">Never</option>
-              <option value="date">On a date</option>
-              <option value="count">After N occurrences</option>
-            </select>
-          </div>
-          {recurrenceEnd.kind === "date" && (
-            <div className="flex-1">
-              <label className="text-xs font-medium text-secondary mb-1.5 block">End Date</label>
-              <CalendarPicker
-                value={recurrenceEnd.date}
-                onChange={(d) => setRecurrenceEnd({ kind: "date", date: d })}
-                placeholder="Select date"
-              />
+          <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="min-w-0">
+              <label className="text-xs font-medium text-secondary mb-1.5 block">Recurrence</label>
+              <select
+                value={recurrencePreset}
+                onChange={(e) => handlePresetChange(e.target.value)}
+                className="input-field text-xs h-10"
+              >
+                {RECURRENCE_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
             </div>
-          )}
-          {recurrenceEnd.kind === "count" && (
-            <div className="flex-1">
-              <label className="text-xs font-medium text-secondary mb-1.5 block">Occurrences</label>
+            <div className="min-w-0">
+              <label className="text-xs font-medium text-secondary mb-1.5 block">Duration (mins)</label>
               <input
                 type="number"
+                value={estimatedMinutes}
+                onChange={(e) => setEstimatedMinutes(e.target.value)}
+                placeholder="30"
+                className="input-field text-xs h-10"
                 min={1}
-                value={recurrenceEnd.count}
-                onChange={(e) =>
-                  setRecurrenceEnd({ kind: "count", count: Math.max(1, Number(e.target.value) || 1) })
-                }
-                className="input-field text-xs h-10 w-full"
               />
+            </div>
+            {recurrencePreset === "custom" && (
+              <div className="col-span-2 min-w-0 sm:col-span-1">
+                <label className="text-xs font-medium text-secondary mb-1.5 block">RRULE</label>
+                <input
+                  type="text"
+                  value={recurrenceRule}
+                  onChange={(e) => setRecurrenceRule(e.target.value)}
+                  placeholder="FREQ=DAILY"
+                  className="input-field text-xs h-10"
+                />
+              </div>
+            )}
+          </div>
+          {recurrencePreset !== "none" && (
+            <div className="grid min-w-0 grid-cols-2 gap-2">
+              <div className="min-w-0">
+                <label className="text-xs font-medium text-secondary mb-1.5 block">Ends</label>
+                <select
+                  value={recurrenceEnd.kind}
+                  onChange={(e) => {
+                    const kind = e.target.value as RecurrenceEnd["kind"];
+                    if (kind === "never") setRecurrenceEnd({ kind: "never" });
+                    else if (kind === "date")
+                      setRecurrenceEnd({ kind: "date", date: startDate || toLocalDateString() });
+                    else setRecurrenceEnd({ kind: "count", count: 10 });
+                  }}
+                  className="input-field text-xs h-10"
+                >
+                  <option value="never">Never</option>
+                  <option value="date">On a date</option>
+                  <option value="count">After N occurrences</option>
+                </select>
+              </div>
+              {recurrenceEnd.kind === "date" && (
+                <div className="min-w-0">
+                  <label className="text-xs font-medium text-secondary mb-1.5 block">End Date</label>
+                  <CalendarPicker
+                    value={recurrenceEnd.date}
+                    onChange={(d) => setRecurrenceEnd({ kind: "date", date: d })}
+                    placeholder="Select date"
+                  />
+                </div>
+              )}
+              {recurrenceEnd.kind === "count" && (
+                <div className="min-w-0">
+                  <label className="text-xs font-medium text-secondary mb-1.5 block">Occurrences</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={recurrenceEnd.count}
+                    onChange={(e) =>
+                      setRecurrenceEnd({ kind: "count", count: Math.max(1, Number(e.target.value) || 1) })
+                    }
+                    className="input-field text-xs h-10 w-full"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          {tags.length > 0 && (
+            <div>
+              <label className="text-xs font-medium text-secondary mb-1.5 block">Tags</label>
+              <div className="flex flex-wrap gap-1.5">
+                {tags.map((tag) => {
+                  const isSelected = selectedTags.includes(tag.id);
+                  return (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() =>
+                        setSelectedTags((prev) =>
+                          prev.includes(tag.id) ? prev.filter((id) => id !== tag.id) : [...prev, tag.id]
+                        )
+                      }
+                      className={`badge text-[10px] transition-all ${
+                        isSelected
+                          ? "gradient-bg text-[var(--on-gradient)]"
+                          : "bg-elevated text-secondary hover:text-primary"
+                      }`}
+                    >
+                      {tag.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
       )}
-      {tags.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {tags.map((tag) => {
-            const isSelected = selectedTags.includes(tag.id);
-            return (
-              <button
-                key={tag.id}
-                type="button"
-                onClick={() =>
-                  setSelectedTags((prev) =>
-                    prev.includes(tag.id) ? prev.filter((id) => id !== tag.id) : [...prev, tag.id]
-                  )
-                }
-                className={`badge text-[10px] transition-all ${
-                  isSelected
-                    ? "gradient-bg text-[var(--on-gradient)]"
-                    : "bg-elevated text-secondary hover:text-primary"
-                }`}
-              >
-                {tag.name}
-              </button>
-            );
-          })}
-        </div>
-      )}
-        </div>
-      )}
-      <div className="sticky bottom-0 bg-surface pt-2 mt-2 border-t border-border/40">
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onCancel} className="btn bg-elevated border border-border px-4 py-2 text-sm text-secondary hover:bg-hover hover:text-primary">
+
+      {/* Sticky action bar: stays reachable while the single scroll region
+          moves, and clears the iOS home indicator. */}
+      <div
+        data-testid="task-form-actions"
+        className="sticky bottom-0 z-10 -mx-4 mt-auto border-t border-border bg-surface px-4 pt-3 sm:-mx-6 sm:px-6"
+        style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.75rem)" }}
+      >
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="btn pointer-coarse:min-h-11 bg-elevated border border-border px-4 py-2.5 text-sm text-secondary hover:bg-hover hover:text-primary"
+          >
             Cancel
           </button>
-          <button type="submit" disabled={!!validationError} className="btn btn-primary px-6 py-2 text-sm disabled:opacity-50">
+          <button
+            type="submit"
+            disabled={!!validationError}
+            className="btn btn-primary pointer-coarse:min-h-11 flex-1 px-6 py-2.5 text-sm disabled:opacity-50 sm:flex-none"
+          >
             {isEdit ? "Update Task" : "Create Task"}
           </button>
         </div>
@@ -560,3 +591,12 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
     </form>
   );
 }
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="-mb-1 border-t border-border/60 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted">
+      {children}
+    </h3>
+  );
+}
+

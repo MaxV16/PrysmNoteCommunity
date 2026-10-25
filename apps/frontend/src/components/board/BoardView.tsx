@@ -31,6 +31,8 @@ import {
   type BoardSort,
 } from "@/lib/board-dnd";
 import { useLocalBool } from "@/lib/use-local-bool";
+import { BOARD_ZOOM_LEVELS, scaledPx } from "@/lib/view-zoom";
+import { usePersistentZoom } from "@/hooks/usePersistentZoom";
 import { KanbanToolbar, type BoardFilter } from "@/components/kanban/KanbanToolbar";
 import { KanbanAddCard } from "@/components/kanban/KanbanAddCard";
 import { TaskForm } from "@/components/tasks/TaskForm";
@@ -75,6 +77,8 @@ interface BoardGroupProps {
   onAdd: () => void;
   onEmptyContextMenu?: (e: React.MouseEvent, droppableId: string, title: string) => void;
   onCardContextMenu?: (e: React.MouseEvent, task: Task) => void;
+  /** Masonry density, 0.75 to 1.5. Scales the minimum card width only. */
+  zoom?: number;
 }
 
 function BoardGroup({
@@ -96,6 +100,7 @@ function BoardGroup({
   onAdd,
   onEmptyContextMenu,
   onCardContextMenu,
+  zoom = 1,
 }: BoardGroupProps) {
   const { setNodeRef } = useDroppable({ id: droppableId });
   const strategy = rectSortingStrategy;
@@ -126,7 +131,15 @@ function BoardGroup({
         <SortableContext items={tasks.map((t) => t.id)} strategy={strategy}>
           <div
             data-testid="board-masonry"
-            className="grid grid-flow-dense gap-3 sm:gap-4 grid-cols-[repeat(auto-fill,minmax(230px,1fr))]"
+            className="grid grid-flow-dense gap-3 sm:gap-4"
+            style={{
+              gridTemplateColumns: `repeat(auto-fill, minmax(${scaledPx(
+                230,
+                zoom,
+                170,
+                380
+              )}px, 1fr))`,
+            }}
           >
             {tasks.map((task) => (
               <BoardCard
@@ -170,6 +183,11 @@ export function BoardView({ tasks }: BoardViewProps) {
 
   const [filter, setFilter] = useState<BoardFilter>("all");
   const [sort, setSort] = useState<BoardSort>("manual");
+  const { zoom, zoomIn, zoomOut, reset: resetZoom } = usePersistentZoom(
+    "board",
+    BOARD_ZOOM_LEVELS,
+    1
+  );
   const comparator = useMemo(() => boardComparator(sort), [sort]);
 
   const soundOn = useLocalBool("prysm_notif_sound", true);
@@ -423,6 +441,10 @@ export function BoardView({ tasks }: BoardViewProps) {
         onFilterChange={setFilter}
         sort={sort}
         onSortChange={setSort}
+        zoom={zoom}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onZoomReset={resetZoom}
       />
 
       <div
@@ -461,6 +483,7 @@ export function BoardView({ tasks }: BoardViewProps) {
                 onAdd={() => void fetchTasks()}
                 onEmptyContextMenu={openEmptyMenu}
                 onCardContextMenu={openCardMenu}
+                zoom={zoom}
               />
             ))}
 
@@ -482,6 +505,7 @@ export function BoardView({ tasks }: BoardViewProps) {
               onAdd={() => void fetchTasks()}
               onEmptyContextMenu={openEmptyMenu}
               onCardContextMenu={openCardMenu}
+              zoom={zoom}
             />
           </div>
 

@@ -93,15 +93,14 @@ pub async fn store_tokens(
     refresh_token: Option<&str>,
     expiry: Option<DateTime<Utc>>,
 ) -> Result<(), sqlx::Error> {
-    let enc_access = encrypt_token(key, access_token)
-        .map_err(|_| sqlx::Error::Protocol("encrypt".into()))?;
-    let existing: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM user_tokens WHERE user_id = $1 AND provider = $2",
-    )
-    .bind(user_id)
-    .bind(PROVIDER)
-    .fetch_optional(&mut *conn)
-    .await?;
+    let enc_access =
+        encrypt_token(key, access_token).map_err(|_| sqlx::Error::Protocol("encrypt".into()))?;
+    let existing: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM user_tokens WHERE user_id = $1 AND provider = $2")
+            .bind(user_id)
+            .bind(PROVIDER)
+            .fetch_optional(&mut *conn)
+            .await?;
     if let Some(id) = existing {
         let enc_refresh = match refresh_token {
             Some(rt) => {
@@ -204,7 +203,9 @@ pub async fn get_user_calendar_interval(
         Ok(v) => v,
         Err(_) => return default_interval as i64,
     };
-    let Some(value) = value else { return default_interval as i64 };
+    let Some(value) = value else {
+        return default_interval as i64;
+    };
     let minutes = match value.get("minutes").and_then(|m| m.as_i64()) {
         Some(m) => m,
         None => return default_interval as i64,
@@ -279,7 +280,12 @@ async fn upsert_pref(
 // Google OAuth helpers
 // ---------------------------------------------------------------------------
 
-pub fn build_auth_url(client_id: &str, redirect_uri: &str, state: &str, extra_scopes: &[String]) -> String {
+pub fn build_auth_url(
+    client_id: &str,
+    redirect_uri: &str,
+    state: &str,
+    extra_scopes: &[String],
+) -> String {
     let mut scopes: Vec<&str> = GOOGLE_CALENDAR_SCOPES.to_vec();
     for s in extra_scopes {
         scopes.push(s.as_str());
@@ -357,7 +363,11 @@ pub async fn exchange_code(
         .get("expires_in")
         .and_then(|v| v.as_i64())
         .map(|secs| Utc::now() + chrono::Duration::seconds(secs));
-    Ok(OAuthTokens { access_token, refresh_token, expires_at })
+    Ok(OAuthTokens {
+        access_token,
+        refresh_token,
+        expires_at,
+    })
 }
 
 pub async fn revoke_google_token(token: &str) -> bool {
@@ -460,7 +470,10 @@ async fn list_events_blocking(
         if let Some(arr) = body.get("items").and_then(|v| v.as_array()) {
             items.extend(arr.iter().cloned());
         }
-        page_token = body.get("nextPageToken").and_then(|v| v.as_str()).map(str::to_string);
+        page_token = body
+            .get("nextPageToken")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         if page_token.is_none() {
             break;
         }
@@ -475,10 +488,7 @@ async fn upsert_event_blocking(
 ) -> Result<(String, String), ApiError> {
     let client = reqwest::Client::new();
     let url = match google_event_id {
-        Some(id) => format!(
-            "{CALENDAR_API}/calendars/primary/events/{}",
-            enc(id)
-        ),
+        Some(id) => format!("{CALENDAR_API}/calendars/primary/events/{}", enc(id)),
         None => format!("{CALENDAR_API}/calendars/primary/events"),
     };
     let req = if google_event_id.is_some() {
@@ -501,8 +511,16 @@ async fn upsert_event_blocking(
             &body.to_string(),
         )));
     }
-    let id = body.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let link = body.get("htmlLink").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let link = body
+        .get("htmlLink")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     Ok((id, link))
 }
 
@@ -528,7 +546,10 @@ pub async fn list_calendars(access_token: &str) -> Result<Vec<Value>, ApiError> 
                 .and_then(|v| v.as_str())
                 .or_else(|| item.get("summary").and_then(|v| v.as_str()))
                 .unwrap_or(id);
-            let primary = item.get("primary").and_then(|v| v.as_bool()).unwrap_or(false);
+            let primary = item
+                .get("primary")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             out.push(json!({ "id": id, "name": name, "primary": primary }));
         }
     }
@@ -636,7 +657,10 @@ pub async fn pull_and_import_events(
             .get("summary")
             .and_then(|v| v.as_str())
             .unwrap_or("Untitled Event");
-        let description = item.get("description").and_then(|v| v.as_str()).unwrap_or("");
+        let description = item
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let start_date = google_event_date(item.get("start"));
         let due_date = google_event_date(item.get("end"));
         let task_id: Result<Uuid, _> = sqlx::query_scalar(
@@ -988,10 +1012,7 @@ async fn status(
     }
 }
 
-async fn pull(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Json<Value>, ApiError> {
+async fn pull(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let key = state.settings.encryption_key.clone();
     let mut tx = state.pool.begin().await.map_err(db_error)?;
@@ -1036,11 +1057,12 @@ async fn pull(
 
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
     let _ = db::set_rls_user(&mut conn, user.user_id, "").await;
-    let ids = get_user_calendar_ids(&mut conn, user.user_id).await.map_err(db_error)?;
+    let ids = get_user_calendar_ids(&mut conn, user.user_id)
+        .await
+        .map_err(db_error)?;
     drop(conn);
 
-    let result =
-        pull_and_import_events(&state.pool, &key, user.user_id, &access, ids).await;
+    let result = pull_and_import_events(&state.pool, &key, user.user_id, &access, ids).await;
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
     sqlx::query(

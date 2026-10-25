@@ -18,13 +18,29 @@ pub async fn maintenance_cleanup_once(pool: &PgPool, retention_days: i64) -> u64
     let mut total: u64 = 0;
 
     // token_blacklist has no RLS.
-    match sqlx::query("DELETE FROM token_blacklist WHERE expires_at < now()").execute(pool).await {
+    match sqlx::query("DELETE FROM token_blacklist WHERE expires_at < now()")
+        .execute(pool)
+        .await
+    {
         Ok(result) => total += result.rows_affected(),
         Err(err) => tracing::warn!("maintenance: token_blacklist prune failed: {err}"),
     }
 
+    // refresh_tokens has no RLS; expired rows (including revoked families) are
+    // safe to drop once the tokens can no longer be presented.
+    match sqlx::query("DELETE FROM refresh_tokens WHERE expires_at < now()")
+        .execute(pool)
+        .await
+    {
+        Ok(result) => total += result.rows_affected(),
+        Err(err) => tracing::warn!("maintenance: refresh_tokens prune failed: {err}"),
+    }
+
     // ai_cache is FORCE RLS; the system pool bypasses it.
-    match sqlx::query("DELETE FROM ai_cache WHERE expires_at < now()").execute(pool).await {
+    match sqlx::query("DELETE FROM ai_cache WHERE expires_at < now()")
+        .execute(pool)
+        .await
+    {
         Ok(result) => total += result.rows_affected(),
         Err(err) => tracing::warn!("maintenance: ai_cache prune failed: {err}"),
     }
@@ -57,7 +73,11 @@ mod tests {
 
     async fn live_pool() -> Option<PgPool> {
         let url = std::env::var("DATABASE_URL").ok()?;
-        sqlx::postgres::PgPoolOptions::new().max_connections(2).connect(&url).await.ok()
+        sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .ok()
     }
 
     #[tokio::test]
@@ -82,11 +102,12 @@ mod tests {
 
         maintenance_cleanup_once(&pool, 400).await;
 
-        let live: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM token_blacklist WHERE jti LIKE $1")
-            .bind(format!("{marker}-live%"))
-            .fetch_one(&pool)
-            .await
-            .expect("count live");
+        let live: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM token_blacklist WHERE jti LIKE $1")
+                .bind(format!("{marker}-live%"))
+                .fetch_one(&pool)
+                .await
+                .expect("count live");
         let expired: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM token_blacklist WHERE jti LIKE $1")
                 .bind(format!("{marker}-expired%"))

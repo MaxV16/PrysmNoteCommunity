@@ -92,4 +92,27 @@ describe("middleware session handling", () => {
       expect(redirectLocation(middleware(makeRequest(path)))).toBeNull();
     }
   });
+
+  it("renders the 404 for an unknown path instead of bouncing to /login", () => {
+    // A stale deep link (e.g. an old share URL) must reach the branded
+    // not-found page, not a login redirect that hides the real state.
+    const anon = middleware(makeRequest("/old-shared-task-link"));
+    expect(redirectLocation(anon)).toBeNull();
+    expect((anon as { status: number }).status).toBe(200);
+
+    const signedIn = middleware(
+      makeRequest("/old-shared-task-link", { refresh_token: "r" })
+    );
+    expect(redirectLocation(signedIn)).toBeNull();
+  });
+
+  it("lets a signed-in visitor reach a protected deep link so it can render its own 404", () => {
+    const res = middleware(makeRequest("/notes/deleted-note", { refresh_token: "r" }));
+    expect(redirectLocation(res)).toBeNull();
+  });
+
+  it("still guards protected deep links for a logged-out visitor", () => {
+    const res = middleware(makeRequest("/notes/deleted-note"));
+    expect(redirectLocation(res)).toContain("/login?next=");
+  });
 });

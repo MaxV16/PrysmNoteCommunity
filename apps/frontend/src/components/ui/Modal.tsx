@@ -80,7 +80,9 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
 
   return (
     // Backdrop: clicking outside the panel closes. On small screens the panel
-    // becomes a safe-area-aware bottom sheet instead of a centered card.
+    // becomes a safe-area-aware bottom sheet that uses almost the whole height
+    // (so a long form fits without a second scroll area) instead of a centered
+    // card.
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center"
       // Overlays must not be part of the Electron window drag region, or their
@@ -96,22 +98,31 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
         aria-modal="true"
         aria-labelledby="modal-title"
         tabIndex={-1}
-        className="max-h-[85dvh] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-2xl border border-border bg-surface p-6 pb-safe shadow-lg outline-none sm:rounded-xl"
+        className="flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-t-xl border border-border bg-surface shadow-lg outline-none sm:max-h-[85dvh] sm:rounded-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 id="modal-title" className="text-lg font-semibold text-primary">
+        {/* The title bar and the close button never scroll away, so a long
+            sheet always has a visible way out. */}
+        <div className="flex shrink-0 items-center justify-between gap-3 px-5 pb-3 pt-5 sm:px-6 sm:pt-6">
+          <h2 id="modal-title" className="min-w-0 truncate text-lg font-semibold text-primary">
             {title}
           </h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="pointer-coarse:h-11 pointer-coarse:w-11 flex h-8 w-8 items-center justify-center rounded-full text-sm text-secondary transition-colors hover:bg-hover hover:text-primary"
+            className="pointer-coarse:h-11 pointer-coarse:w-11 -mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm text-secondary transition-colors hover:bg-hover hover:text-primary"
           >
             ✕
           </button>
         </div>
-        {children}
+        {/* One scroll owner: the body. Screens own their inner layout and can
+            pin a sticky action bar to the bottom of this region. */}
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 sm:px-6"
+          style={{ paddingBottom: "max(env(safe-area-inset-bottom), 1.25rem)" }}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );

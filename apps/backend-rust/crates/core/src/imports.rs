@@ -361,7 +361,13 @@ fn is_ticktick_header(map: &HashMap<String, String>) -> bool {
         return false;
     }
     let mut markers = 0;
-    for key in ["task id", "parent id", "checklist", "folder name", "list name"] {
+    for key in [
+        "task id",
+        "parent id",
+        "checklist",
+        "folder name",
+        "list name",
+    ] {
         if map.contains_key(key) {
             markers += 1;
         }
@@ -425,7 +431,8 @@ fn checklist_stripped(content: &str) -> String {
         if t.is_empty() {
             continue;
         }
-        let marker = t.starts_with(['\u{25ab}', '\u{25aa}', '\u{2022}', '-', '*']) || t.starts_with('[');
+        let marker =
+            t.starts_with(['\u{25ab}', '\u{25aa}', '\u{2022}', '-', '*']) || t.starts_with('[');
         if !marker {
             kept.push(t);
         }
@@ -486,7 +493,11 @@ fn parse_ticktick_row(map: &HashMap<String, String>, ordinal: usize, out: &mut V
         .get("list name")
         .cloned()
         .filter(|v| !v.trim().is_empty())
-        .or_else(|| map.get("folder name").cloned().filter(|v| !v.trim().is_empty()));
+        .or_else(|| {
+            map.get("folder name")
+                .cloned()
+                .filter(|v| !v.trim().is_empty())
+        });
     let is_note = list_name
         .as_deref()
         .map(|n| n.trim().eq_ignore_ascii_case("notes"))
@@ -535,7 +546,10 @@ fn parse_ticktick_row(map: &HashMap<String, String>, ordinal: usize, out: &mut V
             .get("due date")
             .and_then(|v| parse_date_value(v, tz.as_deref())),
         recurrence_rule: recurrence,
-        priority: map_priority(&map.get("priority").cloned().unwrap_or_default(), "ticktick"),
+        priority: map_priority(
+            &map.get("priority").cloned().unwrap_or_default(),
+            "ticktick",
+        ),
         status: status_value,
         is_archived: archived,
         completed_at: completed.as_deref().and_then(parse_dt),
@@ -603,7 +617,11 @@ fn parse_todoist(content: &str) -> Vec<ImportRow> {
             due_date: due,
             recurrence_rule: None,
             priority: 2,
-            status: if is_done { "done".to_string() } else { "todo".to_string() },
+            status: if is_done {
+                "done".to_string()
+            } else {
+                "todo".to_string()
+            },
             is_archived: false,
             completed_at: None,
             created_at: None,
@@ -626,15 +644,27 @@ fn parse_todoist(content: &str) -> Vec<ImportRow> {
 
 fn generic_header_map() -> Vec<(&'static str, Vec<&'static str>)> {
     vec![
-        ("title", vec!["title", "name", "task", "task name", "subject"]),
+        (
+            "title",
+            vec!["title", "name", "task", "task name", "subject"],
+        ),
         ("due", vec!["due", "due date", "due_date", "deadline"]),
         ("start", vec!["start", "start date", "start_date", "date"]),
-        ("desc", vec!["description", "desc", "notes", "content", "body"]),
+        (
+            "desc",
+            vec!["description", "desc", "notes", "content", "body"],
+        ),
         ("tags", vec!["tags", "labels", "categories", "category"]),
-        ("parent", vec!["parent", "parent task", "parent_task", "project"]),
+        (
+            "parent",
+            vec!["parent", "parent task", "parent_task", "project"],
+        ),
         ("priority", vec!["priority", "importance"]),
         ("status", vec!["status", "state"]),
-        ("recurrence", vec!["recurrence", "repeat", "rrule", "recurrence_rule"]),
+        (
+            "recurrence",
+            vec!["recurrence", "repeat", "rrule", "recurrence_rule"],
+        ),
         ("completed", vec!["completed", "completed_at", "done"]),
         ("archived", vec!["archived", "is_archived", "archive"]),
     ]
@@ -808,7 +838,9 @@ fn ics_component_to_row(comp: &IcsComponent) -> Option<ImportRow> {
     let due = prop("DTEND")
         .or_else(|| prop("DUE"))
         .and_then(|(_, _, v)| parse_ics_dt(v, tz.as_deref()));
-    let status_raw = prop("STATUS").map(|(_, _, v)| v.clone()).unwrap_or_default();
+    let status_raw = prop("STATUS")
+        .map(|(_, _, v)| v.clone())
+        .unwrap_or_default();
     let completed_val = prop("COMPLETED").map(|(_, _, v)| v.clone());
     let is_done = status_raw.eq_ignore_ascii_case("COMPLETED") || completed_val.is_some();
     let rule = prop("RRULE").map(|(_, _, v)| v.clone());
@@ -823,15 +855,23 @@ fn ics_component_to_row(comp: &IcsComponent) -> Option<ImportRow> {
         .unwrap_or_default();
     Some(ImportRow {
         title: summary,
-        description: prop("DESCRIPTION").map(|(_, _, v)| v.clone()).filter(|d| !d.is_empty()),
+        description: prop("DESCRIPTION")
+            .map(|(_, _, v)| v.clone())
+            .filter(|d| !d.is_empty()),
         start_date: start,
         due_date: due,
         recurrence_rule: recurrence,
         priority: map_priority(
-            &prop("PRIORITY").map(|(_, _, v)| v.clone()).unwrap_or_default(),
+            &prop("PRIORITY")
+                .map(|(_, _, v)| v.clone())
+                .unwrap_or_default(),
             "ics",
         ),
-        status: if is_done { "done".to_string() } else { "todo".to_string() },
+        status: if is_done {
+            "done".to_string()
+        } else {
+            "todo".to_string()
+        },
         is_archived: false,
         completed_at: if is_done {
             completed_val.as_deref().and_then(parse_ics_datetime_utc)
@@ -840,10 +880,7 @@ fn ics_component_to_row(comp: &IcsComponent) -> Option<ImportRow> {
         },
         created_at: prop("CREATED")
             .and_then(|(_, _, v)| parse_dt(v))
-            .or_else(|| {
-                prop("CREATED")
-                    .and_then(|(_, _, v)| parse_ics_datetime_utc(v))
-            }),
+            .or_else(|| prop("CREATED").and_then(|(_, _, v)| parse_ics_datetime_utc(v))),
         tags,
         list_title: None,
         source_key: None,
@@ -930,13 +967,12 @@ async fn attach_tags(
         if name.trim().is_empty() {
             continue;
         }
-        let tag_id: Uuid = if let Some(existing) = sqlx::query(
-            "SELECT id FROM tags WHERE user_id = $1 AND name = $2 LIMIT 1",
-        )
-        .bind(user_id)
-        .bind(&name)
-        .fetch_optional(&mut *conn)
-        .await?
+        let tag_id: Uuid = if let Some(existing) =
+            sqlx::query("SELECT id FROM tags WHERE user_id = $1 AND name = $2 LIMIT 1")
+                .bind(user_id)
+                .bind(&name)
+                .fetch_optional(&mut *conn)
+                .await?
         {
             existing.try_get::<Uuid, _>("id")?
         } else {
@@ -1140,7 +1176,18 @@ pub async fn run_import(
             pending_children.push(idx);
             continue;
         }
-        import_one(conn, user_id, row, batch_id, &mut stats, &mut errors, &mut existing, &mut source_ids, &mut title_ids).await;
+        import_one(
+            conn,
+            user_id,
+            row,
+            batch_id,
+            &mut stats,
+            &mut errors,
+            &mut existing,
+            &mut source_ids,
+            &mut title_ids,
+        )
+        .await;
     }
 
     // Pass 2: children with multi-round resolution.
@@ -1156,7 +1203,19 @@ pub async fn run_import(
                 .and_then(|k| source_ids.get(k).or_else(|| title_ids.get(k)).copied());
             match parent {
                 Some(parent_id) => {
-                    import_child(conn, user_id, row, batch_id, parent_id, &mut stats, &mut errors, &mut existing, &mut source_ids, &mut title_ids).await;
+                    import_child(
+                        conn,
+                        user_id,
+                        row,
+                        batch_id,
+                        parent_id,
+                        &mut stats,
+                        &mut errors,
+                        &mut existing,
+                        &mut source_ids,
+                        &mut title_ids,
+                    )
+                    .await;
                     progressed = true;
                 }
                 None => still.push(idx),
@@ -1179,7 +1238,18 @@ pub async fn run_import(
         let row = &rows[idx];
         let mut promoted = row.clone();
         promoted.parent_key = None;
-        import_one(conn, user_id, &promoted, batch_id, &mut stats, &mut errors, &mut existing, &mut source_ids, &mut title_ids).await;
+        import_one(
+            conn,
+            user_id,
+            &promoted,
+            batch_id,
+            &mut stats,
+            &mut errors,
+            &mut existing,
+            &mut source_ids,
+            &mut title_ids,
+        )
+        .await;
     }
 
     Ok((
@@ -1236,9 +1306,7 @@ async fn import_one(
                 }
             }
             if row.recurrence_rule.is_some() {
-                if let Ok(Some(created)) =
-                    crate::task::find_task(conn, id, user_id, false).await
-                {
+                if let Ok(Some(created)) = crate::task::find_task(conn, id, user_id, false).await {
                     let _ = crate::recurring::expand_task_occurrences(conn, &created).await;
                 }
             }
@@ -1364,7 +1432,8 @@ async fn import_tasks(
             }
             "notes_as_notes" => {
                 let raw = field.text().await.unwrap_or_default();
-                notes_as_notes = !matches!(raw.trim().to_lowercase().as_str(), "false" | "0" | "no");
+                notes_as_notes =
+                    !matches!(raw.trim().to_lowercase().as_str(), "false" | "0" | "no");
             }
             _ => {}
         }
@@ -1418,7 +1487,9 @@ async fn import_tasks(
     let batch_id = Uuid::new_v4();
     let result = async {
         let mut tx = state.pool.begin().await.map_err(db_error)?;
-        db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+        db::set_rls_user(&mut *tx, user.user_id, "")
+            .await
+            .map_err(db_error)?;
         let (summary, _errors) =
             run_import(&mut *tx, user.user_id, &mut rows, notes_as_notes, batch_id).await?;
         tx.commit().await.map_err(db_error)?;
@@ -1446,7 +1517,9 @@ async fn undo_import(
         .map_err(|_| ApiError::NotFound("No import batch found to undo".to_string()))?;
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
 
     let ids: Vec<Uuid> = sqlx::query_scalar(
         "SELECT id FROM tasks WHERE user_id = $1 AND import_batch_id = $2 AND deleted_at IS NULL",
@@ -1499,13 +1572,14 @@ async fn undo_import(
     .map_err(db_error)?
     .rows_affected();
 
-    let deleted_notes = sqlx::query("DELETE FROM notes WHERE user_id = $1 AND import_batch_id = $2")
-        .bind(user.user_id)
-        .bind(batch_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?
-        .rows_affected();
+    let deleted_notes =
+        sqlx::query("DELETE FROM notes WHERE user_id = $1 AND import_batch_id = $2")
+            .bind(user.user_id)
+            .bind(batch_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?
+            .rows_affected();
 
     tx.commit().await.map_err(db_error)?;
 
@@ -1573,7 +1647,8 @@ mod tests {
         let user = user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
+        let token =
+            jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
 
         let csv = "title,due,priority,tags\nBuy milk,2030-01-02,high,errand\nCall mom,,low,\n";
         let boundary = "----prysmtestboundary";
@@ -1585,11 +1660,16 @@ mod tests {
         body.extend_from_slice(csv.as_bytes());
         body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
 
-        let app = router().merge(crate::tasks::router()).with_state(state.clone());
+        let app = router()
+            .merge(crate::tasks::router())
+            .with_state(state.clone());
         let req = Request::builder()
             .method("POST")
             .uri("/api/imports/tasks")
-            .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
             .header("cookie", format!("access_token={token}"))
             .body(Body::from(body))
             .unwrap();
@@ -1628,7 +1708,8 @@ mod tests {
         let user = user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
+        let token =
+            jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
 
         let boundary = "----prysmtestboundary";
         let mut body = Vec::new();
@@ -1645,7 +1726,10 @@ mod tests {
         let req = Request::builder()
             .method("POST")
             .uri("/api/imports/tasks")
-            .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
             .header("cookie", format!("access_token={token}"))
             .body(Body::from(body))
             .unwrap();

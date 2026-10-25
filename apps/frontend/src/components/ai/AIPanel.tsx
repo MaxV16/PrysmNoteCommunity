@@ -454,15 +454,13 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
 
       {!aiLocked && (
         <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 sm:py-4">
             {chatMessages.length === 0 ? (
               <div className="flex h-full flex-col">
-                <div className="mx-auto max-w-sm rounded-xl border border-border/70 bg-elevated px-4 py-3 text-center text-xs leading-relaxed text-secondary">
-                  You are chatting with PrysmAI, an AI assistant. Hosted responses are routed with
-                  zero data retention and may use different models depending on your region; you may
-                  also connect your own OpenAI, Gemini, DeepSeek, or OpenRouter key in Settings.
-                  Do not enter sensitive personal data.
-                </div>
+                <p className="mx-auto max-w-sm text-center text-[11px] leading-relaxed text-muted">
+                  You are chatting with PrysmAI, an AI assistant. Hosted responses use zero data
+                  retention. Do not enter sensitive personal data.
+                </p>
                 <div className="min-h-0 flex-1">
                   <AIEmptyState onSuggest={handleSend} />
                 </div>
@@ -477,21 +475,6 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
                     isLast={idx === chatMessages.length - 1}
                   />
                 ))}
-                {provider === "prysmai" && entitlement && (
-                  <div className="flex justify-end px-2">
-                    <span className="text-[10px] text-muted" title="PrysmAI monthly token allowance">
-                      Prysm AI: {entitlement.used.toLocaleString()} / {entitlement.allowance.toLocaleString()} tokens
-                      {entitlement.blocked ? " (allowance used up)" : ""}
-                    </span>
-                  </div>
-                )}
-                {usageTokens != null && !isLoading && (
-                  <div className="flex justify-end px-2">
-                    <span className="text-[10px] text-muted" title="Estimated prompt + completion tokens for this turn">
-                      ~{usageTokens.toLocaleString()} tokens used
-                    </span>
-                  </div>
-                )}
                 {isLoading && (
                   <div className="flex justify-center py-3">
                     <Spinner />
@@ -500,6 +483,25 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
               </div>
             )}
           </div>
+
+          {/* Usage sits directly above the composer as a thin caption instead of
+              floating mid-thread, so the message list keeps a predictable end. */}
+          {(usageTokens != null && !isLoading) ||
+          (provider === "prysmai" && entitlement) ? (
+            <div className="flex shrink-0 items-center justify-end gap-2 px-3 pb-1 text-[10px] text-muted sm:px-4">
+              {provider === "prysmai" && entitlement && (
+                <span className="tnum truncate" title="PrysmAI monthly token allowance">
+                  {entitlement.used.toLocaleString()}/{entitlement.allowance.toLocaleString()} monthly
+                  {entitlement.blocked ? " (allowance used up)" : ""}
+                </span>
+              )}
+              {usageTokens != null && !isLoading && (
+                <span className="tnum shrink-0" title="Estimated prompt + completion tokens for this turn">
+                  ~{usageTokens.toLocaleString()} this turn
+                </span>
+              )}
+            </div>
+          ) : null}
 
           <AIComposer
             onSend={handleSend}
@@ -513,15 +515,19 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
             onRegisterInsert={(insert) => { insertRef.current = insert; }}
           />
           {(isLoading || backgroundWorking) && (
-            <div className="flex items-center justify-center gap-2 px-4 pb-2">
+            <div className="flex items-center justify-center gap-2 px-4 pb-1">
               <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></div>
               <span className="text-[11px] text-muted">
                 {turnPhase === "final" ? "Writing the reply..." : "Prysm AI is thinking..."}
               </span>
             </div>
           )}
-          <p className="px-3 pb-2 text-center text-[10px] leading-relaxed text-muted sm:px-4 sm:pb-2.5">
-            PrysmAI is an AI assistant; check important details. Hosted models vary by region and are selected for efficiency and accuracy, with zero data retention. Replies are not retained.
+          {/* Persistent AI disclosure. Kept visible (never collapsed) because it
+              is a legal notice; the phone layout trims it to two lines. */}
+          <p className="shrink-0 px-3 pb-2 text-center text-[10px] leading-relaxed text-muted sm:px-4 sm:pb-2.5">
+            PrysmAI is an AI assistant; check important details. Hosted models vary by region and
+            are selected for efficiency and accuracy, with zero data retention. Replies are not
+            retained.
           </p>
         </>
       )}

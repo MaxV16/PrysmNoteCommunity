@@ -13,6 +13,7 @@
     "smoke:recurring": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/recurring-smoke.mjs",
     "smoke:ui": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke.mjs",
     "smoke:ui-mobile": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-smoke-mobile.mjs",
+    "smoke:ui-layout": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/ui-layout-smoke.mjs",
     "smoke:timeline": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-infinite-smoke.mjs",
     "smoke:timeline-drag": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-drag-smoke.mjs",
     "smoke:timeline-pan": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-pan-smoke.mjs",

@@ -57,9 +57,8 @@ impl Settings {
         let webauthn_rp_name =
             env::var("WEBAUTHN_RP_NAME").unwrap_or_else(|_| "Prysm Note".to_string());
         let webauthn_origins = env::var("WEBAUTHN_ORIGINS").unwrap_or_default();
-        let oauth_redirect_uri = env::var("OAUTH_REDIRECT_URI").unwrap_or_else(|_| {
-            "http://localhost:3000/api/auth/oauth/google/callback".to_string()
-        });
+        let oauth_redirect_uri = env::var("OAUTH_REDIRECT_URI")
+            .unwrap_or_else(|_| "http://localhost:3000/api/auth/oauth/google/callback".to_string());
         let google_client_id = env::var("GOOGLE_CLIENT_ID").unwrap_or_default();
         let google_client_secret = env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default();
         let github_client_id = env::var("GITHUB_CLIENT_ID").unwrap_or_default();
@@ -123,6 +122,65 @@ impl Settings {
         self.environment.eq_ignore_ascii_case("production")
     }
 
+    /// Fail-closed startup checks. A missing or short `JWT_SECRET_KEY` in
+    /// production means anyone can forge access tokens, so that is fatal; a
+    /// malformed `ENCRYPTION_KEY` is fatal in production because every
+    /// encrypted value (provider keys, calendar and Slack tokens) would fail.
+    /// Outside production both are downgraded to a warning so a copied
+    /// `.env.example` still boots for local development.
+    ///
+    /// Setup note: `deploy/development.md` documents this requirement.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.is_production() && self.jwt_secret_key.len() < 32 {
+            return Err(
+                "JWT_SECRET_KEY must be set to at least 32 characters in production".to_string(),
+            );
+        }
+        if self.is_production() && !self.encryption_key.is_empty() && !self.fernet_key_is_valid() {
+            return Err(
+                "ENCRYPTION_KEY is not a valid Fernet key (44-character base64)".to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Whether `ENCRYPTION_KEY` parses as a Fernet key.
+    fn fernet_key_is_valid(&self) -> bool {
+        !self.encryption_key.is_empty()
+            && crate::fernet::encrypt(&self.encryption_key, b"probe").is_ok()
+    }
+
+    /// Non-fatal configuration problems worth a loud startup warning. Kept
+    /// separate from [`Settings::validate`] so a weak-but-working deployment
+    /// still boots while the operator sees exactly what to fix.
+    pub fn startup_warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        if self.is_production() && self.encryption_key.is_empty() {
+            warnings.push(
+                "ENCRYPTION_KEY is empty in production: provider keys and integration tokens \
+                 cannot be encrypted at rest"
+                    .to_string(),
+            );
+        } else if !self.is_production()
+            && !self.encryption_key.is_empty()
+            && !self.fernet_key_is_valid()
+        {
+            warnings.push(
+                "ENCRYPTION_KEY is not a valid Fernet key: saving provider keys and integration \
+                 tokens will fail (generate one with `openssl rand -base64 32 | tr '+/' '-_'`)"
+                    .to_string(),
+            );
+        }
+        if self.cors_origins.split(',').any(|o| o.trim() == "*") {
+            warnings.push(
+                "CORS_ORIGINS contains '*': every origin is reflected with credentials, which is \
+                 only safe for local development"
+                    .to_string(),
+            );
+        }
+        warnings
+    }
+
     /// The BYPASSRLS connection string for the cross-user background loops
     /// (`SYSTEM_DATABASE_URL`). Read from the environment at call time so it
     /// stays out of the settings struct and its many test literals; when unset
@@ -164,7 +222,10 @@ impl Settings {
     /// Maximum concurrent per-user calendar pulls (`GCAL_PULL_CONCURRENCY`,
     /// Python default 3).
     pub fn gcal_pull_concurrency(&self) -> usize {
-        env::var("GCAL_PULL_CONCURRENCY").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(3)
+        env::var("GCAL_PULL_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(3)
     }
 
     /// Minimum seconds between manual calendar pulls for one user
@@ -293,8 +354,7 @@ impl Settings {
     /// The EU/EEA/UK and missing-header regions use the EU-compliant,
     /// tool-capable model only. No `:free` models anywhere.
     pub fn prysm_ai_eu_chain(&self) -> String {
-        env::var("PRYSM_AI_EU_CHAIN")
-            .unwrap_or_else(|_| crate::llm::PRYSMAI_EU_MODEL.to_string())
+        env::var("PRYSM_AI_EU_CHAIN").unwrap_or_else(|_| crate::llm::PRYSMAI_EU_MODEL.to_string())
     }
 
     /// Primary hosted model chain for non-restricted regions: the fast
@@ -344,7 +404,10 @@ impl Settings {
 
     /// SMTP port (defaults to 587 STARTTLS; 465 selects implicit TLS).
     pub fn smtp_port(&self) -> u16 {
-        env::var("SMTP_PORT").ok().and_then(|v| v.trim().parse::<u16>().ok()).unwrap_or(587)
+        env::var("SMTP_PORT")
+            .ok()
+            .and_then(|v| v.trim().parse::<u16>().ok())
+            .unwrap_or(587)
     }
 
     /// SMTP login (Brevo per-account login or a mailbox address).
@@ -399,7 +462,9 @@ impl Settings {
 }
 
 fn origin_host(origin: &str) -> Option<String> {
-    url::Url::parse(origin).ok().and_then(|u| u.host_str().map(|h| h.to_string()))
+    url::Url::parse(origin)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_string()))
 }
 
 /// Parse a boolean env var, treating the same values as disabled that the Python
@@ -416,18 +481,27 @@ fn env_bool(name: &str, default: bool) -> bool {
 
 /// Parse a signed integer env var. Absent or unparseable falls back to `default`.
 fn env_i64(name: &str, default: i64) -> i64 {
-    env::var(name).ok().and_then(|v| v.trim().parse::<i64>().ok()).unwrap_or(default)
+    env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .unwrap_or(default)
 }
 
 /// Parse an unsigned integer env var. Absent or unparseable falls back to `default`.
 fn env_u64(name: &str, default: u64) -> u64 {
-    env::var(name).ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(default)
+    env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(default)
 }
 
 /// Parse an unsigned 32-bit integer env var. Absent or unparseable falls back to
 /// `default`.
 fn env_u32(name: &str, default: u32) -> u32 {
-    env::var(name).ok().and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(default)
+    env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(default)
 }
 
 #[cfg(test)]
@@ -482,7 +556,10 @@ pub(crate) mod tests {
 
     #[test]
     fn rp_id_derives_registrable_domain() {
-        assert_eq!(sample("production").resolved_webauthn_rp_id(), "prysmnote.com");
+        assert_eq!(
+            sample("production").resolved_webauthn_rp_id(),
+            "prysmnote.com"
+        );
         let mut local = sample("development");
         local.app_origin = "http://localhost:3000".into();
         assert_eq!(local.resolved_webauthn_rp_id(), "localhost");
@@ -531,5 +608,53 @@ pub(crate) mod tests {
         assert!(sample("production").account_inactivity_enabled());
         assert_eq!(sample("production").inactivity_warning_days(), 365);
         assert_eq!(sample("production").inactivity_grace_days(), 30);
+    }
+
+    #[test]
+    fn production_requires_a_real_jwt_secret() {
+        let mut prod = sample("production");
+        prod.encryption_key = String::new();
+        prod.jwt_secret_key = String::new();
+        assert!(prod.validate().is_err());
+        prod.jwt_secret_key = "too-short".into();
+        assert!(prod.validate().is_err());
+        prod.jwt_secret_key = "s".repeat(32);
+        assert!(prod.validate().is_ok());
+        // Dev keeps working without a secret (the compose file supplies one).
+        let mut dev = sample("development");
+        dev.jwt_secret_key = String::new();
+        assert!(dev.validate().is_ok());
+    }
+
+    #[test]
+    fn a_malformed_encryption_key_is_rejected_in_production() {
+        let mut settings = sample("production");
+        settings.encryption_key = "not-a-fernet-key".into();
+        assert!(settings.validate().is_err());
+        settings.encryption_key = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=".into();
+        assert!(settings.validate().is_ok());
+
+        // Dev only warns: a copied .env.example must still boot.
+        let mut dev = sample("development");
+        dev.encryption_key = "not-a-fernet-key".into();
+        assert!(dev.validate().is_ok());
+        assert!(dev
+            .startup_warnings()
+            .iter()
+            .any(|w| w.contains("not a valid Fernet key")));
+    }
+
+    #[test]
+    fn weak_but_working_config_only_warns() {
+        let mut settings = sample("production");
+        settings.encryption_key = String::new();
+        settings.cors_origins = "*".into();
+        assert!(settings.validate().is_ok());
+        let warnings = settings.startup_warnings();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().any(|w| w.contains("ENCRYPTION_KEY")));
+        assert!(warnings.iter().any(|w| w.contains("CORS_ORIGINS")));
+        // A healthy production config is silent.
+        assert!(sample("production").startup_warnings().is_empty());
     }
 }

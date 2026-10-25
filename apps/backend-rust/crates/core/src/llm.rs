@@ -98,7 +98,10 @@ impl Provider {
     /// Whether the provider can produce embeddings. The hosted gateway and
     /// OpenRouter proxy chat only, so embeddings there are unsupported.
     pub fn supports_embeddings(&self) -> bool {
-        matches!(self, Provider::OpenAI | Provider::Gemini | Provider::DeepSeek)
+        matches!(
+            self,
+            Provider::OpenAI | Provider::Gemini | Provider::DeepSeek
+        )
     }
 
     fn base_url(&self) -> &'static str {
@@ -127,7 +130,8 @@ pub struct LlmClient {
 impl LlmClient {
     /// Build a BYOK client for a known provider with its default model.
     pub fn new(provider: &str, api_key: &str) -> Result<Self, LlmError> {
-        let provider = Provider::parse(provider).ok_or_else(|| LlmError::UnknownProvider(provider.to_string()))?;
+        let provider = Provider::parse(provider)
+            .ok_or_else(|| LlmError::UnknownProvider(provider.to_string()))?;
         let model = match provider {
             Provider::OpenAI => OPENAI_MODEL,
             Provider::Gemini => GEMINI_MODEL,
@@ -211,7 +215,9 @@ impl LlmClient {
         max_tokens: Option<u32>,
     ) -> Result<Value, LlmError> {
         if self.provider == Provider::Gemini {
-            return self.gemini_chat(messages, tools, temperature, max_tokens).await;
+            return self
+                .gemini_chat(messages, tools, temperature, max_tokens)
+                .await;
         }
         let body = self.openai_body(messages, tools, temperature, max_tokens, false);
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
@@ -251,9 +257,14 @@ impl LlmClient {
         };
         let mut request = self.http.post(url).json(&body);
         if self.provider != Provider::Gemini {
-            request = request.bearer_auth(&self.api_key).header("accept", "text/event-stream");
+            request = request
+                .bearer_auth(&self.api_key)
+                .header("accept", "text/event-stream");
         }
-        let response = request.send().await.map_err(|e| LlmError::Request(e.to_string()))?;
+        let response = request
+            .send()
+            .await
+            .map_err(|e| LlmError::Request(e.to_string()))?;
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
@@ -315,7 +326,10 @@ impl LlmClient {
             .await
             .map_err(|e| LlmError::Request(e.to_string()))?;
         let status = response.status();
-        let value: Value = response.json().await.map_err(|e| LlmError::Response(e.to_string()))?;
+        let value: Value = response
+            .json()
+            .await
+            .map_err(|e| LlmError::Response(e.to_string()))?;
         if !status.is_success() {
             return Err(LlmError::Response(format!("HTTP {status}: {value}")));
         }
@@ -333,7 +347,14 @@ impl LlmClient {
         stream: bool,
     ) -> Value {
         if self.provider == Provider::Gemini {
-            return gemini_body(&self.model, messages, tools, temperature, max_tokens, stream);
+            return gemini_body(
+                &self.model,
+                messages,
+                tools,
+                temperature,
+                max_tokens,
+                stream,
+            );
         }
         let mut body = json!({ "model": self.model, "messages": messages });
         if self.provider == Provider::PrysmAi && !self.fallbacks.is_empty() {
@@ -382,7 +403,10 @@ impl LlmClient {
             .await
             .map_err(|e| LlmError::Request(e.to_string()))?;
         let status = response.status();
-        let value: Value = response.json().await.map_err(|e| LlmError::Response(e.to_string()))?;
+        let value: Value = response
+            .json()
+            .await
+            .map_err(|e| LlmError::Response(e.to_string()))?;
         if !status.is_success() {
             return Err(LlmError::Response(format!("HTTP {status}: {value}")));
         }
@@ -404,7 +428,10 @@ impl LlmClient {
             .await
             .map_err(|e| LlmError::Request(e.to_string()))?;
         let status = response.status();
-        let value: Value = response.json().await.map_err(|e| LlmError::Response(e.to_string()))?;
+        let value: Value = response
+            .json()
+            .await
+            .map_err(|e| LlmError::Response(e.to_string()))?;
         if !status.is_success() {
             return Err(LlmError::Response(format!("HTTP {status}: {value}")));
         }
@@ -412,7 +439,11 @@ impl LlmClient {
             .pointer("/embedding/values")
             .and_then(|v| v.as_array())
             .ok_or_else(|| LlmError::Response("missing embedding values".to_string()))?;
-        Ok(values.iter().filter_map(|v| v.as_f64()).map(|v| v as f32).collect())
+        Ok(values
+            .iter()
+            .filter_map(|v| v.as_f64())
+            .map(|v| v as f32)
+            .collect())
     }
 }
 
@@ -422,7 +453,9 @@ fn extract_delta(provider: Provider, value: &Value) -> Option<String> {
         let text = gemini_text(value);
         return if text.is_empty() { None } else { Some(text) };
     }
-    let content = value.pointer("/choices/0/delta/content").and_then(|c| c.as_str());
+    let content = value
+        .pointer("/choices/0/delta/content")
+        .and_then(|c| c.as_str());
     match content {
         Some(text) if !text.is_empty() => Some(text.to_string()),
         _ => None,
@@ -454,12 +487,18 @@ fn gemini_body(
     let mut contents = Vec::new();
     if let Value::Array(items) = messages {
         for message in items {
-            let role = message.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+            let role = message
+                .get("role")
+                .and_then(|r| r.as_str())
+                .unwrap_or("user");
             if role == "system" {
                 continue;
             }
             let gemini_role = if role == "assistant" { "model" } else { "user" };
-            let text = message.get("content").and_then(|c| c.as_str()).unwrap_or("");
+            let text = message
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
             contents.push(json!({ "role": gemini_role, "parts": [{ "text": text }] }));
         }
     }
@@ -518,7 +557,11 @@ fn parse_embedding(value: &Value) -> Result<Vec<f32>, LlmError> {
         .and_then(|d| d.get("embedding"))
         .and_then(|e| e.as_array())
         .ok_or_else(|| LlmError::Response("missing embedding".to_string()))?;
-    Ok(data.iter().filter_map(|v| v.as_f64()).map(|v| v as f32).collect())
+    Ok(data
+        .iter()
+        .filter_map(|v| v.as_f64())
+        .map(|v| v as f32)
+        .collect())
 }
 
 #[cfg(test)]
@@ -536,7 +579,10 @@ mod tests {
 
     #[test]
     fn unknown_provider_is_rejected() {
-        assert!(matches!(LlmClient::new("nope", "key"), Err(LlmError::UnknownProvider(_))));
+        assert!(matches!(
+            LlmClient::new("nope", "key"),
+            Err(LlmError::UnknownProvider(_))
+        ));
     }
 
     #[test]
@@ -554,7 +600,14 @@ mod tests {
             {"role": "assistant", "content": "yo"},
         ]);
         let tools = json!([{ "type": "function", "function": { "name": "f", "description": "d", "parameters": {"type":"object","properties":{}} } }]);
-        let body = gemini_body("gemini-2.0-flash", &messages, Some(&tools), Some(0.5), Some(100), false);
+        let body = gemini_body(
+            "gemini-2.0-flash",
+            &messages,
+            Some(&tools),
+            Some(0.5),
+            Some(100),
+            false,
+        );
         let contents = body["contents"].as_array().unwrap();
         assert_eq!(contents.len(), 2);
         assert_eq!(contents[0]["role"], "user");
@@ -565,7 +618,8 @@ mod tests {
 
     #[test]
     fn gateway_body_adds_fallbacks_and_zdr() {
-        let client = LlmClient::prysm_ai("k", "https://example.test/v1", "", vec!["m2".into()], true);
+        let client =
+            LlmClient::prysm_ai("k", "https://example.test/v1", "", vec!["m2".into()], true);
         let body = client.openai_body(&json!([]), None, None, None, false);
         assert_eq!(body["model"], PRYSMAI_MODEL);
         assert_eq!(body["models"][1], "m2");
@@ -619,16 +673,22 @@ mod live_tests {
         };
         let base = std::env::var("PRYSM_AI_LIVE_BASE_URL")
             .unwrap_or_else(|_| "https://openrouter.ai/api/v1".to_string());
-        let model = std::env::var("PRYSM_AI_LIVE_MODEL")
-            .unwrap_or_else(|_| PRYSMAI_MODEL.to_string());
+        let model =
+            std::env::var("PRYSM_AI_LIVE_MODEL").unwrap_or_else(|_| PRYSMAI_MODEL.to_string());
         let client = LlmClient::prysm_ai(&key, &base, &model, Vec::new(), true);
         let tools = Value::Array(tool_definitions().to_vec());
 
         // (messy user phrasing, acceptable tool names)
         let cases: &[(&str, &[&str])] = &[
-            ("add taks buy milk tomorow", &["create_task", "batch_create_tasks", "add_event"]),
+            (
+                "add taks buy milk tomorow",
+                &["create_task", "batch_create_tasks", "add_event"],
+            ),
             ("marks the report done", &["update_task", "complete_task"]),
-            ("remind me pay rent on the 1st", &["create_task", "add_event"]),
+            (
+                "remind me pay rent on the 1st",
+                &["create_task", "add_event"],
+            ),
             ("wat am i wating", &["list_watchlist"]),
             ("did my workout", &["toggle_habit_log"]),
         ];
@@ -642,13 +702,19 @@ mod live_tests {
                         Some(name) if expected.contains(&name.as_str()) => {
                             println!("OK   {prompt:?} -> {name}");
                         }
-                        Some(name) => failures.push(format!("{prompt:?} -> {name} (expected {expected:?})")),
+                        Some(name) => {
+                            failures.push(format!("{prompt:?} -> {name} (expected {expected:?})"))
+                        }
                         None => failures.push(format!("{prompt:?} -> no tool call")),
                     }
                 }
                 Err(err) => failures.push(format!("{prompt:?} -> error: {err}")),
             }
         }
-        assert!(failures.is_empty(), "live tool-selection failures:\n{}", failures.join("\n"));
+        assert!(
+            failures.is_empty(),
+            "live tool-selection failures:\n{}",
+            failures.join("\n")
+        );
     }
 }

@@ -156,7 +156,11 @@ Upgrade your plan or wait for it to reset."
         let server_key = std::env::var("OPENROUTER_API_KEY")
             .ok()
             .filter(|s| !s.is_empty())
-            .or_else(|| std::env::var("DEEPSEEK_API_KEY").ok().filter(|s| !s.is_empty()));
+            .or_else(|| {
+                std::env::var("DEEPSEEK_API_KEY")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+            });
         let Some(key) = server_key else {
             return Err(ApiError::ServiceUnavailable(
                 "PrysmAI is not configured on this server yet.".to_string(),
@@ -169,7 +173,8 @@ Upgrade your plan or wait for it to reset."
     let stored = api_key::get_active_by_provider(&state.pool, user_id, provider)
         .await
         .map_err(db_error)?;
-    let decrypted = stored.and_then(|key| api_key::decrypt(&key, &state.settings.encryption_key).ok());
+    let decrypted =
+        stored.and_then(|key| api_key::decrypt(&key, &state.settings.encryption_key).ok());
     match decrypted {
         Some(key) if !key.is_empty() => Ok((provider.to_string(), key, None)),
         _ => Err(ApiError::BadRequest(
@@ -228,7 +233,9 @@ async fn load_summary_and_memories(
     user_message: &str,
 ) -> Result<(Option<String>, Vec<String>), ApiError> {
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let summary = ai_conversation::get_summary(&mut *tx, user_id, session_id)
         .await
         .map_err(db_error)?;
@@ -253,7 +260,9 @@ pub async fn record_response_usage(
         return Ok(());
     }
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     ai_entitlement::record_usage_conn(
         &mut *tx,
         user_id,
@@ -342,11 +351,15 @@ async fn chat(
             .and_then(|c| c.as_str())
             .unwrap_or("")
             .to_string();
-        tool_calls = assistant.get("tool_calls").filter(|v| !v.is_null()).cloned();
+        tool_calls = assistant
+            .get("tool_calls")
+            .filter(|v| !v.is_null())
+            .cloned();
 
         if tool_calls.is_none() {
             if let Some(parsed) = ai_text::parse_text_tool_calls(&content) {
-                content = ai_text::normalize_reply_markdown(&ai_text::strip_text_tool_calls(&content));
+                content =
+                    ai_text::normalize_reply_markdown(&ai_text::strip_text_tool_calls(&content));
                 tool_calls = Some(Value::Array(parsed));
             }
         }
@@ -413,7 +426,9 @@ Tell me the exact item and what you want changed and I will do it."
 
     {
         let mut tx = state.pool.begin().await.map_err(db_error)?;
-        db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+        db::set_rls_user(&mut *tx, user.user_id, "")
+            .await
+            .map_err(db_error)?;
         ai_conversation::insert_conversation(
             &mut *tx,
             user.user_id,
@@ -537,9 +552,7 @@ async fn chat_stream(
             ai_turn_runner::TurnEvent::Usage(value) => {
                 Event::default().event("usage").data(value.to_string())
             }
-            ai_turn_runner::TurnEvent::Error(text) => {
-                Event::default().event("error").data(text)
-            }
+            ai_turn_runner::TurnEvent::Error(text) => Event::default().event("error").data(text),
             ai_turn_runner::TurnEvent::Done => Event::default().event("done").data(""),
         };
         Ok::<_, Infallible>(frame)
@@ -674,12 +687,9 @@ mod tests {
         let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = crate::jwt::encode_access(
-            &state.settings.jwt_secret_key,
-            &user.id.to_string(),
-            0,
-        )
-        .unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
         (user.id, token)
     }
 
@@ -747,8 +757,7 @@ mod tests {
         let (status, body) = call(&app, "POST", "/api/ai/turn/cancel", &token, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["cancelled"], false);
-        let (status, body) =
-            call(&app, "POST", "/api/ai/turn/answer-now", &token, None).await;
+        let (status, body) = call(&app, "POST", "/api/ai/turn/answer-now", &token, None).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["finalizing"], false);
         sqlx::query("DELETE FROM users WHERE id = $1")

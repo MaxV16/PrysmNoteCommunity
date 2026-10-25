@@ -64,7 +64,7 @@ function CheckboxButton({ checked, onChange, id }: CheckboxButtonProps) {
         setPending(true);
         void onChange().finally(() => setPending(false));
       }}
-      className={`flex h-[18px] w-[18px] shrink-0 cursor-pointer items-center justify-center rounded-full border-2 transition-all ${
+      className={`relative flex h-[18px] w-[18px] shrink-0 cursor-pointer items-center justify-center rounded-full border-2 transition-all pointer-coarse:after:absolute pointer-coarse:after:-inset-2.5 pointer-coarse:after:content-[''] ${
         checked
           ? "check-gradient border-transparent"
           : "border-border hover:border-accent"
@@ -206,7 +206,7 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
       <button
         {...listeners}
         {...attributes}
-        className="pointer-coarse:opacity-100 cursor-grab touch-none text-muted opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+        className="pointer-coarse:opacity-100 pointer-coarse:p-2 cursor-grab touch-none rounded text-muted opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
         aria-label="Drag to reorder"
         onClick={(e) => e.stopPropagation()}
       >
@@ -648,7 +648,7 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
         </SortableContext>
       </DndContext>
       <div className="mt-2">
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <input
             ref={newTitleRef}
             type="text"
@@ -670,13 +670,14 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
               void handleNewImage(source);
             }}
             placeholder="Add subtask..."
-            className="input-field flex-1 text-xs"
+            className="input-field min-w-0 flex-1 text-xs"
             onKeyDown={(e) => e.key === "Enter" && void handleAdd()}
           />
           <button
             onClick={() => void handleAdd()}
             disabled={newUploading}
-            className="btn btn-gradient px-2.5 py-1 text-xs rounded-lg disabled:opacity-60"
+            aria-label="Add subtask"
+            className="btn btn-gradient pointer-coarse:h-11 pointer-coarse:w-11 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg p-0 text-base leading-none disabled:opacity-60"
           >
             +
           </button>

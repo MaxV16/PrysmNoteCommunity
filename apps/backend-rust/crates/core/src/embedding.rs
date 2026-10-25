@@ -72,7 +72,10 @@ pub(crate) async fn client_for_user(
     encryption_key: &str,
     user_id: Uuid,
 ) -> Option<LlmClient> {
-    let key = crate::api_key::get_active_for_user(pool, user_id).await.ok().flatten()?;
+    let key = crate::api_key::get_active_for_user(pool, user_id)
+        .await
+        .ok()
+        .flatten()?;
     client_from_key(&key, encryption_key)
 }
 
@@ -84,7 +87,10 @@ async fn existing_hash(conn: &mut PgConnection, task_id: Uuid) -> Option<Option<
         .await
         .ok()
         .flatten()
-        .map(|row| row.try_get::<Option<String>, _>("source_hash").unwrap_or(None))
+        .map(|row| {
+            row.try_get::<Option<String>, _>("source_hash")
+                .unwrap_or(None)
+        })
 }
 
 /// Generate and store an embedding for a task, skipping unchanged text or a
@@ -98,7 +104,11 @@ pub async fn generate_and_store_embedding(
     description: Option<&str>,
 ) {
     // A user with no usable AI path is skipped before touching the provider.
-    if crate::ai_entitlement::check_allowance(pool, user_id).await.mode == "none" {
+    if crate::ai_entitlement::check_allowance(pool, user_id)
+        .await
+        .mode
+        == "none"
+    {
         return;
     }
 
@@ -216,7 +226,10 @@ mod tests {
     #[test]
     fn text_and_hash_are_stable() {
         assert_eq!(embedding_text("Buy milk", None), "Buy milk");
-        assert_eq!(embedding_text("Buy milk", Some("2 litres")), "Buy milk\n2 litres");
+        assert_eq!(
+            embedding_text("Buy milk", Some("2 litres")),
+            "Buy milk\n2 litres"
+        );
         assert_eq!(embedding_text("Buy milk", Some("")), "Buy milk");
         let a = source_hash("Buy milk", None);
         assert_eq!(a.len(), 64);
@@ -256,7 +269,9 @@ mod tests {
         store_embedding(&mut conn, task_id, &vector, Some("hash"))
             .await
             .expect("store");
-        let hits = search_similar(&mut conn, &vector, user.id, 10).await.expect("search");
+        let hits = search_similar(&mut conn, &vector, user.id, 10)
+            .await
+            .expect("search");
         assert!(hits.iter().any(|(task, _)| task.id == task_id));
 
         sqlx::query("DELETE FROM users WHERE id = $1")

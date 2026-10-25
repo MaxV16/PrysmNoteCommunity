@@ -18,6 +18,8 @@ import { useTasks } from "@/hooks/useTasks";
 import { useVisibleTasks } from "@/hooks/useVisibleTasks";
 import { useBoardSections } from "@/hooks/useBoardSections";
 import { type CardLayout } from "@/lib/preferences";
+import { BOARD_ZOOM_LEVELS } from "@/lib/view-zoom";
+import { usePersistentZoom } from "@/hooks/usePersistentZoom";
 import {
   applyBoardDrop,
   applyBoardGroupDrop,
@@ -45,6 +47,11 @@ export function KanbanBoard() {
     useBoardSections("kanban");
 
   const cardLayout: CardLayout = "stacked";
+  const { zoom, zoomIn, zoomOut, reset: resetZoom } = usePersistentZoom(
+    "kanban",
+    BOARD_ZOOM_LEVELS,
+    1
+  );
 
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
@@ -191,6 +198,10 @@ export function KanbanBoard() {
     <div className="flex h-full min-h-0 flex-col">
       <KanbanToolbar
         onAddSection={(title) => void addSection({ title, color: null })}
+        zoom={zoom}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onZoomReset={resetZoom}
       />
 
       <div
@@ -215,6 +226,7 @@ export function KanbanBoard() {
               tasks={tasksBySection.get(section.id) ?? []}
               subtasksByParent={childrenByParent}
               cardLayout={cardLayout}
+              zoom={zoom}
               onRefetch={refetchTasks}
               onRename={(title) => void renameSection(section.id, title)}
               onRemove={() => handleRemoveColumn(section)}

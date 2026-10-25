@@ -199,7 +199,10 @@ fn provider_authorize_url(state: &AppState, provider: &str, oauth_state: &str) -
 }
 
 fn looks_like_github_code(code: &str) -> bool {
-    code.len() == 20 && code.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    code.len() == 20
+        && code
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 fn sanitize_return(value: Option<&str>) -> String {
@@ -210,11 +213,7 @@ fn sanitize_return(value: Option<&str>) -> String {
 }
 
 fn random_state() -> String {
-    format!(
-        "{}{}",
-        Uuid::new_v4().simple(),
-        Uuid::new_v4().simple()
-    )
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
 fn parse_state_cookie(raw: &str) -> (Option<&'static str>, String, String) {
@@ -245,7 +244,13 @@ fn display_name(identity_name: &str, email: &str) -> Option<String> {
     if !trimmed.is_empty() {
         return Some(trimmed);
     }
-    let local: String = email.split('@').next().unwrap_or("").chars().take(100).collect();
+    let local: String = email
+        .split('@')
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take(100)
+        .collect();
     if local.is_empty() {
         None
     } else {
@@ -304,10 +309,16 @@ async fn start(
     headers: HeaderMap,
 ) -> Response {
     if !is_provider(&provider) {
-        return redirect(StatusCode::FOUND, &app_url(&state, "/login?error=unsupported_provider"));
+        return redirect(
+            StatusCode::FOUND,
+            &app_url(&state, "/login?error=unsupported_provider"),
+        );
     }
     if !configured(&state, &provider) {
-        return redirect(StatusCode::FOUND, &app_url(&state, "/login?error=sso_not_configured"));
+        return redirect(
+            StatusCode::FOUND,
+            &app_url(&state, "/login?error=sso_not_configured"),
+        );
     }
 
     let oauth_state = random_state();
@@ -334,7 +345,10 @@ async fn start(
     };
 
     let Some(url) = provider_authorize_url(&state, &provider, &oauth_state) else {
-        return redirect(StatusCode::FOUND, &app_url(&state, "/login?error=sso_not_configured"));
+        return redirect(
+            StatusCode::FOUND,
+            &app_url(&state, "/login?error=sso_not_configured"),
+        );
     };
 
     let _ = headers;
@@ -605,13 +619,7 @@ async fn exchange_google(state: &AppState, code: &str) -> Result<Identity, ()> {
         .get("name")
         .and_then(|v| v.as_str())
         .map(|v| v.to_string())
-        .unwrap_or_else(|| {
-            email
-                .split('@')
-                .next()
-                .unwrap_or("")
-                .to_string()
-        });
+        .unwrap_or_else(|| email.split('@').next().unwrap_or("").to_string());
     let email_verified = claims.get("email_verified").and_then(bool_value);
     Ok(Identity {
         email,
@@ -706,8 +714,14 @@ async fn exchange_github(state: &AppState, code: &str) -> Result<Identity, ()> {
             .map_err(|_| ())?;
         if let Some(list) = emails.as_array() {
             for entry in list {
-                let primary = entry.get("primary").and_then(|v| v.as_bool()).unwrap_or(false);
-                let verified = entry.get("verified").and_then(|v| v.as_bool()).unwrap_or(false);
+                let primary = entry
+                    .get("primary")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let verified = entry
+                    .get("verified")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 if primary && verified {
                     if let Some(found) = entry.get("email").and_then(|v| v.as_str()) {
                         email = found.to_string();
@@ -782,12 +796,7 @@ mod tests {
 
     async fn get(state: AppState, uri: &str) -> Response {
         app(state)
-            .oneshot(
-                Request::builder()
-                    .uri(uri)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
             .await
             .unwrap()
     }
@@ -834,10 +843,9 @@ mod tests {
         // The login page's `next` (an MCP authorize request) is kept in a
         // short-lived HttpOnly cookie, so a Google/GitHub sign-in returns to it
         // instead of dropping the user on "/".
-        assert!(set_cookies(&response)
-            .iter()
-            .any(|c| c.starts_with("oauth_next=/api/ee/mcp-oauth/authorize?client_id=abc")
-                && c.contains("HttpOnly")));
+        assert!(set_cookies(&response).iter().any(|c| c
+            .starts_with("oauth_next=/api/ee/mcp-oauth/authorize?client_id=abc")
+            && c.contains("HttpOnly")));
     }
 
     #[tokio::test]
@@ -868,7 +876,10 @@ mod tests {
 
         // No cookie: the legacy `return` query is honored when it is same-site.
         let empty = HeaderMap::new();
-        assert_eq!(post_login_path(&empty, Some("/settings?tab=mcp")), "/settings?tab=mcp");
+        assert_eq!(
+            post_login_path(&empty, Some("/settings?tab=mcp")),
+            "/settings?tab=mcp"
+        );
         assert_eq!(post_login_path(&empty, Some("https://evil.example")), "/");
         assert_eq!(post_login_path(&empty, None), "/");
 
@@ -889,12 +900,16 @@ mod tests {
         );
         assert_eq!(safe_next_cookie_value(Some("//evil.example")), None);
         assert_eq!(safe_next_cookie_value(Some("/x\r\nSet-Cookie: a=b")), None);
-        assert_eq!(safe_next_cookie_value(Some("https://prysmnote.com/x")), None);
+        assert_eq!(
+            safe_next_cookie_value(Some("https://prysmnote.com/x")),
+            None
+        );
         assert_eq!(safe_next_cookie_value(None), None);
     }
 
     #[tokio::test]
-    async fn start_reports_unconfigured() {        let mut settings = test_settings();
+    async fn start_reports_unconfigured() {
+        let mut settings = test_settings();
         settings.google_client_id = String::new();
         settings.google_client_secret = String::new();
         let state = AppState::lazy(settings);
@@ -914,7 +929,11 @@ mod tests {
     #[tokio::test]
     async fn callback_rejects_state_mismatch() {
         let state = AppState::lazy(test_settings());
-        let response = get(state, "/api/auth/oauth/google/callback?code=abc&state=wrong").await;
+        let response = get(
+            state,
+            "/api/auth/oauth/google/callback?code=abc&state=wrong",
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
         assert!(location(&response).contains("/login?error=sso_invalid_state"));
     }

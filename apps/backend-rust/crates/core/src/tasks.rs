@@ -54,7 +54,10 @@ pub fn router() -> Router<AppState> {
             "/api/tasks/{task_id}",
             get(get_task).patch(update_task).delete(delete_task),
         )
-        .route("/api/tasks/{task_id}/permanent", axum::routing::delete(delete_permanent))
+        .route(
+            "/api/tasks/{task_id}/permanent",
+            axum::routing::delete(delete_permanent),
+        )
         .route("/api/tasks/{task_id}/restore", post(restore_task))
         .route(
             "/api/tasks/{task_id}/recurrence",
@@ -64,7 +67,10 @@ pub fn router() -> Router<AppState> {
             "/api/tasks/{task_id}/subtasks",
             get(list_subtasks).post(create_subtask),
         )
-        .route("/api/tasks/{task_id}/subtasks/reorder", post(reorder_subtasks))
+        .route(
+            "/api/tasks/{task_id}/subtasks/reorder",
+            post(reorder_subtasks),
+        )
         .route(
             "/api/tasks/{task_id}/description-to-subtasks",
             post(description_to_subtasks),
@@ -388,9 +394,9 @@ fn parse_date_field(value: Option<&str>) -> Result<Option<NaiveDate>, ApiError> 
 fn parse_time_field(value: Option<&str>) -> Result<Option<NaiveTime>, ApiError> {
     match value {
         None => Ok(None),
-        Some(raw) => task::parse_time(Some(raw)).map(Some).ok_or_else(|| {
-            ApiError::Unprocessable("Time must be in HH:MM format".to_string())
-        }),
+        Some(raw) => task::parse_time(Some(raw))
+            .map(Some)
+            .ok_or_else(|| ApiError::Unprocessable("Time must be in HH:MM format".to_string())),
     }
 }
 
@@ -402,9 +408,7 @@ fn parse_reminder_at(value: Option<&str>) -> Result<Option<DateTime<Utc>>, ApiEr
     match value.map(str::trim).filter(|raw| !raw.is_empty()) {
         None => Ok(None),
         Some(raw) => parse_datetime(raw).map(Some).ok_or_else(|| {
-            ApiError::Unprocessable(
-                "reminder_at must be an ISO 8601 date-time".to_string(),
-            )
+            ApiError::Unprocessable("reminder_at must be an ISO 8601 date-time".to_string())
         }),
     }
 }
@@ -425,14 +429,14 @@ async fn section_owned(
     id: Uuid,
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    Ok(sqlx::query_scalar::<_, i32>(
-        "SELECT 1 FROM board_sections WHERE id = $1 AND user_id = $2",
+    Ok(
+        sqlx::query_scalar::<_, i32>("SELECT 1 FROM board_sections WHERE id = $1 AND user_id = $2")
+            .bind(id)
+            .bind(user_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .is_some(),
     )
-    .bind(id)
-    .bind(user_id)
-    .fetch_optional(&mut *conn)
-    .await?
-    .is_some())
 }
 
 async fn tag_owned(conn: &mut PgConnection, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
@@ -446,7 +450,11 @@ async fn tag_owned(conn: &mut PgConnection, id: Uuid, user_id: Uuid) -> Result<b
     )
 }
 
-async fn task_active(conn: &mut PgConnection, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
+async fn task_active(
+    conn: &mut PgConnection,
+    id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, sqlx::Error> {
     let access = task::access_condition(2);
     let sql = format!("SELECT 1 FROM tasks WHERE id = $1 AND {access} AND deleted_at IS NULL");
     Ok(sqlx::query_scalar::<_, i32>(&sql)
@@ -496,9 +504,15 @@ async fn serialize_all(
         .collect())
 }
 
-pub(crate) async fn serialize_one(conn: &mut PgConnection, task: &Task) -> Result<Value, sqlx::Error> {
+pub(crate) async fn serialize_one(
+    conn: &mut PgConnection,
+    task: &Task,
+) -> Result<Value, sqlx::Error> {
     let tags = task::tags_for(&mut *conn, &[task.id]).await?;
-    Ok(task::task_json(task, tags.get(&task.id).map(|v| v.as_slice())))
+    Ok(task::task_json(
+        task,
+        tags.get(&task.id).map(|v| v.as_slice()),
+    ))
 }
 
 async fn insert_task(
@@ -665,7 +679,9 @@ fn validate_update(req: UpdateTaskRequest) -> Result<TaskPatch, ApiError> {
         Some(raw) => {
             let trimmed = raw.trim().to_string();
             if trimmed.is_empty() {
-                return Err(ApiError::Unprocessable("Title must not be empty".to_string()));
+                return Err(ApiError::Unprocessable(
+                    "Title must not be empty".to_string(),
+                ));
             }
             if trimmed.chars().count() > TITLE_MAX {
                 return Err(ApiError::Unprocessable(
@@ -837,7 +853,8 @@ async fn llm_breakdown_titles(
         .to_string();
 
     let mut titles: Vec<String> = Vec::new();
-    if let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(&content) {
+    if let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(&content)
+    {
         for item in items {
             let text = item.to_string();
             let text = text.trim_matches('"').trim();
@@ -943,7 +960,10 @@ async fn apply_patch(
         task.parent_task_id = Some(parent);
     }
     if let Some(section) = patch.board_section_id {
-        if !section_owned(conn, section, user_id).await.map_err(db_error)? {
+        if !section_owned(conn, section, user_id)
+            .await
+            .map_err(db_error)?
+        {
             return Err(ApiError::NotFound("Board section not found".to_string()));
         }
         task.board_section_id = Some(section);
@@ -957,7 +977,12 @@ async fn apply_patch(
     if task.recurrence_rule.is_some() && task.start_date.is_none() {
         task.start_date = Some(Utc::now().date_naive());
     }
-    task::validate_order(task.start_date, task.due_date, task.start_time, task.end_time)?;
+    task::validate_order(
+        task.start_date,
+        task.due_date,
+        task.start_time,
+        task.end_time,
+    )?;
 
     persist_task(conn, task).await.map_err(db_error)?;
     Ok(())
@@ -972,11 +997,14 @@ async fn list_tasks(
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
     let offset = params.offset.unwrap_or(0).max(0);
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
 
     let tasks: Vec<Task> = if let Some(query) = params.query.as_deref().filter(|s| !s.is_empty()) {
-        let mut hits =
-            task::search_tasks(&mut *tx, user.user_id, query, limit).await.map_err(db_error)?;
+        let mut hits = task::search_tasks(&mut *tx, user.user_id, query, limit)
+            .await
+            .map_err(db_error)?;
         if let Some(raw_list) = params.list_id.as_deref() {
             let list_id = owned_list_uuid(&mut *tx, user.user_id, raw_list).await?;
             hits.retain(|(t, _)| t.list_id == Some(list_id));
@@ -1013,7 +1041,10 @@ async fn list_tasks(
             .fetch_all(&mut *tx)
             .await
             .map_err(db_error)?;
-        rows.iter().map(Task::from_row).collect::<Result<_, _>>().map_err(db_error)?
+        rows.iter()
+            .map(Task::from_row)
+            .collect::<Result<_, _>>()
+            .map_err(db_error)?
     } else if let Some(raw_since) = params.updated_since.as_deref() {
         let since = parse_datetime(raw_since).ok_or_else(|| {
             ApiError::Unprocessable("updated_since must be a valid ISO datetime".to_string())
@@ -1038,7 +1069,10 @@ async fn list_tasks(
             .fetch_all(&mut *tx)
             .await
             .map_err(db_error)?;
-        rows.iter().map(Task::from_row).collect::<Result<_, _>>().map_err(db_error)?
+        rows.iter()
+            .map(Task::from_row)
+            .collect::<Result<_, _>>()
+            .map_err(db_error)?
     } else {
         let list_id = match params.list_id.as_deref() {
             Some(raw) => Some(owned_list_uuid(&mut *tx, user.user_id, raw).await?),
@@ -1059,7 +1093,10 @@ async fn list_tasks(
             .fetch_all(&mut *tx)
             .await
             .map_err(db_error)?;
-        rows.iter().map(Task::from_row).collect::<Result<_, _>>().map_err(db_error)?
+        rows.iter()
+            .map(Task::from_row)
+            .collect::<Result<_, _>>()
+            .map_err(db_error)?
     };
 
     let out = serialize_all(&mut *tx, tasks).await.map_err(db_error)?;
@@ -1105,15 +1142,23 @@ pub(crate) async fn svc_create_task(
 ) -> Result<Value, ApiError> {
     let new = validate_create(req)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
 
     if let Some(parent) = new.parent_task_id {
-        if !task_active(&mut *tx, parent, user_id).await.map_err(db_error)? {
+        if !task_active(&mut *tx, parent, user_id)
+            .await
+            .map_err(db_error)?
+        {
             return Err(ApiError::NotFound("Parent task not found".to_string()));
         }
     }
     if let Some(section) = new.board_section_id {
-        if !section_owned(&mut *tx, section, user_id).await.map_err(db_error)? {
+        if !section_owned(&mut *tx, section, user_id)
+            .await
+            .map_err(db_error)?
+        {
             return Err(ApiError::NotFound("Board section not found".to_string()));
         }
     }
@@ -1124,14 +1169,19 @@ pub(crate) async fn svc_create_task(
             }
             id
         }
-        None => task::default_list_id(&mut *tx, user_id).await.map_err(db_error)?,
+        None => task::default_list_id(&mut *tx, user_id)
+            .await
+            .map_err(db_error)?,
     };
 
     let id = insert_task(&mut *tx, user_id, &new, list_id).await?;
 
     if let Some(tag_ids) = &new.tag_ids {
         for tag_id in tag_ids {
-            if !tag_owned(&mut *tx, *tag_id, user_id).await.map_err(db_error)? {
+            if !tag_owned(&mut *tx, *tag_id, user_id)
+                .await
+                .map_err(db_error)?
+            {
                 return Err(ApiError::BadRequest(format!("Tag not found: {tag_id}")));
             }
             sqlx::query(
@@ -1154,7 +1204,10 @@ pub(crate) async fn svc_create_task(
     // Materialize the recurring occurrences AFTER the template is committed and
     // best-effort, so an expansion failure can never roll back the task the user
     // just created (it still fills in on the next read or the background sweep).
-    if new.recurrence_rule.is_some() && new.parent_task_id.is_none() && task.recurrence_parent_id.is_none() {
+    if new.recurrence_rule.is_some()
+        && new.parent_task_id.is_none()
+        && task.recurrence_parent_id.is_none()
+    {
         expand_occurrences_best_effort(state, user_id, &task).await;
     }
     crate::embedding::spawn_embedding(
@@ -1176,7 +1229,9 @@ pub(crate) async fn svc_update_task(
 ) -> Result<Value, ApiError> {
     let patch = validate_update(req)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
 
     let mut task = task::find_task(&mut *tx, id, user_id, false)
         .await
@@ -1187,7 +1242,10 @@ pub(crate) async fn svc_update_task(
 
     if let Some(tag_ids) = &patch.tag_ids {
         for tag_id in tag_ids {
-            if !tag_owned(&mut *tx, *tag_id, user_id).await.map_err(db_error)? {
+            if !tag_owned(&mut *tx, *tag_id, user_id)
+                .await
+                .map_err(db_error)?
+            {
                 return Err(ApiError::BadRequest(format!("Tag not found: {tag_id}")));
             }
         }
@@ -1212,7 +1270,9 @@ pub(crate) async fn svc_update_task(
         .await
         .map_err(db_error)?
         .ok_or_else(|| ApiError::Internal("updated task missing".to_string()))?;
-    let out = serialize_one(&mut *tx, &refreshed).await.map_err(db_error)?;
+    let out = serialize_one(&mut *tx, &refreshed)
+        .await
+        .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     if refreshed.recurrence_rule.is_some()
         && refreshed.parent_task_id.is_none()
@@ -1237,7 +1297,9 @@ pub(crate) async fn svc_get_task(
     id: Uuid,
 ) -> Result<Value, ApiError> {
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let task = task::find_task(&mut *tx, id, user_id, false)
         .await
         .map_err(db_error)?
@@ -1253,7 +1315,9 @@ pub(crate) async fn svc_delete_task_permanent(
     id: Uuid,
 ) -> Result<(), ApiError> {
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let trashed = task::find_task(&mut *tx, id, user_id, true)
         .await
         .map_err(db_error)?
@@ -1316,11 +1380,18 @@ async fn delete_task(
     let user = require_user(&state, &headers)?;
     let id = task::require_uuid(&task_id)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
-    if !task_active(&mut *tx, id, user.user_id).await.map_err(db_error)? {
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
+    if !task_active(&mut *tx, id, user.user_id)
+        .await
+        .map_err(db_error)?
+    {
         return Err(ApiError::NotFound("Task not found".to_string()));
     }
-    apply_delete(&mut *tx, id, user.user_id, true).await.map_err(db_error)?;
+    apply_delete(&mut *tx, id, user.user_id, true)
+        .await
+        .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({ "status": "deleted" })))
 }
@@ -1344,7 +1415,9 @@ async fn restore_task(
     let user = require_user(&state, &headers)?;
     let id = task::require_uuid(&task_id)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let trashed = task::find_task(&mut *tx, id, user.user_id, true)
         .await
         .map_err(db_error)?
@@ -1352,7 +1425,9 @@ async fn restore_task(
     if trashed.is_none() {
         return Err(ApiError::NotFound("Task not found in trash".to_string()));
     }
-    apply_delete(&mut *tx, id, user.user_id, false).await.map_err(db_error)?;
+    apply_delete(&mut *tx, id, user.user_id, false)
+        .await
+        .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({ "status": "restored" })))
 }
@@ -1369,7 +1444,9 @@ async fn stop_recurrence(
     let user = require_user(&state, &headers)?;
     let id = task::require_uuid(&task_id)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let task = task::find_task(&mut *tx, id, user.user_id, false)
         .await
         .map_err(db_error)?
@@ -1470,7 +1547,9 @@ async fn list_trash(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     purge_trash(&mut tx, Some(user.user_id), TRASH_RETENTION_DAYS)
         .await
         .map_err(db_error)?;
@@ -1484,8 +1563,11 @@ async fn list_trash(
         .fetch_all(&mut *tx)
         .await
         .map_err(db_error)?;
-    let tasks: Vec<Task> =
-        rows.iter().map(Task::from_row).collect::<Result<_, _>>().map_err(db_error)?;
+    let tasks: Vec<Task> = rows
+        .iter()
+        .map(Task::from_row)
+        .collect::<Result<_, _>>()
+        .map_err(db_error)?;
     let out = serialize_all(&mut *tx, tasks).await.map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(Value::Array(out)))
@@ -1497,7 +1579,9 @@ async fn empty_trash(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!("DELETE FROM tasks WHERE {access} AND deleted_at IS NOT NULL");
     let result = sqlx::query(&sql)
@@ -1517,7 +1601,9 @@ async fn batch_delete(
     let user = require_user(&state, &headers)?;
     let ids = parse_batch_ids(&req.task_ids)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!(
         "UPDATE tasks SET deleted_at = now(), updated_at = now() WHERE {access} AND deleted_at IS NULL \
@@ -1526,9 +1612,9 @@ async fn batch_delete(
     let result = sqlx::query(&sql)
         .bind(user.user_id)
         .bind(&ids)
-    .execute(&mut *tx)
-    .await
-    .map_err(db_error)?;
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({ "deleted": result.rows_affected() })))
 }
@@ -1541,7 +1627,9 @@ async fn batch_restore(
     let user = require_user(&state, &headers)?;
     let ids = parse_batch_ids(&req.task_ids)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!(
         "UPDATE tasks SET deleted_at = NULL, updated_at = now() WHERE {access} AND deleted_at IS NOT NULL \
@@ -1550,9 +1638,9 @@ async fn batch_restore(
     let result = sqlx::query(&sql)
         .bind(user.user_id)
         .bind(&ids)
-    .execute(&mut *tx)
-    .await
-    .map_err(db_error)?;
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({ "restored": result.rows_affected() })))
 }
@@ -1567,7 +1655,9 @@ async fn batch_set_date(
     let date = task::parse_date(Some(&req.date))
         .ok_or_else(|| ApiError::Unprocessable("Invalid date".to_string()))?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!(
         "UPDATE tasks SET start_date = $3, due_date = $3, updated_at = now() WHERE {access} AND deleted_at IS NULL \
@@ -1576,10 +1666,10 @@ async fn batch_set_date(
     let result = sqlx::query(&sql)
         .bind(user.user_id)
         .bind(&ids)
-    .bind(date)
-    .execute(&mut *tx)
-    .await
-    .map_err(db_error)?;
+        .bind(date)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({ "updated": result.rows_affected() })))
 }
@@ -1597,7 +1687,9 @@ async fn batch_reschedule(
     let user = require_user(&state, &headers)?;
     let ids = parse_batch_ids(&req.task_ids)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!(
         "UPDATE tasks SET \
@@ -1631,12 +1723,20 @@ async fn board_move(
     let user = require_user(&state, &headers)?;
     let id = task::require_uuid(&req.task_id)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
-    if !task_active(&mut *tx, id, user.user_id).await.map_err(db_error)? {
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
+    if !task_active(&mut *tx, id, user.user_id)
+        .await
+        .map_err(db_error)?
+    {
         return Err(ApiError::NotFound("Task not found".to_string()));
     }
     if let Some(section) = req.section_id {
-        if !section_owned(&mut *tx, section, user.user_id).await.map_err(db_error)? {
+        if !section_owned(&mut *tx, section, user.user_id)
+            .await
+            .map_err(db_error)?
+        {
             return Err(ApiError::NotFound("Section not found".to_string()));
         }
     }
@@ -1667,14 +1767,22 @@ async fn batch_board_move(
     let user = require_user(&state, &headers)?;
     let ids = parse_batch_ids(&req.task_ids)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     for id in &ids {
-        if !task_active(&mut *tx, *id, user.user_id).await.map_err(db_error)? {
+        if !task_active(&mut *tx, *id, user.user_id)
+            .await
+            .map_err(db_error)?
+        {
             return Err(ApiError::NotFound("Task not found".to_string()));
         }
     }
     if let Some(section) = req.section_id {
-        if !section_owned(&mut *tx, section, user.user_id).await.map_err(db_error)? {
+        if !section_owned(&mut *tx, section, user.user_id)
+            .await
+            .map_err(db_error)?
+        {
             return Err(ApiError::NotFound("Section not found".to_string()));
         }
     }
@@ -1713,25 +1821,28 @@ async fn batch_create(
         parsed.push(validate_create(item)?);
     }
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
 
     let explicit: Vec<Uuid> = parsed.iter().filter_map(|n| n.list_id).collect();
     if !explicit.is_empty() {
-        let owned: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM lists WHERE user_id = $1 AND id = ANY($2)",
-        )
-        .bind(user.user_id)
-        .bind(&explicit)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(db_error)?;
+        let owned: Vec<Uuid> =
+            sqlx::query_scalar("SELECT id FROM lists WHERE user_id = $1 AND id = ANY($2)")
+                .bind(user.user_id)
+                .bind(&explicit)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(db_error)?;
         let owned: std::collections::HashSet<Uuid> = owned.into_iter().collect();
         if explicit.iter().any(|id| !owned.contains(id)) {
             return Err(ApiError::NotFound("List not found".to_string()));
         }
     }
 
-    let default_list = task::default_list_id(&mut *tx, user.user_id).await.map_err(db_error)?;
+    let default_list = task::default_list_id(&mut *tx, user.user_id)
+        .await
+        .map_err(db_error)?;
     let mut created = Vec::with_capacity(parsed.len());
     for new in &parsed {
         let list_id = new.list_id.unwrap_or(default_list);
@@ -1748,7 +1859,9 @@ async fn expand_recurring(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let created = crate::recurring::expand_recurring_tasks(
         &mut *tx,
         Some(user.user_id),
@@ -1767,8 +1880,12 @@ async fn search_route(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
-    let hits = task::search_tasks(&mut *tx, user.user_id, &params.q, 20).await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
+    let hits = task::search_tasks(&mut *tx, user.user_id, &params.q, 20)
+        .await
+        .map_err(db_error)?;
     let from = task::parse_date(params.date_from.as_deref());
     let to = task::parse_date(params.date_to.as_deref());
     let mut out = Vec::new();
@@ -1823,7 +1940,9 @@ async fn date_range(
         ));
     };
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     crate::recurring::expand_recurring_for_range(&mut *tx, Some(user.user_id), from, to)
         .await
         .map_err(db_error)?;
@@ -1841,8 +1960,11 @@ async fn date_range(
         .fetch_all(&mut *tx)
         .await
         .map_err(db_error)?;
-    let tasks: Vec<Task> =
-        rows.iter().map(Task::from_row).collect::<Result<_, _>>().map_err(db_error)?;
+    let tasks: Vec<Task> = rows
+        .iter()
+        .map(Task::from_row)
+        .collect::<Result<_, _>>()
+        .map_err(db_error)?;
     let out: Vec<Value> = tasks
         .iter()
         .map(|t| {
@@ -1868,7 +1990,9 @@ async fn upcoming_deadlines(
     let user = require_user(&state, &headers)?;
     let days = params.days_ahead.unwrap_or(7).max(0);
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!(
         "SELECT {COLUMNS} FROM tasks WHERE {access} AND deleted_at IS NULL \
@@ -1882,8 +2006,11 @@ async fn upcoming_deadlines(
         .fetch_all(&mut *tx)
         .await
         .map_err(db_error)?;
-    let tasks: Vec<Task> =
-        rows.iter().map(Task::from_row).collect::<Result<_, _>>().map_err(db_error)?;
+    let tasks: Vec<Task> = rows
+        .iter()
+        .map(Task::from_row)
+        .collect::<Result<_, _>>()
+        .map_err(db_error)?;
     let out: Vec<Value> = tasks
         .iter()
         .map(|t| {
@@ -1958,7 +2085,9 @@ async fn list_subtasks(
     let user = require_user(&state, &headers)?;
     let id = task::require_uuid(&task_id)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     if task::find_task(&mut *tx, id, user.user_id, false)
         .await
         .map_err(db_error)?
@@ -2003,7 +2132,9 @@ async fn create_subtask(
     let id = task::require_uuid(&task_id)?;
     let title = validate_subtask_title(&req)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let parent = task::find_task(&mut *tx, id, user.user_id, false)
         .await
         .map_err(db_error)?
@@ -2024,7 +2155,9 @@ async fn create_subtask(
     .await
     .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
-    Ok(Json(json!({ "id": subtask_id.to_string(), "title": title, "status": "todo" })))
+    Ok(Json(
+        json!({ "id": subtask_id.to_string(), "title": title, "status": "todo" }),
+    ))
 }
 
 async fn reorder_subtasks(
@@ -2036,7 +2169,9 @@ async fn reorder_subtasks(
     let user = require_user(&state, &headers)?;
     let id = task::require_uuid(&task_id)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let parent = task::find_task(&mut *tx, id, user.user_id, false)
         .await
         .map_err(db_error)?
@@ -2083,7 +2218,9 @@ async fn description_to_subtasks(
     let user = require_user(&state, &headers)?;
     let id = task::require_uuid(&task_id)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let parent = task::find_task(&mut *tx, id, user.user_id, false)
         .await
         .map_err(db_error)?
@@ -2114,7 +2251,9 @@ async fn description_to_subtasks(
         .await
         .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
-    Ok(Json(json!({ "status": "ok", "description": Value::Null, "subtasks": created })))
+    Ok(Json(
+        json!({ "status": "ok", "description": Value::Null, "subtasks": created }),
+    ))
 }
 
 async fn subtasks_to_description(
@@ -2125,7 +2264,9 @@ async fn subtasks_to_description(
     let user = require_user(&state, &headers)?;
     let id = task::require_uuid(&task_id)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let parent = task::find_task(&mut *tx, id, user.user_id, false)
         .await
         .map_err(db_error)?
@@ -2182,7 +2323,9 @@ async fn breakdown_task(
     // (optional) LLM call so no pooled connection is held across the network.
     let (parent_title, parent_description, parent_priority) = {
         let mut tx = state.pool.begin().await.map_err(db_error)?;
-        db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+        db::set_rls_user(&mut *tx, user.user_id, "")
+            .await
+            .map_err(db_error)?;
         let parent = task::find_task(&mut *tx, id, user.user_id, false)
             .await
             .map_err(db_error)?
@@ -2193,14 +2336,21 @@ async fn breakdown_task(
         tx.commit().await.map_err(db_error)?;
         (parent.title, parent.description, parent.priority)
     };
-    let mut titles =
-        llm_breakdown_titles(&state, user.user_id, &parent_title, parent_description.as_deref()).await;
+    let mut titles = llm_breakdown_titles(
+        &state,
+        user.user_id,
+        &parent_title,
+        parent_description.as_deref(),
+    )
+    .await;
     if titles.is_empty() {
         titles = breakdown_titles(parent_description.as_deref());
     }
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let mut start = next_sort_order(&mut *tx, id).await.map_err(db_error)?;
     let mut created: Vec<Value> = Vec::new();
     for title in &titles {
@@ -2236,7 +2386,9 @@ async fn find_owned_subtask(
     subtask_id: &str,
 ) -> Result<Option<Task>, ApiError> {
     let sid = task::require_uuid(subtask_id)?;
-    let subtask = task::find_task(conn, sid, user_id, false).await.map_err(db_error)?;
+    let subtask = task::find_task(conn, sid, user_id, false)
+        .await
+        .map_err(db_error)?;
     Ok(subtask.filter(|t| t.parent_task_id.map(|p| p.to_string()).as_deref() == Some(task_id)))
 }
 
@@ -2249,7 +2401,9 @@ async fn update_subtask(
     let user = require_user(&state, &headers)?;
     let patch = validate_update(req)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let mut subtask = find_owned_subtask(&mut *tx, user.user_id, &task_id, &subtask_id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Subtask not found".to_string()))?;
@@ -2269,7 +2423,9 @@ async fn delete_subtask(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let subtask = find_owned_subtask(&mut *tx, user.user_id, &task_id, &subtask_id)
         .await?
         .ok_or_else(|| ApiError::NotFound("Subtask not found".to_string()))?;
@@ -2277,7 +2433,9 @@ async fn delete_subtask(
         .await
         .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
-    Ok(Json(json!({ "status": "deleted", "id": subtask.id.to_string() })))
+    Ok(Json(
+        json!({ "status": "deleted", "id": subtask.id.to_string() }),
+    ))
 }
 
 #[cfg(test)]
@@ -2326,20 +2484,31 @@ mod tests {
         ("authorization".to_string(), format!("Bearer {token}"))
     }
 
-    async fn call(app: Router, method: &str, uri: &str, token: &str, body: Option<Value>) -> axum::response::Response {
+    async fn call(
+        app: Router,
+        method: &str,
+        uri: &str,
+        token: &str,
+        body: Option<Value>,
+    ) -> axum::response::Response {
         let (hk, hv) = auth_header(token);
         let mut builder = Request::builder().method(method).uri(uri).header(hk, hv);
         if body.is_some() {
             builder = builder.header("content-type", "application/json");
         }
         let request = builder
-            .body(body.map(|b| Body::from(b.to_string())).unwrap_or_else(Body::empty))
+            .body(
+                body.map(|b| Body::from(b.to_string()))
+                    .unwrap_or_else(Body::empty),
+            )
             .unwrap();
         app.oneshot(request).await.unwrap()
     }
 
     async fn body_json(res: axum::response::Response) -> Value {
-        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         serde_json::from_slice(&bytes).unwrap()
     }
 
@@ -2349,10 +2518,17 @@ mod tests {
             return;
         };
         let email = format!("rust-tasks-{}@test.local", Uuid::new_v4());
-        let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", Some("Task Tester"))
-            .await
-            .unwrap();
-        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
+        let user = crate::user::create_email_user(
+            &state.pool,
+            &email,
+            "not-a-real-hash",
+            Some("Task Tester"),
+        )
+        .await
+        .unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
         let app = router().with_state(state.clone());
 
         // create
@@ -2375,7 +2551,11 @@ mod tests {
         let res = call(app.clone(), "GET", "/api/tasks", &token, None).await;
         assert_eq!(res.status(), StatusCode::OK);
         let listed = body_json(res).await;
-        assert!(listed.as_array().unwrap().iter().any(|t| t["id"] == task_id));
+        assert!(listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == task_id));
 
         // update (clear the start time slot explicitly)
         let res = call(
@@ -2401,11 +2581,22 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(5));
 
         // delete (soft) then it disappears from the active list
-        let res = call(app.clone(), "DELETE", &format!("/api/tasks/{task_id}"), &token, None).await;
+        let res = call(
+            app.clone(),
+            "DELETE",
+            &format!("/api/tasks/{task_id}"),
+            &token,
+            None,
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::OK);
         let res = call(app.clone(), "GET", "/api/tasks", &token, None).await;
         let listed = body_json(res).await;
-        assert!(!listed.as_array().unwrap().iter().any(|t| t["id"] == task_id));
+        assert!(!listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == task_id));
 
         // The tombstone must surface in the incremental (updated_since) feed so
         // other devices drop the task too: soft-delete has to bump updated_at,
@@ -2432,13 +2623,30 @@ mod tests {
         // trash lists it and restore brings it back
         let res = call(app.clone(), "GET", "/api/tasks/trash", &token, None).await;
         let trashed = body_json(res).await;
-        assert!(trashed.as_array().unwrap().iter().any(|t| t["id"] == task_id));
-        let res =
-            call(app.clone(), "POST", &format!("/api/tasks/{task_id}/restore"), &token, None).await;
+        assert!(trashed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["id"] == task_id));
+        let res = call(
+            app.clone(),
+            "POST",
+            &format!("/api/tasks/{task_id}/restore"),
+            &token,
+            None,
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::OK);
 
         // cleanup
-        let _ = call(app.clone(), "DELETE", &format!("/api/tasks/{task_id}/permanent"), &token, None).await;
+        let _ = call(
+            app.clone(),
+            "DELETE",
+            &format!("/api/tasks/{task_id}/permanent"),
+            &token,
+            None,
+        )
+        .await;
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(user.id)
             .execute(&state.pool)
@@ -2455,7 +2663,9 @@ mod tests {
         let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
         let app = router().with_state(state.clone());
 
         let res = call(
@@ -2484,7 +2694,9 @@ mod tests {
         let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
         let app = router().with_state(state.clone());
 
         // parent task with a bulleted description
@@ -2515,7 +2727,14 @@ mod tests {
         let child_id = created["id"].as_str().unwrap().to_string();
 
         // list
-        let res = call(app.clone(), "GET", &format!("/api/tasks/{parent_id}/subtasks"), &token, None).await;
+        let res = call(
+            app.clone(),
+            "GET",
+            &format!("/api/tasks/{parent_id}/subtasks"),
+            &token,
+            None,
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(body_json(res).await.as_array().unwrap().len(), 1);
 
@@ -2541,7 +2760,14 @@ mod tests {
         .await;
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(body_json(res).await["description"], "- Child A");
-        let res = call(app.clone(), "GET", &format!("/api/tasks/{parent_id}/subtasks"), &token, None).await;
+        let res = call(
+            app.clone(),
+            "GET",
+            &format!("/api/tasks/{parent_id}/subtasks"),
+            &token,
+            None,
+        )
+        .await;
         assert_eq!(body_json(res).await.as_array().unwrap().len(), 0);
 
         // description -> subtasks (splits the "- Child A" bullet, clears description)
@@ -2559,14 +2785,34 @@ mod tests {
         assert_eq!(converted["subtasks"].as_array().unwrap().len(), 1);
 
         // breakdown with no description falls back to the generic list
-        let res = call(app.clone(), "POST", &format!("/api/tasks/{parent_id}/breakdown"), &token, None).await;
+        let res = call(
+            app.clone(),
+            "POST",
+            &format!("/api/tasks/{parent_id}/breakdown"),
+            &token,
+            None,
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(body_json(res).await["subtasks"].as_array().unwrap().len(), 5);
+        assert_eq!(
+            body_json(res).await["subtasks"].as_array().unwrap().len(),
+            5
+        );
 
         // update + delete a subtask
-        let res = call(app.clone(), "GET", &format!("/api/tasks/{parent_id}/subtasks"), &token, None).await;
+        let res = call(
+            app.clone(),
+            "GET",
+            &format!("/api/tasks/{parent_id}/subtasks"),
+            &token,
+            None,
+        )
+        .await;
         let all = body_json(res).await;
-        let any_id = all.as_array().unwrap()[0]["id"].as_str().unwrap().to_string();
+        let any_id = all.as_array().unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let res = call(
             app.clone(),
             "PATCH",
@@ -2633,7 +2879,10 @@ mod tests {
                 .fetch_one(&state.pool)
                 .await
                 .unwrap();
-        assert!(children > 0, "expected materialized occurrences, got {children}");
+        assert!(
+            children > 0,
+            "expected materialized occurrences, got {children}"
+        );
 
         // Occurrences are top-level tasks, not subtasks: none may carry a
         // parent_task_id (that column is reserved for real subtasks).
@@ -2671,10 +2920,14 @@ mod tests {
             returned_ids.contains(&template_id),
             "template must appear on the timeline feed"
         );
-        for occ in listed.iter().filter(|t| {
-            t["recurrence_parent_id"].as_str() == Some(template_id.as_str())
-        }) {
-            assert!(occ["parent_task_id"].is_null(), "occurrence must have no parent");
+        for occ in listed
+            .iter()
+            .filter(|t| t["recurrence_parent_id"].as_str() == Some(template_id.as_str()))
+        {
+            assert!(
+                occ["parent_task_id"].is_null(),
+                "occurrence must have no parent"
+            );
         }
         let window_children: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM tasks WHERE recurrence_parent_id = $1 \
@@ -2732,7 +2985,11 @@ mod tests {
                 .fetch_one(&state.pool)
                 .await
                 .unwrap();
-        assert_eq!(ended, Some(today), "recurrence_end_date must be set to today");
+        assert_eq!(
+            ended,
+            Some(today),
+            "recurrence_end_date must be set to today"
+        );
 
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(user.id)
@@ -2782,7 +3039,9 @@ mod tests {
         .await
         .unwrap();
 
-        let purged = purge_trash(&mut *tx, Some(user.id), TRASH_RETENTION_DAYS).await.unwrap();
+        let purged = purge_trash(&mut *tx, Some(user.id), TRASH_RETENTION_DAYS)
+            .await
+            .unwrap();
         assert_eq!(purged, 2, "old parent + descendant must be purged");
         tx.commit().await.unwrap();
 
@@ -2794,8 +3053,16 @@ mod tests {
         assert_eq!(remaining, vec![recent], "recent trash must survive");
 
         let _ = old_child;
-        sqlx::query("DELETE FROM tasks WHERE user_id = $1").bind(user.id).execute(&state.pool).await.unwrap();
-        sqlx::query("DELETE FROM users WHERE id = $1").bind(user.id).execute(&state.pool).await.unwrap();
+        sqlx::query("DELETE FROM tasks WHERE user_id = $1")
+            .bind(user.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
     }
 
     /// One priority scale end-to-end: the API accepts only the 3 app tiers
@@ -2810,23 +3077,46 @@ mod tests {
         let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
         let app = router().with_state(state.clone());
 
         // No priority -> medium (2), matching the UI/timeline default.
-        let res = call(app.clone(), "POST", "/api/tasks", &token, Some(json!({ "title": "Default" }))).await;
+        let res = call(
+            app.clone(),
+            "POST",
+            "/api/tasks",
+            &token,
+            Some(json!({ "title": "Default" })),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::OK);
         let created = body_json(res).await;
         assert_eq!(created["priority"], 2);
         let default_id = created["id"].as_str().unwrap().to_string();
 
         // Explicit high (1) persists.
-        let res = call(app.clone(), "POST", "/api/tasks", &token, Some(json!({ "title": "High", "priority": 1 }))).await;
+        let res = call(
+            app.clone(),
+            "POST",
+            "/api/tasks",
+            &token,
+            Some(json!({ "title": "High", "priority": 1 })),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(body_json(res).await["priority"], 1);
 
         // Out-of-scale values are rejected with the 3-tier message.
-        let res = call(app.clone(), "POST", "/api/tasks", &token, Some(json!({ "title": "Bad", "priority": 5 }))).await;
+        let res = call(
+            app.clone(),
+            "POST",
+            "/api/tasks",
+            &token,
+            Some(json!({ "title": "Bad", "priority": 5 })),
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
         let err = body_json(res).await;
         assert_eq!(err["detail"], "Priority must be between 1 and 3");
@@ -2843,8 +3133,16 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(body_json(res).await["priority"], 3);
 
-        sqlx::query("DELETE FROM tasks WHERE user_id = $1").bind(user.id).execute(&state.pool).await.unwrap();
-        sqlx::query("DELETE FROM users WHERE id = $1").bind(user.id).execute(&state.pool).await.unwrap();
+        sqlx::query("DELETE FROM tasks WHERE user_id = $1")
+            .bind(user.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
     }
 
     /// A scheduled reminder round-trips through create, validates bad values
@@ -2858,7 +3156,9 @@ mod tests {
         let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0).unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
         let app = router().with_state(state.clone());
 
         // A reminder time turns the master switch on automatically.
@@ -2945,7 +3245,15 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(body_json(res).await["reminder_at"], Value::Null);
 
-        sqlx::query("DELETE FROM tasks WHERE user_id = $1").bind(user.id).execute(&state.pool).await.unwrap();
-        sqlx::query("DELETE FROM users WHERE id = $1").bind(user.id).execute(&state.pool).await.unwrap();
+        sqlx::query("DELETE FROM tasks WHERE user_id = $1")
+            .bind(user.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user.id)
+            .execute(&state.pool)
+            .await
+            .unwrap();
     }
 }

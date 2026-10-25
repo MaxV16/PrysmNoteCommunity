@@ -62,14 +62,39 @@ async function main() {
     `expected HTTP 404 for a bogus path (got ${response.status()})`
   );
 
-  console.log("[2/3] the branded heading is visible");
+  console.log("[2/5] the branded heading is visible");
   await page
     .getByRole("heading", { name: "We could not find that page" })
     .waitFor({ state: "visible", timeout: 10000 });
 
-  console.log("[3/3] a primary action is available");
+  console.log("[3/5] the document title names the brand exactly once");
+  const title = await page.title();
+  assert(
+    title === "Page not found | Prysm Note",
+    `expected the composed 404 title, got "${title}"`
+  );
+  assert(
+    title.match(/Prysm Note/g)?.length === 1,
+    `expected exactly one "Prysm Note" in the title, got "${title}"`
+  );
+
+  console.log("[4/5] a primary action is available");
   const cta = page.getByRole("link", { name: /Start for free|Back to your workspace/ });
   await cta.first().waitFor({ state: "visible" });
+
+  console.log("[5/5] a bogus marketing subpath still renders the branded 404");
+  const marketingBogus = `/marketing/does-not-exist-${Date.now()}`;
+  const marketingResponse = await page.goto(`${BASE_URL}${marketingBogus}`, {
+    waitUntil: "domcontentloaded",
+  });
+  assert(marketingResponse, "expected an HTTP response for the bogus marketing path");
+  assert(
+    marketingResponse.status() === 404,
+    `expected HTTP 404 for a bogus marketing path (got ${marketingResponse.status()})`
+  );
+  await page
+    .getByRole("heading", { name: "We could not find that page" })
+    .waitFor({ state: "visible", timeout: 10000 });
 
   await browser.close();
   console.log("\nSMOKE 404 PASS: bogus path returns 404 with the branded not-found view");

@@ -653,6 +653,21 @@ CREATE TABLE public.token_blacklist (
 
 
 --
+-- Name: refresh_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.refresh_tokens (
+    token_hash character varying(64) NOT NULL,
+    family_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    issued_at timestamp with time zone DEFAULT now() NOT NULL,
+    rotated_at timestamp with time zone,
+    revoked_at timestamp with time zone
+);
+
+
+--
 -- Name: user_notification_prefs; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1058,6 +1073,14 @@ ALTER TABLE ONLY public.teams
 
 ALTER TABLE ONLY public.token_blacklist
     ADD CONSTRAINT token_blacklist_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: refresh_tokens refresh_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.refresh_tokens
+    ADD CONSTRAINT refresh_tokens_pkey PRIMARY KEY (token_hash);
 
 
 --
@@ -1531,6 +1554,20 @@ CREATE INDEX ix_token_blacklist_expires ON public.token_blacklist USING btree (e
 --
 
 CREATE UNIQUE INDEX ix_token_blacklist_jti ON public.token_blacklist USING btree (jti);
+
+
+--
+-- Name: ix_refresh_tokens_family_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_refresh_tokens_family_id ON public.refresh_tokens USING btree (family_id);
+
+
+--
+-- Name: ix_refresh_tokens_expires_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX ix_refresh_tokens_expires_at ON public.refresh_tokens USING btree (expires_at);
 
 
 --

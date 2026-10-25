@@ -21,6 +21,9 @@ pub async fn add(
     .bind(expires_at as f64)
     .execute(pool)
     .await?;
+    // Keep the in-process/Redis revocation cache in sync so a logout takes
+    // effect immediately instead of waiting for a cache miss.
+    crate::revocation::mark_revoked(jti, expires_at).await;
     Ok(())
 }
 
@@ -43,6 +46,9 @@ pub async fn add_once(
     .bind(expires_at as f64)
     .execute(pool)
     .await?;
+    if result.rows_affected() == 1 {
+        crate::revocation::mark_revoked(jti, expires_at).await;
+    }
     Ok(result.rows_affected() == 1)
 }
 

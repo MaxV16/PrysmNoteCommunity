@@ -24,23 +24,42 @@ export const SECTION_HEADER_HEIGHT = 40;
 export const MIN_LANE_HEIGHT = 56;
 
 /** Discrete zoom levels for the timeline (multiplier on DAY_WIDTH). */
-export const ZOOM_LEVELS = [1.0, 1.5, 2.0, 3.0] as const;
-export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
+import { TIMELINE_ZOOM_LEVELS } from "@/lib/view-zoom";
+export { TIMELINE_ZOOM_LEVELS as ZOOM_LEVELS } from "@/lib/view-zoom";
+export type ZoomLevel = (typeof TIMELINE_ZOOM_LEVELS)[number];
 export const DEFAULT_ZOOM: ZoomLevel = 1.0;
+/** A rendered day column never goes below this, even at the smallest zoom. */
+export const MIN_RENDERED_DAY_WIDTH = 28;
 
 /**
- * Responsive day column width: ~5-6 days visible on phones instead of the 120px
- * desktop width (clamp(56px, 15vw, 120px)). Listening to `resize` keeps the
- * density live when a phone rotates or a desktop window resizes.
+ * Responsive day column width. Phones get a wider column than the old
+ * ~56px clamp (which clipped every task title to three characters): about
+ * 4-5 days visible, 88px minimum, so a bar has room for a readable label.
+ * Desktop keeps the full 120px column, which the timeline geometry and the
+ * timeline smoke test both rely on. Listening to `resize` keeps the density
+ * live when a phone rotates or a desktop window resizes.
  */
-export function useResponsiveDayWidth(zoom: ZoomLevel = DEFAULT_ZOOM): number {
+export const PHONE_DAY_WIDTH_MIN = 88;
+export const PHONE_BREAKPOINT = 768;
+
+export function responsiveDayWidth(viewportWidth: number): number {
+  if (viewportWidth >= PHONE_BREAKPOINT) return DAY_WIDTH;
+  return Math.round(Math.min(DAY_WIDTH, Math.max(PHONE_DAY_WIDTH_MIN, viewportWidth * 0.22)));
+}
+
+// `zoom` is a plain multiplier at runtime: `usePersistentZoom` always returns a
+// value already snapped to the ladder, so a caller can pass the raw number.
+export function useResponsiveDayWidth(zoom: number = DEFAULT_ZOOM): number {
   const { scale } = useUiScale();
-  const [width, setWidth] = useState(() => DAY_WIDTH * zoom * scale);
+  const [width, setWidth] = useState(() => Math.max(MIN_RENDERED_DAY_WIDTH, DAY_WIDTH * zoom * scale));
   useEffect(() => {
     const update = () => {
-      const vw = typeof window === "undefined" ? 120 : window.innerWidth;
-      const base = Math.round(Math.min(DAY_WIDTH, Math.max(56, vw * 0.15)));
-      setWidth(Math.round(base * zoom * scale));
+      const vw = typeof window === "undefined" ? DAY_WIDTH : window.innerWidth;
+      // The phone clamp sets the BASE column, then the user's zoom multiplies it,
+      // so zooming out goes below the phone default and zooming in goes above.
+      setWidth(
+        Math.max(MIN_RENDERED_DAY_WIDTH, Math.round(responsiveDayWidth(vw) * zoom * scale))
+      );
     };
     update();
     window.addEventListener("resize", update);

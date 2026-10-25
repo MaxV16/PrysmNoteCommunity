@@ -12,7 +12,10 @@ import {
 import type { Task } from "@/types/task";
 import {
   computeDragDays,
+  dragOffsetFromContent,
   dragOffsetPx,
+  grabOffsetWithinBar,
+  pointerContentX,
   resizePreviewRange,
   resizePreviewSpan,
   taskSpanDays,
@@ -120,6 +123,16 @@ interface DragSession {
   /** True when the drag is disabled (e.g. a done task): the bar still gets the
    * touch hold, but it can never be picked up, dragged, or committed. */
   moveDisabled: boolean;
+  /**
+   * Press-time content-space anchor. The drag offset is always recomputed from
+   * the pointer's CURRENT content position against this anchor, never from an
+   * accumulated scroll delta, so a native pan or its momentum cannot go stale.
+   */
+  startContentX: number;
+  /** The bar's content-space left edge at press, and where inside it the finger
+   * landed. A drop lands the grabbed point under the pointer. */
+  barContentLeft: number;
+  grabOffsetPx: number;
   startScrollLeft: number;
   scrollDelta: number;
   startScrollTop: number;
@@ -252,6 +265,10 @@ export function useTimelineBarDrag(
   const ctx = useContext(TimelineDragContext);
   const ref = useRef<HTMLDivElement | null>(null);
   const sessionRef = useRef<DragSession | null>(null);
+  // Pointer id aborted by the multi-touch guard. The same pointerdown event
+  // continues into the bar's React handler after the window capture listener
+  // runs, so this stops that second finger from immediately opening a drag.
+  const abortedPointerRef = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
   // Live start/end dates shown above the bar while a resize handle is dragged.
   const [resizePreview, setResizePreview] = useState<{ start: string; due: string } | null>(null);
@@ -432,12 +449,11 @@ export function useTimelineBarDrag(
         velocityX = intensity * intensity * s.dayWidth * EDGE_MAX_DAYS_PER_FRAME;
       }
       if (velocityX !== 0 && s.body) {
-        // Account for the scroll we just applied BEFORE computing the preview.
-        // Waiting for the passive scroll event left the bar one frame behind the
-        // canvas during edge auto-scroll, which read as a jitter/rubber-band.
-        const before = s.body.scrollLeft;
+        // The scroll write is the only source of truth. The offset below reads
+        // the live `scrollLeft` AFTER this write, so the preview and the drop
+        // both see it exactly once (never accumulated on top of a native
+        // scroll).
         s.body.scrollLeft += velocityX;
-        s.scrollDelta += s.body.scrollLeft - before;
       }
 
       // Vertical edge auto-scroll so a lane off-screen can be reached, but only
@@ -457,15 +473,28 @@ export function useTimelineBarDrag(
           velocityY = intensity * intensity * EDGE_MAX_PX_PER_FRAME;
         }
         if (velocityY !== 0 && s.body) {
-          const before = s.body.scrollTop;
           s.body.scrollTop += velocityY;
-          s.scrollTopDelta += s.body.scrollTop - before;
         }
       }
 
-      const offsetX = dragOffsetPx({
-        dx: s.latestX - s.startX,
-        scrollDelta: s.scrollDelta,
+      // Sample the canvas scroll LIVE every frame. This is the one place the
+      // gesture learns where the content is, so:
+      // - edge auto-scroll (written just above) is included exactly once,
+      // - a native Windows touchscreen pan / momentum that happened during the
+      //   drag is included exactly once,
+      // - nothing is ever re-applied on top of a stale press-time baseline.
+      const liveScrollLeft = s.body ? s.body.scrollLeft : s.startScrollLeft;
+      const liveScrollTop = s.body ? s.body.scrollTop : s.startScrollTop;
+      s.scrollDelta = liveScrollLeft - s.startScrollLeft;
+      s.scrollTopDelta = liveScrollTop - s.startScrollTop;
+      const pointerX = pointerContentX({
+        clientX: s.latestX,
+        bodyLeft: s.bodyLeft,
+        scrollLeft: liveScrollLeft,
+      });
+      const offsetX = dragOffsetFromContent({
+        startContentX: s.startContentX,
+        pointerContentX: pointerX,
       });
       const offsetY = dragOffsetPx({
         dx: s.latestY - s.startY,
@@ -672,6 +701,36 @@ export function useTimelineBarDrag(
     finishRef.current(false);
   }, []);
 
+  // A second pointer (a second finger landing on the bar or anywhere else, or a
+  // canvas pinch starting) aborts the gesture instead of starting a second drag
+  // or letting two sessions fight over the same bar.
+  const onExtraPointer = useCallback((e: PointerEvent) => {
+    const s = sessionRef.current;
+    if (!s || e.pointerId === s.pointerId) return;
+    abortedPointerRef.current = e.pointerId;
+    // Clear after the current event has finished dispatching, so the React bar
+    // handler (which runs later in this same dispatch) is also suppressed
+    // without swallowing a future press that reuses the pointer id.
+    window.setTimeout(() => {
+      if (abortedPointerRef.current === e.pointerId) abortedPointerRef.current = null;
+    }, 0);
+    finishRef.current(false);
+  }, []);
+
+  // Losing window focus (alt-tab, a native dialog, the Windows app switcher)
+  // can swallow the terminal pointer event. Abort and restore the pre-drag
+  // position instead of leaving a session (and touchAction) stuck.
+  const onWindowBlur = useCallback(() => {
+    if (sessionRef.current) finishRef.current(false);
+  }, []);
+
+  // A hidden document (tab switch, app backgrounded) cannot finish a drag.
+  const onVisibilityChange = useCallback(() => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      if (sessionRef.current) finishRef.current(false);
+    }
+  }, []);
+
   const finish = useCallback(
     (commit: boolean) => {
       const s = sessionRef.current;
@@ -687,6 +746,9 @@ export function useTimelineBarDrag(
       window.removeEventListener("pointermove", onWindowMove);
       window.removeEventListener("pointerup", onWindowUp);
       window.removeEventListener("pointercancel", onWindowCancel);
+      window.removeEventListener("pointerdown", onExtraPointer, true);
+      window.removeEventListener("blur", onWindowBlur);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       s.captureEl.removeEventListener("lostpointercapture", onLostCapture);
       s.body?.removeEventListener("scroll", onBodyScroll);
       window.removeEventListener("touchmove", preventTouchMove);
@@ -702,10 +764,19 @@ export function useTimelineBarDrag(
       if (s.body) s.body.style.userSelect = "";
 
       if (commit && s.active) {
+        // Re-read the live scroll and the current day width at the drop, exactly
+        // as the preview does. A stale press-time scroll baseline is what let a
+        // Windows touchscreen's own pan move the task to a random day.
+        const liveScrollLeft = s.body ? s.body.scrollLeft : s.startScrollLeft;
+        const pointerX = pointerContentX({
+          clientX: s.latestX,
+          bodyLeft: s.bodyLeft,
+          scrollLeft: liveScrollLeft,
+        });
+        const liveDayWidth = ctxRef.current?.dayWidth ?? s.dayWidth;
         const days = computeDragDays({
-          dx: s.latestX - s.startX,
-          scrollDelta: s.scrollDelta,
-          dayWidth: s.dayWidth,
+          dx: pointerX - s.startContentX,
+          dayWidth: liveDayWidth,
         });
         const sectionChanged = resolveSectionChange(s);
         let committed = false;
@@ -739,7 +810,7 @@ export function useTimelineBarDrag(
           // slot swapped in under it must be eased from the last preview offset.
           const hasTransform = previewTransformRef.current;
           if (s.mode === "move" && hasTransform) {
-            const snappedPx = commitDaysUsed * s.dayWidth;
+            const snappedPx = commitDaysUsed * liveDayWidth;
             glideRef.current = {
               startTransform: `translate3d(${s.offsetPx - snappedPx}px, ${s.offsetYPx}px, 0)`,
               endTransform: "translate3d(0, 0, 0)",
@@ -776,7 +847,7 @@ export function useTimelineBarDrag(
       }
       setDragging(false);
     },
-      [onWindowMove, onWindowUp, onWindowCancel, onLostCapture, onBodyScroll, preventTouchMove, resetPreview, armClickSuppressor]
+      [onWindowMove, onWindowUp, onWindowCancel, onLostCapture, onBodyScroll, onExtraPointer, onWindowBlur, onVisibilityChange, preventTouchMove, resetPreview, armClickSuppressor]
   );
   finishRef.current = finish;
 
@@ -788,11 +859,17 @@ export function useTimelineBarDrag(
       // every later press silently inert. Recover here so a fresh gesture
       // always starts from a clean slate instead of being ignored.
       if (sessionRef.current) finishRef.current(false);
+      if (abortedPointerRef.current === e.pointerId) return;
       const currentCtx = ctxRef.current;
       if (!currentCtx) return;
       const el = ref.current;
       if (!el) return;
       const isTouch = (e.pointerType || "mouse") === "touch";
+      // A second finger is never the start of a bar drag. The first pointer's
+      // session is aborted by the window capture listener; this guard also makes
+      // sure the second pointerdown cannot immediately open a new one (a pinch
+      // that starts on a bar must zoom the canvas, not grab the task).
+      if (isTouch && e.isPrimary === false) return;
       // A drag-disabled bar (a done task) still owns the touch hold, so a
       // stationary press opens the mobile action bar; mouse/pen on it stay
       // inert. Everything else follows the single contract below.
@@ -816,6 +893,21 @@ export function useTimelineBarDrag(
         mode === "move"
           ? el
           : ((el.closest("[data-task-bar]") as HTMLElement | null) ?? el);
+      // The press anchor in content space, plus the bar's own content left edge
+      // and the grabbed point inside it. Both use the scroll read ONCE here (a
+      // synchronous read at press is accurate); every later frame re-samples
+      // the live scroll instead of trusting this baseline.
+      const startScrollLeft = body?.scrollLeft ?? 0;
+      const startScrollTop = body?.scrollTop ?? 0;
+      const bodyLeft = rect?.left ?? 0;
+      const startContentX = pointerContentX({
+        clientX: e.clientX,
+        bodyLeft,
+        scrollLeft: startScrollLeft,
+      });
+      const barRect = barEl.getBoundingClientRect();
+      const barContentLeft = barRect.left - bodyLeft + startScrollLeft;
+      const grabOffsetPx = grabOffsetWithinBar({ startContentX, barContentLeft });
       const s: DragSession = {
         pointerId: e.pointerId,
         pointerType: e.pointerType || "mouse",
@@ -829,12 +921,15 @@ export function useTimelineBarDrag(
         holdY: e.clientY,
         movedAfterHold: false,
         moveDisabled: !!disabled,
-        startScrollLeft: body?.scrollLeft ?? 0,
+        startContentX,
+        barContentLeft,
+        grabOffsetPx,
+        startScrollLeft,
         scrollDelta: 0,
-        startScrollTop: body?.scrollTop ?? 0,
+        startScrollTop,
         scrollTopDelta: 0,
         body,
-        bodyLeft: rect?.left ?? 0,
+        bodyLeft,
         bodyTop: rect?.top ?? 0,
         bodyClientWidth: body?.clientWidth ?? 0,
         bodyClientHeight: body?.clientHeight ?? 0,
@@ -901,10 +996,13 @@ export function useTimelineBarDrag(
       window.addEventListener("pointermove", onWindowMove);
       window.addEventListener("pointerup", onWindowUp);
       window.addEventListener("pointercancel", onWindowCancel);
+      window.addEventListener("pointerdown", onExtraPointer, true);
+      window.addEventListener("blur", onWindowBlur);
+      document.addEventListener("visibilitychange", onVisibilityChange);
       captureEl.addEventListener("lostpointercapture", onLostCapture);
       body?.addEventListener("scroll", onBodyScroll);
     },
-    [disabled, onWindowMove, onWindowUp, onWindowCancel, onLostCapture, onBodyScroll, disarmClickSuppressor]
+    [disabled, onWindowMove, onWindowUp, onWindowCancel, onLostCapture, onBodyScroll, onExtraPointer, onWindowBlur, onVisibilityChange, disarmClickSuppressor]
   );
 
   // Escape cancels and reverts an in-flight drag.

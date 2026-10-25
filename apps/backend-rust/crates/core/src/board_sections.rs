@@ -28,8 +28,8 @@ use crate::db;
 use crate::error::ApiError;
 use crate::llm::LlmClient;
 use crate::task::{Task, COLUMNS, STATUSES};
-use crate::{ai_chat, ai_entitlement, api_key};
 use crate::AppState;
+use crate::{ai_chat, ai_entitlement, api_key};
 
 const VALID_KINDS: [&str; 3] = ["kanban", "board", "timeline"];
 const SECTION_TITLE_MAX: usize = 200;
@@ -57,7 +57,9 @@ fn organize_limiter() -> &'static crate::ratelimit::RateLimiter {
 
 /// The cache key for one section scope (`kind` + optional list).
 fn sections_cache_key(user_id: Uuid, kind: &str, list_id: Option<Uuid>) -> String {
-    let list_part = list_id.map(|u| u.to_string()).unwrap_or_else(|| "none".to_string());
+    let list_part = list_id
+        .map(|u| u.to_string())
+        .unwrap_or_else(|| "none".to_string());
     crate::cache::user_cache_key("board_sections", user_id, &[kind, &list_part])
 }
 
@@ -78,8 +80,14 @@ const DEFAULT_KANBAN_SECTIONS: [(&str, &str, &str); 4] = [
 /// The `/api/board-sections` sub-router.
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/board-sections", get(list_sections).post(create_section))
-        .route("/api/board-sections/", get(list_sections).post(create_section))
+        .route(
+            "/api/board-sections",
+            get(list_sections).post(create_section),
+        )
+        .route(
+            "/api/board-sections/",
+            get(list_sections).post(create_section),
+        )
         .route("/api/board-sections/auto-organize", post(auto_organize))
         .route(
             "/api/board-sections/{section_id}",
@@ -280,7 +288,9 @@ async fn list_sections(
         return Ok(Json(cached));
     }
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
 
     let mut sections = list_kind_sections(&mut *tx, user.user_id, &kind, target_list)
         .await
@@ -288,14 +298,26 @@ async fn list_sections(
 
     if !sections.is_empty() {
         // Self-heal users who predate the seed marker.
-        if kind == "kanban" && !seeded_flag(&mut *tx, user.user_id, &kind).await.map_err(db_error)? {
-            claim_seed(&mut *tx, user.user_id, &kind).await.map_err(db_error)?;
+        if kind == "kanban"
+            && !seeded_flag(&mut *tx, user.user_id, &kind)
+                .await
+                .map_err(db_error)?
+        {
+            claim_seed(&mut *tx, user.user_id, &kind)
+                .await
+                .map_err(db_error)?;
         }
     } else if kind == "timeline" {
         // Timeline never seeds; an empty result is the user's real choice.
-    } else if seeded_flag(&mut *tx, user.user_id, &kind).await.map_err(db_error)? {
+    } else if seeded_flag(&mut *tx, user.user_id, &kind)
+        .await
+        .map_err(db_error)?
+    {
         // Marker present and no sections: the user deleted every default.
-    } else if claim_seed(&mut *tx, user.user_id, &kind).await.map_err(db_error)? {
+    } else if claim_seed(&mut *tx, user.user_id, &kind)
+        .await
+        .map_err(db_error)?
+    {
         if kind == "kanban" {
             for (position, (status, title, color)) in DEFAULT_KANBAN_SECTIONS.iter().enumerate() {
                 sqlx::query(
@@ -349,13 +371,17 @@ async fn create_section(
     }
     if let Some(status) = &req.status {
         if !valid_status(status) {
-            return Err(ApiError::Unprocessable(crate::task::invalid_status_message()));
+            return Err(ApiError::Unprocessable(
+                crate::task::invalid_status_message(),
+            ));
         }
     }
     let target_list = parse_list_id(req.list_id.as_deref())?;
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
 
     // Status sections upsert by (user_id, kind, list_id, status) so the
     // frontend's one-time migration can converge titles/colors.
@@ -433,7 +459,9 @@ async fn update_section(
     let section_id = require_uuid(&section_id)?;
     if let Some(title) = &req.title {
         if title.trim().is_empty() {
-            return Err(ApiError::Unprocessable("Title must not be empty".to_string()));
+            return Err(ApiError::Unprocessable(
+                "Title must not be empty".to_string(),
+            ));
         }
         if title.chars().count() > SECTION_TITLE_MAX {
             return Err(ApiError::Unprocessable(
@@ -442,7 +470,9 @@ async fn update_section(
         }
     }
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let exists =
         sqlx::query_scalar::<_, i32>("SELECT 1 FROM board_sections WHERE id = $1 AND user_id = $2")
             .bind(section_id)
@@ -498,7 +528,9 @@ async fn delete_section(
     let user = require_user(&state, &headers)?;
     let section_id = require_uuid(&section_id)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let exists =
         sqlx::query_scalar::<_, i32>("SELECT 1 FROM board_sections WHERE id = $1 AND user_id = $2")
             .bind(section_id)
@@ -509,12 +541,14 @@ async fn delete_section(
     if exists.is_none() {
         return Err(ApiError::NotFound("Section not found".to_string()));
     }
-    sqlx::query("UPDATE tasks SET board_section_id = NULL WHERE board_section_id = $1 AND user_id = $2")
-        .bind(section_id)
-        .bind(user.user_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
+    sqlx::query(
+        "UPDATE tasks SET board_section_id = NULL WHERE board_section_id = $1 AND user_id = $2",
+    )
+    .bind(section_id)
+    .bind(user.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
     sqlx::query("DELETE FROM board_sections WHERE id = $1")
         .bind(section_id)
         .execute(&mut *tx)
@@ -687,10 +721,7 @@ fn collect_assignments(items: &[Value], out: &mut HashMap<String, String>) {
         match item {
             Value::Array(pair) if pair.len() >= 2 => {
                 if let Some(key) = pair[0].as_str() {
-                    out.insert(
-                        key.to_string(),
-                        pair[1].as_str().unwrap_or("").to_string(),
-                    );
+                    out.insert(key.to_string(), pair[1].as_str().unwrap_or("").to_string());
                 }
             }
             Value::Object(map) => {
@@ -817,7 +848,9 @@ async fn load_organize_tasks(
     list_id: Option<Uuid>,
 ) -> Result<Vec<Task>, ApiError> {
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let mut sql = format!(
         "SELECT {COLUMNS} FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
          AND is_archived = false AND status <> 'cancelled' \
@@ -856,7 +889,9 @@ async fn load_timeline_sections(
     list_id: Option<Uuid>,
 ) -> Result<Vec<TimelineSection>, ApiError> {
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let sql = if list_id.is_none() {
         "SELECT id, title FROM board_sections WHERE user_id = $1 AND kind = 'timeline' \
          AND list_id IS NULL ORDER BY position, created_at"
@@ -887,7 +922,9 @@ async fn count_organize_remaining(
     list_id: Option<Uuid>,
 ) -> Result<i64, ApiError> {
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let sql = if list_id.is_none() {
         "SELECT COUNT(*) FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
          AND is_archived = false AND status <> 'cancelled' \
@@ -951,7 +988,8 @@ pub(crate) async fn svc_organize_timeline(
     let mut assignments: HashMap<String, String> = HashMap::new();
     let mut failed_batches = 0usize;
     for batch in tasks.chunks(ORGANIZE_BATCH_SIZE) {
-        let messages = json!([{ "role": "user", "content": topic_prompt(&existing_topics, batch) }]);
+        let messages =
+            json!([{ "role": "user", "content": topic_prompt(&existing_topics, batch) }]);
         let mut response: Option<Value> = None;
         for attempt in 0..3u64 {
             match client
@@ -1063,7 +1101,9 @@ pub(crate) async fn svc_organize_timeline(
     }
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let mut next_pos = next_position(&mut *tx, user_id, SECTION_KIND_TIMELINE, list_id)
         .await
         .map_err(db_error)?;
@@ -1140,7 +1180,10 @@ async fn auto_organize(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let used = organize_limiter()
-        .count(&format!("organize:{}", user.user_id), Duration::from_secs(3600))
+        .count(
+            &format!("organize:{}", user.user_id),
+            Duration::from_secs(3600),
+        )
         .await;
     if used >= ORGANIZE_MAX_PER_HOUR {
         return Err(ApiError::TooManyRequests(
@@ -1218,13 +1261,18 @@ mod tests {
             builder = builder.header("content-type", "application/json");
         }
         let request = builder
-            .body(body.map(|b| Body::from(b.to_string())).unwrap_or_else(Body::empty))
+            .body(
+                body.map(|b| Body::from(b.to_string()))
+                    .unwrap_or_else(Body::empty),
+            )
             .unwrap();
         app.oneshot(request).await.unwrap()
     }
 
     async fn body_json(res: axum::response::Response) -> Value {
-        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         serde_json::from_slice(&bytes).unwrap()
     }
 
@@ -1237,18 +1285,33 @@ mod tests {
         let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
-            .unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
         let app = router().with_state(state.clone());
 
         // first load seeds 4 kanban sections
-        let res = call(app.clone(), "GET", "/api/board-sections?kind=kanban", &token, None).await;
+        let res = call(
+            app.clone(),
+            "GET",
+            "/api/board-sections?kind=kanban",
+            &token,
+            None,
+        )
+        .await;
         assert_eq!(res.status(), StatusCode::OK);
         let sections = body_json(res).await;
         assert_eq!(sections.as_array().unwrap().len(), 4);
 
         // timeline never seeds
-        let res = call(app.clone(), "GET", "/api/board-sections?kind=timeline", &token, None).await;
+        let res = call(
+            app.clone(),
+            "GET",
+            "/api/board-sections?kind=timeline",
+            &token,
+            None,
+        )
+        .await;
         assert!(body_json(res).await.as_array().unwrap().is_empty());
 
         // delete all kanban sections, then a re-load must stay empty
@@ -1264,7 +1327,14 @@ mod tests {
             .await;
             assert_eq!(res.status(), StatusCode::OK);
         }
-        let res = call(app.clone(), "GET", "/api/board-sections?kind=kanban", &token, None).await;
+        let res = call(
+            app.clone(),
+            "GET",
+            "/api/board-sections?kind=kanban",
+            &token,
+            None,
+        )
+        .await;
         assert!(body_json(res).await.as_array().unwrap().is_empty());
 
         sqlx::query("DELETE FROM users WHERE id = $1")
@@ -1289,17 +1359,15 @@ mod tests {
 
     #[test]
     fn parse_assignments_reads_object_array() {
-        let parsed = parse_assignments(
-            r#"[{"id":"a","topic":"Home"},{"task_id":"b","category":"Work"}]"#,
-        );
+        let parsed =
+            parse_assignments(r#"[{"id":"a","topic":"Home"},{"task_id":"b","category":"Work"}]"#);
         assert_eq!(parsed.get("a").map(String::as_str), Some("Home"));
         assert_eq!(parsed.get("b").map(String::as_str), Some("Work"));
     }
 
     #[test]
     fn parse_assignments_reads_fenced_json() {
-        let parsed =
-            parse_assignments("```json\n[{\"id\": \"x\", \"topic\": \"Errands\"}]\n```");
+        let parsed = parse_assignments("```json\n[{\"id\": \"x\", \"topic\": \"Errands\"}]\n```");
         assert_eq!(parsed.get("x").map(String::as_str), Some("Errands"));
     }
 

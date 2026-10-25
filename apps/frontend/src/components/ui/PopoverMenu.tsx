@@ -52,19 +52,29 @@ export function PopoverMenu({
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect || (rect.width === 0 && rect.height === 0)) return null;
       const menu = menuRef.current;
-      const menuW = menu ? menu.getBoundingClientRect().width : 240;
-      const menuH = menu ? menu.getBoundingClientRect().height : 200;
+      const measuredW = menu ? menu.getBoundingClientRect().width : 240;
+      const measuredH = menu ? menu.getBoundingClientRect().height : 200;
       const minTop = minOverlayTop(8);
-      let left = align === "right" ? rect.right - menuW : Math.min(rect.left, window.innerWidth - menuW - 8);
-      left = Math.max(8, left);
-      let top = preferred === "below" ? rect.bottom + 4 : rect.top - menuH - 4;
-      if (preferred === "below" && top + menuH > window.innerHeight - 8) {
-        top = rect.top - menuH - 4;
-      }
-      top = Math.max(minTop, top);
-      // Cap the height to the space below the menu so a tall menu scrolls
+      const edge = 8;
+      const maxW = Math.max(160, window.innerWidth - edge * 2);
+      const menuW = Math.min(measuredW, maxW);
+      let left = align === "right" ? rect.right - menuW : rect.left;
+      left = Math.max(edge, Math.min(left, window.innerWidth - menuW - edge));
+
+      // Pick the side with more room so a tall menu (the view switcher) keeps
+      // as many items visible as possible, then clamp inside the viewport.
+      const spaceBelow = window.innerHeight - rect.bottom - edge;
+      const spaceAbove = rect.top - minTop - edge;
+      const openBelow =
+        preferred === "below"
+          ? spaceBelow >= Math.min(measuredH, 160) || spaceBelow >= spaceAbove
+          : spaceAbove < Math.min(measuredH, 160) && spaceBelow > spaceAbove;
+      const menuH = Math.min(measuredH, Math.max(120, window.innerHeight - minTop - edge * 2));
+      let top = openBelow ? rect.bottom + 4 : rect.top - menuH - 4;
+      top = Math.max(minTop, Math.min(top, window.innerHeight - edge - Math.min(menuH, window.innerHeight - minTop - edge)));
+      // Cap the height to the space actually available so a tall menu scrolls
       // instead of being clipped, keeping its last items reachable.
-      const maxH = Math.max(160, window.innerHeight - top - 8);
+      const maxH = Math.max(120, window.innerHeight - top - edge);
       return { top, left, width: menuW, maxH };
     };
     setPos(compute());

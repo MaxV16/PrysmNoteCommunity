@@ -16,6 +16,7 @@ const HEX_ALLOW = new Set([
   "components/auth/OAuthButtons.tsx",
   "components/board/board-utils.ts",
   "components/settings/ThemeImportExport.tsx",
+  "components/settings/ThemeTokenImport.tsx",
   "components/sidebar/ThemeMenu.tsx",
   "ee/lib/risk-collector.ts",
   "ee/marketing/demo/sampleData.ts",
@@ -24,6 +25,7 @@ const HEX_ALLOW = new Set([
   "lib/palette.ts",
   "lib/priority.ts",
   "lib/theme-context.tsx",
+  "lib/theme-import.ts",
 ]);
 
 const RULES = [

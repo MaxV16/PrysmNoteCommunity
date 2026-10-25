@@ -33,9 +33,8 @@ fn db_error(err: sqlx::Error) -> ApiError {
 }
 
 fn require_user(state: &AppState, headers: &HeaderMap) -> Result<AuthUser, ApiError> {
-    let token = auth::token_from_headers(headers).ok_or_else(|| {
-        ApiError::Unauthorized("Not authenticated".to_string())
-    })?;
+    let token = auth::token_from_headers(headers)
+        .ok_or_else(|| ApiError::Unauthorized("Not authenticated".to_string()))?;
     auth::authenticate(&state.settings.jwt_secret_key, &token)
 }
 
@@ -71,11 +70,12 @@ fn dec_opt(value: &Option<f64>) -> Option<Decimal> {
 /// `frequency` enum (weekly/monthly/quarterly/yearly).
 fn item_step(item: &ItemRow) -> Option<(String, i32)> {
     if let Some(unit) = item.frequency_unit.as_deref() {
-        return Some((unit.to_string(), item.frequency_interval.unwrap_or(1).max(1)));
+        return Some((
+            unit.to_string(),
+            item.frequency_interval.unwrap_or(1).max(1),
+        ));
     }
-    item.frequency
-        .as_deref()
-        .map(|f| (f.to_string(), 1))
+    item.frequency.as_deref().map(|f| (f.to_string(), 1))
 }
 
 /// Advance a date by `interval` units (day/week/month/quarter/year, plus the
@@ -233,7 +233,9 @@ async fn list_items(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
-    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let rows = sqlx::query_as::<_, ItemRow>(&format!(
         "SELECT {ITEM_COLUMNS} FROM financial_items WHERE user_id = $1 ORDER BY created_at ASC"
     ))
@@ -241,7 +243,10 @@ async fn list_items(
     .fetch_all(&mut *conn)
     .await
     .map_err(db_error)?;
-    Ok(Json(json!(rows.iter().map(serialize_item).collect::<Vec<_>>())))
+    Ok(Json(json!(rows
+        .iter()
+        .map(serialize_item)
+        .collect::<Vec<_>>())))
 }
 
 async fn create_item(
@@ -274,7 +279,9 @@ async fn create_item(
     }
 
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
-    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let row = sqlx::query_as::<_, ItemRow>(&format!(
         "INSERT INTO financial_items (user_id, name, direction, amount, kind, start_date, \
          end_date, frequency, next_date, payee, category, principal, remaining_balance, \
@@ -321,7 +328,9 @@ async fn get_item(
     let user = require_user(&state, &headers)?;
     let id = require_uuid(&item_id)?;
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
-    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let row = fetch_item(&mut conn, user.user_id, id)
         .await
         .map_err(db_error)?
@@ -358,8 +367,14 @@ async fn update_item(
         .ok_or_else(|| ApiError::Unprocessable("Invalid body".to_string()))?;
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut tx, user.user_id, "").await.map_err(db_error)?;
-    if fetch_item(&mut *tx, user.user_id, id).await.map_err(db_error)?.is_none() {
+    db::set_rls_user(&mut tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
+    if fetch_item(&mut *tx, user.user_id, id)
+        .await
+        .map_err(db_error)?
+        .is_none()
+    {
         return Err(ApiError::NotFound("Item not found".to_string()));
     }
 
@@ -389,7 +404,11 @@ async fn update_item(
             Value::String(s) => Some(s.clone()),
             other => Some(other.to_string()),
         });
-        sets.push(format!("{key} = ${}::{}", binds.len(), if cast == "integer" { "bigint" } else { cast }));
+        sets.push(format!(
+            "{key} = ${}::{}",
+            binds.len(),
+            if cast == "integer" { "bigint" } else { cast }
+        ));
     }
 
     if !sets.is_empty() {
@@ -411,7 +430,10 @@ async fn update_item(
             .map_err(db_error)?;
     }
 
-    if let Some(row) = fetch_item(&mut *tx, user.user_id, id).await.map_err(db_error)? {
+    if let Some(row) = fetch_item(&mut *tx, user.user_id, id)
+        .await
+        .map_err(db_error)?
+    {
         if row.principal.is_some() && row.remaining_balance.is_none() {
             sqlx::query(
                 "UPDATE financial_items SET remaining_balance = principal WHERE id = $1 AND user_id = $2",
@@ -440,7 +462,9 @@ async fn delete_item(
     let user = require_user(&state, &headers)?;
     let id = require_uuid(&item_id)?;
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
-    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let result = sqlx::query("DELETE FROM financial_items WHERE id = $1 AND user_id = $2")
         .bind(id)
         .bind(user.user_id)
@@ -459,7 +483,9 @@ async fn list_debts(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
-    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let rows = sqlx::query_as::<_, ItemRow>(&format!(
         "SELECT {ITEM_COLUMNS} FROM financial_items WHERE user_id = $1 AND principal IS NOT NULL \
          AND paid_off_at IS NULL ORDER BY created_at ASC"
@@ -468,7 +494,10 @@ async fn list_debts(
     .fetch_all(&mut *conn)
     .await
     .map_err(db_error)?;
-    Ok(Json(json!(rows.iter().map(serialize_item).collect::<Vec<_>>())))
+    Ok(Json(json!(rows
+        .iter()
+        .map(serialize_item)
+        .collect::<Vec<_>>())))
 }
 
 // ----- transactions -----
@@ -485,8 +514,7 @@ struct TxnRow {
     item_id: Option<Uuid>,
 }
 
-const TXN_COLUMNS: &str =
-    "id, date, amount, counterparty, description, category, source, item_id";
+const TXN_COLUMNS: &str = "id, date, amount, counterparty, description, category, source, item_id";
 
 fn serialize_txn(row: &TxnRow) -> Value {
     json!({
@@ -517,7 +545,9 @@ async fn list_transactions(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
-    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "")
+        .await
+        .map_err(db_error)?;
 
     let item_filter = uri
         .0
@@ -547,7 +577,10 @@ async fn list_transactions(
         .await
         .map_err(db_error)?,
     };
-    Ok(Json(json!(rows.iter().map(serialize_txn).collect::<Vec<_>>())))
+    Ok(Json(json!(rows
+        .iter()
+        .map(serialize_txn)
+        .collect::<Vec<_>>())))
 }
 
 async fn create_transaction(
@@ -559,7 +592,9 @@ async fn create_transaction(
     let date = NaiveDate::parse_from_str(&payload.date, "%Y-%m-%d")
         .map_err(|_| ApiError::Unprocessable("date (YYYY-MM-DD) is required".to_string()))?;
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
-    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let row = sqlx::query_as::<_, TxnRow>(&format!(
         "INSERT INTO financial_transactions (user_id, date, amount, counterparty, description, \
          category, source) VALUES ($1,$2,$3,$4,$5,$6,'manual') RETURNING {TXN_COLUMNS}"
@@ -683,8 +718,16 @@ async fn record_payment(
              WHERE id = $4 AND user_id = $5",
         )
         .bind(new_balance)
-        .bind(if paid_off { Some(payment_date) } else { item.paid_off_at })
-        .bind(if paid_off { Some(payment_date) } else { item.end_date })
+        .bind(if paid_off {
+            Some(payment_date)
+        } else {
+            item.paid_off_at
+        })
+        .bind(if paid_off {
+            Some(payment_date)
+        } else {
+            item.end_date
+        })
         .bind(item.id)
         .bind(user_id)
         .execute(&mut *conn)
@@ -697,14 +740,12 @@ async fn record_payment(
     let mut next_date_json = Value::Null;
     if !paid_off {
         if let Some(next) = next_occurrence(&item, payment_date) {
-            sqlx::query(
-                "UPDATE financial_items SET next_date = $1 WHERE id = $2 AND user_id = $3",
-            )
-            .bind(next)
-            .bind(item.id)
-            .bind(user_id)
-            .execute(&mut *conn)
-            .await?;
+            sqlx::query("UPDATE financial_items SET next_date = $1 WHERE id = $2 AND user_id = $3")
+                .bind(next)
+                .bind(item.id)
+                .bind(user_id)
+                .execute(&mut *conn)
+                .await?;
             next_date_json = Value::String(next.format("%Y-%m-%d").to_string());
         }
     }
@@ -808,7 +849,9 @@ async fn reverse_transaction(
             .bind(user_id)
             .execute(&mut *conn)
             .await?;
-            remaining_json = restored.map(|d| Value::String(d.to_string())).unwrap_or(Value::Null);
+            remaining_json = restored
+                .map(|d| Value::String(d.to_string()))
+                .unwrap_or(Value::Null);
         }
     }
 
@@ -835,10 +878,8 @@ async fn pay_item(
     let user = require_user(&state, &headers)?;
     let date_raw = body.get("date").and_then(|v| v.as_str()).unwrap_or("");
     let amount_raw = body.get("amount").and_then(|v| v.as_f64());
-    let (payment_date, amount) = match (
-        NaiveDate::parse_from_str(date_raw, "%Y-%m-%d"),
-        amount_raw,
-    ) {
+    let (payment_date, amount) = match (NaiveDate::parse_from_str(date_raw, "%Y-%m-%d"), amount_raw)
+    {
         (Ok(d), Some(a)) => (d, dec(a)),
         _ => {
             return Err(ApiError::Unprocessable(
@@ -847,7 +888,9 @@ async fn pay_item(
         }
     };
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let result = record_payment(&mut *tx, user.user_id, &item_id, payment_date, amount)
         .await
         .map_err(db_error)?;
@@ -869,7 +912,9 @@ async fn pay_off(
     let payment_date = NaiveDate::parse_from_str(date_raw, "%Y-%m-%d")
         .map_err(|_| ApiError::Unprocessable("date (YYYY-MM-DD) is required".to_string()))?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let result = pay_off_item(&mut *tx, user.user_id, &item_id, payment_date)
         .await
         .map_err(db_error)?;
@@ -887,7 +932,9 @@ async fn delete_transaction(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let result = reverse_transaction(&mut *tx, user.user_id, &transaction_id)
         .await
         .map_err(db_error)?;
@@ -911,7 +958,9 @@ async fn list_receivables(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
-    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let rows = sqlx::query_as::<_, ItemRow>(&format!(
         "SELECT {ITEM_COLUMNS} FROM financial_items WHERE user_id = $1 AND receivable = true \
          AND settled_at IS NULL ORDER BY due_date ASC NULLS LAST, created_at ASC"
@@ -920,7 +969,10 @@ async fn list_receivables(
     .fetch_all(&mut *conn)
     .await
     .map_err(db_error)?;
-    Ok(Json(json!(rows.iter().map(serialize_item).collect::<Vec<_>>())))
+    Ok(Json(json!(rows
+        .iter()
+        .map(serialize_item)
+        .collect::<Vec<_>>())))
 }
 
 async fn list_upcoming_income(
@@ -929,7 +981,9 @@ async fn list_upcoming_income(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
     let mut conn = state.pool.acquire().await.map_err(db_error)?;
-    db::set_rls_user(&mut conn, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut conn, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let rows = sqlx::query_as::<_, ItemRow>(&format!(
         "SELECT {ITEM_COLUMNS} FROM financial_items WHERE user_id = $1 AND direction = 'income' \
          AND paid_off_at IS NULL AND settled_at IS NULL ORDER BY created_at ASC"
@@ -943,7 +997,9 @@ async fn list_upcoming_income(
     let mut upcoming: Vec<(Option<NaiveDate>, Value)> = Vec::new();
     for row in &rows {
         let next = if row.kind == "recurring" {
-            next_occurrence(row, today).or(row.next_date).or(row.start_date)
+            next_occurrence(row, today)
+                .or(row.next_date)
+                .or(row.start_date)
         } else {
             row.due_date.or(row.next_date).or(row.start_date)
         };
@@ -959,7 +1015,10 @@ async fn list_upcoming_income(
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => std::cmp::Ordering::Equal,
     });
-    Ok(Json(json!(upcoming.into_iter().map(|(_, v)| v).collect::<Vec<_>>())))
+    Ok(Json(json!(upcoming
+        .into_iter()
+        .map(|(_, v)| v)
+        .collect::<Vec<_>>())))
 }
 
 async fn settle_receivable(
@@ -1025,7 +1084,9 @@ async fn settle_route(
             .map_err(|_| ApiError::Unprocessable("date (YYYY-MM-DD) is required".to_string()))?
     };
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut tx, user.user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
     let result = settle_receivable(&mut *tx, user.user_id, &item_id, settle_date)
         .await
         .map_err(db_error)?;
@@ -1050,27 +1111,27 @@ fn build_finance_task(item: &ItemRow) -> crate::tasks::CreateTaskRequest {
         format!("Pay {}", item.name)
     };
     let due = item.due_date.or(item.next_date).or(item.start_date);
-    let (recurrence_rule, recurrence_end_date) = if item.kind == "recurring" && item.end_date.is_some()
-    {
-        let unit = item
-            .frequency_unit
-            .as_deref()
-            .or(item.frequency.as_deref())
-            .unwrap_or("monthly");
-        let rule = match unit {
-            "day" => "FREQ=DAILY",
-            "week" | "weekly" => "FREQ=WEEKLY",
-            "year" | "yearly" => "FREQ=YEARLY",
-            "quarter" | "quarterly" => "FREQ=MONTHLY;INTERVAL=3",
-            _ => "FREQ=MONTHLY",
+    let (recurrence_rule, recurrence_end_date) =
+        if item.kind == "recurring" && item.end_date.is_some() {
+            let unit = item
+                .frequency_unit
+                .as_deref()
+                .or(item.frequency.as_deref())
+                .unwrap_or("monthly");
+            let rule = match unit {
+                "day" => "FREQ=DAILY",
+                "week" | "weekly" => "FREQ=WEEKLY",
+                "year" | "yearly" => "FREQ=YEARLY",
+                "quarter" | "quarterly" => "FREQ=MONTHLY;INTERVAL=3",
+                _ => "FREQ=MONTHLY",
+            };
+            (
+                Some(rule.to_string()),
+                item.end_date.map(|d| d.format("%Y-%m-%d").to_string()),
+            )
+        } else {
+            (None, None)
         };
-        (
-            Some(rule.to_string()),
-            item.end_date.map(|d| d.format("%Y-%m-%d").to_string()),
-        )
-    } else {
-        (None, None)
-    };
     crate::tasks::CreateTaskRequest {
         title,
         parent_task_id: None,
@@ -1106,7 +1167,9 @@ pub async fn svc_link_finance_task(
 ) -> Result<Value, ApiError> {
     let item = {
         let mut conn = state.pool.acquire().await.map_err(db_error)?;
-        db::set_rls_user(&mut conn, user_id, "").await.map_err(db_error)?;
+        db::set_rls_user(&mut conn, user_id, "")
+            .await
+            .map_err(db_error)?;
         fetch_item(&mut *conn, user_id, id)
             .await
             .map_err(db_error)?
@@ -1116,7 +1179,9 @@ pub async fn svc_link_finance_task(
     let task_id = match task_id {
         Some(tid) => {
             let mut conn = state.pool.acquire().await.map_err(db_error)?;
-            db::set_rls_user(&mut conn, user_id, "").await.map_err(db_error)?;
+            db::set_rls_user(&mut conn, user_id, "")
+                .await
+                .map_err(db_error)?;
             let owned: Option<Uuid> = sqlx::query_scalar(
                 "SELECT id FROM tasks WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
             )
@@ -1128,7 +1193,8 @@ pub async fn svc_link_finance_task(
             owned.ok_or_else(|| ApiError::NotFound("Task not found".to_string()))?
         }
         None => {
-            let created = crate::tasks::svc_create_task(state, user_id, build_finance_task(&item)).await?;
+            let created =
+                crate::tasks::svc_create_task(state, user_id, build_finance_task(&item)).await?;
             let created_id = created
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -1138,7 +1204,9 @@ pub async fn svc_link_finance_task(
     };
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut tx, user_id, "").await.map_err(db_error)?;
+    db::set_rls_user(&mut tx, user_id, "")
+        .await
+        .map_err(db_error)?;
     let row = sqlx::query_as::<_, ItemRow>(&format!(
         "UPDATE financial_items SET linked_task_id = $1 WHERE id = $2 AND user_id = $3 \
          RETURNING {ITEM_COLUMNS}"
@@ -1184,10 +1252,22 @@ pub fn router() -> Router<AppState> {
             "/api/finance/items/{item_id}",
             get(get_item).patch(update_item).delete(delete_item),
         )
-        .route("/api/finance/items/{item_id}/pay", axum::routing::post(pay_item))
-        .route("/api/finance/items/{item_id}/pay-off", axum::routing::post(pay_off))
-        .route("/api/finance/items/{item_id}/settle", axum::routing::post(settle_route))
-        .route("/api/finance/items/{item_id}/link-task", axum::routing::post(link_task))
+        .route(
+            "/api/finance/items/{item_id}/pay",
+            axum::routing::post(pay_item),
+        )
+        .route(
+            "/api/finance/items/{item_id}/pay-off",
+            axum::routing::post(pay_off),
+        )
+        .route(
+            "/api/finance/items/{item_id}/settle",
+            axum::routing::post(settle_route),
+        )
+        .route(
+            "/api/finance/items/{item_id}/link-task",
+            axum::routing::post(link_task),
+        )
         .route("/api/finance/receivables", get(list_receivables))
         .route("/api/finance/upcoming-income", get(list_upcoming_income))
         .route("/api/finance/debts", get(list_debts))
@@ -1265,7 +1345,10 @@ mod tests {
     #[test]
     fn one_off_items_do_not_advance() {
         let item = sample_item("one_off", Some("month"), Some(1));
-        assert_eq!(next_occurrence(&item, NaiveDate::from_ymd_opt(2026, 1, 10).unwrap()), None);
+        assert_eq!(
+            next_occurrence(&item, NaiveDate::from_ymd_opt(2026, 1, 10).unwrap()),
+            None
+        );
     }
 
     #[test]
@@ -1321,7 +1404,13 @@ mod tests {
         Some(AppState::lazy(settings))
     }
 
-    async fn call(app: &Router, method: &str, uri: &str, token: &str, body: Option<Value>) -> Response {
+    async fn call(
+        app: &Router,
+        method: &str,
+        uri: &str,
+        token: &str,
+        body: Option<Value>,
+    ) -> Response {
         let builder = Request::builder()
             .method(method)
             .uri(uri)
@@ -1348,12 +1437,9 @@ mod tests {
         let user = crate::user::create_email_user(&state.pool, &email, "not-a-real-hash", None)
             .await
             .unwrap();
-        let token = crate::jwt::encode_access(
-            &state.settings.jwt_secret_key,
-            &user.id.to_string(),
-            0,
-        )
-        .unwrap();
+        let token =
+            crate::jwt::encode_access(&state.settings.jwt_secret_key, &user.id.to_string(), 0)
+                .unwrap();
         (user.id, token)
     }
 
@@ -1453,7 +1539,8 @@ mod tests {
         assert_eq!(paid["recorded"], true);
         assert_eq!(paid["remaining_balance"], "300.00");
 
-        let txns = body_json(call(&app, "GET", "/api/finance/transactions", &token, None).await).await;
+        let txns =
+            body_json(call(&app, "GET", "/api/finance/transactions", &token, None).await).await;
         assert_eq!(txns.as_array().unwrap().len(), 1);
         let txn_id = txns[0]["id"].as_str().unwrap().to_string();
 
