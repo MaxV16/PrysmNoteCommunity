@@ -15,7 +15,6 @@ const HEX_ALLOW = new Set([
   "app/settings/page.tsx",
   "components/auth/OAuthButtons.tsx",
   "components/board/board-utils.ts",
-  "components/settings/ThemeImportExport.tsx",
   "components/settings/ThemeTokenImport.tsx",
   "components/sidebar/ThemeMenu.tsx",
   "ee/lib/risk-collector.ts",

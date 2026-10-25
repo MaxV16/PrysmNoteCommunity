@@ -222,6 +222,38 @@ function readMeta(
   return cleaned.slice(0, MAX_THEME_META_LENGTH);
 }
 
+const LEGACY_META_KEYS = new Set(["label", "extra", "name", "author", "version"]);
+
+/**
+ * Convert an old palette-shaped theme document into tokens.
+ *
+ * Returns null when the object is not a legacy palette (so the caller can keep
+ * reporting a helpful error), and null when it mixes palette keys with unknown
+ * fields, because that is more likely a typo than a theme.
+ */
+export function convertLegacyThemeDoc(
+  raw: Record<string, unknown>,
+): { vars: Record<string, string>; name?: string } | null {
+  const keys = Object.keys(raw);
+  if (!keys.some((key) => key in COLOR_KEY_TO_VAR)) return null;
+  if (keys.some((key) => !(key in COLOR_KEY_TO_VAR) && !LEGACY_META_KEYS.has(key))) return null;
+
+  const vars = themeColorsToVars(raw);
+  const extra = raw.extra;
+  if (isPlainObject(extra)) {
+    for (const [key, value] of Object.entries(extra)) {
+      if (typeof value === "string") vars[key] = value;
+    }
+  }
+  const name =
+    typeof raw.label === "string"
+      ? raw.label
+      : typeof raw.name === "string"
+        ? raw.name
+        : undefined;
+  return { vars, name };
+}
+
 /** Parse and validate a theme document. Never throws. */
 export function parseThemeDocument(text: string): ThemeParseResult {
   if (typeof text !== "string") return fail("Theme file must be text.");
@@ -270,13 +302,22 @@ export function parseThemeDocument(text: string): ThemeParseResult {
     meta.author = raw.author;
     meta.version = raw.version;
   } else {
-    // Bare token map. Every key must be a custom property, otherwise the user
-    // probably meant the wrapped shape and we say so instead of guessing.
-    const keys = Object.keys(raw);
-    if (keys.some((key) => !key.startsWith("--"))) {
-      return fail('Expected a "vars" object holding CSS custom properties such as "--accent".');
+    // Legacy palette export (the old ThemeImportExport dialog wrote
+    // `{ base, accent, ..., label, extra }`). Accept it so an older download
+    // still imports, then run the converted tokens through the same checks.
+    const legacy = convertLegacyThemeDoc(raw);
+    if (legacy) {
+      varsInput = legacy.vars;
+      meta.name = legacy.name;
+    } else {
+      // Bare token map. Every key must be a custom property, otherwise the user
+      // probably meant the wrapped shape and we say so instead of guessing.
+      const keys = Object.keys(raw);
+      if (keys.some((key) => !key.startsWith("--"))) {
+        return fail('Expected a "vars" object holding CSS custom properties such as "--accent".');
+      }
+      varsInput = raw;
     }
-    varsInput = raw;
   }
 
   const entries = Object.entries(varsInput);

@@ -22,7 +22,7 @@ import {
  * no CSS parser in the bundle: a theme is a flat JSON map of custom properties.
  * `KNOWN_CSS_VARS` in `src/lib/theme-vars.ts` is the source of truth for names.
  */
-export function ThemeTokenImport() {
+export function ThemeTokenImport({ variant = "full" }: { variant?: "full" | "menu" }) {
   const { themeName, customTheme, importCustomTheme } = useTheme();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
@@ -148,7 +148,21 @@ export function ThemeTokenImport() {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2">
+      {variant === "menu" ? (
+        <button
+          onClick={() => {
+            reset();
+            setOpen(true);
+          }}
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-secondary transition-colors hover:bg-hover hover:text-primary"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M12 3v12M12 15l-4-4M12 15l4-4M5 21h14" />
+          </svg>
+          Import theme…
+        </button>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={() => {
             reset();
@@ -170,7 +184,8 @@ export function ThemeTokenImport() {
           </svg>
           Export theme
         </button>
-      </div>
+        </div>
+      )}
 
       <Modal isOpen={open} onClose={() => { setOpen(false); reset(); }} title="Import theme tokens">
         <div className="space-y-4 pb-1">

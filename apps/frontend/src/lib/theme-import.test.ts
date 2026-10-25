@@ -278,3 +278,35 @@ describe("describeTheme + themeColorsToVars", () => {
     expect(Object.keys(vars)).toHaveLength(3);
   });
 });
+
+describe("legacy palette documents", () => {
+  it("imports a document exported by the old dialog", () => {
+    const result = parseThemeDocument(
+      JSON.stringify({
+        base: "#07070b",
+        surface: "#101018",
+        accent: "#6c5ce7",
+        label: "Old export",
+        extra: { "--radius-lg": "14px" },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.theme.name).toBe("Old export");
+    expect(result.theme.vars["--bg-base"]).toBe("#07070b");
+    expect(result.theme.vars["--accent"]).toBe("#6c5ce7");
+    expect(result.theme.vars["--radius-lg"]).toBe("14px");
+  });
+
+  it("still rejects a legacy-looking object with unknown fields", () => {
+    const result = parseThemeDocument(JSON.stringify({ base: "#07070b", nonsense: 1 }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("keeps the value grammar for legacy documents", () => {
+    const result = parseThemeDocument(
+      JSON.stringify({ base: "url(https://evil.test/x.png)" }),
+    );
+    expect(result.ok).toBe(false);
+  });
+});

@@ -10,7 +10,6 @@ import { useApiKeys } from "@/hooks/useApiKeys";
 import { useSubscription } from "@/hooks/use-subscription";
 import { TeamList } from "@/components/collaborate/TeamList";
 import { ImportPanel } from "@/components/import/ImportPanel";
-import { ThemeImportExport } from "@/components/settings/ThemeImportExport";
 import { ThemeTokenImport } from "@/components/settings/ThemeTokenImport";
 import { PasskeysSettings } from "@/components/settings/PasskeysSettings";
 import { FinanceSettings } from "@/components/finance/FinanceSettings";
@@ -1212,8 +1211,6 @@ export default function SettingsPage() {
               >
                 + Create Custom Theme
               </button>
-
-              <ThemeImportExport />
 
               <div className="space-y-2">
                 <h4 className="text-xs font-semibold text-secondary uppercase tracking-wider">Set any token</h4>

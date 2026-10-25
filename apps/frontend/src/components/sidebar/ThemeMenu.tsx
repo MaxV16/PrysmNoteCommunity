@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "@/lib/theme-context";
 import { THEMES, type ThemeName } from "@/types/theme";
-import { ThemeImportExport } from "@/components/settings/ThemeImportExport";
+import { ThemeTokenImport } from "@/components/settings/ThemeTokenImport";
 
 const APPEARANCE_THEMES: ThemeName[] = ["dark", "light", "slate", "dracula", "nord", "monokai", "coffee", "solarized", "github-dark", "tokyo", "ocean", "forest", "sunset"];
 
@@ -72,7 +72,7 @@ export function ThemeMenu() {
             })}
           </div>
           <div className="mt-1 border-t border-border pt-1">
-            <ThemeImportExport variant="menu" />
+            <ThemeTokenImport variant="menu" />
           </div>
         </div>
       )}
