@@ -445,6 +445,22 @@ fn parse_date_arg(value: Option<&str>) -> Option<NaiveDate> {
     parse_relative_date(raw, chrono::Utc::now().date_naive())
 }
 
+/// Normalise a `date_from`/`date_to` pair. A single bound means that one day
+/// ("what do I have tomorrow" often sends only `date_from`), reversed bounds
+/// are swapped, and a missing pair stays `(None, None)` so the caller can
+/// answer with a helpful error instead of a silently empty list.
+fn normalized_range(args: &Value) -> (Option<NaiveDate>, Option<NaiveDate>) {
+    let from = parse_date_arg(arg_str(args, "date_from"));
+    let to = parse_date_arg(arg_str(args, "date_to"));
+    match (from, to) {
+        (Some(a), Some(b)) if a <= b => (Some(a), Some(b)),
+        (Some(a), Some(b)) => (Some(b), Some(a)),
+        (Some(a), None) => (Some(a), Some(a)),
+        (None, Some(b)) => (Some(b), Some(b)),
+        (None, None) => (None, None),
+    }
+}
+
 /// Resolve "today", "tomorrow", a bare weekday ("friday", "next friday") and
 /// simple offsets ("in 3 days", "+3", "-2") relative to `today`.
 fn parse_relative_date(raw: &str, today: NaiveDate) -> Option<NaiveDate> {
@@ -1153,11 +1169,10 @@ async fn create_task_conflicts(
         "SELECT id, title, priority, start_date, due_date FROM tasks \
          WHERE user_id = $1 AND id <> $2 AND deleted_at IS NULL \
          AND status::text NOT IN ('done', 'cancelled') \
-         AND (start_date = $3 OR due_date = $4 \
-              OR (start_date <= $4 AND due_date >= $3) \
-              OR (start_date <= $4 AND due_date IS NULL) \
-              OR (due_date >= $3 AND start_date IS NULL)) \
-         ORDER BY priority ASC, start_date LIMIT 10",
+         AND (start_date IS NOT NULL OR due_date IS NOT NULL) \
+         AND COALESCE(start_date, due_date) <= $4 \
+         AND COALESCE(due_date, start_date) >= $3 \
+         ORDER BY priority ASC, COALESCE(start_date, due_date) LIMIT 10",
     )
     .bind(user_id)
     .bind(task_id)
@@ -1874,15 +1889,21 @@ async fn tool_link_tasks(state: &AppState, user_id: Uuid, args: &Value) -> ToolR
 }
 
 async fn tool_check_calendar(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
-    let date_from = parse_date_arg(arg_str(args, "date_from"));
-    let date_to = parse_date_arg(arg_str(args, "date_to"));
+    let (date_from, date_to) = normalized_range(args);
+    let Some((date_from, date_to)) = date_from.zip(date_to) else {
+        return ok_obj(json!({
+            "error": "A date is required",
+            "note": "Pass date_from and date_to as YYYY-MM-DD."
+        }));
+    };
     let mut tx = begin(state, user_id).await?;
     let rows = sqlx::query(
-        "SELECT start_date::text AS day, COUNT(*) AS count FROM tasks \
-         WHERE user_id = $1 AND deleted_at IS NULL AND start_date IS NOT NULL \
+        "SELECT COALESCE(start_date, due_date)::text AS day, COUNT(*) AS count FROM tasks \
+         WHERE user_id = $1 AND deleted_at IS NULL \
+         AND COALESCE(start_date, due_date) IS NOT NULL \
          AND status::text NOT IN ('done', 'cancelled') \
-         AND start_date >= $2 AND start_date <= $3 \
-         GROUP BY start_date ORDER BY start_date",
+         AND COALESCE(start_date, due_date) >= $2 AND COALESCE(start_date, due_date) <= $3 \
+         GROUP BY COALESCE(start_date, due_date) ORDER BY COALESCE(start_date, due_date)",
     )
     .bind(user_id)
     .bind(date_from)
@@ -1896,8 +1917,8 @@ async fn tool_check_calendar(state: &AppState, user_id: Uuid, args: &Value) -> T
         .map(|r| json!({ "date": r.get::<String, _>("day"), "count": r.get::<i64, _>("count") }))
         .collect();
     ok_obj(json!({
-        "date_from": date_from.map(|d| d.to_string()),
-        "date_to": date_to.map(|d| d.to_string()),
+        "date_from": date_from.to_string(),
+        "date_to": date_to.to_string(),
         "density": density,
     }))
 }
@@ -2074,8 +2095,15 @@ async fn tool_list_tasks_by_date_range(
     user_id: Uuid,
     args: &Value,
 ) -> ToolResult {
-    let date_from = parse_date_arg(arg_str(args, "date_from"));
-    let date_to = parse_date_arg(arg_str(args, "date_to"));
+    let (date_from, date_to) = normalized_range(args);
+    let Some((date_from, date_to)) = date_from.zip(date_to) else {
+        // No usable date used to mean "every comparison is NULL" and a silent
+        // empty list, which the model then narrated as "nothing scheduled".
+        return ok_obj(json!({
+            "error": "A date is required",
+            "note": "Pass date_from and date_to as YYYY-MM-DD (use the same date for a single day)."
+        }));
+    };
     let list_arg = arg_str(args, "list_id").and_then(safe_uuid_str);
 
     let mut tx = begin(state, user_id).await?;
@@ -2083,11 +2111,12 @@ async fn tool_list_tasks_by_date_range(
         "SELECT id, title, priority, status::text AS status, start_date, due_date, description \
          FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
          AND status::text NOT IN ('done', 'cancelled') \
+         AND (start_date IS NOT NULL OR due_date IS NOT NULL) \
          AND ((start_date >= $2 AND start_date <= $3) \
               OR (due_date >= $2 AND due_date <= $3) \
-              OR (start_date <= $2 AND due_date >= $3)) \
+              OR (COALESCE(start_date, due_date) <= $2 AND COALESCE(due_date, start_date) >= $3)) \
          AND ($4::uuid IS NULL OR list_id = $4) \
-         ORDER BY start_date",
+         ORDER BY COALESCE(start_date, due_date)",
     )
     .bind(user_id)
     .bind(date_from)
@@ -2113,14 +2142,8 @@ async fn tool_list_tasks_by_date_range(
         })
         .collect();
     let mut fields = Map::new();
-    fields.insert(
-        "date_from".to_string(),
-        date_from.map(|d| json!(d.to_string())).unwrap_or(Value::Null),
-    );
-    fields.insert(
-        "date_to".to_string(),
-        date_to.map(|d| json!(d.to_string())).unwrap_or(Value::Null),
-    );
+    fields.insert("date_from".to_string(), json!(date_from.to_string()));
+    fields.insert("date_to".to_string(), json!(date_to.to_string()));
     fields.insert("count".to_string(), json!(tasks.len()));
     ok1(bounded_list_payload(fields, "tasks", tasks, TOOL_LIST_BUDGET))
 }
@@ -3484,6 +3507,32 @@ mod tests {
         }
         assert_eq!(parse_relative_date("someday", today), None);
         assert_eq!(parse_relative_date("", today), None);
+    }
+
+    #[test]
+    #[test]
+    fn normalized_range_fills_a_single_bound_and_swaps_reversed_bounds() {
+        let args = |from: &str, to: &str| {
+            let mut map = Map::new();
+            if !from.is_empty() {
+                map.insert("date_from".to_string(), json!(from));
+            }
+            if !to.is_empty() {
+                map.insert("date_to".to_string(), json!(to));
+            }
+            Value::Object(map)
+        };
+        let one = NaiveDate::from_ymd_opt(2026, 10, 27).unwrap();
+        // Only date_from: the range is that single day, not "no rows" (a NULL
+        // comparison used to return an empty list for a one-date request).
+        assert_eq!(normalized_range(&args("2026-10-27", "")), (Some(one), Some(one)));
+        assert_eq!(normalized_range(&args("", "2026-10-27")), (Some(one), Some(one)));
+        let later = NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        assert_eq!(
+            normalized_range(&args("2026-10-30", "2026-10-27")),
+            (Some(one), Some(later))
+        );
+        assert_eq!(normalized_range(&args("", "")), (None, None));
     }
 
     #[test]
