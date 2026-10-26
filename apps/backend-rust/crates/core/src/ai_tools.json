@@ -158,7 +158,7 @@
     "type": "function",
     "function": {
       "name": "delete_task",
-      "description": "Move a task to the Trash (soft delete). Deleting is NOT permanent: the task sits in the Trash for 14 days (restore_task brings it back), then is purged automatically. ONLY call this after the user has EXPLICITLY confirmed deletion (e.g. 'yes delete it', 'go ahead', 'delete them'). When the user first asks to delete, DO NOT call this - reply listing exactly what you will delete and ask for confirmation. If the user said a task is 'done'/'completed'/'finished', use update_task with status='done' instead (never delete).",
+      "description": "Move a task to the Trash (soft delete). Deleting is NOT permanent: the task sits in the Trash for 14 days (restore_task brings it back), then is purged automatically. ONLY call this after the user has EXPLICITLY confirmed deletion (e.g. 'yes delete it', 'go ahead', 'delete them'). When the user first asks to delete, DO NOT call this - reply listing exactly what you will delete and ask for confirmation. If the user said a task is 'done'/'completed'/'finished', use update_task with status='done' instead (never delete). task_id accepts the task id OR the exact title. If several tasks share the title, the most recent one is used: this changes exactly ONE task per call, so never call it again to handle a namesake.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -345,7 +345,7 @@
     "type": "function",
     "function": {
       "name": "reschedule_task",
-      "description": "Reschedule a task to a new date/time with conflict checking",
+      "description": "Reschedule a task to a new date/time with conflict checking. Dates must be YYYY-MM-DD; copy them from the calendar in the system prompt for relative days. task_id accepts the task id OR the exact title. If several tasks share the title, the most recent one is used: this changes exactly ONE task per call, so never call it again to handle a namesake.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -753,7 +753,7 @@
     "type": "function",
     "function": {
       "name": "complete_task",
-      "description": "Mark a task as done/complete (sets status to done). Use this when the user says a task is done, finished, or completed. This is NOT a delete.",
+      "description": "Mark a task as done/complete (sets status to done). Use this when the user says a task is done, finished, or completed. This is NOT a delete. task_id accepts the task id OR the exact title. If several tasks share the title, the most recent one is used: this changes exactly ONE task per call, so never call it again to handle a namesake.",
       "parameters": {
         "type": "object",
         "properties": {

@@ -138,7 +138,8 @@ pub fn build_messages(
         "\nResolve weekdays from this table. If the user says \"Friday\" and today is Monday, Friday is the FIRST upcoming Friday in the table, never a Saturday.\n\
          DATE RULE: copy the exact date string from the table above for any relative day and pass it to the tool as YYYY-MM-DD. Never compute a weekday yourself and never pass the word \"friday\" as a date.\n\
          TASK RESOLUTION RULE: titles are matched case-insensitively and people type in lower case. When several tasks share a name, act on EXACTLY ONE: the most recent one unless the user names a date, list or other task detail that picks a different one. Call search_tasks only to choose between them, never mutate every match.\n\
-         TRUTHFULNESS RULE: the tool result is the only evidence of a change. If the result names a different title, date or count than the user meant, say what actually changed instead of claiming the original request succeeded.",
+         TRUTHFULNESS RULE: the tool result is the only evidence of a change. If the result names a different title, date or count than the user meant, say what actually changed instead of claiming the original request succeeded.\n\
+         ACTION RULE: \"push/move/reschedule/snooze/bump <task> to <day>\" is an edit, not a question. Call reschedule_task right away with the date from the table above. Do not answer it with a search of that day, and do not ask which task when only one matches the title. If the tool replies skipped or duplicate_title, say which single task changed.",
     );
     system.push_str(&calendar);
 
@@ -298,6 +299,8 @@ mod tests {
         assert!(system.contains("TASK RESOLUTION RULE"));
         assert!(system.contains("case-insensitive"));
         assert!(system.contains("TRUTHFULNESS RULE"));
+        assert!(system.contains("ACTION RULE"));
+        assert!(system.contains("reschedule_task"), "action rule must name the tool");
     }
 
     #[test]

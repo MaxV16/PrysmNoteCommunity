@@ -102,6 +102,11 @@ pub(crate) async fn execute_tool_calls_outcome(
     let mut results: Vec<Value> = Vec::new();
     let mut action_succeeded = false;
     let ee_names = crate::ai_tools::ee_tool_names();
+    // Titles this turn already changed. The model used to answer "mark dentist
+    // as done" by calling complete_task once per same-named task, so the user
+    // saw a second appointment silently completed. Guard is server side: a
+    // second mutation of the same title in one turn is refused, not executed.
+    let mut mutated_titles: Vec<String> = Vec::new();
 
     for tc in calls {
         let call_id = tc.get("id").cloned().unwrap_or(Value::Null);
@@ -136,14 +141,42 @@ pub(crate) async fn execute_tool_calls_outcome(
         };
 
         let resource = crate::ai_tools::mutation_resource(name);
-        // Core mutating tools are mapped precisely; EE mutating tools are not
-        // known to core, so an EE tool name counts as a write too. Read-only
-        // EE tools still publish a harmless generic refresh signal.
+        // Refuse a second change to the same title within one turn (see
+        // `mutated_titles`). Applies only to single-task mutation tools; batch
+        // tools and anything not title-addressable are untouched.
+        let mut guarded_title: Option<String> = None;
+        if matches!(name, "complete_task" | "delete_task") {
+            let raw = args
+                .get("task_id")
+                .or_else(|| args.get("task_title"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            if let Some(title) = peek_task_title(state, user_id, &raw).await {
+                if mutated_titles
+                    .iter()
+                    .any(|m| m.eq_ignore_ascii_case(&title))
+                {
+                    results.push(tool_message(
+                        call_id,
+                        Value::String(obj_str(&json!({
+                            "skipped": true,
+                            "duplicate_title": title,
+                            "note": "A task with this title was already changed in this request. Same-named tasks were left alone. Tell the user exactly which task was changed.",
+                        }))),
+                    ));
+                    continue;
+                }
+                guarded_title = Some(title);
+            }
+        }
         let is_write = resource.is_some() || ee_names.iter().any(|n| n == name);
         match dispatch(state, user_id, name, &args).await {
             Ok(payloads) => {
                 let committed = payloads.iter().any(|p| !payload_is_error(p));
                 if committed {
+                    if let Some(title) = guarded_title {
+                        mutated_titles.push(title);
+                    }
                     if let Some(res) = resource {
                         state.events.publish(user_id, res);
                     } else if is_write {
@@ -339,6 +372,27 @@ async fn begin(
     let mut tx = state.pool.begin().await.map_err(db_err)?;
     db::set_rls_user(&mut *tx, user_id, "").await.map_err(db_err)?;
     Ok(tx)
+}
+
+/// Which task would this argument mutate? Used to refuse a second change to a
+/// same-named task inside one turn, before anything is written.
+async fn peek_task_title(state: &AppState, user_id: Uuid, raw: &Value) -> Option<String> {
+    if raw.is_null() {
+        return None;
+    }
+    let mut tx = state.pool.begin().await.ok()?;
+    db::set_rls_user(&mut tx, user_id, "").await.ok()?;
+    let id = resolve_task_id(&mut tx, user_id, raw).await.ok()??;
+    let title = sqlx::query_scalar::<_, String>(
+        "SELECT title FROM tasks WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .ok()??;
+    let _ = tx.rollback().await;
+    Some(title)
 }
 
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
