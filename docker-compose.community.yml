@@ -1,0 +1,112 @@
+# Prysm Note, Community Edition (open core, AGPL-3.0).
+#
+# Self-host with the published images:
+#   docker compose -f docker-compose.community.yml up -d
+# then open http://localhost:3000
+#
+# This stack is the open-core build: tasks, notes, timeline, watchlist, habits,
+# countdowns and the assistant with your own AI key. The team and billing
+# features (finance dashboards, Slack, GitHub, calendar sync) are not part of it.
+#
+# Defaults below are DEV defaults so the stack boots with no .env. Before you
+# put this on a real domain, set at least JWT_SECRET_KEY, ENCRYPTION_KEY and the
+# database passwords, and set CORS_ORIGINS plus NEXT_PUBLIC_API_URL to your real
+# origin (NEXT_PUBLIC_API_URL is compiled into the frontend image, so it needs a
+# rebuild there, not just an env change).
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-prysm_note}
+      POSTGRES_USER: ${POSTGRES_USER:-prysm}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-prysmdev}
+      DB_APP_USER: ${DB_APP_USER:-prysm_app}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:-prysmappdev}
+      DB_SYSTEM_USER: ${DB_SYSTEM_USER:-prysm_system}
+      DB_SYSTEM_PASSWORD: ${DB_SYSTEM_PASSWORD:-prysmdevsys}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # No partial init.sql here on purpose: it pre-creates a handful of tables,
+      # which makes the server think the database is already provisioned and
+      # skips the full schema, leaving later migrations pointing at tables that
+      # were never created. A fresh database lets the server apply the complete
+      # embedded schema itself.
+      - ./docker/db/zz-init-roles.sh:/docker-entrypoint-initdb.d/zz-init-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-prysm} -d ${POSTGRES_DB:-prysm_note}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c work_mem=16MB
+      -c maintenance_work_mem=64MB
+      -c max_connections=30
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "1024M"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "256M"
+
+  backend:
+    image: ${IMAGE_NAMESPACE:-prysmnote}/prysm-note-backend:${PRYSM_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_APP_USER:-prysm_app}:${DB_APP_PASSWORD:-prysmappdev}@postgres:5432/${POSTGRES_DB:-prysm_note}
+      SYSTEM_DATABASE_URL: postgresql+asyncpg://${DB_SYSTEM_USER:-prysm_system}:${DB_SYSTEM_PASSWORD:-prysmdevsys}@postgres:5432/${POSTGRES_DB:-prysm_note}
+      REDIS_URL: redis://redis:6379/0
+      PORT: "8000"
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # DEV defaults: replace both before exposing this to the internet.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-community-edition-dev-jwt-secret-change-this-64-chars-minimum-000}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-HO4hRQYMRFDYdR0Jy6_HrFNbHFBan_DL1Gc3vUjTHGI=}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@localhost}
+    ports:
+      - "${API_HOST_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: "1024M"
+
+  frontend:
+    image: ${IMAGE_NAMESPACE:-prysmnote}/prysm-note-frontend:${PRYSM_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${WEB_HOST_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: "1536M"
+
+volumes:
+  postgres_data:

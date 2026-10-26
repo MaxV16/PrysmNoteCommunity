@@ -4,7 +4,30 @@ AI-powered task management with a 3-pane interface (sidebar, timeline, AI chat).
 
 ## Quick Start
 
-### Option 1: Docker (recommended)
+### Option 1: Docker from published images (Community Edition, fastest)
+
+The open-core build is published to Docker Hub on every release, so you can run it
+without cloning anything:
+
+```bash
+curl -O https://raw.githubusercontent.com/PrysmNoteCommunity/prysm-note/main/docker-compose.community.yml
+curl -O https://raw.githubusercontent.com/PrysmNoteCommunity/prysm-note/main/docker/db/init.sql
+curl -O https://raw.githubusercontent.com/PrysmNoteCommunity/prysm-note/main/docker/db/zz-init-roles.sh
+docker compose -f docker-compose.community.yml up -d
+# open http://localhost:3000
+```
+
+That stack is the open-core edition: tasks, notes, timeline, watchlist, habits,
+countdowns and the assistant with your own AI key (BYOK). The team and billing
+features (finance dashboards, Slack, GitHub, calendar sync) are not part of it.
+
+The defaults in that file are development defaults. Before exposing it to the
+internet, set `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, the database passwords,
+`CORS_ORIGINS` and `APP_ORIGIN`. `NEXT_PUBLIC_API_URL` is compiled into the
+frontend bundle, so changing the API origin needs the frontend image rebuilt with
+a matching `--build-arg`, not just an env change.
+
+### Option 2: Docker from source (this repo, dev stack)
 
 ```bash
 cp .env.example .env

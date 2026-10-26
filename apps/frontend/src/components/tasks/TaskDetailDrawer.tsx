@@ -1051,8 +1051,6 @@ const handleUpdate = async (data: {
         </div>
       )}
 
-      <ErrorBoundary label="GitHub">
-      </ErrorBoundary>
 
       {isBroadTask(task.title) && (
         <button

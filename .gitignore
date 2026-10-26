@@ -70,3 +70,4 @@ apps/frontend/.turbo/
 
 # deploy ssh key
 .deploy-ssh/
+.community-build/

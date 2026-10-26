@@ -129,6 +129,19 @@ pub(crate) fn resolve_chain(
         .map_err(|_| ApiError::Forbidden("PrysmAI is not available in your region.".to_string()))
 }
 
+/// Whether this deployment can serve the hosted `prysmai` provider at all.
+///
+/// The enterprise build owns billing and creates `ee_subscriptions` at boot; the
+/// open-core build never does. A missing subscription table therefore means
+/// "self-hosted, no hosted model", which is a different answer from "you are on
+/// the free tier" and must not be reported as a plan problem.
+async fn hosted_prysmai_configured(state: &AppState) -> bool {
+    sqlx::query_scalar::<_, bool>("SELECT to_regclass('public.ee_subscriptions') IS NOT NULL")
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or(false)
+}
+
 /// Resolve `(provider, api_key, chain)` for a chat request, mirroring Python
 /// `resolve_llm_key`. In the community build `prysmai` is always unavailable
 /// (no hosted entitlement) and BYOK is always allowed.
@@ -139,6 +152,16 @@ pub async fn resolve_llm_key(
     headers: &HeaderMap,
 ) -> Result<(String, String, Option<(String, Vec<String>)>), ApiError> {
     if provider == "prysmai" {
+        // The community build has no billing and therefore no subscription
+        // table at all. Saying "upgrade your plan" there is nonsense, so answer
+        // with the honest reason instead: this instance has no hosted provider.
+        if !hosted_prysmai_configured(state).await {
+            return Err(ApiError::ServiceUnavailable(
+                "PrysmAI is not available on this self-hosted instance. \
+Add your own API key in Settings to use the assistant."
+                    .to_string(),
+            ));
+        }
         let ent = ai_entitlement::check_allowance(&state.pool, user_id).await;
         if ent.mode != "prysmai" {
             return Err(ApiError::Forbidden(
