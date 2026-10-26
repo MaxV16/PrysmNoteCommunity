@@ -11,7 +11,7 @@
 //! workflow, OpenClaw) are registered elsewhere and are out of scope here.
 
 use axum::http::HeaderMap;
-use chrono::{Duration, NaiveDate, NaiveTime, Utc};
+use chrono::{Datelike, Duration, NaiveDate, NaiveTime, Utc};
 use serde_json::{json, Map, Value};
 use sqlx::{PgConnection, QueryBuilder, Row};
 use uuid::Uuid;
@@ -355,7 +355,81 @@ fn arg_i64(args: &Value, key: &str) -> Option<i64> {
 
 /// Parse a `YYYY-MM-DD` date argument, returning `None` on junk.
 fn parse_date_arg(value: Option<&str>) -> Option<NaiveDate> {
-    task::parse_date(value)
+    let raw = value?;
+    if let Some(parsed) = task::parse_date(Some(raw)) {
+        return Some(parsed);
+    }
+    // The model used to do its own weekday arithmetic ("Friday" landing on a
+    // Saturday) and to pass bare words like "friday" through as a date, which
+    // silently failed to parse and left the task untouched. Resolve the common
+    // human phrases here, server side, so the outcome never depends on the
+    // model counting days.
+    parse_relative_date(raw, chrono::Utc::now().date_naive())
+}
+
+/// Resolve "today", "tomorrow", a bare weekday ("friday", "next friday") and
+/// simple offsets ("in 3 days", "+3", "-2") relative to `today`.
+fn parse_relative_date(raw: &str, today: NaiveDate) -> Option<NaiveDate> {
+    let s = raw
+        .trim()
+        .to_lowercase()
+        .trim_end_matches('.')
+        .trim()
+        .to_string();
+    if s.is_empty() {
+        return None;
+    }
+    match s.as_str() {
+        "today" | "tonight" => return Some(today),
+        "tomorrow" | "tmrw" | "tmr" | "tomorow" => return Some(today + Duration::days(1)),
+        "yesterday" => return Some(today - Duration::days(1)),
+        "day after tomorrow" => return Some(today + Duration::days(2)),
+        _ => {}
+    }
+    if let Some(days) = parse_day_offset(&s) {
+        return Some(today + Duration::days(days));
+    }
+    let word = s
+        .strip_prefix("next ")
+        .or_else(|| s.strip_prefix("this "))
+        .or_else(|| s.strip_prefix("coming "))
+        .unwrap_or(&s)
+        .trim();
+    let target = match word {
+        "monday" | "mon" => chrono::Weekday::Mon,
+        "tuesday" | "tue" | "tues" => chrono::Weekday::Tue,
+        "wednesday" | "wed" => chrono::Weekday::Wed,
+        "thursday" | "thu" | "thur" | "thurs" => chrono::Weekday::Thu,
+        "friday" | "fri" => chrono::Weekday::Fri,
+        "saturday" | "sat" => chrono::Weekday::Sat,
+        "sunday" | "sun" => chrono::Weekday::Sun,
+        _ => return None,
+    };
+    // Upcoming occurrence, today included: "push it to Friday" on a Monday is
+    // this week's Friday. A negative distance means the day already passed, so
+    // take the next one.
+    let mut delta = (target.num_days_from_monday() as i64)
+        - (today.weekday().num_days_from_monday() as i64);
+    if delta < 0 {
+        delta += 7;
+    }
+    Some(today + Duration::days(delta))
+}
+
+/// "in 3 days", "+3", "-2", "3 days from now" -> day offset.
+fn parse_day_offset(s: &str) -> Option<i64> {
+    let stripped = s
+        .strip_prefix("in ")
+        .or_else(|| s.strip_prefix("after "))
+        .unwrap_or(s);
+    let stripped = stripped
+        .trim_end_matches(" from now")
+        .trim_end_matches(" from today")
+        .trim_end_matches(" days")
+        .trim_end_matches(" day")
+        .trim();
+    let numeric = stripped.strip_prefix('+').unwrap_or(stripped);
+    numeric.parse::<i64>().ok()
 }
 
 /// Tolerantly parse a clock time: "14:00", "14:00:00", "2pm" -> 14:00, "9" -> 09:00.
@@ -2598,10 +2672,10 @@ async fn tool_complete_task(state: &AppState, user_id: Uuid, args: &Value) -> To
     let exists = task::find_task(&mut *tx, task_id, user_id, false)
         .await
         .map_err(db_err)?;
-    if exists.is_none() {
+    let Some(mut target) = exists else {
         tx.rollback().await.ok();
         return ok_obj(json!({ "error": "Task not found" }));
-    }
+    };
     sqlx::query(
         "UPDATE tasks SET status = 'done'::task_status, completed_at = now(), \
          reminder_at = NULL, updated_at = now() \
@@ -2612,8 +2686,31 @@ async fn tool_complete_task(state: &AppState, user_id: Uuid, args: &Value) -> To
     .execute(&mut *tx)
     .await
     .map_err(db_err)?;
+    // Same-named siblings are the reason "mark dentist done" once completed two
+    // tasks: the model saw a list and acted on each. Report the exact task that
+    // changed and say the siblings were left alone.
+    let others: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
+         AND lower(title) = lower($2) AND id <> $3 AND status <> 'done'::task_status",
+    )
+    .bind(user_id)
+    .bind(&target.title)
+    .bind(task_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
-    ok_obj(json!({ "completed": true, "task_id": task_id.to_string(), "status": "done" }))
+    target.status = "done".to_string();
+    ok_obj(json!({
+        "completed": true,
+        "task_id": task_id.to_string(),
+        "title": target.title,
+        "start_date": target.start_date.map(|d| d.format("%Y-%m-%d").to_string()),
+        "due_date": target.due_date.map(|d| d.format("%Y-%m-%d").to_string()),
+        "status": "done",
+        "other_same_name_tasks": others,
+        "note": "Only this task was changed. Do not complete same-named tasks unless the user asks.",
+    }))
 }
 
 async fn tool_duplicate_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
@@ -3238,6 +3335,33 @@ mod tests {
     }
 
     #[test]
+    fn relative_dates_resolve_server_side_not_by_the_model() {
+        // 2026-10-26 is a Monday. "Friday" must be 2026-10-30, never a
+        // Saturday, because the model no longer does the arithmetic.
+        let today = NaiveDate::from_ymd_opt(2026, 10, 26).unwrap();
+        for (raw, expected) in [
+            ("friday", "2026-10-30"),
+            ("Friday", "2026-10-30"),
+            ("next friday", "2026-10-30"),
+            ("monday", "2026-10-26"),
+            ("tomorrow", "2026-10-27"),
+            ("tonight", "2026-10-26"),
+            ("yesterday", "2026-10-25"),
+            ("day after tomorrow", "2026-10-28"),
+            ("wednesday", "2026-10-28"),
+            ("in 3 days", "2026-10-29"),
+            ("+2", "2026-10-28"),
+            ("-1", "2026-10-25"),
+            ("3 days from now", "2026-10-29"),
+        ] {
+            let expected = NaiveDate::parse_from_str(expected, "%Y-%m-%d").unwrap();
+            assert_eq!(parse_relative_date(raw, today), Some(expected), "for {raw:?}");
+        }
+        assert_eq!(parse_relative_date("someday", today), None);
+        assert_eq!(parse_relative_date("", today), None);
+    }
+
+    #[test]
     fn parse_date_arg_accepts_iso_dates_and_datetimes() {
         for (raw, expected) in [
             ("2026-10-17", NaiveDate::from_ymd_opt(2026, 10, 17)),
@@ -3264,11 +3388,13 @@ mod tests {
             Some("2026-02-30"),
             Some("2025-02-29"),
             Some("17/10/2026"),
-            Some("tomorrow"),
+            Some("whenever"),
             None,
         ] {
             assert_eq!(parse_date_arg(bad), None, "expected rejection for {bad:?}");
         }
+        // Spoken days resolve now (see relative_dates_resolve_server_side...).
+        assert!(parse_date_arg(Some("tomorrow")).is_some());
     }
 
     #[test]
@@ -3836,15 +3962,26 @@ mod tests {
         );
         assert_eq!(req.start_date.as_deref(), Some("2026-10-03"));
         assert_eq!(req.start_time.as_deref(), Some("14:00:00"));
-        // Junk dates are dropped (like Python), never passed to the strict validator.
+        // Junk dates are dropped (like Python), never passed to the strict
+        // validator, while spoken days now resolve to a real date.
         let req = build_create_request(
-            &json!({ "title": "Testing", "start_date": "tomorrow", "start_time": "sometime" }),
+            &json!({ "title": "Testing", "start_date": "someday", "start_time": "sometime" }),
             "Testing",
             None,
             None,
         );
         assert_eq!(req.start_date, None);
         assert_eq!(req.start_time, None);
+        let req = build_create_request(
+            &json!({ "title": "Testing", "start_date": "tomorrow" }),
+            "Testing",
+            None,
+            None,
+        );
+        let tomorrow = (chrono::Utc::now().date_naive() + Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        assert_eq!(req.start_date.as_deref(), Some(tomorrow.as_str()));
         // No list named means no list_id: the service defaults to the main list.
         assert_eq!(req.list_id, None);
     }
