@@ -1260,8 +1260,20 @@ async fn tool_create_task(state: &AppState, user_id: Uuid, args: &Value) -> Tool
         "task": {
             "id": created.get("id").cloned().unwrap_or(Value::Null),
             "title": created.get("title").cloned().unwrap_or(Value::Null),
+            "start_date": created.get("start_date").cloned().unwrap_or(Value::Null),
+            "due_date": created.get("due_date").cloned().unwrap_or(Value::Null),
         },
     });
+    // A pre-formatted span the model can quote verbatim: it used to describe a
+    // 2026-10-27..2026-11-05 task as ending on November 4 after doing its own
+    // arithmetic. Counting the start day is the server's job.
+    if let (Some(start), Some(end)) = (ts, te) {
+        let days = (end - start).num_days() + 1;
+        created_payload["task"]["span"] =
+            json!(format!("{} to {} ({days} days)", start, end));
+        created_payload["task"]["end_date_note"] =
+            json!("due_date is the LAST day, inclusive; quote the span verbatim");
+    }
 
     if let (Some(tid), Some(ts)) = (task_id, ts) {
         let te = te.unwrap_or(ts);
