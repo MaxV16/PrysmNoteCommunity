@@ -1104,10 +1104,10 @@ fn build_create_request(
     // duration, so accept it explicitly and derive the end date here.
     let mut start_date = norm_date_arg(args, "start_date");
     let mut due_date = norm_date_arg(args, "due_date");
-    if let Some(days) = arg_i64(args, "duration_days")
-        .filter(|d| *d >= 1)
-        .filter(|_| due_date.is_none())
-    {
+    // The stated duration wins over a model-computed due_date: the model used
+    // to be off by one ("10 days" ending on day 9), and the user's period is
+    // the authoritative input.
+    if let Some(days) = arg_i64(args, "duration_days").filter(|d| *d >= 1) {
         let from = parse_date_arg(start_date.as_deref())
             .or_else(|| parse_date_arg(due_date.as_deref()))
             .unwrap_or_else(|| chrono::Utc::now().date_naive());
@@ -4097,14 +4097,15 @@ mod tests {
             None,
         );
         assert_eq!(req.due_date.as_deref(), Some("2026-10-27"));
-        // An explicit due_date wins over a duration, so nothing is overridden.
+        // The stated duration wins over a model-computed due_date: a model that
+        // is off by one must not shorten the period the user asked for.
         let req = build_create_request(
-            &json!({ "title": "Dentist", "start_date": "2026-10-27", "due_date": "2026-10-28", "duration_days": 10 }),
+            &json!({ "title": "Dentist", "start_date": "2026-10-27", "due_date": "2026-11-04", "duration_days": 10 }),
             "Dentist",
             None,
             None,
         );
-        assert_eq!(req.due_date.as_deref(), Some("2026-10-28"));
+        assert_eq!(req.due_date.as_deref(), Some("2026-11-05"));
     }
 
     #[test]
