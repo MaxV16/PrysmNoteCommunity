@@ -107,6 +107,10 @@ pub(crate) async fn execute_tool_calls_outcome(
     // saw a second appointment silently completed. Guard is server side: a
     // second mutation of the same title in one turn is refused, not executed.
     let mut mutated_titles: Vec<String> = Vec::new();
+    // Titles created in this turn. Asking for a task "for 10 days" used to emit
+    // the same title again on each day; a second create of a title that this
+    // same request already created is that mistake, so it is refused.
+    let mut created_titles: Vec<String> = Vec::new();
 
     for tc in calls {
         let call_id = tc.get("id").cloned().unwrap_or(Value::Null);
@@ -169,11 +173,31 @@ pub(crate) async fn execute_tool_calls_outcome(
                 guarded_title = Some(title);
             }
         }
+        if name == "create_task" {
+            let title = arg_str(&args, "title").unwrap_or("").trim().to_lowercase();
+            if !title.is_empty() && created_titles.iter().any(|t| *t == title) {
+                results.push(tool_message(
+                    call_id,
+                    Value::String(obj_str(&json!({
+                        "skipped": true,
+                        "duplicate_title": arg_str(&args, "title").unwrap_or(""),
+                        "note": "This title was already created in this request. A duration or a period belongs on ONE task (start_date plus due_date, or duration_days); do not create one task per day. Tell the user the single task you created and the dates it spans.",
+                    }))),
+                ));
+                continue;
+            }
+        }
         let is_write = resource.is_some() || ee_names.iter().any(|n| n == name);
         match dispatch(state, user_id, name, &args).await {
             Ok(payloads) => {
                 let committed = payloads.iter().any(|p| !payload_is_error(p));
                 if committed {
+                    if name == "create_task" {
+                        let title = arg_str(&args, "title").unwrap_or("").trim().to_lowercase();
+                        if !title.is_empty() {
+                            created_titles.push(title);
+                        }
+                    }
                     if let Some(title) = guarded_title {
                         mutated_titles.push(title);
                     }
@@ -1075,6 +1099,23 @@ fn build_create_request(
     resolved_list: Option<Uuid>,
 ) -> tasks::CreateTaskRequest {
     let priority = forced_priority.or_else(|| arg_i64(args, "priority")).unwrap_or(2);
+    // "make it last 10 days" is ONE task spanning a period, not ten tasks. The
+    // model used to emit a task per day because the schema had no way to say a
+    // duration, so accept it explicitly and derive the end date here.
+    let mut start_date = norm_date_arg(args, "start_date");
+    let mut due_date = norm_date_arg(args, "due_date");
+    if let Some(days) = arg_i64(args, "duration_days")
+        .filter(|d| *d >= 1)
+        .filter(|_| due_date.is_none())
+    {
+        let from = parse_date_arg(start_date.as_deref())
+            .or_else(|| parse_date_arg(due_date.as_deref()))
+            .unwrap_or_else(|| chrono::Utc::now().date_naive());
+        let span = (days - 1).min(3650);
+        let end = from + chrono::Duration::days(span);
+        start_date = Some(from.format("%Y-%m-%d").to_string());
+        due_date = Some(end.format("%Y-%m-%d").to_string());
+    }
     tasks::CreateTaskRequest {
         title: title.to_string(),
         parent_task_id: None,
@@ -1082,8 +1123,8 @@ fn build_create_request(
         description: arg_str(args, "description").map(|s| s.to_string()),
         status: "backlog".to_string(),
         priority: task::normalize_priority(Some(priority)) as i64,
-        start_date: norm_date_arg(args, "start_date"),
-        due_date: norm_date_arg(args, "due_date"),
+        start_date,
+        due_date,
         start_time: norm_time_arg(args, "start_time"),
         end_time: norm_time_arg(args, "end_time"),
         recurrence_rule: arg_str(args, "recurrence_rule").map(|s| s.to_string()),
@@ -2177,6 +2218,21 @@ async fn tool_batch_create_tasks(state: &AppState, user_id: Uuid, args: &Value) 
     if batch.len() > 50 {
         return ok_obj(json!({ "error": "Too many tasks in one batch (max 50)" }));
     }
+    // A duration ("make it last 10 days") was once turned into ten tasks, one
+    // per day. Three or more entries sharing a title is that pattern, never an
+    // intended batch, so keep the first and report the collapse.
+    let mut title_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for item in &batch {
+        let t = item
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Untitled")
+            .trim()
+            .to_lowercase();
+        *title_counts.entry(t).or_insert(0) += 1;
+    }
+    let mut collapsed: Vec<String> = Vec::new();
+    let mut seen_repeated: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut created: Vec<Value> = Vec::new();
     for item in &batch {
         let raw_title = item
@@ -2187,6 +2243,13 @@ async fn tool_batch_create_tasks(state: &AppState, user_id: Uuid, args: &Value) 
         if title.is_empty() {
             title = "Untitled".to_string();
         }
+        let key = title.to_lowercase();
+        if title_counts.get(&key).copied().unwrap_or(0) >= 3 {
+            if !seen_repeated.insert(key.clone()) {
+                collapsed.push(title.clone());
+                continue;
+            }
+        }
         let resolved_list = resolve_create_list(state, user_id, item).await?;
         let req = build_create_request(item, &title, None, resolved_list);
         let value = tasks::svc_create_task(state, user_id, req).await?;
@@ -2195,7 +2258,15 @@ async fn tool_batch_create_tasks(state: &AppState, user_id: Uuid, args: &Value) 
             "title": value.get("title").cloned().unwrap_or(Value::Null),
         }));
     }
-    ok_obj(json!({ "created_count": created.len(), "tasks": created }))
+    if collapsed.is_empty() {
+        return ok_obj(json!({ "created_count": created.len(), "tasks": created }));
+    }
+    ok_obj(json!({
+        "created_count": created.len(),
+        "tasks": created,
+        "collapsed_duplicates": collapsed.len(),
+        "note": "Repeated identical titles were collapsed into one task. A duration is a single task with a due_date, not one task per day.",
+    }))
 }
 
 async fn tool_add_event(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
@@ -4003,6 +4074,37 @@ mod tests {
         assert!(!payload_is_error("{\"created\":true}"));
         // Non-JSON (the "Invalid arguments" fallback) counts as a failure.
         assert!(payload_is_error("Invalid arguments"));
+    }
+
+    #[test]
+    #[test]
+    fn duration_days_makes_one_spanning_task() {
+        // "make the dentist appointment last like 10 days" became ten tasks,
+        // one per day. It is one task from the start date to start + 9.
+        let req = build_create_request(
+            &json!({ "title": "Dentist", "start_date": "2026-10-27", "duration_days": 10 }),
+            "Dentist",
+            None,
+            None,
+        );
+        assert_eq!(req.start_date.as_deref(), Some("2026-10-27"));
+        assert_eq!(req.due_date.as_deref(), Some("2026-11-05"));
+        // A one day duration is just that day, never a zero-width or negative span.
+        let req = build_create_request(
+            &json!({ "title": "Dentist", "start_date": "2026-10-27", "duration_days": 1 }),
+            "Dentist",
+            None,
+            None,
+        );
+        assert_eq!(req.due_date.as_deref(), Some("2026-10-27"));
+        // An explicit due_date wins over a duration, so nothing is overridden.
+        let req = build_create_request(
+            &json!({ "title": "Dentist", "start_date": "2026-10-27", "due_date": "2026-10-28", "duration_days": 10 }),
+            "Dentist",
+            None,
+            None,
+        );
+        assert_eq!(req.due_date.as_deref(), Some("2026-10-28"));
     }
 
     #[test]

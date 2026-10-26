@@ -123,6 +123,11 @@
           "reminder_email": {
             "type": "boolean",
             "description": "also email the reminder (honours the user's email reminders setting)"
+          },
+          "duration_days": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How many days the task spans, when the user says it lasts a period (\"for 10 days\", \"lasts a week\", \"a 3 day trip\"). ONE task with due_date = start_date + duration_days - 1. NEVER create one task per day, and never use recurrence_rule for a duration."
           }
         },
         "required": [

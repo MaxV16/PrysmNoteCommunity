@@ -141,7 +141,8 @@ pub fn build_messages(
          TRUTHFULNESS RULE: the tool result is the only evidence of a change. If the result names a different title, date or count than the user meant, say what actually changed instead of claiming the original request succeeded.\n\
          ACTION RULE: \"push/move/reschedule/snooze/bump <task> to <day>\" is an edit, not a question. Call reschedule_task right away with the date from the table above. Do not answer it with a search of that day, and do not ask which task when only one matches the title. If the tool replies skipped or duplicate_title, say which single task changed.\n\
          GROUNDING RULE: only a tool result from THIS turn may be used to say a task exists, or that it is on a particular date or time. Conversation history and memory are not evidence about current tasks. A search hit on a different date is NOT proof of the date the user mentioned.\n\
-         CREATE-FROM-STATEMENT RULE: when the user states a plan for themselves (\"I have a dentist appointment tomorrow at 9am\", \"lunch with Sam on Friday at 1\"), that is a request to add it. Call create_task with that exact title, date and time. Only reply \"you already have it\" when a tool result in this turn shows a task with that same title on that SAME date and time; a same-named task on another day is a different appointment, so create the new one.",
+         CREATE-FROM-STATEMENT RULE: when the user states a plan for themselves (\"I have a dentist appointment tomorrow at 9am\", \"lunch with Sam on Friday at 1\"), that is a request to add it. Call create_task with that exact title, date and time. Only reply \"you already have it\" when a tool result in this turn shows a task with that same title on that SAME date and time; a same-named task on another day is a different appointment, so create the new one.\n\
+         DURATION RULE: a period is ONE task, never one task per day. \"make it last 10 days\", \"for a week\", \"a 3 day trip\", \"from Monday to Friday\" all become a single create_task with start_date and either duration_days (10) or the computed due_date (start + days - 1). Never call batch_create_tasks to spread a duration across days, and never use recurrence_rule for a duration; recurrence is only for \"every Monday\" style repeats.",
     );
     system.push_str(&calendar);
 
@@ -306,6 +307,9 @@ mod tests {
         assert!(system.contains("GROUNDING RULE"));
         assert!(system.contains("tool result from THIS turn"));
         assert!(system.contains("CREATE-FROM-STATEMENT RULE"));
+        // "make it last 10 days" must be one spanning task, not ten tasks.
+        assert!(system.contains("DURATION RULE"));
+        assert!(system.contains("never one task per day"));
         assert!(system.contains("ACTION RULE"));
         assert!(system.contains("reschedule_task"), "action rule must name the tool");
     }
