@@ -374,6 +374,9 @@ pub async fn search_tasks(
     let trgm_access = access_condition(2);
     let trgm_sql = format!(
         "SELECT {COLUMNS}, GREATEST( \
+             CASE WHEN lower(title) = $1 THEN 1.0 \
+                  WHEN lower(title) LIKE ('%' || $1 || '%') THEN 0.9 \
+                  ELSE 0 END, \
              similarity(lower(title), $1), \
              similarity(lower(coalesce(description, '')), $1), \
              COALESCE((SELECT MAX(similarity(lower(tg.name), $1)) FROM task_tags tt \
@@ -385,7 +388,7 @@ pub async fn search_tasks(
              OR id IN (SELECT tt.task_id FROM task_tags tt JOIN tags tg ON tg.id = tt.tag_id \
                  WHERE lower(tg.name) % $1) \
          ) \
-         ORDER BY rank DESC LIMIT $3"
+         ORDER BY rank DESC, created_at DESC LIMIT $3"
     );
     let trgm = sqlx::query(&trgm_sql)
         .bind(&q_lower)

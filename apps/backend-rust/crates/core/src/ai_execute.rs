@@ -434,11 +434,14 @@ async fn resolve_task_id(
     };
     // Prefer a top-level task over a subtask with the same title: moving or
     // completing a subtask when the user meant the parent looks like nothing
-    // happened in the main list.
+    // happened in the main list. Within that, prefer the exact same spelling
+    // and then the NEWEST task: people say "dentist" for the appointment they
+    // just created, and resolving to a months-old namesake made every later
+    // edit land on a task the user was not looking at.
     let exact = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
          AND parent_task_id IS NULL AND lower(title) = lower($2) \
-         ORDER BY updated_at DESC NULLS LAST LIMIT 1",
+         ORDER BY (title = $2) DESC, created_at DESC LIMIT 1",
     )
     .bind(user_id)
     .bind(title)
@@ -450,7 +453,7 @@ async fn resolve_task_id(
     }
     let exact = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
-         AND lower(title) = lower($2) ORDER BY updated_at DESC NULLS LAST LIMIT 1",
+         AND lower(title) = lower($2) ORDER BY (title = $2) DESC, created_at DESC LIMIT 1",
     )
     .bind(user_id)
     .bind(title)
@@ -459,6 +462,22 @@ async fn resolve_task_id(
     .map_err(db_err)?;
     if exact.is_some() {
         return Ok(exact);
+    }
+    // Partial title ("dentist" for "Dentist appointment"): newest title match
+    // beats a fuzzy description match, which is how "delete dentist" used to
+    // delete an unrelated older row.
+    let partial = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
+         AND parent_task_id IS NULL AND title ILIKE $2 \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(format!("%{}%", title))
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(db_err)?;
+    if partial.is_some() {
+        return Ok(partial);
     }
     let hits = task::search_tasks(&mut *conn, user_id, title, 1)
         .await

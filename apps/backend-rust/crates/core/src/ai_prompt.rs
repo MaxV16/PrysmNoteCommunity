@@ -106,9 +106,40 @@ pub fn build_messages(
     memories: Option<&[String]>,
     include_finance: bool,
 ) -> Vec<Value> {
-    let today = chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string();
+    let today_date = chrono::Utc::now().date_naive();
+    let today = format!(
+        "{} ({})",
+        today_date.format("%Y-%m-%d"),
+        today_date.format("%A")
+    );
 
     let mut system = ai_prompts::SYSTEM_HEADER.replace("@@TODAY@@", &today);
+    // Weekday maths is the single most common way a model gets a date wrong
+    // ("push it to Friday" landing on a Saturday), so hand it the calendar
+    // instead of asking it to count.
+    let mut calendar = String::from(
+        "\n\nNEXT 14 DAYS (date = weekday), use these EXACT dates for relative days:",
+    );
+    for offset in 0..14 {
+        let day = today_date + chrono::Duration::days(offset);
+        let label = match offset {
+            0 => " (today)",
+            1 => " (tomorrow)",
+            _ => "",
+        };
+        calendar.push_str(&format!(
+            "\n- {} = {}{}",
+            day.format("%A"),
+            day.format("%Y-%m-%d"),
+            label
+        ));
+    }
+    calendar.push_str(
+        "\nResolve weekdays from this table. If the user says \"Friday\" and today is Monday, Friday is the FIRST upcoming Friday in the table, never a Saturday.\n\
+         TASK RESOLUTION RULE: titles are matched case-insensitively and people type in lower case. When more than one task shares a name, call search_tasks first and pick the one whose date/list matches what the user is talking about, then pass that task's id to the mutation tool. Never guess between same-named tasks.\n\
+         TRUTHFULNESS RULE: the tool result is the only evidence of a change. If the result names a different title or date than the user meant, say what actually changed and ask whether that was intended instead of claiming the original request succeeded.",
+    );
+    system.push_str(&calendar);
 
     if include_finance {
         system.push_str("\n\n");
@@ -243,6 +274,29 @@ mod tests {
         let messages = build_messages(&[], "hi", None, None, None, true);
         let system = messages[0]["content"].as_str().unwrap();
         assert!(system.contains("MONEY RULE"));
+    }
+
+    #[test]
+    fn system_prompt_carries_weekday_calendar_and_resolution_rules() {
+        // "push it to Friday" landed on a Saturday because the model had to
+        // count weekdays itself, and same-named tasks were edited by guess.
+        let messages = build_messages(&[], "push dentist to friday", None, None, None, false);
+        let system = messages[0]["content"].as_str().unwrap();
+        assert!(system.contains("NEXT 14 DAYS"));
+        let today = chrono::Utc::now().date_naive();
+        assert!(system.contains(&today.format("%Y-%m-%d").to_string()));
+        // Three consecutive days must be listed with their weekday names.
+        for offset in 0..3 {
+            let day = today + chrono::Duration::days(offset);
+            assert!(
+                system.contains(&format!("{} = {}", day.format("%A"), day.format("%Y-%m-%d"))),
+                "calendar is missing day +{}",
+                offset
+            );
+        }
+        assert!(system.contains("TASK RESOLUTION RULE"));
+        assert!(system.contains("case-insensitive"));
+        assert!(system.contains("TRUTHFULNESS RULE"));
     }
 
     #[test]

@@ -178,10 +178,14 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
     return () => window.removeEventListener("prysm-ai-suggest", handler);
   }, [sendMessage, provider]);
 
-  const handleNewChat = async () => {
-    await newChat();
+  const handleNewChat = () => {
+    // Clear the transcript and close the history drawer FIRST: a slow or
+    // failing `newChat()` used to leave the old conversation (and the drawer)
+    // on screen, which reads as an unresponsive button.
     saveMessages([]);
     setCurrentSessionId(null);
+    setHistoryOpen(false);
+    void Promise.resolve(newChat()).catch(() => {});
   };
 
   const handleClearCurrent = async () => {
