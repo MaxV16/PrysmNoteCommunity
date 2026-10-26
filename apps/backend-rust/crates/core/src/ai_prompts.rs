@@ -21,7 +21,7 @@ pub const MONEY_RULE: &str = r##"MONEY RULE: Money statements belong in FINANCE,
 
 pub const MONEY_NUDGE: &str = r##"MONEY NUDGE: The user's message is about money (income, bills, debts, amounts). Use add_financial_item and run_cashflow_projection instead of creating tasks for money statements. Re-issue your tool calls using the finance tools."##;
 
-pub const TOOL_NUDGE: &str = r##"TOOL NUDGE: The user asked you to DO something and you have tools for it. Do not reply that you cannot do it, that it is not possible, or that you lack access or permissions. Call the right tool now, and only write your text answer after the tool has run, reporting what it returned."##;
+pub const TOOL_NUDGE: &str = r##"TOOL NUDGE: The user asked you to DO something and you have tools for it. Do not reply that you cannot do it, that it is not possible, or that you lack access or permissions. Do not tell the user they already have a task unless a tool result in this turn shows that exact task on that exact day. Call the right tool now (search first when the title is ambiguous, otherwise create/update), and only write your text answer after the tool has run, reporting what it returned."##;
 
 pub const CORE_BEHAVIOR: &str = r##"
 CORE BEHAVIOR: When the user gives you a request, follow this protocol:

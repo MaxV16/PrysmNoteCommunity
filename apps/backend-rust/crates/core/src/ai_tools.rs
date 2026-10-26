@@ -228,6 +228,32 @@ fn action_keywords() -> &'static Regex {
     })
 }
 
+/// The user stating their own plan with a day or time ("I have a dentist
+/// appointment tomorrow at 9am", "lunch with Sam on Friday at 1"). This is an
+/// implicit add, not a question.
+fn stated_plan_pattern() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(
+            r"(?i)\b(?:(?:i (?:have|'?ve got|got|need|booked|am having|'?m having)|there(?:'s| is))|(?:lunch|dinner|breakfast|meeting|call|appointment|coffee|drinks|flight|trip|class|exam|interview))\b.{0,60}\b(?:today|tonight|tomorrow|(?:next |this )?(?:mon|tues|wednes|thurs|fri|satur|sun)day|at \d{1,2}(?::\d{2})?\s*(?:am|pm)?|\d{1,2}(?::\d{2})?\s*(?:am|pm))\b",
+        )
+        .expect("valid stated plan regex")
+    })
+}
+
+/// The reply asserts a task already exists. Fine only when a tool result backs
+/// it up, which `needs_tool_retry` cannot see, so it is used only together with
+/// `stated_plan_pattern` and no tool round.
+fn claims_existing_schedule() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(
+            r"(?i)(you (?:already )?have|you'?ve got|you already scheduled|it'?s already|already (?:scheduled|on your|in your)|is scheduled for|(?:task|appointment|event) (?:is|was) already)",
+        )
+        .expect("valid existing schedule regex")
+    })
+}
+
 /// Verbs that ask for a persisted change. Read-only requests ("what do I have
 /// tomorrow", "find my task") intentionally do not match, so a legitimate
 /// search summary can never be replaced by the honest-failure fallback.
@@ -358,6 +384,14 @@ pub fn needs_tool_retry(content: &str, user_message: &str) -> bool {
     if question_only_start().is_match(user_message) && !user_message.contains('$') {
         return false;
     }
+    // "I have a dentist appointment tomorrow at 9am" is a request to add it.
+    // Answering "you already have it" without a tool round is the stale-memory
+    // failure the user reported, where the reply described a task that was not
+    // on the timeline at all. Questions are handled above, so a genuine "what
+    // do I have tomorrow" answer is never retried.
+    if stated_plan_pattern().is_match(user_message) && claims_existing_schedule().is_match(content) {
+        return true;
+    }
     action_keywords().is_match(user_message)
 }
 
@@ -438,6 +472,31 @@ mod tests {
         assert!(!needs_tool_retry(
             "It is sunny today",
             "what is the weather"
+        ));
+    }
+
+    #[test]
+    fn stated_plan_answered_with_an_existing_task_forces_a_retry() {
+        // The reported failure: "I have a dentist appointment tomorrow at 9am"
+        // answered with "you already have ... tomorrow at 9:00AM" while no such
+        // task existed on that day. Without a tool round the reply is a guess
+        // from memory, so it must be retried with the tools available.
+        assert!(needs_tool_retry(
+            "I see that you already have a dentist appointment scheduled for tomorrow at 9:00AM.",
+            "I have a dentist appointment tomorrow at 9am."
+        ));
+        assert!(needs_tool_retry(
+            "It's already on your calendar for Friday at 1pm.",
+            "lunch with Sam on friday at 1pm"
+        ));
+        // Genuine questions and unrelated statements must never be retried.
+        assert!(!needs_tool_retry(
+            "You have 3 tasks due today.",
+            "what do i have today"
+        ));
+        assert!(!needs_tool_retry(
+            "Noted, I will keep that in mind.",
+            "I have been tired lately"
         ));
     }
 

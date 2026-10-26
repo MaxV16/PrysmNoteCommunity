@@ -139,7 +139,9 @@ pub fn build_messages(
          DATE RULE: copy the exact date string from the table above for any relative day and pass it to the tool as YYYY-MM-DD. Never compute a weekday yourself and never pass the word \"friday\" as a date.\n\
          TASK RESOLUTION RULE: titles are matched case-insensitively and people type in lower case. When several tasks share a name, act on EXACTLY ONE: the most recent one unless the user names a date, list or other task detail that picks a different one. Call search_tasks only to choose between them, never mutate every match.\n\
          TRUTHFULNESS RULE: the tool result is the only evidence of a change. If the result names a different title, date or count than the user meant, say what actually changed instead of claiming the original request succeeded.\n\
-         ACTION RULE: \"push/move/reschedule/snooze/bump <task> to <day>\" is an edit, not a question. Call reschedule_task right away with the date from the table above. Do not answer it with a search of that day, and do not ask which task when only one matches the title. If the tool replies skipped or duplicate_title, say which single task changed.",
+         ACTION RULE: \"push/move/reschedule/snooze/bump <task> to <day>\" is an edit, not a question. Call reschedule_task right away with the date from the table above. Do not answer it with a search of that day, and do not ask which task when only one matches the title. If the tool replies skipped or duplicate_title, say which single task changed.\n\
+         GROUNDING RULE: only a tool result from THIS turn may be used to say a task exists, or that it is on a particular date or time. Conversation history and memory are not evidence about current tasks. A search hit on a different date is NOT proof of the date the user mentioned.\n\
+         CREATE-FROM-STATEMENT RULE: when the user states a plan for themselves (\"I have a dentist appointment tomorrow at 9am\", \"lunch with Sam on Friday at 1\"), that is a request to add it. Call create_task with that exact title, date and time. Only reply \"you already have it\" when a tool result in this turn shows a task with that same title on that SAME date and time; a same-named task on another day is a different appointment, so create the new one.",
     );
     system.push_str(&calendar);
 
@@ -299,6 +301,11 @@ mod tests {
         assert!(system.contains("TASK RESOLUTION RULE"));
         assert!(system.contains("case-insensitive"));
         assert!(system.contains("TRUTHFULNESS RULE"));
+        // Regressions: the model claimed an existing appointment on a day with
+        // no task, and answered a stated plan without writing anything.
+        assert!(system.contains("GROUNDING RULE"));
+        assert!(system.contains("tool result from THIS turn"));
+        assert!(system.contains("CREATE-FROM-STATEMENT RULE"));
         assert!(system.contains("ACTION RULE"));
         assert!(system.contains("reschedule_task"), "action rule must name the tool");
     }
