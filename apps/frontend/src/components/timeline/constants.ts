@@ -1,5 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useUiScale } from "@/lib/ui-scale-context";
+import {
+  contentZoomScale,
+  getTimelineZoom,
+  subscribeTimelineZoom,
+} from "@/lib/view-zoom";
 
 export const DAY_WIDTH = 120;
 export const DAY_HEADER_HEIGHT = 56;
@@ -72,6 +77,12 @@ export interface TimelineMetrics {
   barHeight: number;
   barGap: number;
   topPadding: number;
+  /**
+   * Task label font size in px. Zooming the timeline column without zooming the
+   * label is the "the UI scales but the tasks do not" bug, so the label reads
+   * the same metrics as the bar it sits in.
+   */
+  labelPx: number;
 }
 
 /**
@@ -82,12 +93,17 @@ export interface TimelineMetrics {
  */
 export function useTimelineMetrics(): TimelineMetrics {
   const { scale } = useUiScale();
+  const zoom = useSyncExternalStore(subscribeTimelineZoom, getTimelineZoom, () => 1);
+  // View zoom and the UI scale both grow the content. Damping the zoom keeps a
+  // 200% column from turning every title into one enormous word.
+  const z = contentZoomScale(zoom);
   return useMemo(
     () => ({
-      barHeight: Math.max(24, Math.round(BAR_HEIGHT * scale)),
-      barGap: Math.max(4, Math.round(BAR_GAP * scale)),
-      topPadding: Math.max(2, Math.round(TOP_PADDING * scale)),
+      barHeight: Math.max(24, Math.round(BAR_HEIGHT * scale * z)),
+      barGap: Math.max(4, Math.round(BAR_GAP * scale * z)),
+      topPadding: Math.max(2, Math.round(TOP_PADDING * scale * z)),
+      labelPx: Math.max(10, Math.min(22, Math.round(10 * scale * z))),
     }),
-    [scale]
+    [scale, z]
   );
 }

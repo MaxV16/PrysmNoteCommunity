@@ -119,3 +119,47 @@ export const CALENDAR_ZOOM_LEVELS = [0.8, 0.9, 1, 1.1, 1.25, 1.4] as const;
 
 /** Board/kanban card density, expressed through the column minimum width. */
 export const BOARD_ZOOM_LEVELS = [0.75, 0.85, 1, 1.15, 1.3, 1.5] as const;
+
+/**
+ * How much the timeline CONTENT (bar heights, label text) grows with the view
+ * zoom.
+ *
+ * Zoom used to widen the day columns only, so at 200% you got enormous columns
+ * with 10px task titles and 40px bars crammed at the left edge of each one. The
+ * content has to grow too, but not by the full factor: a 6x column zoom with 6x
+ * text would show one word per screen. The result is damped and capped, which
+ * keeps a wide zoom useful for reading titles instead of making them enormous.
+ */
+export function contentZoomScale(zoom: number): number {
+  const z = Number.isFinite(zoom) ? Math.min(Math.max(zoom, 0.5), 6) : 1;
+  if (z < 1) return Math.max(0.85, z);
+  return Math.min(1.85, 1 + (z - 1) * 0.42);
+}
+
+/**
+ * The zoom the timeline is currently rendered at, published as a module-level
+ * store so the lane layout, the bars and the task labels can all read the same
+ * number without threading a prop through every memoized component. Rendering
+ * two different values here is what makes rows overlap, so there is exactly one
+ * reader helper (`useTimelineZoom`) and one writer (`setTimelineZoom`).
+ */
+let currentTimelineZoom = 1;
+const timelineZoomListeners = new Set<() => void>();
+
+export function setTimelineZoom(zoom: number): void {
+  const next = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  if (next === currentTimelineZoom) return;
+  currentTimelineZoom = next;
+  for (const listener of timelineZoomListeners) listener();
+}
+
+export function getTimelineZoom(): number {
+  return currentTimelineZoom;
+}
+
+export function subscribeTimelineZoom(listener: () => void): () => void {
+  timelineZoomListeners.add(listener);
+  return () => {
+    timelineZoomListeners.delete(listener);
+  };
+}

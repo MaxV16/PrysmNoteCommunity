@@ -29,7 +29,7 @@ import { useRouter } from "next/navigation";
 import { parseLocalDate, toLocalDateString } from "@/lib/utils";
 import type { Task, TaskStatus } from "@/types/task";
 import { useResponsiveDayWidth, DAY_HEADER_HEIGHT, SECTION_HEADER_HEIGHT, MIN_LANE_HEIGHT } from "@/components/timeline/constants";
-import { zoomPercent } from "@/lib/view-zoom";
+import { setTimelineZoom, zoomPercent } from "@/lib/view-zoom";
 import { computeLaneLayout } from "@/components/timeline/lane-layout";
 import { PREF_DEFAULT_VIEW } from "@/lib/preferences";
 import { usePreferencesStore } from "@/stores/preferences-store";
@@ -198,6 +198,13 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
 
   // Responsive column width: ~5-6 days visible on phones (clamp 56..120px).
   const dayWidth = useResponsiveDayWidth(zoom);
+
+  // Publish the zoom so bar heights and task labels scale with the columns.
+  // Without this, 200% zoom widened the days and left every title at 10px.
+  useEffect(() => {
+    setTimelineZoom(zoom);
+    return () => setTimelineZoom(1);
+  }, [zoom]);
 
   const defaultView = usePreferencesStore(
     (s) => (s.prefs[PREF_DEFAULT_VIEW] as TimelineViewMode) || "timeline"

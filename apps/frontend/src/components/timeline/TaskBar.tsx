@@ -8,8 +8,7 @@ import { TIER_COLORS, TIER_LABELS, normalizePriority, type PriorityTier } from "
 import { taskTimeLabel } from "@/lib/task-time";
 import { parseLocalDate } from "@/lib/utils";
 import { useTimelineBarDrag } from "@/hooks/useTimelineBarDrag";
-import { useUiScale } from "@/lib/ui-scale-context";
-import { BAR_HEIGHT } from "./constants";
+import { useTimelineMetrics } from "./constants";
 
 /** Compact "Mar 5 - Mar 12" label for the live resize preview. */
 function formatResizeRange(start: string, due: string) {
@@ -123,7 +122,10 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
   const armed = useAppStore((s) => s.mobileActionTaskId === task.id);
   // Bar height follows the device-local interface size (floor 24px) so a task
   // shrinks with the rest of the UI but stays tappable.
-  const { scale } = useUiScale();
+  // Height and label size come from the shared timeline metrics, which already
+  // fold in the device UI scale AND the view zoom. Computing them here from the
+  // UI scale alone is what left 10px titles inside 200% wide columns.
+  const metrics = useTimelineMetrics();
   // Which pointer started the current press. A touch hold already opens the
   // bottom action bar, so the floating right-click menu must stay closed on
   // touch (it would duplicate the same actions and cover the task being moved).
@@ -145,7 +147,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
   const barStyle = {
     ...style,
     position: "absolute",
-    height: Math.max(24, Math.round(BAR_HEIGHT * scale)),
+    height: metrics.barHeight,
     backgroundColor: colors.bg,
     backgroundClip: "padding-box",
     borderRadius: 4,
@@ -232,14 +234,14 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
           title at its start instead of a wall of text running off-screen. It
           clips its own text since the bar no longer clips (the handles sit
           just outside the edges). */}
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden" style={{ maxWidth: 320 }}>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden" style={{ maxWidth: 320, fontSize: metrics.labelPx }}>
         {timeLabel && (
-          <span className="hidden shrink-0 rounded-full bg-black/20 px-1.5 py-0.5 text-[9px] font-semibold sm:inline-block" style={{ color: "var(--bar-ink)" }}>
+          <span className="hidden shrink-0 rounded-full bg-black/20 px-1.5 py-0.5 text-[9px] font-semibold sm:inline-block" style={{ color: "var(--bar-ink)", fontSize: Math.max(9, Math.round(metrics.labelPx * 0.82)) }}>
             {timeLabel}
           </span>
         )}
         {tier === 1 && (
-          <span className="hidden shrink-0 text-[9px] font-semibold uppercase tracking-wide sm:inline" style={{ color: "var(--bar-ink-muted)" }}>
+          <span className="hidden shrink-0 text-[9px] font-semibold uppercase tracking-wide sm:inline" style={{ color: "var(--bar-ink-muted)", fontSize: Math.max(9, Math.round(metrics.labelPx * 0.82)) }}>
             {TIER_LABELS[tier]}
           </span>
         )}
