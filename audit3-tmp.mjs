@@ -1,0 +1,12 @@
+import { chromium } from "playwright";
+const EXE = process.env.HOME + "/Library/Caches/ms-playwright/chromium_headless_shell-1244/chrome-headless-shell-mac-arm64/chrome-headless-shell";
+const browser = await chromium.launch({ executablePath: EXE });
+const ctx = await browser.newContext({ viewport: { width: 412, height: 900 } });
+const page = await ctx.newPage();
+page.on("console", (m) => console.log(`CONSOLE[${m.type()}]: ${m.text().slice(0, 800)}`));
+page.on("pageerror", (e) => console.log("PAGEERROR:", String(e.stack || e).slice(0, 1200)));
+await page.goto("https://prysmnote.com/cookie-policy", { waitUntil: "load", timeout: 45000 });
+await page.waitForTimeout(3000);
+const dom = await page.evaluate(() => document.body.innerText.replace(/\s+/g, " ").slice(-320));
+console.log("DOM TAIL:", dom);
+await browser.close();

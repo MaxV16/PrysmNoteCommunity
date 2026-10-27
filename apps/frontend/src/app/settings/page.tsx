@@ -1776,8 +1776,8 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-2 pt-2">
-                <a href="/privacy" className="block text-sm text-accent hover:underline">Privacy Policy</a>
-                <a href="/tos" className="block text-sm text-accent hover:underline">Terms of Service</a>
+                <a href="/privacy-policy" className="block text-sm text-accent hover:underline">Privacy Policy</a>
+                <a href="/terms-of-service" className="block text-sm text-accent hover:underline">Terms of Service</a>
                 <a href="https://github.com/MaxV16/PrysmNoteCommunity" className="block text-sm text-accent hover:underline" target="_blank" rel="noopener">GitHub Repository</a>
               </div>
             </section>
