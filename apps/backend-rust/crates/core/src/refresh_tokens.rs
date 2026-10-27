@@ -27,6 +27,33 @@ use crate::api_token::hash_token;
 /// may still be racing with the same cookie.
 pub const ROTATION_GRACE_SECS: i64 = 60;
 
+/// How long a replayed (already rotated) refresh token is still accepted.
+///
+/// Revoking the whole family on ANY replay logged people out of every device
+/// for a benign race: a second tab, a request that was already in flight when
+/// the first rotation landed, a laptop waking up, or a reload after an update
+/// all present a token that was rotated moments ago. The replay itself is still
+/// rejected as a rotation, but only a replay older than this window is treated
+/// as a leak worth killing the lineage for.
+pub const REUSE_TOLERANCE_SECS: i64 = 900;
+
+/// How a replayed rotation is treated, given how long ago it was rotated.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ReplayVerdict {
+    /// Hand the caller a fresh token in the same family: the session stays.
+    Accept,
+    /// Older than the tolerance window: assume theft, revoke the lineage.
+    Revoke,
+}
+
+pub fn replay_verdict(elapsed_secs: i64) -> ReplayVerdict {
+    if elapsed_secs <= REUSE_TOLERANCE_SECS {
+        ReplayVerdict::Accept
+    } else {
+        ReplayVerdict::Revoke
+    }
+}
+
 /// Outcome of consuming a presented refresh token.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Consume {
@@ -111,7 +138,14 @@ pub async fn consume(
             tx.commit().await?;
             return Ok(Consume::ReplayedWithinGrace(family_id));
         }
-        // Reuse outside the grace window: assume the token leaked and revoke
+        // A replay a little older than the grace window is normally a second
+        // tab or an in-flight request, not a stolen token, so keep the session
+        // and rotate again instead of logging the user out everywhere.
+        if replay_verdict(elapsed) == ReplayVerdict::Accept {
+            tx.commit().await?;
+            return Ok(Consume::ReplayedWithinGrace(family_id));
+        }
+        // Reuse well outside the window: assume the token leaked and revoke
         // every token issued in this lineage.
         sqlx::query(
             "UPDATE refresh_tokens SET revoked_at = now() \
@@ -174,6 +208,18 @@ pub async fn revoke_family_for_token(pool: &PgPool, token: &str) -> Result<(), s
 mod tests {
     use super::*;
 
+    #[test]
+    fn replay_tolerance_keeps_benign_races_alive() {
+        // Same tab, two tabs, an in-flight request, a waking laptop: these are
+        // all minutes old, and none of them may end the session.
+        assert_eq!(replay_verdict(0), ReplayVerdict::Accept);
+        assert_eq!(replay_verdict(ROTATION_GRACE_SECS), ReplayVerdict::Accept);
+        assert_eq!(replay_verdict(REUSE_TOLERANCE_SECS), ReplayVerdict::Accept);
+        // A day-old token replayed means someone kept a copy.
+        assert_eq!(replay_verdict(REUSE_TOLERANCE_SECS + 1), ReplayVerdict::Revoke);
+        assert_eq!(replay_verdict(86_400), ReplayVerdict::Revoke);
+    }
+
     #[tokio::test]
     async fn rotation_grace_and_reuse() {
         let Ok(url) = std::env::var("DATABASE_URL") else {
@@ -207,9 +253,26 @@ mod tests {
             Consume::ReplayedWithinGrace(family)
         );
 
-        // Age the rotation past the window: reuse revokes the lineage.
+        // A replay minutes later is a second tab, not a leak: the family stays
+        // alive, which is the difference between a stale tab and a logout.
         sqlx::query(
-            "UPDATE refresh_tokens SET rotated_at = now() - interval '2 minutes' \
+            "UPDATE refresh_tokens SET rotated_at = now() - interval '5 minutes' \
+             WHERE token_hash = $1",
+        )
+        .bind(hash_token(&first))
+        .execute(&pool)
+        .await
+        .expect("age rotation");
+        assert_eq!(
+            consume(&pool, &first, user_id, exp, Some(family))
+                .await
+                .expect("consume tolerated replay"),
+            Consume::ReplayedWithinGrace(family)
+        );
+
+        // Age the rotation well past the tolerance: reuse revokes the lineage.
+        sqlx::query(
+            "UPDATE refresh_tokens SET rotated_at = now() - interval '2 hours' \
              WHERE token_hash = $1",
         )
         .bind(hash_token(&first))

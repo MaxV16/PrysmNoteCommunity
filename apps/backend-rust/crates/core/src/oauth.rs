@@ -30,6 +30,9 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/auth/oauth/{provider}/start", get(start))
         .route("/api/auth/oauth/{provider}/callback", get(callback))
+        // The handoff page is served under the API CSP (`script-src 'self'`),
+        // so its behaviour has to live in a same-origin file, never inline.
+        .route("/api/auth/oauth/handoff.js", get(handoff_script))
 }
 
 pub fn mobile_router() -> Router<AppState> {
@@ -197,10 +200,11 @@ fn app_handoff_page(location: &str, web_url: &str) -> Response {
   }}
   h1 {{ font-size: 17px; margin: 0 0 8px; font-weight: 600; }}
   p {{ font-size: 13px; line-height: 1.5; margin: 0 0 20px; color: #a0a0b0; }}
-  button {{
-    width: 100%; padding: 10px 14px; border: 0; border-radius: 999px;
+  a.primary {{
+    display: block; margin: 0; box-sizing: border-box; width: 100%;
+    padding: 10px 14px; border: 0; border-radius: 999px;
     background: linear-gradient(90deg, #9b7bff, #6f5bff); color: #fff;
-    font-size: 13px; font-weight: 600; cursor: pointer;
+    font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;
   }}
   a {{ display: inline-block; margin-top: 14px; font-size: 12px; color: #a0a0b0; }}
 </style>
@@ -210,18 +214,10 @@ fn app_handoff_page(location: &str, web_url: &str) -> Response {
     <div class="mark">P</div>
     <h1>You are signed in</h1>
     <p>Prysm Note is opening in the app. If nothing happens, use the button below, or keep working in the browser.</p>
-    <button id="handoff" data-target="{target}">Open Prysm Note</button>
+    <a id="handoff" class="primary" href="{target}" data-target="{target}">Open Prysm Note</a>
     <a href="{web}">Continue in the browser</a>
   </div>
-  <script>
-    (function () {{
-      var button = document.getElementById('handoff');
-      var target = button.getAttribute('data-target');
-      if (!target) return;
-      button.addEventListener('click', function () {{ window.location.href = target; }});
-      setTimeout(function () {{ window.location.href = target; }}, 150);
-    }})();
-  </script>
+  <script src="/api/auth/oauth/handoff.js" defer></script>
 </body>
 </html>"#
     );
@@ -232,6 +228,31 @@ fn app_handoff_page(location: &str, web_url: &str) -> Response {
         .header("referrer-policy", "no-referrer")
         .body(Body::from(body))
         .expect("valid handoff page")
+}
+
+/// Same-origin behaviour for the SSO handoff page.
+///
+/// The page is served from `/api/auth/...`, where the API middleware sets
+/// `script-src 'self'` with no `'unsafe-inline'`. An inline `<script>` there is
+/// dropped by the browser, which left the "Open Prysm Note" button dead and the
+/// automatic app handoff silent. The control is a real `<a href>` so it works
+/// with scripts blocked; this file only adds the automatic attempt.
+const HANDOFF_SCRIPT: &str = r#"(function () {
+  var link = document.getElementById('handoff');
+  if (!link) return;
+  var target = link.getAttribute('data-target');
+  if (!target) return;
+  setTimeout(function () { window.location.href = target; }, 250);
+})();
+"#;
+
+async fn handoff_script() -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/javascript; charset=utf-8")
+        .header("cache-control", "public, max-age=300")
+        .body(Body::from(HANDOFF_SCRIPT))
+        .expect("valid handoff script")
 }
 
 fn append_cookie(response: &mut Response, cookie: &str) {
@@ -1099,6 +1120,28 @@ mod tests {
         assert!(html.contains("You are signed in"));
         assert!(html.contains("prysm://auth?code=abc123"));
         assert!(html.contains("http://localhost:3000/"));
+        // The control has to be a real anchor: with `script-src 'self'` the
+        // inline script used to be blocked, so a `<button>`-only page did
+        // nothing at all when pressed.
+        assert!(html.contains(r#"<a id="handoff" class="primary" href="prysm://auth?code=abc123""#));
+        assert!(html.contains(r#"<script src="/api/auth/oauth/handoff.js" defer></script>"#));
+        assert!(!html.contains("<script>\n"), "no inline script may be served");
+    }
+
+    #[tokio::test]
+    async fn handoff_script_is_served_as_a_same_origin_asset() {
+        let response = handoff_script().await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("application/javascript; charset=utf-8")
+        );
+        let js = body_text(response).await;
+        assert!(js.contains("handoff"));
+        assert!(js.contains("data-target"));
     }
 
     #[tokio::test]
