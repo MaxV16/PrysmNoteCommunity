@@ -98,38 +98,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     (async () => {
+      // `/auth/session` answers 200 either way ("are you signed in?"), unlike
+      // `/auth/me`, which replies 401 for a logged-out visitor. Public marketing
+      // pages boot this provider too, and the 401 path logged four console
+      // errors per anonymous visit (me, both refresh attempts, billing).
+      const readSession = async () => {
+        const res = await fetch(`${API_URL}/auth/session`, { credentials: "include" });
+        if (!res.ok) return null;
+        return (await res.json()) as {
+          authenticated?: boolean;
+          refreshable?: boolean;
+          user?: User;
+        };
+      };
       try {
-        const res = await fetch(`${API_URL}/auth/me`, { credentials: "include" });
-        if (res.ok) {
-          const me = (await res.json()) as User;
-          rememberUserSnapshot(me);
-          setUser(me);
-        } else if (isUnauthenticated(res)) {
+        const session = await readSession();
+        if (!session) {
+          // Transient failure: preserve the seeded snapshot/user.
+        } else if (session.authenticated && session.user) {
+          rememberUserSnapshot(session.user);
+          setUser(session.user);
+        } else if (session.refreshable) {
           // The access token is expired/invalid: try the 7-day refresh cookie
-          // once. Only an explicit unauthenticated answer from the refresh or
-          // the retry ends the session; a transient 5xx/network error keeps the
-          // snapshot so a deploy-window blip cannot log the user out.
+          // once. Only an explicit unauthenticated answer ends the session; a
+          // transient 5xx/network error keeps the snapshot so a deploy-window
+          // blip cannot log the user out.
           const refreshed = await fetch(`${API_URL}/auth/refresh`, {
             method: "POST",
             credentials: "include",
           }).catch(() => null);
           if (refreshed?.ok) {
-            const retry = await fetch(`${API_URL}/auth/me`, { credentials: "include" });
-            if (retry.ok) {
-              const me = (await retry.json()) as User;
-              rememberUserSnapshot(me);
-              setUser(me);
-            } else if (isUnauthenticated(retry)) {
+            const retry = await readSession();
+            if (retry?.authenticated && retry.user) {
+              rememberUserSnapshot(retry.user);
+              setUser(retry.user);
+            } else if (retry) {
               rememberUserSnapshot(null);
               setUser(null);
             }
-          } else if (isUnauthenticated(refreshed)) {
+          } else if (refreshed && isUnauthenticated(refreshed)) {
             rememberUserSnapshot(null);
             setUser(null);
           }
+        } else {
+          // No session and no refresh cookie: definitively logged out.
+          rememberUserSnapshot(null);
+          setUser(null);
         }
-        // Any other status (500/502/503/504/429) is transient: preserve the
-        // seeded snapshot/user and let the next session check recover.
       } catch {
         // Network error: keep the snapshot.
       }

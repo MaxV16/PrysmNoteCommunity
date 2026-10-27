@@ -30,12 +30,17 @@ describe("useAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    // Default: /me returns 401 (no session)
-    mockFetch.mockResolvedValue({ ok: false, status: 401 });
+    // Default: the session probe answers "not signed in, nothing to refresh",
+    // which is a 200 (public pages boot this, so a 401 would log console noise).
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ authenticated: false, refreshable: false }),
+    });
   });
 
   it("starts in loading state", async () => {
-    // Don't resolve the /me fetch to keep loading=true
+    // Don't resolve the session fetch to keep loading=true
     mockFetch.mockImplementationOnce(() => new Promise(() => {}));
 
     const { result } = renderHook(() => useAuth(), { wrapper });
@@ -44,10 +49,15 @@ describe("useAuth", () => {
     expect(result.current.user).toBeNull();
   });
 
-  it("sets user from /me on mount", async () => {
+  it("sets user from the session probe on mount", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ id: "1", email: "test@test.com" }),
+      json: () =>
+        Promise.resolve({
+          authenticated: true,
+          refreshable: true,
+          user: { id: "1", email: "test@test.com" },
+        }),
     });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
@@ -56,14 +66,23 @@ describe("useAuth", () => {
     expect(result.current.user).toEqual({ id: "1", email: "test@test.com" });
   });
 
-  it("refreshes token if /me fails on mount", async () => {
-    // First call = /me fails, second = /refresh succeeds, third = /me succeeds
+  it("refreshes token when the access token is stale but a refresh cookie exists", async () => {
+    // First call = session says refreshable, second = /refresh succeeds, third =
+    // session now reports the user.
     mockFetch
-      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ authenticated: false, refreshable: true }),
+      })
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ id: "1", email: "test@test.com" }),
+        json: () =>
+          Promise.resolve({
+            authenticated: true,
+            refreshable: true,
+            user: { id: "1", email: "test@test.com" },
+          }),
       });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
@@ -74,7 +93,7 @@ describe("useAuth", () => {
     });
   });
 
-  it("keeps the seeded user when /me fails with a transient 5xx", async () => {
+  it("keeps the seeded user when the session probe fails with a transient 5xx", async () => {
     localStorage.setItem(
       "prysm_user_snapshot",
       JSON.stringify({ id: "9", email: "seed@test.com" })
@@ -88,13 +107,16 @@ describe("useAuth", () => {
     expect(localStorage.getItem("prysm_user_snapshot")).not.toBeNull();
   });
 
-  it("keeps the seeded user when the refresh call fails transiently after a 401", async () => {
+  it("keeps the seeded user when the refresh call fails transiently", async () => {
     localStorage.setItem(
       "prysm_user_snapshot",
       JSON.stringify({ id: "9", email: "seed@test.com" })
     );
     mockFetch
-      .mockResolvedValueOnce({ ok: false, status: 401 })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ authenticated: false, refreshable: true }),
+      })
       .mockResolvedValueOnce({ ok: false, status: 503 });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
@@ -103,12 +125,17 @@ describe("useAuth", () => {
     expect(result.current.user).toEqual({ id: "9", email: "seed@test.com" });
   });
 
-  it("clears the seeded user on an explicit 401 when refresh is rejected", async () => {
+  it("clears the seeded user when the refresh cookie is rejected", async () => {
     localStorage.setItem(
       "prysm_user_snapshot",
       JSON.stringify({ id: "9", email: "seed@test.com" })
     );
-    mockFetch.mockResolvedValue({ ok: false, status: 401 });
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ authenticated: false, refreshable: true }),
+      })
+      .mockResolvedValue({ ok: false, status: 401 });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
@@ -117,9 +144,30 @@ describe("useAuth", () => {
     expect(localStorage.getItem("prysm_user_snapshot")).toBeNull();
   });
 
+  it("never calls /auth/refresh when there is no session and no refresh cookie", async () => {
+    // The bug: anonymous visitors fired /auth/me (401), /auth/refresh (401) and
+    // the billing status (401) on every public page.
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ authenticated: false, refreshable: false }),
+    });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.user).toBeNull();
+    const urls = mockFetch.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.endsWith("/auth/session"))).toBe(true);
+    expect(urls.some((u) => u.includes("/auth/refresh"))).toBe(false);
+    expect(urls.some((u) => u.includes("/auth/me"))).toBe(false);
+  });
+
   it("login sets user on success", async () => {
-    // Mount: /me fails
-    mockFetch.mockResolvedValue({ ok: false, status: 401 });
+    // Mount: no session
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ authenticated: false, refreshable: false }),
+    });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 

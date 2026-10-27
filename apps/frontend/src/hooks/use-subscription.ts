@@ -153,11 +153,22 @@ export function useSubscription(authKey?: string | null): SubscriptionValue {
       setResolved(true);
     } else {
       setSub(FREE_SUBSCRIPTION);
-      setResolved(false);
+      // A logged-out visitor is authoritatively free: no skeleton, and nothing
+      // to ask the billing endpoint (it would answer 401 for every anon page).
+      setResolved(!authKey);
     }
   }, [authKey]);
 
   const refresh = useCallback(async () => {
+    // Nothing to fetch without a signed-in user: `/api/ee/billing/status` only
+    // ever answers 401 there, which used to log console errors on every public
+    // page. Resolve straight to the free tier instead.
+    if (!authKey) {
+      setSub(FREE_SUBSCRIPTION);
+      setResolved(true);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const s = await fetchStatus();

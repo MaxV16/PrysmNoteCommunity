@@ -344,6 +344,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/auth/forgot-password", post(forgot_password))
         .route("/api/auth/reset-password", post(reset_password))
         .route("/api/auth/me", get(me).delete(delete_account))
+        .route("/api/auth/session", get(session))
 }
 
 fn normalize_email(email: &str) -> String {
@@ -927,6 +928,46 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Va
         ));
     }
     Ok(Json(user_json(&user)))
+}
+
+/// `GET /api/auth/session` - a 200 answer to "am I signed in?", for clients that
+/// boot on a public page.
+///
+/// `/api/auth/me` answers 401 when there is no session, which is correct HTTP but
+/// means every logged-out visitor of a marketing page logs console errors for a
+/// request nobody asked about. This reports the same thing as a normal response:
+/// `authenticated` plus the user, and `refreshable` when a refresh cookie is
+/// present so the client knows whether trying `/auth/refresh` can help.
+async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<Value> {
+    let refreshable = cookie_value(&headers, "refresh_token")
+        .map(|value| !value.is_empty())
+        .unwrap_or(false);
+
+    let user = match auth::token_from_headers(&headers) {
+        Some(token) => match auth::authenticate(&state.settings.jwt_secret_key, &token) {
+            Ok(auth_user) => match jwt::decode(&state.settings.jwt_secret_key, &token) {
+                Ok(claims) => match blacklist::contains(&state.pool, &claims.jti).await {
+                    Ok(false) => match user::get_by_id(&state.pool, auth_user.user_id).await {
+                        Ok(Some(row)) if row.token_version == auth_user.token_version => Some(row),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                Err(_) => None,
+            },
+            Err(_) => None,
+        },
+        None => None,
+    };
+
+    match user {
+        Some(row) => Json(json!({
+            "authenticated": true,
+            "refreshable": true,
+            "user": user_json(&row),
+        })),
+        None => Json(json!({ "authenticated": false, "refreshable": refreshable })),
+    }
 }
 
 /// Read a cookie value from the request headers.
@@ -1914,4 +1955,52 @@ mod tests {
             .execute(&state.pool)
             .await;
     }
+    #[tokio::test]
+    async fn session_answers_200_for_a_logged_out_visitor() {
+        // Public pages boot this instead of /auth/me: a 401 there logged four
+        // console errors for every anonymous visitor.
+        let state = AppState::lazy(crate::config::tests::sample("test"));
+        let app = build_router(state, None);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/auth/session")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["authenticated"], false);
+        assert_eq!(json["refreshable"], false);
+        assert!(json.get("user").is_none());
+    }
+
+    #[tokio::test]
+    async fn session_reports_refreshable_when_a_refresh_cookie_exists() {
+        let state = AppState::lazy(crate::config::tests::sample("test"));
+        let app = build_router(state, None);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/auth/session")
+                    .header("cookie", "refresh_token=stale-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["authenticated"], false);
+        assert_eq!(json["refreshable"], true);
+    }
+
 }

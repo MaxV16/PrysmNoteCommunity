@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::header::{LOCATION, SET_COOKIE};
+use axum::http::header::{CONTENT_TYPE, LOCATION, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -140,6 +140,98 @@ fn redirect(status: StatusCode, location: &str) -> Response {
         .header(LOCATION, location)
         .body(Body::empty())
         .expect("valid redirect response")
+}
+
+/// Escape a URL for safe interpolation into an HTML attribute.
+fn escape_html_attribute(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Landing page for an app handoff (`prysm://` or the desktop deep link).
+///
+/// A 307 to a custom scheme is invisible to a normal browser tab: there is
+/// nothing to render, the address bar keeps the OAuth URL and the spinner never
+/// stops, even though the app has already signed the user in. This returns a
+/// real page that says so, retries the deep link from JavaScript and offers a
+/// manual button plus a plain web fallback. `no-store` keeps it out of any
+/// cache, since the link carries a one-time login code.
+fn app_handoff_page(location: &str, web_url: &str) -> Response {
+    let target = escape_html_attribute(location);
+    let web = escape_html_attribute(web_url);
+    let body = format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signed in | Prysm Note</title>
+<style>
+  :root {{ color-scheme: dark; }}
+  html, body {{ margin: 0; height: 100%; }}
+  body {{
+    display: flex; align-items: center; justify-content: center;
+    background: #0a0a11; color: #e8e8f0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 24px; box-sizing: border-box;
+  }}
+  .card {{
+    width: 100%; max-width: 360px; text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 14px;
+    background: #12121b; padding: 28px 24px;
+  }}
+  .mark {{
+    width: 44px; height: 44px; margin: 0 auto 16px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(155, 123, 255, 0.15); color: #9b7bff; font-weight: 700;
+  }}
+  h1 {{ font-size: 17px; margin: 0 0 8px; font-weight: 600; }}
+  p {{ font-size: 13px; line-height: 1.5; margin: 0 0 20px; color: #a0a0b0; }}
+  button {{
+    width: 100%; padding: 10px 14px; border: 0; border-radius: 999px;
+    background: linear-gradient(90deg, #9b7bff, #6f5bff); color: #fff;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }}
+  a {{ display: inline-block; margin-top: 14px; font-size: 12px; color: #a0a0b0; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="mark">P</div>
+    <h1>You are signed in</h1>
+    <p>Prysm Note is opening in the app. If nothing happens, use the button below, or keep working in the browser.</p>
+    <button id="handoff" data-target="{target}">Open Prysm Note</button>
+    <a href="{web}">Continue in the browser</a>
+  </div>
+  <script>
+    (function () {{
+      var button = document.getElementById('handoff');
+      var target = button.getAttribute('data-target');
+      if (!target) return;
+      button.addEventListener('click', function () {{ window.location.href = target; }});
+      setTimeout(function () {{ window.location.href = target; }}, 150);
+    }})();
+  </script>
+</body>
+</html>"#
+    );
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "text/html; charset=utf-8")
+        .header("cache-control", "no-store")
+        .header("referrer-policy", "no-referrer")
+        .body(Body::from(body))
+        .expect("valid handoff page")
 }
 
 fn append_cookie(response: &mut Response, cookie: &str) {
@@ -459,7 +551,7 @@ async fn callback(
                     } else {
                         format!("{deep_link}?code={code}&nonce={app_nonce}")
                     };
-                    redirect(StatusCode::TEMPORARY_REDIRECT, &location)
+                    app_handoff_page(&location, &app_url(&state, "/"))
                 }
                 Err(_) => redirect(
                     StatusCode::TEMPORARY_REDIRECT,
@@ -973,6 +1065,51 @@ mod tests {
             .execute(&pool)
             .await
             .expect("cleanup");
+    }
+
+    async fn body_text(response: Response) -> String {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        String::from_utf8(bytes.to_vec()).expect("utf8")
+    }
+
+    #[tokio::test]
+    async fn app_handoff_page_renders_instead_of_redirecting_to_a_custom_scheme() {
+        // A 307 to `prysm://` is invisible to a browser tab: nothing renders and
+        // the OAuth page spins forever while the app is already signed in.
+        let response = app_handoff_page("prysm://auth?code=abc123", "http://localhost:3000/");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(location(&response).is_empty());
+        assert_eq!(
+            response
+                .headers()
+                .get(CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok()),
+            Some("text/html; charset=utf-8")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("cache-control")
+                .and_then(|v| v.to_str().ok()),
+            Some("no-store")
+        );
+        let html = body_text(response).await;
+        assert!(html.contains("You are signed in"));
+        assert!(html.contains("prysm://auth?code=abc123"));
+        assert!(html.contains("http://localhost:3000/"));
+    }
+
+    #[tokio::test]
+    async fn app_handoff_page_escapes_the_deep_link() {
+        let response = app_handoff_page(
+            "prysm://auth?code=a&nonce=b\"><script>alert(1)</script>",
+            "http://localhost:3000/",
+        );
+        let html = body_text(response).await;
+        assert!(!html.contains("<script>alert(1)</script>"));
+        assert!(html.contains("&amp;nonce=b&quot;&gt;&lt;script&gt;"));
     }
 
     #[tokio::test]
