@@ -68,7 +68,7 @@ services:
           memory: "256M"
 
   backend:
-    image: ${IMAGE_NAMESPACE:-prysmnote}/prysm-note-backend:${PRYSM_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:-mk758}/prysm-note-backend:${PRYSM_TAG:-latest}
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_APP_USER:-prysm_app}:${DB_APP_PASSWORD:-prysmappdev}@postgres:5432/${POSTGRES_DB:-prysm_note}
@@ -95,7 +95,7 @@ services:
           memory: "1024M"
 
   frontend:
-    image: ${IMAGE_NAMESPACE:-prysmnote}/prysm-note-frontend:${PRYSM_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:-mk758}/prysm-note-frontend:${PRYSM_TAG:-latest}
     restart: unless-stopped
     ports:
       - "${WEB_HOST_PORT:-3000}:3000"

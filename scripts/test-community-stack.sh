@@ -9,11 +9,11 @@
 #   4. the AI endpoint answers (503 without a key is a pass: it means the route
 #      is wired and only the provider is missing, which is the BYOK default)
 #
-# Usage: scripts/test-community-stack.sh [--tag 1.62.8] [--namespace prysmnote] [--keep]
+# Usage: scripts/test-community-stack.sh [--tag 1.62.8] [--namespace mk758] [--keep]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NAMESPACE="${IMAGE_NAMESPACE:-prysmnote}"
+NAMESPACE="${IMAGE_NAMESPACE:-mk758}"
 TAG="${PRYSM_TAG:-latest}"
 KEEP=0
 WEB_PORT="${WEB_HOST_PORT:-3100}"

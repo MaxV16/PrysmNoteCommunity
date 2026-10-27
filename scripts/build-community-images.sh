@@ -15,7 +15,7 @@
 #   scripts/build-community-images.sh                     # build, tag :latest + :<sha>
 #   scripts/build-community-images.sh --tag 1.62.8        # build, tag :latest + :1.62.8
 #   scripts/build-community-images.sh --tag 1.62.8 --push # build, then push both tags
-#   scripts/build-community-images.sh --namespace myorg   # Docker Hub namespace
+#   scripts/build-community-images.sh --namespace myorg   # Docker Hub namespace (default mk758)
 #
 # Push needs `docker login` first (CI: DOCKERHUB_USERNAME / DOCKERHUB_TOKEN).
 
@@ -23,7 +23,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT/.community-build"
-NAMESPACE="${IMAGE_NAMESPACE:-prysmnote}"
+NAMESPACE="${IMAGE_NAMESPACE:-mk758}"
 TAG=""
 PUSH=0
 PLATFORM="${PLATFORMS:-linux/amd64}"
