@@ -123,7 +123,11 @@ pub async fn mark_revoked(jti: &str, expires_at: i64) {
 /// Whether `jti` is currently revoked. See the module-level failure policy.
 pub async fn is_revoked(pool: &PgPool, redis: &RedisPool, jti: &str, expires_at: i64) -> bool {
     let remaining = expires_at.saturating_sub(chrono::Utc::now().timestamp());
-    if remaining <= 0 {
+    // Match `jsonwebtoken`: it rejects a token only when `exp < now`, so the
+    // exact second where `exp == now` is still a valid token. Treating it as
+    // expired here 401'd every request (including `/api/auth/refresh`) during
+    // that final second, which looked exactly like a random sign-out.
+    if remaining < 0 {
         return true;
     }
     let ttl = Duration::from_secs(remaining as u64);
@@ -215,6 +219,29 @@ mod tests {
         assert!(
             guard.len() <= MAX_ENTRIES,
             "cache must respect its hard cap"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_token_at_its_exact_expiry_second_is_still_valid() {
+        // Regression: `jsonwebtoken` accepts a token while `exp >= now`, so the
+        // revocation lookup must use the same boundary. Using `<= 0` here made
+        // every authenticated request 401 for the final second of a token's
+        // life, including the refresh call meant to replace it.
+        let jti = format!("test-boundary-{}", uuid::Uuid::new_v4());
+        let pool = crate::db::connect_lazy("postgres://prysm:prysm@127.0.0.1:1/prysm");
+        let redis = RedisPool::from_url("");
+        let now = chrono::Utc::now().timestamp();
+        // Seed a known-good entry so the check never needs a database.
+        cache_put(&jti, false, Duration::from_secs(60));
+        assert!(!is_revoked(&pool, &redis, &jti, now + 60).await);
+        assert!(
+            !is_revoked(&pool, &redis, &jti, now).await,
+            "exp == now is still inside the JWT validity window"
+        );
+        assert!(
+            is_revoked(&pool, &redis, &jti, now - 1).await,
+            "exp < now is expired"
         );
     }
 

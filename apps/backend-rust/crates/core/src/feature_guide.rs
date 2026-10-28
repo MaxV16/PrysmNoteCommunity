@@ -35,6 +35,7 @@ SHOWS AND MOVIES: The Shows & Movies section in the sidebar is a personal watchl
 
 HABITS: The Habits section tracks daily and weekly habits. Create a tracker for a habit you want to build, then log each day (or week) you complete it. Missed days are fine: the tracker keeps going. The AI can create, list, update, log and delete habits for you: try "log my water today" or "add a habit to read daily".
 
+VAULT: The Vault (under More on a phone, in the sidebar on desktop) is a notebook for markdown notes, separate from tasks. Create a note with a title and a body, add tags and aliases, and file it in a folder. Link notes to each other with double brackets, like [[Project plan]]: the note you are in shows its outgoing links, and the linked note shows who links to it (its backlinks), so you can walk a web of notes instead of hunting through folders. Search is full text and ranked; with your own AI key it can also search by meaning, so "the idea about pricing" finds a note that never uses the word pricing. Open the graph view to see notes and their links. Every edit keeps a short history (the last 20 versions of each note), and you can restore an earlier version from the note's history. Templates save a reusable outline for new notes, quick capture saves a thought with one line and no title, and Export downloads your whole vault as a JSON bundle that Import can load back. The AI can search, read, create, update and append to notes too; deleting a note is destructive and the AI asks you to confirm first. On this hosted instance the Vault is a Premium feature; self-hosting Prysm Note includes it for free.
 TEAMS: The Collaborate area lets you invite other people by email. Teams turn a task list into a shared workspace: the whole team sees the same projects and every task that has been shared with it. You can share a single task with the whole team or with individual members: open the task, press the share button in its footer, and toggle the team or a person; the current share state is shown for each team and each member. Leave a team or remove a member from the team settings.
 
 CALENDAR SYNC: Connect a Google account in Settings: Prysm Note imports your Google Calendar events so they appear in the timeline and calendar views, and tasks can be pushed back. New events are pulled automatically in the background.
@@ -85,6 +86,7 @@ mod tests {
             "TRASH:",
             "VIEWS:",
             "HABITS:",
+            "VAULT:",
             "AI CHAT:",
             "TIMERS AND COUNTDOWNS:",
             "SYNC ACROSS DEVICES:",

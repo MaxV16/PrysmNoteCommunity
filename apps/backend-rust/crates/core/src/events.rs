@@ -35,6 +35,7 @@ pub const RESOURCE_PREFIXES: &[(&str, &str)] = &[
     ("/api/lists", "lists"),
     ("/api/board-sections", "board_sections"),
     ("/api/notes", "notes"),
+    ("/api/vault", "vault"),
     ("/api/preferences", "preferences"),
     ("/api/watchlist", "watchlist"),
     ("/api/habits", "habits"),

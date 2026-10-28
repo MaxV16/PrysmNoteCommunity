@@ -634,6 +634,7 @@ fn tools_list() -> Vec<Value> {
     if let Some(ee) = ee_tools() {
         tools.extend(ee.tool_definitions());
     }
+    tools.extend(crate::vault::mcp_tools());
     tools
 }
 
@@ -787,6 +788,9 @@ async fn call_tool(
                 .map_err(api_err_msg)
         }
         _ => {
+            if let Some(result) = crate::vault::mcp_call(state, user_id, name, args).await {
+                return result.map_err(api_err_msg);
+            }
             if let Some(ee) = ee_tools() {
                 if let Some(result) = ee.call(state, user_id, name, args).await {
                     return result.map_err(api_err_msg);
@@ -1165,7 +1169,7 @@ mod tests {
             post(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await;
         assert_eq!(status, StatusCode::OK);
         let list = sse_json(&bytes);
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 21);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 29);
 
         // tools/call create_task
         let mut event_rx = state.events.subscribe();
@@ -1222,7 +1226,7 @@ mod tests {
     #[test]
     fn tools_list_has_core_tools() {
         let tools = tools_list();
-        assert_eq!(tools.len(), 21);
+        assert_eq!(tools.len(), 29);
         let names: Vec<String> = tools
             .iter()
             .filter_map(|t| t.get("name").and_then(|n| n.as_str()).map(str::to_string))

@@ -42,6 +42,7 @@ export function SidebarLeft({
   const quadrantOn = false;
   const focusOn = false;
   const countdownOn = false;
+  const vaultOn = useUiModule("vault");
   const isMobileOS = useIsMobileOS();
   const notesOn = useUiModule("stickyNotes") && !isMobileOS;
   const router = useRouter();
@@ -145,6 +146,16 @@ export function SidebarLeft({
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 14.5 13.5"/></svg>
             </button>
           )}
+          {vaultOn && (
+            <button
+              onClick={() => onSelectView("vault")}
+              aria-label="Vault"
+              className={`icon-btn ${view === "vault" ? "bg-accent/15 text-accent" : ""}`}
+              title="Vault"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5V5a2 2 0 0 1 2-2h9l5 5v11.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19.5Z"/><path d="M14 3v6h6"/></svg>
+            </button>
+          )}
           {notesOn && (
             <button
               onClick={() => { track("feature_used", { feature: "notes" }); addNoteWithContent("", ""); }}
@@ -202,7 +213,7 @@ export function SidebarLeft({
 
       {/* Navigation */}
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3">
-        <SidebarNav view={view} onSelectView={onSelectView} financeOn={financeOn} watchlistOn={watchlistOn} habitsOn={habitsOn} quadrantOn={quadrantOn} focusOn={focusOn} countdownOn={countdownOn} />
+        <SidebarNav view={view} onSelectView={onSelectView} financeOn={financeOn} watchlistOn={watchlistOn} habitsOn={habitsOn} quadrantOn={quadrantOn} focusOn={focusOn} countdownOn={countdownOn} vaultOn={vaultOn} />
         {tagsOn && (
           <div className="mt-6">
             <TagList />

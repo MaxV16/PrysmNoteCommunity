@@ -939,9 +939,10 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Va
 /// `authenticated` plus the user, and `refreshable` when a refresh cookie is
 /// present so the client knows whether trying `/auth/refresh` can help.
 async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<Value> {
-    let refreshable = cookie_value(&headers, "refresh_token")
-        .map(|value| !value.is_empty())
-        .unwrap_or(false);
+    let refreshable = match cookie_value(&headers, "refresh_token") {
+        Some(value) if !value.is_empty() => refresh_cookie_usable(&state, &value).await,
+        _ => false,
+    };
 
     let user = match auth::token_from_headers(&headers) {
         Some(token) => match auth::authenticate(&state.settings.jwt_secret_key, &token) {
@@ -967,6 +968,51 @@ async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<Valu
             "user": user_json(&row),
         })),
         None => Json(json!({ "authenticated": false, "refreshable": refreshable })),
+    }
+}
+
+/// Would `POST /api/auth/refresh` accept this cookie right now?
+///
+/// `/api/auth/session` reports this as `refreshable` so a client can decide
+/// whether a session is really over. Saying "yes" merely because a cookie
+/// exists was misleading: an expired, revoked or reused token also has a
+/// cookie, and the client would then treat a momentary 401 as recoverable
+/// forever. A store outage still answers `true` (fail open), because a
+/// transient database blip must never turn into a mass logout.
+async fn refresh_cookie_usable(state: &AppState, token: &str) -> bool {
+    let Ok(claims) = jwt::decode(&state.settings.jwt_secret_key, token) else {
+        return false;
+    };
+    if claims.token_type != jwt::REFRESH {
+        return false;
+    }
+    let Ok(user_id) = uuid::Uuid::parse_str(&claims.sub) else {
+        return false;
+    };
+    // A password change (or account deletion) bumps `token_version` or removes
+    // the row, and both invalidate every outstanding refresh token.
+    match user::get_by_id(&state.pool, user_id).await {
+        Ok(Some(row)) if row.token_version == claims.tv => {}
+        Ok(_) => return false,
+        Err(err) => {
+            tracing::warn!(error = %err, "session: user lookup failed, assuming refreshable");
+            return true;
+        }
+    }
+    match blacklist::contains(&state.pool, &claims.jti).await {
+        Ok(true) => return false,
+        Ok(false) => {}
+        Err(err) => {
+            tracing::warn!(error = %err, "session: blacklist lookup failed, assuming refreshable");
+            return true;
+        }
+    }
+    match refresh_tokens::is_usable(&state.pool, token).await {
+        Ok(usable) => usable,
+        Err(err) => {
+            tracing::warn!(error = %err, "session: refresh token lookup failed, assuming refreshable");
+            true
+        }
     }
 }
 
@@ -1981,7 +2027,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_reports_refreshable_when_a_refresh_cookie_exists() {
+    async fn session_reports_not_refreshable_for_an_unusable_refresh_cookie() {
+        // A cookie that is present but not a valid refresh token must not be
+        // advertised as refreshable, or the client can never conclude that the
+        // session is genuinely over (an expired cookie still sits in the jar).
         let state = AppState::lazy(crate::config::tests::sample("test"));
         let app = build_router(state, None);
         let response = app
@@ -1995,6 +2044,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["authenticated"], false);
+        assert_eq!(json["refreshable"], false);
+    }
+
+    #[tokio::test]
+    async fn session_keeps_refreshable_when_the_store_cannot_confirm_it() {
+        // Fail open: a database outage must never be reported as "signed out",
+        // which would make the client clear a perfectly good session.
+        let settings = crate::config::tests::sample("test");
+        let token = crate::jwt::encode_refresh(
+            &settings.jwt_secret_key,
+            &uuid::Uuid::new_v4().to_string(),
+            0,
+        )
+        .unwrap();
+        let state = AppState::lazy(settings);
+        let app = build_router(state, None);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/auth/session")
+                    .header("cookie", format!("refresh_token={token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();

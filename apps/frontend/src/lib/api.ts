@@ -41,16 +41,43 @@ async function refreshOnce(): Promise<RefreshOutcome> {
  * A 401 here signs the user out and hard-navigates them to /login, which is the
  * worst possible outcome if the rejection was momentary: prod logs showed one
  * `POST /api/auth/refresh` answering 401 and the next attempt, milliseconds
- * later with the very same cookie, answering 200. Rotation is allowed to be
- * strict on the server, so the client must be forgiving: one rejected attempt is
- * retried once, briefly, before the session is declared over.
+ * later with the very same cookie, answering 200 (and a clock boundary on the
+ * access token made every request, refresh included, 401 for one second).
+ * Rotation is allowed to be strict on the server, so the client must be
+ * forgiving: a rejection is retried with a short backoff before the session is
+ * declared over.
  */
 async function doRefresh(): Promise<RefreshOutcome> {
-  const first = await refreshOnce();
-  if (first !== "unauthenticated") return first;
-  await sleep(250);
-  const second = await refreshOnce();
-  return second === "unauthenticated" ? "unauthenticated" : second;
+  const delays = [0, 250, 750];
+  let last: RefreshOutcome = "transient";
+  for (const delay of delays) {
+    if (delay > 0) await sleep(delay);
+    last = await refreshOnce();
+    if (last !== "unauthenticated") return last;
+  }
+  return last;
+}
+
+/**
+ * Ask the server whether this browser has ANY usable session left.
+ *
+ * Only a `200` that reports neither an access token (`authenticated`) nor a
+ * refresh cookie the server would actually accept (`refreshable`) counts as
+ * confirmed. A 5xx, a network error or any ambiguity answers `false`, so a
+ * deploy blip can never be turned into a sign-out.
+ */
+async function serverConfirmedSignedOut(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/auth/session`, { credentials: "include" });
+    if (!res.ok) return false;
+    const body = (await res.json()) as {
+      authenticated?: boolean;
+      refreshable?: boolean;
+    };
+    return !body.authenticated && !body.refreshable;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -139,6 +166,15 @@ async function request<T>(
       return request<T>(path, options, true);
     }
     if (refreshed === "unauthenticated") {
+      // Never bounce to /login on the strength of a 401 alone. `/auth/session`
+      // confirms that the server sees neither a valid access token nor a
+      // refresh cookie it would accept; anything less is treated as a blip and
+      // the user keeps their session.
+      if (!(await serverConfirmedSignedOut())) {
+        throw new Error(
+          "The server could not confirm your session yet. Please try again."
+        );
+      }
       // Preserve the current URL so a deep-linked flow (an integration connect
       // handed to the system browser, or a returning OAuth callback) resumes
       // after sign-in instead of dropping its query string. Same-site only; the

@@ -359,6 +359,9 @@ async fn dispatch(state: &AppState, user_id: Uuid, name: &str, args: &Value) -> 
         "toggle_habit_log" => tool_toggle_habit_log(state, user_id, args).await,
         "get_habit_logs" => tool_get_habit_logs(state, user_id, args).await,
         _ => {
+            if let Some(result) = crate::vault::ai_call(state, user_id, name, args).await {
+                return result;
+            }
             if let Some(result) = crate::ai_tools::ee_dispatch(state, user_id, name, args).await {
                 return result;
             }

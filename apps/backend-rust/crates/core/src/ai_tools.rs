@@ -112,6 +112,9 @@ pub fn mutation_resource(tool_name: &str) -> Option<&'static str> {
             Some("watchlist")
         }
         "create_habit" | "update_habit" | "delete_habit" | "toggle_habit_log" => Some("habits"),
+        "vault_create_note" | "vault_update_note" | "vault_append_to_note" | "vault_delete_note" => {
+            Some("vault")
+        }
         _ => None,
     }
 }
@@ -148,8 +151,22 @@ fn ee_free_names() -> Vec<String> {
 pub fn tools_for_user(premium: bool) -> Vec<Value> {
     let mut all = tool_definitions().to_vec();
     all.extend(ee_tool_definitions());
+    all.extend(crate::vault::tool_definitions());
     if premium {
         return all;
+    }
+    // Hosted free tier: the Vault is Premium there, so its tools disappear from
+    // the request. In the community build no entitlement provider is installed
+    // (`is_gated()` is false), so a self-hosted user keeps them for free.
+    if crate::vault::is_gated() {
+        all.retain(|tool| {
+            let name = tool
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+            !name.starts_with("vault_")
+        });
     }
     let ee = ee_tool_names();
     if ee.is_empty() {
@@ -431,8 +448,11 @@ mod tests {
 
     #[test]
     fn tools_for_user_returns_all_for_premium() {
-        assert_eq!(tools_for_user(true).len(), tool_definitions().len());
-        assert_eq!(tools_for_user(false).len(), tool_definitions().len());
+        // The Vault tools are appended for every build; no EE provider is
+        // installed in the core test build, so both tiers get the same set.
+        let full = tool_definitions().len() + crate::vault::tool_definitions().len();
+        assert_eq!(tools_for_user(true).len(), full);
+        assert_eq!(tools_for_user(false).len(), full);
     }
 
     #[test]

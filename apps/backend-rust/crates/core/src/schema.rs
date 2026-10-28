@@ -219,6 +219,121 @@ CREATE TABLE IF NOT EXISTS public.refresh_tokens (
 
 CREATE INDEX IF NOT EXISTS ix_refresh_tokens_family_id ON public.refresh_tokens USING btree (family_id);
 CREATE INDEX IF NOT EXISTS ix_refresh_tokens_expires_at ON public.refresh_tokens USING btree (expires_at);
+
+-- ---------------------------------------------------------------------------
+-- Vault (core, free in the community build, Premium on hosted)
+-- ---------------------------------------------------------------------------
+-- Markdown notes with wikilinks, tags, revisions and chunked embeddings. The
+-- engine is core so a self-hosted instance gets the whole feature (BYOK for the
+-- semantic half); the hosted build gates the routes behind its entitlement
+-- provider. Caps are enforced in `vault.rs`, not by the schema.
+CREATE TABLE IF NOT EXISTS public.vault_notes (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    title text NOT NULL,
+    body text DEFAULT ''::text NOT NULL,
+    tags text[] DEFAULT '{}'::text[] NOT NULL,
+    aliases text[] DEFAULT '{}'::text[] NOT NULL,
+    folder text DEFAULT ''::text NOT NULL,
+    pinned boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    search tsvector GENERATED ALWAYS AS (
+        to_tsvector('english'::regconfig, title || ' ' || body)
+    ) STORED,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_vault_notes_user_updated
+    ON public.vault_notes USING btree (user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS ix_vault_notes_user_title
+    ON public.vault_notes USING btree (user_id, lower(title));
+CREATE INDEX IF NOT EXISTS ix_vault_notes_tags
+    ON public.vault_notes USING gin (tags);
+CREATE INDEX IF NOT EXISTS ix_vault_notes_search
+    ON public.vault_notes USING gin (search);
+
+CREATE TABLE IF NOT EXISTS public.vault_links (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    source_note_id uuid NOT NULL,
+    target_title text NOT NULL,
+    target_note_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_vault_links_user_source
+    ON public.vault_links USING btree (user_id, source_note_id);
+CREATE INDEX IF NOT EXISTS ix_vault_links_user_target
+    ON public.vault_links USING btree (user_id, lower(target_title));
+
+CREATE TABLE IF NOT EXISTS public.vault_revisions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    note_id uuid NOT NULL,
+    title text NOT NULL,
+    body text DEFAULT ''::text NOT NULL,
+    tags text[] DEFAULT '{}'::text[] NOT NULL,
+    aliases text[] DEFAULT '{}'::text[] NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_vault_revisions_note
+    ON public.vault_revisions USING btree (user_id, note_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.vault_templates (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    name text NOT NULL,
+    body text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_vault_templates_user
+    ON public.vault_templates USING btree (user_id, lower(name));
+
+CREATE TABLE IF NOT EXISTS public.vault_chunks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    note_id uuid NOT NULL,
+    chunk_index integer DEFAULT 0 NOT NULL,
+    content text NOT NULL,
+    embedding public.vector(1536),
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_vault_chunks_user_note
+    ON public.vault_chunks USING btree (user_id, note_id);
+
+ALTER TABLE public.vault_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vault_notes FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS user_isolation ON public.vault_notes;
+CREATE POLICY user_isolation ON public.vault_notes USING ((user_id = public.rls_user_id())) WITH CHECK ((user_id = public.rls_user_id()));
+
+ALTER TABLE public.vault_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vault_links FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS user_isolation ON public.vault_links;
+CREATE POLICY user_isolation ON public.vault_links USING ((user_id = public.rls_user_id())) WITH CHECK ((user_id = public.rls_user_id()));
+
+ALTER TABLE public.vault_revisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vault_revisions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS user_isolation ON public.vault_revisions;
+CREATE POLICY user_isolation ON public.vault_revisions USING ((user_id = public.rls_user_id())) WITH CHECK ((user_id = public.rls_user_id()));
+
+ALTER TABLE public.vault_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vault_templates FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS user_isolation ON public.vault_templates;
+CREATE POLICY user_isolation ON public.vault_templates USING ((user_id = public.rls_user_id())) WITH CHECK ((user_id = public.rls_user_id()));
+
+ALTER TABLE public.vault_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vault_chunks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS user_isolation ON public.vault_chunks;
+CREATE POLICY user_isolation ON public.vault_chunks USING ((user_id = public.rls_user_id())) WITH CHECK ((user_id = public.rls_user_id()));
 "#;
 
 /// Provisions the core schema on a fresh database.

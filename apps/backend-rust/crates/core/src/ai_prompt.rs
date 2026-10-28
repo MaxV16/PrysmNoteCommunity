@@ -238,6 +238,11 @@ pub fn build_messages(
     }
     push_note(&mut system, Some(ai_prompts::WATCHLIST_SYSTEM_NOTE.to_string()));
     push_note(&mut system, Some(ai_prompts::HABIT_SYSTEM_NOTE.to_string()));
+    // The Vault is core (free when self-hosted) and Premium-only on hosted, so
+    // its prompt guidance follows the same rule as its tools.
+    if include_finance || !crate::vault::is_gated() {
+        push_note(&mut system, Some(crate::vault::SYSTEM_NOTE.to_string()));
+    }
     push_note(&mut system, get_note(|n| &n.countdown));
     if include_finance {
         push_note(&mut system, get_note(|n| &n.quadrant));

@@ -14,6 +14,7 @@ import { HabitsWorkspace } from "@/components/habits/HabitsWorkspace";
 import { QuadrantWorkspace } from "@/components/quadrant/QuadrantWorkspace";
 import { FocusWorkspace } from "@/components/focus/FocusWorkspace";
 import { CountdownWorkspace } from "@/components/countdown/CountdownWorkspace";
+import { VaultWorkspace } from "@/components/vault/VaultWorkspace";
 import { WatchlistView } from "@/components/watchlist/WatchlistView";
 import {
   PREF_DEFAULT_VIEW,
@@ -47,7 +48,7 @@ const AIPanel = dynamic(
   { ssr: false }
 );
 
-export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits" | "quadrant" | "focus" | "countdown";
+export type WorkspaceView = "timeline" | "finance" | "watchlist" | "habits" | "quadrant" | "focus" | "countdown" | "vault";
 
 const VIEW_MODES: TimelineViewMode[] = ["timeline", "kanban", "calendar", "list", "board"];
 
@@ -193,6 +194,7 @@ export function AppShell() {
   const quadrantOn = false;
   const focusOn = false;
   const countdownOn = false;
+  const vaultOn = useUiModule("vault");
 
   const smallScreen = useMediaQuery("(max-width: 767px)");
   // Height of the mobile tab bar, published as `--tabbar-h` so phone overlays
@@ -410,6 +412,8 @@ export function AppShell() {
             <FocusWorkspace onOpenAi={openAi} />
           ) : view === "countdown" && countdownOn ? (
             <CountdownWorkspace onOpenAi={openAi} />
+          ) : view === "vault" && vaultOn ? (
+            <VaultWorkspace onOpenAi={openAi} />
           ) : view === "habits" && habitsOn ? (
             <HabitsWorkspace onOpenAi={openAi} />
           ) : (
@@ -478,6 +482,7 @@ export function AppShell() {
             showQuadrant={quadrantOn}
             showFocus={focusOn}
             showCountdown={countdownOn}
+            showVault={vaultOn}
           />
         </div>
       )}

@@ -158,17 +158,25 @@ describe("api", () => {
     expect(opts.body).toBe(JSON.stringify({}));
   });
 
-  it("redirects on 401 when refresh fails", async () => {
+  it("redirects on 401 when the server confirms there is no session left", async () => {
     document.cookie = "access_token=expired-token";
     const originalLocation = window.location;
     // @ts-expect-error - mocking location
     delete window.location;
     window.location = { href: "", pathname: "/settings", search: "?tab=integrations&connect=github" } as any;
 
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: () => Promise.resolve({ detail: "Unauthorized" }),
+    mockFetch.mockImplementation(async (url: string) => {
+      if (String(url).includes("/auth/session")) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({ authenticated: false, refreshable: false }),
+        };
+      }
+      return {
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ detail: "Unauthorized" }),
+      };
     });
 
     await expect(api.get("/tasks")).rejects.toThrow("Session expired");
@@ -179,6 +187,35 @@ describe("api", () => {
     );
 
     window.location.href = originalLocation.href;
+  });
+
+  it("does not redirect when a rejected refresh leaves a usable session", async () => {
+    // Regression: a clock boundary on the access token 401'd every request,
+    // refresh included, and the client bounced to /login while the session was
+    // still perfectly valid. Only a confirmed "nothing left" may sign out.
+    document.cookie = "access_token=expired-token";
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: { href: "/app" },
+    });
+
+    mockFetch.mockImplementation(async (url: string) => {
+      if (String(url).includes("/auth/session")) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({ authenticated: false, refreshable: true }),
+        };
+      }
+      return {
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ detail: "Unauthorized" }),
+      };
+    });
+
+    await expect(api.get("/tasks")).rejects.toThrow(/could not confirm your session/i);
+    expect(window.location.href).toBe("/app");
   });
 
   it("keeps the session (no redirect) when refresh fails transiently", async () => {

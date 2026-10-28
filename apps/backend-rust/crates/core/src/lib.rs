@@ -109,6 +109,7 @@ pub mod teams;
 pub mod tokens;
 pub mod uploads;
 pub mod user;
+pub mod vault;
 pub mod watchlist;
 
 /// Extension point the optional extension crate fills with additional
@@ -185,6 +186,7 @@ pub fn build_router(state: AppState, ee: Option<&dyn EeExtension>) -> Router {
         .merge(task_links::router())
         .merge(preferences::router())
         .merge(notes::router())
+        .merge(vault::router())
         .merge(habits::router())
         .merge(notifications::router())
         .merge(watchlist::router())

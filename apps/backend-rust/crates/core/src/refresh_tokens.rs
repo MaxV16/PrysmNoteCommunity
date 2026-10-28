@@ -166,6 +166,49 @@ pub async fn consume(
     Ok(Consume::Fresh(family_id))
 }
 
+/// Whether `token` would currently be accepted by [`consume`], without
+/// consuming it.
+///
+/// `/api/auth/session` reports `refreshable` from this so the client can tell a
+/// genuinely dead session (logout, password change, expired, revoked family)
+/// from a momentary 401. A token minted before rotation support has no row and
+/// is treated as usable, because `consume` registers it on first use.
+pub async fn is_usable(pool: &PgPool, token: &str) -> Result<bool, sqlx::Error> {
+    let hash = hash_token(token);
+    let row = sqlx::query(&format!(
+        "SELECT {COLUMNS} FROM refresh_tokens WHERE token_hash = $1"
+    ))
+    .bind(&hash)
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else { return Ok(true) };
+
+    let family_id: Uuid = row.get("family_id");
+    let rotated_at: Option<DateTime<Utc>> = row.get("rotated_at");
+    let revoked_at: Option<DateTime<Utc>> = row.get("revoked_at");
+    if revoked_at.is_some() {
+        return Ok(false);
+    }
+    let family_revoked: Option<Uuid> = sqlx::query_scalar(
+        "SELECT family_id FROM refresh_tokens \
+         WHERE family_id = $1 AND revoked_at IS NOT NULL LIMIT 1",
+    )
+    .bind(family_id)
+    .fetch_optional(pool)
+    .await?;
+    if family_revoked.is_some() {
+        return Ok(false);
+    }
+    if let Some(rotated_at) = rotated_at {
+        // Mirrors `consume`: only a rotation inside the grace window is
+        // replayable. An older copy would be treated as reuse and revoke the
+        // lineage, so it is not a viable session either.
+        let elapsed = Utc::now().signed_duration_since(rotated_at).num_seconds();
+        return Ok(elapsed <= ROTATION_GRACE_SECS);
+    }
+    Ok(true)
+}
+
 /// Persist a freshly minted refresh token (hash only).
 pub async fn store_issued(
     pool: &PgPool,

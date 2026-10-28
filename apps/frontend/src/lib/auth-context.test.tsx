@@ -130,21 +130,63 @@ describe("useAuth", () => {
       "prysm_user_snapshot",
       JSON.stringify({ id: "9", email: "seed@test.com" })
     );
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ authenticated: false, refreshable: true }),
-      })
-      .mockResolvedValue({ ok: false, status: 401 });
+    let sessionCalls = 0;
+    mockFetch.mockImplementation(async (url: string) => {
+      const href = String(url);
+      if (href.includes("/auth/refresh")) return { ok: false, status: 401 };
+      if (href.includes("/auth/session")) {
+        sessionCalls += 1;
+        // First probe: access token expired, refresh cookie present. The
+        // confirmation probe after the rejected refresh: nothing left.
+        return {
+          ok: true,
+          json: () =>
+            Promise.resolve(
+              sessionCalls === 1
+                ? { authenticated: false, refreshable: true }
+                : { authenticated: false, refreshable: false }
+            ),
+        };
+      }
+      return { ok: false, status: 503 };
+    });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
     // The seeded snapshot clears `loading` immediately, so wait for the refresh
-    // round trip itself (the client retries a single 401 once, briefly, before
-    // it declares the session over) instead of asserting on the first tick.
-    await waitFor(() => expect(result.current.user).toBeNull());
+    // round trip itself (the client retries a rejected refresh with a short
+    // backoff before it declares the session over).
+    await waitFor(() => expect(result.current.user).toBeNull(), { timeout: 5000 });
     expect(localStorage.getItem("prysm_user_snapshot")).toBeNull();
-    expect(mockFetch.mock.calls.filter((c) => String(c[0]).includes("/auth/refresh"))).toHaveLength(2);
+    expect(
+      mockFetch.mock.calls.filter((c) => String(c[0]).includes("/auth/refresh")).length
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps the session when a refresh is rejected but the cookie is still usable", async () => {
+    // Regression: the access token's final second used to 401 every request,
+    // refresh included, and the client then cleared a perfectly good session.
+    localStorage.setItem(
+      "prysm_user_snapshot",
+      JSON.stringify({ id: "9", email: "seed@test.com" })
+    );
+    mockFetch.mockImplementation(async (url: string) => {
+      const href = String(url);
+      if (href.includes("/auth/refresh")) return { ok: false, status: 401 };
+      if (href.includes("/auth/session")) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({ authenticated: false, refreshable: true }),
+        };
+      }
+      return { ok: false, status: 503 };
+    });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.user).toEqual({ id: "9", email: "seed@test.com" });
+    expect(localStorage.getItem("prysm_user_snapshot")).not.toBeNull();
   });
 
   it("never calls /auth/refresh when there is no session and no refresh cookie", async () => {

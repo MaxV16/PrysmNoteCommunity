@@ -132,8 +132,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setUser(null);
             }
           } else if (outcome === "unauthenticated") {
-            rememberUserSnapshot(null);
-            setUser(null);
+            // A bare 401 is not proof the session is over (a clock boundary on
+            // the access token or a moment of backend unavailability produced
+            // exactly that). Ask the server once more: it reports `refreshable`
+            // from the actual refresh-token state, so only a definitive "no
+            // access token and no usable refresh cookie" clears the user.
+            const confirm = await readSession().catch(() => null);
+            if (confirm?.authenticated && confirm.user) {
+              rememberUserSnapshot(confirm.user);
+              setUser(confirm.user);
+            } else if (confirm && !confirm.refreshable) {
+              rememberUserSnapshot(null);
+              setUser(null);
+            }
+            // Otherwise keep the snapshot: retry on the next check.
           }
         } else {
           // No session and no refresh cookie: definitively logged out.
