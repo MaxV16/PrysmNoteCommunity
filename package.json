@@ -19,6 +19,7 @@
     "smoke:timeline-pan": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-pan-smoke.mjs",
     "smoke:timeline-touch": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/timeline-touch-smoke.mjs",
     "smoke:marketing": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/marketing-menu-smoke.mjs",
+    "seo:indexnow": "node scripts/seo-indexnow.mjs",
     "smoke:marketing-links": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/marketing-links-smoke.mjs",
     "smoke:marketing-mobile": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/marketing-mobile-smoke.mjs",
     "smoke:ai": "BASE_URL=${BASE_URL:-http://localhost:8000/api} node scripts/smoke/ai-smoke.mjs",

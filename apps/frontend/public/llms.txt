@@ -1,0 +1,39 @@
+# Prysm Note
+
+> Prysm Note is a task and note app with an AI assistant that works on your own
+> tasks: it creates, schedules, reschedules, completes and searches them in plain
+> language. It runs as a web app, a desktop app (macOS, Windows, Linux) and on
+> mobile, and it can be self-hosted.
+
+Prysm Note combines a calendar-style timeline, kanban, list and board views with a
+folder-and-tag structure, habits, a watchlist, countdowns, a focus timer and a
+finance ledger. Notes and tasks live in the same workspace, so a meeting note and
+the tasks it produced stay together.
+
+Users can bring their own AI key (OpenAI, Google Gemini, DeepSeek, OpenRouter) or
+use the hosted assistant on a paid plan. The assistant is available inside the app
+and through a Model Context Protocol (MCP) server, so external AI tools can read
+and change tasks.
+
+The open-core edition can be run locally with Docker and needs no account on our
+side; the source is at https://github.com/MaxV16/PrysmNoteCommunity.
+
+## Main pages
+
+- [Product](https://prysmnote.com/marketing/features): what the app does
+- [Pricing](https://prysmnote.com/marketing/pricing): plans and what they include
+- [Downloads](https://prysmnote.com/marketing/downloads): desktop apps for macOS, Windows and Linux
+- [Learn](https://prysmnote.com/marketing/learn): explainers about notes, tasks, planning and AI
+- [Use cases](https://prysmnote.com/marketing/use-cases): how people use it
+- [Comparisons](https://prysmnote.com/marketing/vs): how it differs from other tools
+- [Changelog](https://prysmnote.com/marketing/changelog): what shipped, with versions and dates
+- [Docs](https://prysmnote.com/docs): setup, MCP, self-hosting
+- [FAQ](https://prysmnote.com/marketing/faq): common questions
+
+## Notes for assistants
+
+- Task dates are local dates, not UTC timestamps. Use the user's local day when
+  saying "today" or "tomorrow".
+- Deleting a task is destructive and needs explicit confirmation; marking a task
+  done uses the task status, not deletion.
+- The app is free to start and does not require an AI key to be used manually.
