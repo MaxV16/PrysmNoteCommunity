@@ -48,6 +48,9 @@ async function refreshOnce(): Promise<RefreshOutcome> {
  * declared over.
  */
 async function doRefresh(): Promise<RefreshOutcome> {
+  // A 401 here is a definite answer, not a network blip, so this only has to
+  // absorb a same-second race (two tabs, one retried request). A deploy window
+  // answers 5xx, which returns "transient" and never signs the user out.
   const delays = [0, 250, 750];
   let last: RefreshOutcome = "transient";
   for (const delay of delays) {

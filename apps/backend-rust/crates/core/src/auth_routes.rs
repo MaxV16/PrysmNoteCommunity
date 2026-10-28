@@ -424,6 +424,37 @@ async fn issue_refresh(
     Ok(token)
 }
 
+/// Recover a session whose refresh copy was lost to a rotation race.
+///
+/// The presented refresh token is already dead, but a still-valid access token
+/// for the same user proves this device was signed in moments ago: it refreshed
+/// somewhere else, or had the Set-Cookie response dropped while suspended. A
+/// stolen refresh cookie on its own cannot pass this check, so recovery never
+/// weakens reuse detection. Returns the new family, or `None` when the access
+/// cookie is missing, foreign, expired or revoked.
+async fn recover_orphaned_session(
+    state: &AppState,
+    headers: &HeaderMap,
+    user: &user::User,
+) -> Result<Option<uuid::Uuid>, sqlx::Error> {
+    let Some(access_token) = cookie_value(headers, "access_token") else {
+        return Ok(None);
+    };
+    let Ok(claims) = jwt::decode(&state.settings.jwt_secret_key, &access_token) else {
+        return Ok(None);
+    };
+    if claims.token_type != jwt::ACCESS
+        || claims.sub != user.id.to_string()
+        || claims.tv != user.token_version
+    {
+        return Ok(None);
+    }
+    if blacklist::contains(&state.pool, &claims.jti).await? {
+        return Ok(None);
+    }
+    Ok(Some(uuid::Uuid::new_v4()))
+}
+
 async fn register(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -939,10 +970,15 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Va
 /// `authenticated` plus the user, and `refreshable` when a refresh cookie is
 /// present so the client knows whether trying `/auth/refresh` can help.
 async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<Value> {
-    let refreshable = match cookie_value(&headers, "refresh_token") {
-        Some(value) if !value.is_empty() => refresh_cookie_usable(&state, &value).await,
+    let refresh_cookie = cookie_value(&headers, "refresh_token");
+    let refreshable = match &refresh_cookie {
+        Some(value) if !value.is_empty() => refresh_cookie_usable(&state, value).await,
         _ => false,
     };
+    let has_refresh_cookie = refresh_cookie
+        .as_deref()
+        .map(|value| !value.is_empty())
+        .unwrap_or(false);
 
     let user = match auth::token_from_headers(&headers) {
         Some(token) => match auth::authenticate(&state.settings.jwt_secret_key, &token) {
@@ -964,7 +1000,10 @@ async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<Valu
     match user {
         Some(row) => Json(json!({
             "authenticated": true,
-            "refreshable": true,
+            // A live access token can recover an orphaned refresh copy (see
+            // `recover_orphaned_session`), so a dead cookie is still refreshable
+            // while the user is demonstrably signed in.
+            "refreshable": refreshable || has_refresh_cookie,
             "user": user_json(&row),
         })),
         None => Json(json!({ "authenticated": false, "refreshable": refreshable })),
@@ -1070,9 +1109,10 @@ async fn refresh(
     }
 
     // Rotation + reuse detection. The presented token is consumed under a row
-    // lock; a replay inside the grace window is accepted (two tabs racing), a
-    // replay after it revokes the whole family. A stolen token therefore stops
-    // working as soon as the legitimate client refreshes.
+    // lock; a replay inside the tolerance window is accepted (two tabs racing),
+    // a stale replay kills just that copy, and only a repeated stale replay
+    // ends the lineage. A stolen token therefore stops working as soon as the
+    // legitimate client refreshes, without logging that client out everywhere.
     let family_hint = claims
         .fid
         .as_deref()
@@ -1085,7 +1125,15 @@ async fn refresh(
             refresh_tokens::Consume::Fresh(family)
             | refresh_tokens::Consume::ReplayedWithinGrace(family) => family,
             refresh_tokens::Consume::Reused | refresh_tokens::Consume::Revoked => {
-                return Err(unauthorized())
+                // The presented copy is dead, but the request may still carry a
+                // valid access token for the same user. That is the device that
+                // lost a rotation race (a suspended desktop app, a reload right
+                // after an update, a laptop waking up), not a stolen session, so
+                // give it a brand new family instead of signing the user out.
+                recover_orphaned_session(&state, &headers, &user)
+                    .await
+                    .map_err(db_error)?
+                    .ok_or_else(unauthorized)?
             }
         };
 
@@ -1374,6 +1422,126 @@ mod tests {
 
         let _ = sqlx::query("DELETE FROM users WHERE email = $1")
             .bind(&email)
+            .execute(&state.pool)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn refresh_recovers_a_lost_rotation_race_from_the_access_cookie() {
+        // The desktop app got suspended right after a rotation, so its cookie
+        // jar kept the stale copy and lost the Set-Cookie. It is still signed in
+        // (the access token is valid), so refresh must hand it a new family
+        // instead of bouncing it to /login. Without the access cookie the same
+        // stale copy is rejected, so reuse detection is not weakened.
+        let Some(state) = live_state().await else {
+            return;
+        };
+        let app = build_router(state.clone(), None);
+        let email = format!("rust-recover-{}@test.local", Uuid::new_v4());
+
+        let registered = post_json(
+            &app,
+            "/api/auth/register",
+            json!({ "email": email, "password": "password123" }),
+        )
+        .await;
+        assert_eq!(registered.status(), StatusCode::OK);
+        let stale = refresh_cookie(&registered).expect("refresh cookie");
+        let access = access_cookie(&registered).expect("access cookie");
+        let stale_value = stale
+            .strip_prefix("refresh_token=")
+            .unwrap_or(&stale)
+            .to_string();
+
+        let rotated = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": stale_value }),
+        )
+        .await;
+        assert_eq!(rotated.status(), StatusCode::OK);
+        // Move the lineage forward so the old copy is no longer the newest
+        // rotation (otherwise it is the lost-Set-Cookie case, covered by
+        // refresh_tokens::rotation_grace_and_reuse).
+        let newer = refresh_cookie(&rotated).expect("newer refresh cookie");
+        let newer_value = newer
+            .strip_prefix("refresh_token=")
+            .unwrap_or(&newer)
+            .to_string();
+        let advanced = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": newer_value }),
+        )
+        .await;
+        assert_eq!(advanced.status(), StatusCode::OK);
+
+        // Age the rotation past the tolerance so the old copy is a stale replay.
+        sqlx::query(
+            "UPDATE refresh_tokens SET rotated_at = now() - interval '2 hours' \
+             WHERE token_hash = $1",
+        )
+        .bind(crate::api_token::hash_token(&stale_value))
+        .execute(&state.pool)
+        .await
+        .expect("age rotation");
+
+        // Stale copy alone: rejected.
+        let bare = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/auth/refresh")
+                    .header("cookie", stale.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(bare.status(), StatusCode::UNAUTHORIZED);
+
+        // Same stale copy plus a valid access token: recovered, new cookies.
+        let recovered = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/auth/refresh")
+                    .header("cookie", format!("{}; {}", access, stale))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(recovered.status(), StatusCode::OK);
+        let fresh = refresh_cookie(&recovered).expect("recovered refresh cookie");
+        let fresh_value = fresh
+            .strip_prefix("refresh_token=")
+            .unwrap_or(&fresh)
+            .to_string();
+        assert_ne!(fresh_value, stale_value);
+
+        // The recovered token is a working session on its own.
+        let after = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": fresh_value }),
+        )
+        .await;
+        assert_eq!(after.status(), StatusCode::OK);
+
+        let user_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
+            .bind(&email)
+            .fetch_one(&state.pool)
+            .await
+            .expect("user id");
+        let _ = sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&state.pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(user_id)
             .execute(&state.pool)
             .await;
     }
@@ -1723,10 +1891,38 @@ mod tests {
         .await;
         assert_eq!(racing.status(), StatusCode::OK);
 
-        // Age the rotation past the window: replay is reuse and kills lineage.
+        // Age the rotation past the tolerance while `first` is still the newest
+        // rotation: the app lost the Set-Cookie, so this must be accepted.
         let hash = crate::api_token::hash_token(&first_value);
         sqlx::query(
             "UPDATE refresh_tokens SET rotated_at = now() - interval '2 minutes' \
+             WHERE token_hash = $1",
+        )
+        .bind(&hash)
+        .execute(&state.pool)
+        .await
+        .expect("age rotation");
+
+        let lost_cookie = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": first_value }),
+        )
+        .await;
+        assert_eq!(lost_cookie.status(), StatusCode::OK);
+
+        // Move the family forward, then the same old copy is a stale replay:
+        // first strike, only that copy dies, the live sibling keeps working.
+        let moved_on = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": second_value }),
+        )
+        .await;
+        assert_eq!(moved_on.status(), StatusCode::OK);
+
+        sqlx::query(
+            "UPDATE refresh_tokens SET rotated_at = now() - interval '2 hours' \
              WHERE token_hash = $1",
         )
         .bind(&hash)
@@ -1742,7 +1938,27 @@ mod tests {
         .await;
         assert_eq!(reused.status(), StatusCode::UNAUTHORIZED);
 
-        // Every token in the family is now dead, including the legitimate one.
+        // The live token in the same lineage still rotates: a stale copy must
+        // never sign the user out everywhere (the "signed out on every update"
+        // bug in production).
+        let sibling = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": second_value }),
+        )
+        .await;
+        assert_eq!(sibling.status(), StatusCode::OK);
+
+        // Presenting the same revoked copy again is the second strike: the
+        // lineage dies, exactly like a stolen token that keeps being replayed.
+        let second_strike = post_json(
+            &app,
+            "/api/auth/refresh",
+            json!({ "refresh_token": first_value }),
+        )
+        .await;
+        assert_eq!(second_strike.status(), StatusCode::UNAUTHORIZED);
+
         let family_dead = post_json(
             &app,
             "/api/auth/refresh",

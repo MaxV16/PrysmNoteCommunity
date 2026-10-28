@@ -9,9 +9,14 @@
 //!   same family is issued.
 //! - A rotated token is still accepted for [`ROTATION_GRACE_SECS`] so two tabs
 //!   (or a retried request) racing each other do not log the user out.
-//! - Presenting a rotated token after the grace window revokes the whole family
-//!   and the caller returns 401. A stolen token therefore dies as soon as the
-//!   legitimate client refreshes, instead of staying valid for its full 7 days.
+//! - A replay older than [`REUSE_TOLERANCE_SECS`] revokes only the presented
+//!   row, and the caller returns 401 (first strike). The rest of the family
+//!   keeps working, so one stale copy (a suspended desktop app, a reload after
+//!   an update, a laptop waking up) costs a single failed request instead of
+//!   signing the user out everywhere.
+//! - Presenting that same revoked copy a second time revokes the whole lineage
+//!   (second strike): a real leak keeps replaying the stolen token, while a
+//!   legitimate client that lost a race simply moves on with its live token.
 //!
 //! Retention: rows are cheap and the existing hourly maintenance loop prunes
 //! expired ones (`refresh_tokens.expires_at < now()`). Lookups are indexed by
@@ -61,8 +66,10 @@ pub enum Consume {
     Fresh(Uuid),
     /// Accepted because it was rotated inside the grace window.
     ReplayedWithinGrace(Uuid),
-    /// A rotated token was presented after the grace window: the family is now
-    /// revoked and the caller must return 401.
+    /// A rotated token was presented outside the tolerance window. Only that
+    /// row is revoked (first strike) unless it had already been revoked by an
+    /// earlier strike, in which case the whole family is revoked too. The
+    /// caller returns 401 either way, but a live sibling stays valid.
     Reused,
     /// The family is already revoked.
     Revoked,
@@ -114,23 +121,35 @@ pub async fn consume(
     let revoked_at: Option<DateTime<Utc>> = row.get("revoked_at");
 
     if revoked_at.is_some() {
+        // Second strike: this row was revoked individually by an earlier stale
+        // replay while the rest of the lineage is still alive, so the same copy
+        // has now been presented twice. Treat it as a leak and end the family.
+        // A logout revokes every row, so nothing is left alive and this falls
+        // through to plain `Revoked`.
+        let family_alive: Option<Uuid> = sqlx::query_scalar(
+            "SELECT family_id FROM refresh_tokens \
+             WHERE family_id = $1 AND revoked_at IS NULL LIMIT 1",
+        )
+        .bind(family_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if family_alive.is_some() {
+            sqlx::query(
+                "UPDATE refresh_tokens SET revoked_at = now() \
+                 WHERE family_id = $1 AND revoked_at IS NULL",
+            )
+            .bind(family_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(Consume::Reused);
+        }
         tx.commit().await?;
         return Ok(Consume::Revoked);
     }
 
-    // A row minted just before a concurrent reuse revoked the family may still
-    // have a NULL revoked_at; check the whole lineage, not just this row.
-    let family_revoked: Option<Uuid> = sqlx::query_scalar(
-        "SELECT family_id FROM refresh_tokens \
-         WHERE family_id = $1 AND revoked_at IS NOT NULL LIMIT 1",
-    )
-    .bind(family_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    if family_revoked.is_some() {
-        tx.commit().await?;
-        return Ok(Consume::Revoked);
-    }
+    // A full family revoke (logout, password change) marks every row, so a live
+    // sibling row here is normal and must keep working.
 
     if let Some(rotated_at) = rotated_at {
         let elapsed = Utc::now().signed_duration_since(rotated_at).num_seconds();
@@ -145,15 +164,31 @@ pub async fn consume(
             tx.commit().await?;
             return Ok(Consume::ReplayedWithinGrace(family_id));
         }
-        // Reuse well outside the window: assume the token leaked and revoke
-        // every token issued in this lineage.
-        sqlx::query(
-            "UPDATE refresh_tokens SET revoked_at = now() \
-             WHERE family_id = $1 AND revoked_at IS NULL",
+        // Older than the tolerance, but this is the most recently rotated copy
+        // in its family: the device that rotated it never received the
+        // Set-Cookie (a desktop app quitting or updating mid-request, a laptop
+        // suspending). Nobody can "steal" a copy that is newer than every other
+        // rotation, so keep the session instead of signing the user out.
+        let newest: Option<String> = sqlx::query_scalar(
+            "SELECT token_hash FROM refresh_tokens \
+             WHERE family_id = $1 AND rotated_at IS NOT NULL \
+             ORDER BY rotated_at DESC LIMIT 1",
         )
         .bind(family_id)
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
+        if newest.as_deref() == Some(hash.as_str()) {
+            tx.commit().await?;
+            return Ok(Consume::ReplayedWithinGrace(family_id));
+        }
+        // Reuse well outside the window: this copy was kept alive somewhere it
+        // should not have been. Revoke only the presented row so the live
+        // sibling tokens keep the user signed in; a second presentation of this
+        // same copy trips the full-family revoke above.
+        sqlx::query("UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1")
+            .bind(&hash)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         return Ok(Consume::Reused);
     }
@@ -183,28 +218,17 @@ pub async fn is_usable(pool: &PgPool, token: &str) -> Result<bool, sqlx::Error> 
     .await?;
     let Some(row) = row else { return Ok(true) };
 
-    let family_id: Uuid = row.get("family_id");
     let rotated_at: Option<DateTime<Utc>> = row.get("rotated_at");
     let revoked_at: Option<DateTime<Utc>> = row.get("revoked_at");
     if revoked_at.is_some() {
         return Ok(false);
     }
-    let family_revoked: Option<Uuid> = sqlx::query_scalar(
-        "SELECT family_id FROM refresh_tokens \
-         WHERE family_id = $1 AND revoked_at IS NOT NULL LIMIT 1",
-    )
-    .bind(family_id)
-    .fetch_optional(pool)
-    .await?;
-    if family_revoked.is_some() {
-        return Ok(false);
-    }
+    // A sibling row may have been revoked individually by a first strike while
+    // this token stays valid, so the lineage is not a proxy for this token.
     if let Some(rotated_at) = rotated_at {
-        // Mirrors `consume`: only a rotation inside the grace window is
-        // replayable. An older copy would be treated as reuse and revoke the
-        // lineage, so it is not a viable session either.
+        // Mirrors `consume`: a replay is accepted up to REUSE_TOLERANCE_SECS.
         let elapsed = Utc::now().signed_duration_since(rotated_at).num_seconds();
-        return Ok(elapsed <= ROTATION_GRACE_SECS);
+        return Ok(elapsed <= REUSE_TOLERANCE_SECS);
     }
     Ok(true)
 }
@@ -313,7 +337,9 @@ mod tests {
             Consume::ReplayedWithinGrace(family)
         );
 
-        // Age the rotation well past the tolerance: reuse revokes the lineage.
+        // Age the rotation well past the tolerance. `first` is still the most
+        // recently rotated copy in the family, which is exactly the "the device
+        // never got the Set-Cookie" case: the session must survive.
         sqlx::query(
             "UPDATE refresh_tokens SET rotated_at = now() - interval '2 hours' \
              WHERE token_hash = $1",
@@ -325,16 +351,68 @@ mod tests {
         assert_eq!(
             consume(&pool, &first, user_id, exp, Some(family))
                 .await
-                .expect("consume reuse"),
-            Consume::Reused
+                .expect("consume lost set-cookie"),
+            Consume::ReplayedWithinGrace(family)
         );
 
+        // Once a newer rotation exists in the family, an old copy is a genuine
+        // stale replay: this is the first strike and only that row dies.
         let second = format!("test-refresh-second-{user_id}");
         store_issued(&pool, &second, user_id, family, exp)
             .await
             .expect("store second");
         assert_eq!(
             consume(&pool, &second, user_id, exp, Some(family))
+                .await
+                .expect("consume live sibling"),
+            Consume::Fresh(family)
+        );
+        sqlx::query(
+            "UPDATE refresh_tokens SET rotated_at = now() - interval '2 hours' \
+             WHERE token_hash = $1",
+        )
+        .bind(hash_token(&second))
+        .execute(&pool)
+        .await
+        .expect("age rotation");
+        // `second` is now the newest rotated copy again, so re-establish a
+        // newer one first: the third token is the live session.
+        let third = format!("test-refresh-third-{user_id}");
+        store_issued(&pool, &third, user_id, family, exp)
+            .await
+            .expect("store third");
+        assert_eq!(
+            consume(&pool, &third, user_id, exp, Some(family))
+                .await
+                .expect("consume third"),
+            Consume::Fresh(family)
+        );
+        assert_eq!(
+            consume(&pool, &first, user_id, exp, Some(family))
+                .await
+                .expect("consume reuse"),
+            Consume::Reused
+        );
+
+        // The live sibling still rotates and stays in the same family: one
+        // stale copy must never sign the user out everywhere.
+        assert_eq!(
+            consume(&pool, &third, user_id, exp, Some(family))
+                .await
+                .expect("consume live sibling after strike"),
+            Consume::ReplayedWithinGrace(family)
+        );
+
+        // Presenting the same revoked copy again is the second strike: the
+        // lineage dies, exactly like a stolen token that keeps being replayed.
+        assert_eq!(
+            consume(&pool, &first, user_id, exp, Some(family))
+                .await
+                .expect("consume second strike"),
+            Consume::Reused
+        );
+        assert_eq!(
+            consume(&pool, &third, user_id, exp, Some(family))
                 .await
                 .expect("consume revoked"),
             Consume::Revoked
