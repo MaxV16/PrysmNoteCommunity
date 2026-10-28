@@ -12,7 +12,11 @@ let refreshPromise: Promise<RefreshOutcome> | null = null;
  */
 type RefreshOutcome = "ok" | "unauthenticated" | "transient";
 
-async function doRefresh(): Promise<RefreshOutcome> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function refreshOnce(): Promise<RefreshOutcome> {
   try {
     const res = await fetch(`${API_URL}/auth/refresh`, {
       method: "POST",
@@ -29,6 +33,47 @@ async function doRefresh(): Promise<RefreshOutcome> {
   } catch {
     return "transient";
   }
+}
+
+/**
+ * Refresh the session, but never conclude "signed out" from a single 401.
+ *
+ * A 401 here signs the user out and hard-navigates them to /login, which is the
+ * worst possible outcome if the rejection was momentary: prod logs showed one
+ * `POST /api/auth/refresh` answering 401 and the next attempt, milliseconds
+ * later with the very same cookie, answering 200. Rotation is allowed to be
+ * strict on the server, so the client must be forgiving: one rejected attempt is
+ * retried once, briefly, before the session is declared over.
+ */
+async function doRefresh(): Promise<RefreshOutcome> {
+  const first = await refreshOnce();
+  if (first !== "unauthenticated") return first;
+  await sleep(250);
+  const second = await refreshOnce();
+  return second === "unauthenticated" ? "unauthenticated" : second;
+}
+
+/**
+ * The one place that rotates the refresh cookie. Concurrent callers share a
+ * single in-flight attempt, so a page full of 401s does not fire a burst of
+ * rotations at the same cookie.
+ */
+export function tryRefresh(): Promise<RefreshOutcome> {
+  if (!refreshPromise) {
+    refreshPromise = doRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+/**
+ * The same forgiving refresh, without the shared in-flight promise. The boot
+ * probe uses this so a stale promise from an unmounted provider can never make
+ * a fresh mount wait on a request it did not make.
+ */
+export function refreshSessionCookie(): Promise<RefreshOutcome> {
+  return doRefresh();
 }
 
 function statusFallback(res: Response): string {
@@ -89,10 +134,7 @@ async function request<T>(
   });
 
   if (res.status === 401 && !_retried) {
-    if (!refreshPromise) {
-      refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
-    }
-    const refreshed = await refreshPromise;
+    const refreshed = await tryRefresh();
     if (refreshed === "ok") {
       return request<T>(path, options, true);
     }

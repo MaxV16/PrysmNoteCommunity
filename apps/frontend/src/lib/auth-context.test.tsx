@@ -139,9 +139,12 @@ describe("useAuth", () => {
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.user).toBeNull();
+    // The seeded snapshot clears `loading` immediately, so wait for the refresh
+    // round trip itself (the client retries a single 401 once, briefly, before
+    // it declares the session over) instead of asserting on the first tick.
+    await waitFor(() => expect(result.current.user).toBeNull());
     expect(localStorage.getItem("prysm_user_snapshot")).toBeNull();
+    expect(mockFetch.mock.calls.filter((c) => String(c[0]).includes("/auth/refresh"))).toHaveLength(2);
   });
 
   it("never calls /auth/refresh when there is no session and no refresh cookie", async () => {

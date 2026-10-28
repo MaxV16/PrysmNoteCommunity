@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
 import type { User } from "@/types/user";
 import { clearUserData } from "@/lib/clear-user-data";
+import { refreshSessionCookie, tryRefresh } from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -80,9 +81,6 @@ function rememberUser(userId: string | undefined): void {
  * edge blip) and must never end the session: the snapshot is kept and the next
  * check recovers.
  */
-function isUnauthenticated(res: Response | null): boolean {
-  return res?.status === 401 || res?.status === 403;
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -123,11 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // once. Only an explicit unauthenticated answer ends the session; a
           // transient 5xx/network error keeps the snapshot so a deploy-window
           // blip cannot log the user out.
-          const refreshed = await fetch(`${API_URL}/auth/refresh`, {
-            method: "POST",
-            credentials: "include",
-          }).catch(() => null);
-          if (refreshed?.ok) {
+          const outcome = await refreshSessionCookie();
+          if (outcome === "ok") {
             const retry = await readSession();
             if (retry?.authenticated && retry.user) {
               rememberUserSnapshot(retry.user);
@@ -136,7 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               rememberUserSnapshot(null);
               setUser(null);
             }
-          } else if (refreshed && isUnauthenticated(refreshed)) {
+          } else if (outcome === "unauthenticated") {
             rememberUserSnapshot(null);
             setUser(null);
           }
@@ -229,8 +224,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshSession = useCallback(async () => {
-    const res = await fetch(`${API_URL}/auth/refresh`, { method: "POST", credentials: "include" });
-    if (res.ok) {
+    const outcome = await tryRefresh();
+    if (outcome === "ok") {
       const meRes = await fetch(`${API_URL}/auth/me`, { credentials: "include" });
       if (meRes.ok) {
         const me = (await meRes.json()) as User;
