@@ -69,7 +69,7 @@ async function main() {
   await page.goto(`${BASE_URL}/marketing/features`, { waitUntil: "networkidle" });
 
   console.log("[2/5] open the mobile menu");
-  const toggle = page.getByRole("button", { name: "Toggle navigation menu" });
+  const toggle = page.getByRole("button", { name: "Toggle navigation" });
   await toggle.waitFor({ state: "visible" });
   await toggle.click();
   const dialog = page.getByRole("dialog", { name: "Navigation" });
