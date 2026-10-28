@@ -16,7 +16,7 @@ import { FinanceSettings } from "@/components/finance/FinanceSettings";
 import { McpSettings } from "@/components/mcp/McpSettings";
 import { Modal } from "@/components/ui/Modal";
 import { WidgetDashboard } from "@/components/widgets/WidgetDashboard";
-import { getDesktopBridge } from "@/lib/desktop-bridge";
+import { getDesktopBridge, openDesktopWidgets } from "@/lib/desktop-bridge";
 import { useNotificationPrefs, subscribeToPush, unsubscribeFromPush, notificationPermission, requestNotificationPermission, notificationsSupported } from "@/lib/notifications";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { api } from "@/lib/api";
@@ -704,12 +704,14 @@ export default function SettingsPage() {
   };
 
   const handleOpenWidgets = () => {
-    // The desktop app (and any webview that ignores window.open) can't show a
-    // useful popup, so render the dashboard in-app there. In a normal browser
-    // keep the floating window, falling back to the in-app view if the popup is
-    // blocked.
+    // The desktop app opens a real always-on-top widget window, so the widgets
+    // stay visible while you work in another app (that is the whole point of a
+    // widget). A build without that window, a blocked popup or a plain browser
+    // falls back to the in-app dashboard.
     if (getDesktopBridge()) {
-      setWidgetsOpen(true);
+      void openDesktopWidgets().then((opened) => {
+        if (!opened) setWidgetsOpen(true);
+      });
       return;
     }
     const win = window.open('/widgets', 'prysm-widgets', 'width=400,height=600');

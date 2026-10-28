@@ -234,7 +234,14 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
           title at its start instead of a wall of text running off-screen. It
           clips its own text since the bar no longer clips (the handles sit
           just outside the edges). */}
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden" style={{ maxWidth: 320, fontSize: metrics.labelPx }}>
+      {/* Sticky: a task that started before the visible range is clipped at the
+          left edge of the canvas, and without this its title scrolled out of
+          view with it, leaving a bar that reads "CK" or "macy!!". The label now
+          rides the left edge of the viewport while any part of the bar shows. */}
+      <div
+        className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden"
+        style={{ maxWidth: 320, fontSize: metrics.labelPx, position: "sticky", left: 0 }}
+      >
         {timeLabel && (
           <span className="hidden shrink-0 rounded-full bg-black/20 px-1.5 py-0.5 text-[9px] font-semibold sm:inline-block" style={{ color: "var(--bar-ink)", fontSize: Math.max(9, Math.round(metrics.labelPx * 0.82)) }}>
             {timeLabel}

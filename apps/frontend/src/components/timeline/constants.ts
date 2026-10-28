@@ -97,13 +97,16 @@ export function useTimelineMetrics(): TimelineMetrics {
   // View zoom and the UI scale both grow the content. Damping the zoom keeps a
   // 200% column from turning every title into one enormous word.
   const z = contentZoomScale(zoom);
-  return useMemo(
-    () => ({
-      barHeight: Math.max(24, Math.round(BAR_HEIGHT * scale * z)),
+  return useMemo(() => {
+    const barHeight = Math.max(24, Math.round(BAR_HEIGHT * scale * z));
+    return {
+      barHeight,
       barGap: Math.max(4, Math.round(BAR_GAP * scale * z)),
       topPadding: Math.max(2, Math.round(TOP_PADDING * scale * z)),
-      labelPx: Math.max(10, Math.min(22, Math.round(10 * scale * z))),
-    }),
-    [scale, z]
-  );
+      // The label is a fraction of the bar it sits in, not a fixed size. A 48px
+      // bar holding 11px text is what made a zoomed timeline feel like the
+      // tasks never scaled, even after the bars themselves grew.
+      labelPx: Math.max(10, Math.min(22, Math.round(barHeight * 0.34))),
+    };
+  }, [scale, z]);
 }

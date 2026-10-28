@@ -4,7 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { useTasks } from "@/hooks/useTasks";
 import { useNotificationPrefs, showSystemNotification } from "@/lib/notifications";
-import { getDesktopBridge, openDesktopNotification } from "@/lib/desktop-bridge";
+import {
+  getDesktopBridge,
+  onDesktopReminderOpen,
+  openDesktopNotification,
+  syncDesktopReminders,
+} from "@/lib/desktop-bridge";
 import {
   nativeNotificationsSupported,
   reconcileNativeReminders,
@@ -381,6 +386,53 @@ export function useInAppReminders() {
     void reconcileNative();
   }, [loaded, reconcileNative]);
 
+  /**
+   * Desktop only: hand the upcoming reminder times to the main process, which
+   * schedules them with `setTimeout`. The renderer cannot be trusted for this:
+   * Electron throttles (or suspends) a hidden window, so a reminder set while
+   * the app sat in the background never fired. This runs regardless of the
+   * web-push preference, because an OS notification is the desktop app's own
+   * reminder channel, not a browser push subscription.
+   */
+  const reconcileDesktop = useCallback(async () => {
+    if (!getDesktopBridge()) return;
+    try {
+      const rows = await api.get<NativeReminderRow[]>(
+        "/notifications/upcoming-reminders?limit=200"
+      );
+      if (!Array.isArray(rows)) return;
+      await syncDesktopReminders(
+        rows
+          .filter((row) => row && typeof row.id === "string" && row.reminder_at)
+          .map((row) => ({ taskId: row.id, title: row.title, at: row.reminder_at }))
+      );
+    } catch {
+      // Offline or transient: the main process keeps the schedule it has.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    void reconcileDesktop();
+    // Re-sync periodically so a reminder added on another device still fires
+    // here, and refresh whenever the window regains focus.
+    const id = setInterval(() => void reconcileDesktop(), CHECK_INTERVAL);
+    const onFocus = () => void reconcileDesktop();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loaded, reconcileDesktop]);
+
+  // Clicking a reminder notification opens that task in the app.
+  useEffect(() => {
+    if (!getDesktopBridge()) return;
+    return onDesktopReminderOpen((taskId) => {
+      useAppStore.getState().setSelectedTaskId(taskId);
+    });
+  }, []);
+
   // Cross-device sync: re-evaluate after the foreground task refresh so a task
   // added/edited elsewhere can surface here without a reload.
   useEffect(() => {
@@ -388,10 +440,11 @@ export function useInAppReminders() {
       void evaluate();
       void evaluateScheduled();
       void reconcileNative();
+      void reconcileDesktop();
     };
     window.addEventListener(FOREGROUND_REFRESH_EVENT, onRefresh);
     return () => window.removeEventListener(FOREGROUND_REFRESH_EVENT, onRefresh);
-  }, [evaluate, evaluateScheduled, reconcileNative]);
+  }, [evaluate, evaluateScheduled, reconcileNative, reconcileDesktop]);
 
   useEffect(() => {
     const timers = snoozeTimers.current;

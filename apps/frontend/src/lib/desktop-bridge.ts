@@ -10,6 +10,13 @@ import type { StickyNote } from "@/lib/notes";
  * browser or inside Capacitor, where `window.prysmDesktop` is undefined and
  * every call is a safe no-op.
  */
+/** One scheduled reminder the main process should fire at `at` (ISO string). */
+export interface DesktopReminder {
+  taskId: string;
+  title: string;
+  at: string;
+}
+
 export interface DesktopBridge {
   platform: string;
   isDesktop: boolean;
@@ -34,6 +41,20 @@ export interface DesktopBridge {
     body?: string;
     silent?: boolean;
   }) => Promise<boolean> | void;
+  /**
+   * Desktop only: hand the upcoming reminder times to the main process. The
+   * renderer is throttled or suspended while the window is hidden, so reminders
+   * must be scheduled where the timers keep running.
+   */
+  syncReminders?: (rows: DesktopReminder[]) => Promise<number> | void;
+  /** Desktop only: fired when the user clicks a reminder notification. */
+  onReminderOpen?: (callback: (payload: { taskId: string }) => void) => void;
+  /** Desktop only: the floating always-on-top widget window. */
+  widgets?: {
+    open: () => Promise<boolean>;
+    close: () => Promise<boolean>;
+    setAlwaysOnTop: (onTop: boolean) => Promise<boolean>;
+  };
   /** Native sticky note windows (always-on-top, frameless mini-windows) */
   sticky?: {
     create: (noteData: {
@@ -239,4 +260,50 @@ export function openDesktopNotification(payload: {
   } catch {
     return false;
   }
+}
+
+/**
+ * Schedule the given reminders in the main process. Returns the number of
+ * reminders handed over, or -1 when the running build has no scheduler (an app
+ * older than 0.1.13), so the caller can fall back to a renderer-side timer.
+ */
+export async function syncDesktopReminders(rows: DesktopReminder[]): Promise<number> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.syncReminders) return -1;
+  try {
+    const scheduled = await bridge.syncReminders(rows);
+    return typeof scheduled === "number" ? scheduled : -1;
+  } catch {
+    return -1;
+  }
+}
+
+/**
+ * Open the floating widget window in the desktop app. Returns false when the
+ * bridge has no widget window (older build), so the caller can keep the in-app
+ * dashboard as the fallback.
+ */
+export async function openDesktopWidgets(): Promise<boolean> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.widgets) return false;
+  try {
+    return Boolean(await bridge.widgets.open());
+  } catch {
+    return false;
+  }
+}
+
+/** Notify the host app when the user clicks a reminder notification. */
+export function onDesktopReminderOpen(callback: (taskId: string) => void): () => void {
+  const bridge = getDesktopBridge();
+  if (!bridge?.onReminderOpen) return () => {};
+  try {
+    bridge.onReminderOpen((payload) => {
+      if (payload && typeof payload.taskId === "string") callback(payload.taskId);
+    });
+  } catch {
+    return () => {};
+  }
+  // The bridge has no unsubscribe, matching the other Electron listeners here.
+  return () => {};
 }

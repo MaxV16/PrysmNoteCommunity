@@ -232,6 +232,11 @@ pub async fn send_due_alerts(
     Ok(sent)
 }
 
+/// How many failed email attempts a single reminder gets before the pass gives
+/// up on it. The reminder loop runs every minute, so five attempts spans a few
+/// minutes of provider trouble without hammering a permanently dead address.
+const REMINDER_EMAIL_ATTEMPTS: i64 = 5;
+
 /// Send the email/push channels for per-task scheduled reminders whose
 /// `reminder_at` has arrived. Delivery is deduped per (task, reminder time):
 /// a log row written at or after the reminder time suppresses a repeat, while
@@ -296,6 +301,25 @@ pub async fn send_task_reminders(
         }
     }
 
+    // Failed sends are recorded so a reminder whose email bounced is retried on
+    // the next pass instead of being marked done, while a permanently broken
+    // address cannot retry forever.
+    let failed_rows = sqlx::query(
+        "SELECT task_id, COUNT(*) AS attempts FROM notification_logs \
+         WHERE kind = 'task_reminder_failed' AND task_id = ANY($1) GROUP BY task_id",
+    )
+    .bind(&task_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut failed_attempts: HashMap<Uuid, i64> = HashMap::new();
+    for row in &failed_rows {
+        let task_id: Option<Uuid> = row.try_get("task_id")?;
+        let attempts: i64 = row.try_get("attempts")?;
+        if let Some(task_id) = task_id {
+            failed_attempts.insert(task_id, attempts);
+        }
+    }
+
     let mut user_ids: Vec<Uuid> = reminders.iter().map(|r| r.user_id).collect();
     user_ids.sort();
     user_ids.dedup();
@@ -344,12 +368,20 @@ pub async fn send_task_reminders(
         };
 
         let mut attempted = false;
+        let mut email_failed = false;
         if reminder.email && email_reminders {
             if let Some(Some(address)) = users_by_id.get(&reminder.user_id) {
                 if !address.is_empty() {
-                    email::send_email(settings, address, &title, &body, notification_from(settings))
-                        .await;
-                    attempted = true;
+                    // The send result decides whether this reminder is done: a
+                    // reminder marked sent after a failed send is a reminder the
+                    // user never receives.
+                    if email::send_email(settings, address, &title, &body, notification_from(settings))
+                        .await
+                    {
+                        attempted = true;
+                    } else {
+                        email_failed = true;
+                    }
                 }
             }
         }
@@ -370,6 +402,29 @@ pub async fn send_task_reminders(
                 }
             }
         }
+        if !attempted && email_failed {
+            let failures = failed_attempts.get(&reminder.id).copied().unwrap_or(0) + 1;
+            if failures >= REMINDER_EMAIL_ATTEMPTS {
+                tracing::warn!(
+                    task_id = %reminder.id,
+                    attempts = failures,
+                    "task reminder email kept failing, giving up on this reminder"
+                );
+                // Record it as sent so the pass stops retrying, and clear the
+                // time so the task is not stuck in a retry loop forever.
+                log_sent(&mut *conn, reminder.user_id, Some(reminder.id), "task_reminder").await?;
+                sqlx::query("UPDATE tasks SET reminder_at = NULL, updated_at = now() WHERE id = $1")
+                    .bind(reminder.id)
+                    .execute(&mut *conn)
+                    .await?;
+                failed_attempts.insert(reminder.id, failures);
+                continue;
+            }
+            log_sent(&mut *conn, reminder.user_id, Some(reminder.id), "task_reminder_failed").await?;
+            failed_attempts.insert(reminder.id, failures);
+            continue;
+        }
+
         if attempted {
             log_sent(&mut *conn, reminder.user_id, Some(reminder.id), "task_reminder").await?;
             // When no in-app card is expected, the server has completed every

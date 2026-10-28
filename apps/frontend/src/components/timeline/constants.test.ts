@@ -32,3 +32,29 @@ describe("responsiveDayWidth", () => {
     expect(wide).toBeGreaterThan(narrow);
   });
 });
+
+describe("useTimelineMetrics zoom wiring", () => {
+  // The reported bug: the day columns widen with the view zoom while the bars
+  // and their labels stay at the interface size, so a 200% timeline is double
+  // width columns holding tiny clipped titles.
+  it("grows the bar and the label with the timeline zoom", async () => {
+    const { renderHook, act } = await import("@testing-library/react");
+    const { setTimelineZoom } = await import("@/lib/view-zoom");
+    const { useTimelineMetrics } = await import("./constants");
+
+    const { result } = renderHook(() => useTimelineMetrics());
+    const base = result.current;
+
+    act(() => setTimelineZoom(2));
+    const zoomed = result.current;
+
+    expect(zoomed.barHeight).toBeGreaterThan(base.barHeight);
+    expect(zoomed.barGap).toBeGreaterThan(base.barGap);
+    expect(zoomed.labelPx).toBeGreaterThan(base.labelPx);
+    // Damped: a 2x column must not produce 2x rows, or one task fills the screen.
+    expect(zoomed.barHeight).toBeLessThan(base.barHeight * 2);
+    expect(zoomed.labelPx).toBeLessThanOrEqual(22);
+
+    act(() => setTimelineZoom(1));
+  });
+});

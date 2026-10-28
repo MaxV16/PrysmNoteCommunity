@@ -12,6 +12,19 @@ use crate::config::Settings;
 /// Brevo transactional email endpoint.
 const BREVO_SEND_URL: &str = "https://api.brevo.com/v3/smtp/email";
 
+/// Total attempts for one send. Three covers the common edge blip (a reset
+/// connection, a one-off 502) without holding a request open for long.
+const BREVO_ATTEMPTS: u32 = 3;
+
+/// Backoff before retry number `attempt` (0-based): 400ms, then 1200ms. Short
+/// enough that a reminder email is still timely, long enough to outlast a
+/// momentary provider hiccup.
+fn retry_delay(attempt: u32) -> std::time::Duration {
+    const BACKOFF_MS: [u64; 2] = [400, 1200];
+    let index = (attempt as usize).min(BACKOFF_MS.len() - 1);
+    std::time::Duration::from_millis(BACKOFF_MS[index])
+}
+
 /// Subject of the one-time welcome note.
 pub const WELCOME_SUBJECT: &str = "[Prysm Note] Welcome - here is how to get started";
 
@@ -120,8 +133,10 @@ async fn send_brevo(settings: &Settings, to_address: &str, subject: &str, body: 
         Err(_) => return false,
     };
 
-    // Retry once on a transient (5xx/429/network) failure, matching Python.
-    for attempt in 0..2 {
+    // Transient failures (network, 429, 5xx) retry with a short backoff. A 4xx
+    // is a payload or account problem, so retrying only delays the failure.
+    let mut last_error = String::new();
+    for attempt in 0..BREVO_ATTEMPTS {
         match client
             .post(BREVO_SEND_URL)
             .header("api-key", settings.brevo_api_key())
@@ -135,20 +150,28 @@ async fn send_brevo(settings: &Settings, to_address: &str, subject: &str, body: 
                 if status == 200 || status == 201 {
                     return true;
                 }
-                if (status >= 500 || status == 429) && attempt == 0 {
+                let detail = resp.text().await.unwrap_or_default();
+                let transient = status == 429 || status >= 500;
+                // A 429 is a rate limit, not a broken request: honour the
+                // advertised delay when Brevo sends one, otherwise back off.
+                last_error = format!("HTTP {status}: {}", detail.trim());
+                if transient && attempt + 1 < BREVO_ATTEMPTS {
+                    tokio::time::sleep(retry_delay(attempt)).await;
                     continue;
                 }
-                tracing::warn!("Brevo API send to {to_address} returned {status}");
+                tracing::warn!(to = %to_address, status, detail = %detail.trim(), "Brevo rejected an email");
                 return false;
             }
             Err(err) => {
-                if attempt == 0 {
+                last_error = err.to_string();
+                if attempt + 1 < BREVO_ATTEMPTS {
+                    tokio::time::sleep(retry_delay(attempt)).await;
                     continue;
                 }
-                tracing::warn!("Failed to send email via Brevo API to {to_address}: {err}");
             }
         }
     }
+    tracing::warn!(to = %to_address, error = %last_error, "Brevo send failed after retries");
     false
 }
 
