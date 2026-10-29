@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AiPanelButton } from "@/components/ui/AiPanelButton";
 import { Modal } from "@/components/ui/Modal";
+import { VaultGraphView } from "@/components/vault/VaultGraphView";
 import { useForegroundRefresh } from "@/hooks/useForegroundRefresh";
 import { api } from "@/lib/api";
 import { useToast } from "@/lib/toast-context";
@@ -125,6 +126,7 @@ export function VaultExplorer({ onOpenAi }: VaultExplorerProps) {
 
   const [templates, setTemplates] = useState<VaultTemplate[]>([]);
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [graphOpen, setGraphOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [revisions, setRevisions] = useState<VaultRevision[]>([]);
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -513,8 +515,15 @@ export function VaultExplorer({ onOpenAi }: VaultExplorerProps) {
             </span>
             {searching && <span className="text-[10px] text-muted">searching...</span>}
             <button
-              onClick={() => setTemplatesOpen(true)}
+              onClick={() => setGraphOpen(true)}
               className="ml-auto text-[11px] text-secondary hover:text-primary"
+              title="Graph"
+            >
+              Graph
+            </button>
+            <button
+              onClick={() => setTemplatesOpen(true)}
+              className="text-[11px] text-secondary hover:text-primary"
               title="Templates"
             >
               Templates
@@ -821,6 +830,12 @@ export function VaultExplorer({ onOpenAi }: VaultExplorerProps) {
           </div>
         </div>
       </Modal>
+
+      <VaultGraphView
+        isOpen={graphOpen}
+        onClose={() => setGraphOpen(false)}
+        onSelectNote={(noteId) => void selectNote(noteId)}
+      />
 
       <Modal isOpen={templatesOpen} onClose={() => setTemplatesOpen(false)} title="Templates">
         <div className="space-y-3">
