@@ -8,6 +8,42 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("Markdown task list checkboxes", () => {
+  const list = "- [ ] first\n- [x] second";
+
+  it("renders task list checkboxes read-only without a toggle handler", () => {
+    render(<Markdown>{list}</Markdown>);
+    const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0].disabled).toBe(true);
+    expect(boxes[0].checked).toBe(false);
+    expect(boxes[1].checked).toBe(true);
+  });
+
+  it("reports the source line index and the new checked state", () => {
+    const onToggleChecklist = vi.fn();
+    render(<Markdown onToggleChecklist={onToggleChecklist}>{list}</Markdown>);
+
+    const boxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(boxes[0].disabled).toBe(false);
+
+    fireEvent.click(boxes[0]);
+    expect(onToggleChecklist).toHaveBeenCalledWith(0, true);
+
+    // Re-query: the optimistic state re-renders the markdown, so the previously
+    // captured nodes are replaced.
+    fireEvent.click(screen.getAllByRole("checkbox")[1]);
+    expect(onToggleChecklist).toHaveBeenCalledWith(1, false);
+  });
+
+  it("keeps a tick visible while the save is in flight", () => {
+    render(<Markdown onToggleChecklist={() => {}}>{list}</Markdown>);
+    const box = screen.getAllByRole("checkbox")[0] as HTMLInputElement;
+    fireEvent.click(box);
+    expect(box.checked).toBe(true);
+  });
+});
+
 describe("Markdown images", () => {
   it("copies the image URL when the clipboard image API is unavailable", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);

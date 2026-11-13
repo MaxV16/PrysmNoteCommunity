@@ -109,24 +109,21 @@ describe("TimelineLane stacking", () => {
     expect(baseElements.length).toBe(2);
   });
 
-  it("sizes the interactive day-cell overlays from DAY_WIDTH", () => {
-    const days = daysFor("2026-08-03", 3);
+  it("renders ONE day hit layer per lane instead of a node per day (perf invariant)", () => {
+    // The slice is 260 days wide; the old overlay mounted a cell plus a "+"
+    // button per day, per lane. It must stay a single element.
+    const days = daysFor("2026-08-03", 260);
     const { container } = render(
       <DndContext>
-        <TimelineLane tasks={[]} days={days} onDayDoubleClick={() => {}} />
+        <TimelineLane tasks={[]} days={days} onDayDoubleClick={() => {}} onDayAdd={() => {}} />
       </DndContext>
     );
-    const cells = container.querySelectorAll("[class*='cursor-pointer']");
-    expect(cells).toHaveLength(3);
-    for (const cell of cells) {
-      const el = cell as HTMLElement;
-      expect(el.style.width).toBe(`${DAY_WIDTH}px`);
-      expect(el.style.minWidth).toBe(`${DAY_WIDTH}px`);
-      expect(el.style.flex).toBe(`0 0 ${DAY_WIDTH}px`);
-    }
+    expect(container.querySelectorAll("[data-lane-day-overlay]")).toHaveLength(1);
+    expect(container.querySelectorAll("[class*='cursor-pointer']")).toHaveLength(1);
+    expect(container.querySelectorAll("button")).toHaveLength(1);
   });
 
-  it("fires onDayDoubleClick with the clicked day and lane (day-cell create-task hook)", () => {
+  it("fires onDayDoubleClick with the day under the pointer and lane (day-cell create-task hook)", () => {
     const days = daysFor("2026-08-03", 3);
     const onDayDoubleClick = vi.fn();
     const { container } = render(
@@ -139,10 +136,28 @@ describe("TimelineLane stacking", () => {
         />
       </DndContext>
     );
-    const cells = container.querySelectorAll("[class*='cursor-pointer']");
-    fireEvent.doubleClick(cells[1]);
+    const overlay = container.querySelector("[data-lane-day-overlay]") as HTMLElement;
+    expect(overlay).not.toBeNull();
+    fireEvent.doubleClick(overlay, { clientX: DAY_WIDTH * 1 + DAY_WIDTH / 2 });
     expect(onDayDoubleClick).toHaveBeenCalledTimes(1);
     expect(onDayDoubleClick.mock.calls[0][0]).toEqual(days[1]);
     expect(onDayDoubleClick.mock.calls[0][1]).toBe("sec-1");
+  });
+
+  it("never creates twice when the mousedown fallback and dblclick both fire", () => {
+    const days = daysFor("2026-08-03", 3);
+    const onDayDoubleClick = vi.fn();
+    const { container } = render(
+      <DndContext>
+        <TimelineLane tasks={[]} days={days} onDayDoubleClick={onDayDoubleClick} />
+      </DndContext>
+    );
+    const overlay = container.querySelector("[data-lane-day-overlay]") as HTMLElement;
+    const clientX = DAY_WIDTH * 2 + DAY_WIDTH / 2;
+    fireEvent.mouseDown(overlay, { clientX });
+    fireEvent.mouseDown(overlay, { clientX });
+    fireEvent.doubleClick(overlay, { clientX });
+    expect(onDayDoubleClick).toHaveBeenCalledTimes(1);
+    expect(onDayDoubleClick.mock.calls[0][0]).toEqual(days[2]);
   });
 });

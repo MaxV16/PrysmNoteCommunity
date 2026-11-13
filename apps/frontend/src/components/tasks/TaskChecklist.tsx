@@ -13,17 +13,19 @@ import {
   SortableContext,
   verticalListSortingStrategy,
   useSortable,
-  arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { api } from "@/lib/api";
 import type { Task } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
+import { useAppStore } from "@/stores/app-store";
 import { Markdown } from "@/components/ai/Markdown";
 import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
 import { MarkdownImagePreview } from "@/components/ui/MarkdownImagePreview";
 import { SUBTASK_TITLE_MAX, SUBTASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
+import { moveSubtaskById } from "@/lib/subtask-order";
+import { toggleTaskListCheckbox } from "@/lib/markdown-task-list";
 import {
   imageSourceFrom,
   insertImageAtCursor,
@@ -364,6 +366,10 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                 compact
                 onImageActivate={() => startEditing(true)}
                 imageActionLabel="Edit subtask"
+                onToggleChecklist={(lineIndex, checked) => {
+                  const next = toggleTaskListCheckbox(sub.title, lineIndex, checked);
+                  if (next !== sub.title) void onRename(sub, next);
+                }}
               >
                 {sub.title}
               </Markdown>
@@ -478,6 +484,11 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                   compact
                   onImageActivate={() => startDescriptionEdit()}
                   imageActionLabel="Edit description"
+                  onToggleChecklist={(lineIndex, checked) => {
+                    const source = sub.description ?? "";
+                    const next = toggleTaskListCheckbox(source, lineIndex, checked);
+                    if (next !== source) void onUpdateDescription(sub, next);
+                  }}
                 >
                   {sub.description}
                 </Markdown>
@@ -510,7 +521,7 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
   // Completed subtasks are hidden by default so the list stays focused on what
   // is left; the header toggle reveals them again.
   const [showCompleted, setShowCompleted] = useState(false);
-  const { updateTask, fetchTasks } = useTasks();
+  const { updateTask } = useTasks();
   const subtasksSignature = subtasks.map((s) => `${s.id}:${s.status}:${s.title}:${s.description ?? ""}`).join("|");
   const syncedSignatureRef = useRef(subtasksSignature);
 
@@ -584,13 +595,35 @@ export function TaskChecklist({ subtasks, taskId }: TaskChecklistProps) {
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = items.findIndex((s) => s.id === active.id);
-    const newIndex = items.findIndex((s) => s.id === over.id);
-    if (oldIndex < 0 || newIndex < 0) return;
-    const next = sortSubtasks(arrayMove(items, oldIndex, newIndex));
+    // dnd-kit's SortableContext only contains `visibleItems` (completed
+    // subtasks are hidden), so indexes must be resolved against that same list.
+    // Reordering the full `items` array by id keeps the move correct without
+    // the old index mismatch.
+    const visibleIds = new Set(visibleItems.map((s) => s.id));
+    const draggedId = String(active.id);
+    const targetId = String(over.id);
+    if (!visibleIds.has(draggedId) || !visibleIds.has(targetId)) return;
+    const next = moveSubtaskById(items, draggedId, targetId);
+    if (!next) return;
+    // Persist the explicit order. Do NOT run `sortSubtasks` here: it re-sorted
+    // open-first/done-last and immediately undid a drop at the very top.
     setItems(next);
-    await api.post(`/tasks/${taskId}/subtasks/reorder`, { ordered_ids: next.map((s) => s.id) });
-    fetchTasks();
+    try {
+      // Await the save before touching the store, so an in-flight refresh can
+      // never overwrite the order the user just dropped.
+      await api.post(`/tasks/${taskId}/subtasks/reorder`, {
+        ordered_ids: next.map((s) => s.id),
+      });
+      // Reflect the saved sort_order locally. The drawer merges subtasks from
+      // the store, and without this its persisted order would still be the old
+      // one and could snap the list back.
+      const order = new Map(next.map((s, index) => [s.id, index]));
+      useAppStore.getState().mergeTasks(
+        next.map((s) => ({ ...s, sort_order: order.get(s.id) ?? s.sort_order }))
+      );
+    } catch {
+      // Keep the optimistic order; the next reconcile restores server truth.
+    }
   };
 
   const completedCount = items.filter((s) => s.status === "done").length;

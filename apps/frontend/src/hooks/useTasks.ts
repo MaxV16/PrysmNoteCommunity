@@ -22,8 +22,18 @@ let fetchSeq = 0;
 // the same transaction as its siblings (all share an updated_at timestamp) is
 // never skipped.
 let syncCursor: number | null = null;
-const SYNC_OVERLAP_MS = 2000;
+// The server filters `updated_at` with ITS clock. A client that is even a few
+// seconds ahead used to write a cursor in the future and then miss rows the
+// server had just written (a restore, a subtask edit), which is why a restored
+// task could stay invisible while the AI still found it. A generous overlap
+// absorbs normal clock skew, and the cursor is advanced from the newest row the
+// server actually returned rather than from the client clock.
+const SYNC_OVERLAP_MS = 60000;
 const SYNC_FALLBACK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+// Set by a delete/restore path that must reconcile against a full snapshot
+// instead of an incremental pass (a restored row can fall outside the cursor
+// window, or the store can be empty when the last task is restored).
+let forceSnapshot = false;
 
 // Debounced reconcile used after a gesture-driven persist. Patching fires and
 // forgets; the heavier window refresh runs once the user stops, so a drag never
@@ -47,7 +57,13 @@ let cachePersistTimer: ReturnType<typeof setTimeout> | null = null;
 let cachedTasksRef: Task[] | null = null;
 
 if (typeof window !== "undefined") {
-  syncCursor = readTaskCacheCursor();
+  const cachedCursor = readTaskCacheCursor();
+  // Never trust a cached cursor from the future (a previous client clock, or a
+  // clock change since the cache was written): it would hide every newer row.
+  syncCursor =
+    cachedCursor !== null && cachedCursor <= Date.now() + SYNC_OVERLAP_MS
+      ? cachedCursor
+      : null;
   if (useAppStore.getState().tasks.length === 0) {
     const cached = readTaskCache();
     if (cached && cached.length > 0) {
@@ -83,9 +99,10 @@ let fullSnapshotLoaded = false;
 
 async function fetchTaskSnapshot(seq: number): Promise<Task[] | null> {
   // Page fully on the first load, and again whenever the store is empty (a
-  // logout clears it), so a second account in the same tab still gets every
-  // task instead of just the newest page.
-  const full = !fullSnapshotLoaded || useAppStore.getState().tasks.length === 0;
+  // logout clears it) or a restore explicitly asked for a clean pass, so a
+  // second account in the same tab still gets every task instead of just the
+  // newest page.
+  const full = forceSnapshot || !fullSnapshotLoaded || useAppStore.getState().tasks.length === 0;
   const pages = full ? SNAPSHOT_MAX_PAGES : 1;
   const all: Task[] = [];
   for (let page = 0; page < pages; page += 1) {
@@ -97,8 +114,29 @@ async function fetchTaskSnapshot(seq: number): Promise<Task[] | null> {
     all.push(...batch);
     if (batch.length < TASK_PAGE_SIZE) break;
   }
+  if (seq === fetchSeq) forceSnapshot = false;
   fullSnapshotLoaded = true;
   return all;
+}
+
+/**
+ * Advance the sync cursor using the server's own timestamps. Falling back to
+ * `Date.now()` only when a page carried no usable timestamp keeps a client
+ * clock that runs ahead from ever hiding rows written by the server.
+ */
+function advanceCursor(rows: Task[]) {
+  let newest = 0;
+  for (const row of rows) {
+    const ms = Date.parse(row.updated_at || "");
+    if (Number.isFinite(ms) && ms > newest) newest = ms;
+  }
+  // Keep the cursor at a server timestamp when one is available, but floor it
+  // at the fallback window so a dormant account cannot turn the next refresh
+  // into a full-history walk. A future client clock can never push it ahead of
+  // the rows the server actually returned.
+  const floor = Date.now() - SYNC_FALLBACK_WINDOW_MS;
+  if (newest > 0) syncCursor = Math.max(newest, floor);
+  else if (syncCursor === null) syncCursor = Date.now();
 }
 
 // Incremental sync: pull only rows changed since the cursor, tombstones
@@ -176,17 +214,18 @@ export async function refreshTasksPreservingWindow() {
       const changes = await fetchIncrementalChanges(seq);
       if (seq === fetchSeq && changes) {
         applyIncrementalChanges(changes);
-        syncCursor = Date.now();
+        advanceCursor(changes);
       }
     }
-    // Snapshot when we have never paged, or whenever the store is empty (a new
-    // account, or after a logout cleared it), so a cache-hydrated load both
-    // reconciles tombstones above AND still fills the page window below.
-    if (!fullSnapshotLoaded || store.tasks.length === 0) {
+    // Snapshot when we have never paged, whenever the store is empty (a new
+    // account, or after a logout cleared it), or when a restore asked for a
+    // clean pass, so a cache-hydrated load both reconciles tombstones above AND
+    // still fills the page window below.
+    if (forceSnapshot || !fullSnapshotLoaded || store.tasks.length === 0) {
       const data = await fetchTaskSnapshot(seq);
       if (seq === fetchSeq && data) {
         store.mergeTasks(data);
-        syncCursor = Date.now();
+        advanceCursor(data);
       }
     }
   } catch {
@@ -218,14 +257,14 @@ export function useTasks() {
         const changes = await fetchIncrementalChanges(seq);
         if (seq === fetchSeq && changes) {
           applyIncrementalChanges(changes);
-          syncCursor = Date.now();
+          advanceCursor(changes);
         }
       }
-      if (!fullSnapshotLoaded) {
+      if (forceSnapshot || !fullSnapshotLoaded) {
         const data = await fetchTaskSnapshot(seq);
         if (seq === fetchSeq && data) {
           store.mergeTasks(data);
-          syncCursor = Date.now();
+          advanceCursor(data);
         }
       }
     } catch {
@@ -291,6 +330,11 @@ export function useTasks() {
     async (id: string, fields: Record<string, unknown>) => {
       const data = await api.patch<Task>(`/tasks/${id}`, fields);
       if (fields.status === "done") track("task_completed");
+      // Merge the server's copy immediately, exactly like `updateTask`. Without
+      // this a gesture (drag, resize, section move) only showed up after the
+      // debounced reconcile finished, which read as a saved change that lagged
+      // behind the pointer.
+      useAppStore.getState().mergeTasks([data]);
       scheduleReconcile();
       return data;
     },
@@ -311,6 +355,9 @@ export function useTasks() {
       // resurrect it while the response is in flight.
       setTasks(useAppStore.getState().tasks.filter((t) => t.id !== id));
       await fetchTasks();
+      // A concurrent incremental page can still carry the pre-delete row; drop
+      // it once more after the reconcile so a trashed task can never reappear.
+      setTasks(useAppStore.getState().tasks.filter((t) => t.id !== id));
     },
     [setTasks, fetchTasks]
   );
@@ -325,6 +372,7 @@ export function useTasks() {
       const keep = new Set(ids);
       setTasks(useAppStore.getState().tasks.filter((t) => !keep.has(t.id)));
       await fetchTasks();
+      setTasks(useAppStore.getState().tasks.filter((t) => !keep.has(t.id)));
       return { deleted };
     },
     [setTasks, fetchTasks]
@@ -333,6 +381,20 @@ export function useTasks() {
   const restoreTask = useCallback(
     async (id: string) => {
       await api.post(`/tasks/${id}/restore`, {});
+      // A restore writes a fresh `updated_at`, but that row can still fall
+      // outside an incremental window whose cursor was advanced by this client
+      // a moment earlier. Read the row back directly so it reappears at once,
+      // then run a forced snapshot so the surrounding views reconcile.
+      forceSnapshot = true;
+      syncCursor = null;
+      try {
+        const restored = await api.get<Task>(`/tasks/${id}`);
+        if (restored && !Array.isArray(restored) && !restored.deleted_at) {
+          useAppStore.getState().mergeTasks([restored]);
+        }
+      } catch {
+        // The snapshot below is still authoritative.
+      }
       await fetchTasks();
     },
     [fetchTasks]
@@ -343,6 +405,22 @@ export function useTasks() {
     async (ids: string[]): Promise<{ restored: number }> => {
       if (ids.length === 0) return { restored: 0 };
       const body = await api.post<{ restored: number }>("/tasks/batch-restore", { task_ids: ids });
+      forceSnapshot = true;
+      syncCursor = null;
+      // Merge every restored row straight from the server so a batch restore
+      // never depends on the incremental cursor seeing it.
+      const restoredRows = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const task = await api.get<Task>(`/tasks/${id}`);
+            return task && !Array.isArray(task) && !task.deleted_at ? task : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const found = restoredRows.filter((task): task is Task => task !== null);
+      if (found.length > 0) useAppStore.getState().mergeTasks(found);
       await fetchTasks();
       return { restored: body?.restored ?? 0 };
     },

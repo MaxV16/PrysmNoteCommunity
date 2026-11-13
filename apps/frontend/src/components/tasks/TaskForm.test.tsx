@@ -53,6 +53,35 @@ describe("TaskForm", () => {
     onCancel: vi.fn(),
   };
 
+  it("shows the markdown toolbar for the description on create and edit", () => {
+    const first = render(<TaskForm {...defaultProps} />);
+    expect(screen.getByRole("toolbar", { name: "Formatting" })).toBeInTheDocument();
+    first.unmount();
+
+    render(<TaskForm {...defaultProps} initial={makeTask()} />);
+    expect(screen.getByRole("toolbar", { name: "Formatting" })).toBeInTheDocument();
+  });
+
+  it("submits description formatting added from the toolbar", () => {
+    const onSubmit = vi.fn();
+    render(<TaskForm onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
+      target: { value: "Formatted task" },
+    });
+    const description = screen.getByPlaceholderText(
+      /Add details/
+    ) as HTMLTextAreaElement;
+    description.setSelectionRange(0, 0);
+    fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+    expect(description.value).toBe("**bold text**");
+
+    fireEvent.click(screen.getByRole("button", { name: /create task/i }));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "**bold text**" })
+    );
+  });
+
   it("shows default 30 minutes for new tasks", () => {
     render(<TaskForm {...defaultProps} />);
     fireEvent.click(screen.getByRole("button", { name: /more options/i }));

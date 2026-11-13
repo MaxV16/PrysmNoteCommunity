@@ -48,6 +48,7 @@ import {
   removeMarkdownImage,
   type ImageInsertSource,
 } from "@/lib/upload";
+import { toggleTaskListCheckbox } from "@/lib/markdown-task-list";
 
 import {
   TIER_COLORS,
@@ -1020,6 +1021,13 @@ const handleUpdate = async (data: {
                 <Markdown
                   onImageActivate={() => startDescriptionEdit()}
                   imageActionLabel="Edit description"
+                  onToggleChecklist={(lineIndex, checked) => {
+                    const source = task.description ?? "";
+                    void updateTask(task.id, {
+                      description:
+                        toggleTaskListCheckbox(source, lineIndex, checked) || null,
+                    });
+                  }}
                 >
                   {task.description}
                 </Markdown>

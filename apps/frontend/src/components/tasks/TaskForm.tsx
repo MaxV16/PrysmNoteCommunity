@@ -8,6 +8,14 @@ import { TIER_LABELS, TIER_VALUES, normalizePriority, type PriorityTier } from "
 import { applyEnd, parseEnd, type RecurrenceEnd } from "@/lib/recurrence";
 import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
+import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
+import { MarkdownImagePreview } from "@/components/ui/MarkdownImagePreview";
+import {
+  imageSourceFrom,
+  insertImageAtCursor,
+  removeMarkdownImage,
+  type ImageInsertSource,
+} from "@/lib/upload";
 import {
   TaskReminderFields,
   defaultReminderAt,
@@ -190,6 +198,9 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
   const activeListId = useAppStore((s) => s.activeListId);
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
+  const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
+  const [descriptionUploading, setDescriptionUploading] = useState(false);
+  const [descriptionImageError, setDescriptionImageError] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || "");
   const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || "");
   const [startTime, setStartTime] = useState(initial?.start_time || "");
@@ -277,9 +288,27 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
       : null;
   const validationError = dateError ?? timeError ?? titleError ?? descriptionError;
 
+  const handleDescriptionImage = async (source: ImageInsertSource | null) => {
+    const textarea = descriptionRef.current;
+    if (!textarea || !source) return;
+    setDescriptionImageError(null);
+    setDescriptionUploading(true);
+    try {
+      await insertImageAtCursor(textarea, source, setDescription);
+    } catch (err) {
+      setDescriptionImageError(
+        err instanceof Error ? err.message : "Could not upload that image."
+      );
+    } finally {
+      setDescriptionUploading(false);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    // An image upload that is still resolving must land before the form saves.
+    if (descriptionUploading) return;
     if (validationError) return;
     // Ensure undated tasks land on the user's local date so they appear on the
     // timeline. Using the local date (not UTC) keeps the day aligned across
@@ -341,14 +370,52 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
       </div>
       <div>
         <label className="text-xs font-medium text-secondary mb-1.5 block">Description</label>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Add details..."
-          rows={2}
-          className="input-field resize-none text-xs placeholder:text-secondary"
-        />
+        <div className="rounded-lg border border-border/60 bg-elevated/40 p-1.5">
+          <MarkdownToolbar
+            textareaRef={descriptionRef}
+            onChange={setDescription}
+            className="mb-1 border-b border-border/60 pb-1"
+          />
+          <textarea
+            ref={descriptionRef}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onPaste={(e) => {
+              const source = imageSourceFrom(e.clipboardData);
+              if (!source) return;
+              e.preventDefault();
+              void handleDescriptionImage(source);
+            }}
+            onDragOver={(e) => {
+              if (imageSourceFrom(e.dataTransfer)) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              const source = imageSourceFrom(e.dataTransfer);
+              if (!source) return;
+              e.preventDefault();
+              void handleDescriptionImage(source);
+            }}
+            placeholder="Add details (markdown and images supported)..."
+            rows={4}
+            className="input-field w-full resize-none bg-transparent text-xs placeholder:text-secondary"
+          />
+          {descriptionUploading && (
+            <span role="status" className="mt-1 block text-[10px] text-secondary">
+              Uploading image...
+            </span>
+          )}
+          <MarkdownImagePreview
+            text={description}
+            className="mt-1"
+            onRemove={(image) => setDescription((prev) => removeMarkdownImage(prev, image))}
+          />
+        </div>
         <CharLimitHint value={description} max={TASK_DESCRIPTION_MAX} className="mt-1" />
+        {descriptionImageError && (
+          <p role="alert" className="mt-1 text-[10px] text-danger">
+            {descriptionImageError}
+          </p>
+        )}
       </div>
 
       <SectionLabel>Schedule</SectionLabel>
@@ -581,7 +648,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
           </button>
           <button
             type="submit"
-            disabled={!!validationError}
+            disabled={!!validationError || descriptionUploading}
             className="btn btn-primary pointer-coarse:min-h-11 flex-1 px-6 py-2.5 text-sm disabled:opacity-50 sm:flex-none"
           >
             {isEdit ? "Update Task" : "Create Task"}

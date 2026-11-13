@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -9,6 +9,7 @@ import {
   protectDateLineBreaks,
   stripTextToolCalls,
 } from "@/lib/ai-format";
+import { taskListLineIndexes } from "@/lib/markdown-task-list";
 
 // Thin, theme-aware wrapper around react-markdown. Renders markdown produced
 // by AI replies safely (react-markdown never injects raw HTML). Sloppy model
@@ -175,6 +176,7 @@ export function Markdown({
   compact = false,
   onImageActivate,
   imageActionLabel,
+  onToggleChecklist,
 }: {
   children: string;
   ai?: boolean;
@@ -189,16 +191,64 @@ export function Markdown({
   onImageActivate?: (src: string) => void;
   /** Accessible label for the image activation action, e.g. "Edit description". */
   imageActionLabel?: string;
+  /**
+   * Makes GitHub task list checkboxes (`- [ ]`) interactive. The index is the
+   * checkbox's ordinal in the rendered document, which maps to the exact
+   * markdown line through `taskListLineIndexes`. Omitted (AI replies, previews)
+   * leaves them rendered read-only.
+   */
+  onToggleChecklist?: (lineIndex: number, checked: boolean) => void;
 }) {
   const source = ai
     ? protectDateLineBreaks(normalizeAssistantMarkdown(stripTextToolCalls(children)))
     : protectDateLineBreaks(children);
+  const taskLines = taskListLineIndexes(source);
+  // Optimistic checkbox state so a tick shows immediately instead of snapping
+  // back while the description PATCH is in flight. Cleared whenever the source
+  // changes (the parent saved a new version, or the task switched).
+  const [optimistic, setOptimistic] = useState<Record<number, boolean>>({});
+  useEffect(() => {
+    setOptimistic({});
+  }, [children]);
+  let checkboxOrdinal = 0;
   return (
     <div className="markdown-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         urlTransform={(url) => (url.startsWith("data:image/") ? url : defaultUrlTransform(url))}
         components={{
+          input({ type, checked, disabled, className }) {
+            if (type !== "checkbox") {
+              return (
+                <input type={type} checked={!!checked} disabled={disabled} className={className} />
+              );
+            }
+            const lineIndex = taskLines[checkboxOrdinal];
+            checkboxOrdinal += 1;
+            const interactive = onToggleChecklist !== undefined && lineIndex !== undefined;
+            const isChecked =
+              lineIndex !== undefined ? optimistic[lineIndex] ?? !!checked : !!checked;
+            return (
+              <input
+                type="checkbox"
+                checked={isChecked}
+                disabled={!interactive}
+                readOnly={!interactive}
+                aria-label={isChecked ? "Mark checklist item not done" : "Mark checklist item done"}
+                onChange={(e) => {
+                  if (lineIndex === undefined || !onToggleChecklist) return;
+                  const next = e.target.checked;
+                  setOptimistic((prev) => ({ ...prev, [lineIndex]: next }));
+                  onToggleChecklist(lineIndex, next);
+                }}
+                className={
+                  interactive
+                    ? "task-list-checkbox cursor-pointer accent-[var(--accent)]"
+                    : "task-list-checkbox"
+                }
+              />
+            );
+          },
           img({ src, alt, title }) {
             return (
               <MarkdownImage

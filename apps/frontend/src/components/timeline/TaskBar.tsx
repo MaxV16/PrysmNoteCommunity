@@ -8,7 +8,7 @@ import { TIER_COLORS, TIER_LABELS, normalizePriority, type PriorityTier } from "
 import { taskTimeLabel } from "@/lib/task-time";
 import { parseLocalDate } from "@/lib/utils";
 import { useTimelineBarDrag } from "@/hooks/useTimelineBarDrag";
-import { useTimelineMetrics } from "./constants";
+import { useTimelineMetrics, type TimelineMetrics } from "./constants";
 
 /** Compact "Mar 5 - Mar 12" label for the live resize preview. */
 function formatResizeRange(start: string, due: string) {
@@ -25,6 +25,15 @@ interface TaskBarProps {
   dragDisabled?: boolean;
   selected?: boolean;
   selectMode?: boolean;
+}
+
+interface TaskBarViewProps extends TaskBarProps {
+  /**
+   * Bar geometry for the current zoom/UI scale. The lane computes it once and
+   * hands the same object to every bar, so a zoom change re-renders one lane
+   * instead of N per-bar zoom-store subscriptions.
+   */
+  metrics: TimelineMetrics;
 }
 
 /**
@@ -110,7 +119,7 @@ function ResizeHandle({
   );
 }
 
-export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMenu, dragDisabled, selected, selectMode }: TaskBarProps) {
+export const TaskBarView = memo(function TaskBarView({ task, style, onClick, onContextMenu, dragDisabled, selected, selectMode, metrics }: TaskBarViewProps) {
   // A stationary touch hold opens the mobile action bar on release. The pointer
   // engine owns the whole gesture, for draggable and drag-disabled (done) bars
   // alike, so there is exactly one long-press system and one timer.
@@ -125,7 +134,6 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
   // Height and label size come from the shared timeline metrics, which already
   // fold in the device UI scale AND the view zoom. Computing them here from the
   // UI scale alone is what left 10px titles inside 200% wide columns.
-  const metrics = useTimelineMetrics();
   // Which pointer started the current press. A touch hold already opens the
   // bottom action bar, so the floating right-click menu must stay closed on
   // touch (it would duplicate the same actions and cover the task being moved).
@@ -143,6 +151,13 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
   const isDone = task.status === "done";
   const isInProgress = task.status === "in_progress";
   const timeLabel = taskTimeLabel(task);
+  // A task can carry a 100k-character description. Building a DOM `title` from
+  // the whole thing on every render (and on every drag frame that re-renders
+  // the bar) was expensive and made the native tooltip enormous. A short,
+  // whitespace-collapsed hint is all a hover needs.
+  const descriptionHint = task.description
+    ? task.description.replace(/\s+/g, " ").trim().slice(0, 160)
+    : "";
 
   const barStyle = {
     ...style,
@@ -221,7 +236,7 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
         if (lastPointerTypeRef.current === "touch") return;
         onContextMenu?.(e, task);
       }}
-      title={`${task.title}${timeLabel ? ` (${timeLabel})` : ""}${task.description ? " - " + task.description : ""}`}
+      title={`${task.title}${timeLabel ? ` (${timeLabel})` : ""}${descriptionHint ? " - " + descriptionHint : ""}`}
       className={`group/bar transition-colors ${
         dragging ? "ring-2 ring-accent/40" : isInProgress ? "animate-pulse-subtle" : ""
       }`}
@@ -270,4 +285,14 @@ export const TaskBar = memo(function TaskBar({ task, style, onClick, onContextMe
       )}
     </div>
   );
+});
+
+/**
+ * Standalone bar: subscribes to the zoom/UI metrics itself. The timeline renders
+ * `TaskBarView` with the lane's metrics instead, so a zoom change costs one
+ * subscription per lane rather than one per bar.
+ */
+export const TaskBar = memo(function TaskBar(props: TaskBarProps) {
+  const metrics = useTimelineMetrics();
+  return <TaskBarView {...props} metrics={metrics} />;
 });

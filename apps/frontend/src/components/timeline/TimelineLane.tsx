@@ -3,9 +3,9 @@
 import { memo, useMemo, useRef, useCallback } from "react";
 import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
-import { TaskBar } from "./TaskBar";
+import { TaskBarView } from "./TaskBar";
 import { computeLaneLayout } from "./lane-layout";
-import { MIN_LANE_HEIGHT, useTimelineMetrics } from "./constants";
+import { MIN_LANE_HEIGHT, useTimelineMetrics, type TimelineMetrics } from "./constants";
 
 interface TimelineLaneProps {
   tasks: Task[];
@@ -31,11 +31,13 @@ interface TimelineLaneProps {
 }
 
 /**
- * The per-day hover targets (double-click to add, right-click for the day menu,
- * the "+" button). Split out and memoized so the 260 cells per lane are not
- * re-rendered when the parent lane re-renders for an unrelated reason (a pan, a
- * selection change, a drag). Cell keys are slice indices, so a slice shift
- * patches them in place instead of recreating them.
+ * The lane's day hit layer: ONE element instead of one div (plus one "+"
+ * button) per rendered day. The slice is 260 days wide and the timeline mounts
+ * a lane per section, so the old shape created thousands of nodes and thousands
+ * of handlers, all re-rendered on a slice shift. Here the day is derived from
+ * the pointer position at event time (one rect read, no layout writes) and a
+ * single "+" button is parked over the hovered day imperatively, so hovering
+ * costs no React render at all.
  */
 const LaneDayOverlay = memo(function LaneDayOverlay({
   days,
@@ -50,55 +52,136 @@ const LaneDayOverlay = memo(function LaneDayOverlay({
   onDayAdd?: (day: Date) => void;
   onDayContextMenu?: (e: React.MouseEvent, day: Date) => void;
 }) {
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const addRef = useRef<HTMLButtonElement | null>(null);
+  const hoverIndexRef = useRef(-1);
   // Fallback double-click detection for Windows/macOS where onDoubleClick may not fire reliably
-  const lastClickRef = useRef<{ time: number; day: Date } | null>(null);
+  const lastClickRef = useRef<{ time: number; index: number } | null>(null);
+  // Set when the mousedown fallback already fired, so the native dblclick that
+  // follows the same press does not create the task twice.
+  const suppressUntilRef = useRef(0);
+
+  const indexAt = useCallback(
+    (clientX: number): number => {
+      const el = overlayRef.current;
+      if (!el || days.length === 0) return -1;
+      const rect = el.getBoundingClientRect();
+      const index = Math.floor((clientX - rect.left) / dayWidth);
+      if (index < 0 || index >= days.length) return -1;
+      return index;
+    },
+    [dayWidth, days.length]
+  );
+
+  const placeAddButton = useCallback(
+    (index: number) => {
+      const button = addRef.current;
+      if (!button) return;
+      if (index < 0) {
+        button.style.opacity = "0";
+        button.style.pointerEvents = "none";
+        return;
+      }
+      button.style.left = `${index * dayWidth + dayWidth / 2}px`;
+      button.style.opacity = "1";
+      button.style.pointerEvents = "auto";
+    },
+    [dayWidth]
+  );
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.pointerType === "touch") return;
+      const index = indexAt(e.clientX);
+      // Only touch the DOM when the hovered day actually changed.
+      if (index === hoverIndexRef.current) return;
+      hoverIndexRef.current = index;
+      placeAddButton(index);
+    },
+    [indexAt, placeAddButton]
+  );
+
+  const handlePointerLeave = useCallback(() => {
+    if (hoverIndexRef.current === -1) return;
+    hoverIndexRef.current = -1;
+    placeAddButton(-1);
+  }, [placeAddButton]);
+
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!onDayDoubleClick) return;
+      if (Date.now() < suppressUntilRef.current) return;
+      const index = indexAt(e.clientX);
+      if (index < 0) return;
+      onDayDoubleClick(days[index]);
+    },
+    [days, indexAt, onDayDoubleClick]
+  );
 
   const handleMouseDown = useCallback(
-    (day: Date) => {
+    (e: React.MouseEvent) => {
+      if (!onDayDoubleClick) return;
+      const index = indexAt(e.clientX);
+      if (index < 0) return;
       const now = Date.now();
       const last = lastClickRef.current;
-      if (last && now - last.time < 300 && last.day === day) {
-        // Double-click detected
-        onDayDoubleClick?.(day);
+      if (last && now - last.time < 300 && last.index === index) {
+        suppressUntilRef.current = now + 400;
         lastClickRef.current = null;
+        onDayDoubleClick(days[index]);
       } else {
-        lastClickRef.current = { time: now, day };
+        lastClickRef.current = { time: now, index };
       }
     },
-    [onDayDoubleClick]
+    [days, indexAt, onDayDoubleClick]
+  );
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!onDayContextMenu) return;
+      const index = indexAt(e.clientX);
+      if (index < 0) return;
+      onDayContextMenu(e, days[index]);
+    },
+    [days, indexAt, onDayContextMenu]
+  );
+
+  const handleAddClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const index = hoverIndexRef.current;
+      if (!onDayAdd || index < 0 || index >= days.length) return;
+      onDayAdd(days[index]);
+    },
+    [days, onDayAdd]
   );
 
   return (
-    <div className="absolute inset-0 flex pointer-events-none z-0">
-      {days.map((day, index) => (
-        <div
-          key={`lane-day-${index}`}
-          className="group pointer-events-auto relative cursor-pointer"
-          style={{ width: dayWidth, minWidth: dayWidth, flex: `0 0 ${dayWidth}px` }}
-          onDoubleClick={() => onDayDoubleClick?.(day)}
-          onMouseDown={() => handleMouseDown(day)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onDayContextMenu?.(e, day);
-          }}
+    <div
+      ref={overlayRef}
+      data-lane-day-overlay={true}
+      className="group absolute inset-0 z-0 cursor-pointer"
+      onPointerMove={handlePointerMove}
+      onPointerLeave={handlePointerLeave}
+      onDoubleClick={handleDoubleClick}
+      onMouseDown={handleMouseDown}
+      onContextMenu={handleContextMenu}
+    >
+      {onDayAdd && (
+        <button
+          ref={addRef}
+          onClick={handleAddClick}
+          aria-label="Add task on this day"
+          style={{ left: 0, opacity: 0, pointerEvents: "none" }}
+          className="absolute top-1.5 z-30 hidden h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-elevated text-secondary transition-opacity hover:bg-hover hover:text-primary md:flex"
         >
-          {onDayAdd && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDayAdd(day);
-              }}
-              aria-label={`Add task on ${day.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
-              className="absolute left-1/2 top-1.5 z-30 hidden h-7 w-7 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-elevated text-secondary opacity-0 transition-opacity hover:bg-hover hover:text-primary group-hover:opacity-100 md:flex"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-          )}
-        </div>
-      ))}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 });
@@ -120,6 +203,7 @@ const TimelineTaskBar = memo(function TimelineTaskBar({
   dragDisabled,
   selected,
   selectMode,
+  metrics,
 }: {
   task: Task;
   left: number | string;
@@ -130,11 +214,12 @@ const TimelineTaskBar = memo(function TimelineTaskBar({
   dragDisabled?: boolean;
   selected: boolean;
   selectMode?: boolean;
+  metrics: TimelineMetrics;
 }) {
   const style = useMemo(() => ({ left, width, top }), [left, width, top]);
   const handleClick = useCallback(() => onTaskClick?.(task.id), [onTaskClick, task.id]);
   return (
-    <TaskBar
+    <TaskBarView
       task={task}
       style={style}
       onClick={handleClick}
@@ -142,6 +227,7 @@ const TimelineTaskBar = memo(function TimelineTaskBar({
       dragDisabled={dragDisabled}
       selected={selected}
       selectMode={selectMode}
+      metrics={metrics}
     />
   );
 });
@@ -205,6 +291,7 @@ export const TimelineLane = memo(function TimelineLane({ tasks, days, dayWidth =
             dragDisabled={dragDisabled}
             selected={selectedSet.has(task.id)}
             selectMode={selectMode}
+            metrics={metrics}
           />
         ))}
       </div>

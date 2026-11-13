@@ -1,0 +1,4 @@
+
+# Docker entrypoint scripts must keep LF: a CRLF shebang fails with "required file not found" on Linux containers.
+*.sh text eol=lf
+
