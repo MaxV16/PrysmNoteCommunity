@@ -8,6 +8,7 @@ import { TIER_LABELS, TIER_VALUES, normalizePriority, type PriorityTier } from "
 import { applyEnd, parseEnd, type RecurrenceEnd } from "@/lib/recurrence";
 import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
+import { ChipSelect } from "@/components/ui/ChipSelect";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import {
   TaskReminderFields,
@@ -404,43 +405,30 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
           </Chip>
           <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
         </div>
-        <Chip label="List">
-          <select
-            value={listId}
-            onChange={(e) => setListId(e.target.value)}
-            aria-label="List"
-            className="h-8 max-w-[8rem] cursor-pointer border-0 bg-transparent p-0 pr-0.5 text-xs text-primary outline-none"
-          >
-            <option value="">My Tasks</option>
-            {lists.map((l) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
-            ))}
-          </select>
-        </Chip>
-        <Chip label="Status">
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value as TaskStatus)}
-            aria-label="Status"
-            className="h-8 cursor-pointer border-0 bg-transparent p-0 pr-0.5 text-xs text-primary outline-none"
-          >
-            {STATUS_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </Chip>
-        <Chip label="Priority">
-          <select
-            value={priority}
-            onChange={(e) => setPriority(Number(e.target.value) as PriorityTier)}
-            aria-label="Priority"
-            className="h-8 cursor-pointer border-0 bg-transparent p-0 pr-0.5 text-xs text-primary outline-none"
-          >
-            {TIER_VALUES.map((p) => (
-              <option key={p} value={p}>{TIER_LABELS[p]}</option>
-            ))}
-          </select>
-        </Chip>
+        <ChipSelect
+          label="List"
+          ariaLabel="List"
+          value={listId}
+          onChange={setListId}
+          options={[
+            { value: "", label: "My Tasks" },
+            ...lists.map((l) => ({ value: l.id, label: l.name })),
+          ]}
+        />
+        <ChipSelect
+          label="Status"
+          ariaLabel="Status"
+          value={status}
+          onChange={(next) => setStatus(next as TaskStatus)}
+          options={STATUS_OPTIONS}
+        />
+        <ChipSelect
+          label="Priority"
+          ariaLabel="Priority"
+          value={String(priority)}
+          onChange={(next) => setPriority(Number(next) as PriorityTier)}
+          options={TIER_VALUES.map((p) => ({ value: String(p), label: TIER_LABELS[p] }))}
+        />
       </div>
       {dateError && <p className="-mt-1 text-xs text-danger">{dateError}</p>}
       {timeError && <p className="-mt-1 text-xs text-danger">{timeError}</p>}

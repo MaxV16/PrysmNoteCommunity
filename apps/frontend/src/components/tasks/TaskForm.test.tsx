@@ -32,6 +32,19 @@ vi.mock("@/lib/notifications", () => ({
 
 beforeEach(() => {
   useAppStore.mockReturnValue({ tags: [], lists: [], activeListId: null });
+  // ChipSelect opens a positioned popover; it stays closed while the trigger's
+  // rect is 0x0, which is what jsdom reports for every element.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    width: 120,
+    height: 32,
+    top: 100,
+    left: 20,
+    right: 140,
+    bottom: 132,
+    x: 20,
+    y: 100,
+    toJSON: () => ({}),
+  } as DOMRect);
 });
 
 function makeTask(overrides: Record<string, unknown> = {}): any {
@@ -285,7 +298,8 @@ describe("TaskForm", () => {
     fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), {
       target: { value: "Priority high" },
     });
-    fireEvent.change(screen.getByDisplayValue("Medium"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Priority" }));
+    fireEvent.click(screen.getByRole("option", { name: "High" }));
     fireEvent.click(screen.getByRole("button", { name: /create task/i }));
 
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ priority: 1 }));
