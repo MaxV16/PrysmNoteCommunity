@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, fireEvent } from "@testing-library/react";
 import { DndContext } from "@dnd-kit/core";
 import { TaskBar } from "./TaskBar";
 import { useAppStore } from "@/stores/app-store";
@@ -65,13 +65,21 @@ describe("TaskBar", () => {
     expect(titleSpan!.className).toContain("truncate");
   });
 
-  it("renders both resize handles and keeps them interactive so an edge grab resizes", () => {
+  it("renders both resize handles on hover and keeps them interactive so an edge grab resizes", () => {
     const task = makeTask({ title: "Resizable" });
     const { container } = render(
       <DndContext>
         <TaskBar task={task} style={{ left: 0, top: 0, width: 200 }} />
       </DndContext>
     );
+    const bar = container.querySelector("[data-task-bar]") as HTMLElement;
+    // Handles are edge affordances mounted on demand: a bar at rest owns one
+    // pointer engine, not three, so a zoom step does not re-render a whole
+    // timeline of resize previews.
+    expect(container.querySelector('[data-resize-handle="left"]')).toBeNull();
+    act(() => {
+      fireEvent.mouseEnter(bar);
+    });
     const left = container.querySelector('[data-resize-handle="left"]') as HTMLElement;
     const right = container.querySelector('[data-resize-handle="right"]') as HTMLElement;
     expect(left).not.toBeNull();

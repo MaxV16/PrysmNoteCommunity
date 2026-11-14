@@ -56,21 +56,28 @@ export function responsiveDayWidth(viewportWidth: number): number {
 // value already snapped to the ladder, so a caller can pass the raw number.
 export function useResponsiveDayWidth(zoom: number = DEFAULT_ZOOM): number {
   const { scale } = useUiScale();
-  const [width, setWidth] = useState(() => Math.max(MIN_RENDERED_DAY_WIDTH, DAY_WIDTH * zoom * scale));
+  // The viewport width is the only state here; the column width itself is
+  // DERIVED. It used to be mirrored into state from an effect, which meant every
+  // zoom step rendered the whole timeline twice (once with the old width, then
+  // again after the effect committed the new one). Deriving it costs one render.
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? DAY_WIDTH : window.innerWidth
+  );
   useEffect(() => {
-    const update = () => {
-      const vw = typeof window === "undefined" ? DAY_WIDTH : window.innerWidth;
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return useMemo(
+    () =>
       // The phone clamp sets the BASE column, then the user's zoom multiplies it,
       // so zooming out goes below the phone default and zooming in goes above.
-      setWidth(
-        Math.max(MIN_RENDERED_DAY_WIDTH, Math.round(responsiveDayWidth(vw) * zoom * scale))
-      );
-    };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, [zoom, scale]);
-  return width;
+      Math.max(
+        MIN_RENDERED_DAY_WIDTH,
+        Math.round(responsiveDayWidth(viewportWidth) * zoom * scale)
+      ),
+    [viewportWidth, zoom, scale]
+  );
 }
 
 export interface TimelineMetrics {

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { todayStart } from "@/lib/dates";
 import { DAY_HEADER_HEIGHT } from "./constants";
 
@@ -23,6 +23,88 @@ function atLocalMidnight(value: Date): Date {
 }
 
 /**
+ * One day column. The width comes from `--prysm-day-w` on the strip, not from a
+ * prop, so a zoom step (which only changes that variable) never re-renders any
+ * column: React sees identical props and skips all 260 of them.
+ */
+const DayColumn = memo(function DayColumn({
+  first,
+  isToday,
+  isWeekend,
+}: {
+  first: boolean;
+  isToday: boolean;
+  isWeekend: boolean;
+}) {
+  return (
+    <div
+      data-day-column
+      data-is-today={isToday ? "true" : "false"}
+      data-is-weekend={isWeekend ? "true" : "false"}
+      className="relative"
+      style={{
+        width: "var(--prysm-day-w)",
+        minWidth: "var(--prysm-day-w)",
+        flex: "0 0 var(--prysm-day-w)",
+        borderLeft: first
+          ? undefined
+          : "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
+        backgroundColor: isToday
+          ? "color-mix(in srgb, var(--accent) 7%, transparent)"
+          : isWeekend
+          ? "var(--weekend-tint)"
+          : undefined,
+      }}
+    >
+      {isToday && (
+        <div
+          data-today-indicator
+          className="absolute inset-y-0"
+          style={{
+            left: "50%",
+            width: 2,
+            transform: "translateX(-50%)",
+            backgroundColor: "var(--accent)",
+            opacity: 0.9,
+            zIndex: 0,
+            pointerEvents: "none",
+          }}
+        />
+      )}
+    </div>
+  );
+});
+
+/**
+ * The column strip. Split out and memoized on `days` + `todayMs` so a zoom step
+ * touches only the CSS variable above it instead of walking the whole strip.
+ */
+const DayColumns = memo(function DayColumns({
+  days,
+  todayMs,
+}: {
+  days: Date[];
+  todayMs: number;
+}) {
+  return (
+    <div className="flex" style={{ minHeight: "100%" }}>
+      {days.map((day, index) => {
+        const d = atLocalMidnight(day).getTime();
+        const dow = new Date(day).getDay();
+        return (
+          <DayColumn
+            key={`col-${index}`}
+            first={index === 0}
+            isToday={d === todayMs}
+            isWeekend={dow === 0 || dow === 6}
+          />
+        );
+      })}
+    </div>
+  );
+});
+
+/**
  * Day-column background grid. Memoized and keyed by SLICE INDEX, not by date,
  * so a slice shift patches the 260 columns in place (updating `data-is-today`)
  * instead of recreating them, which caused a visible freeze while scrolling.
@@ -35,56 +117,18 @@ export const TimelineGrid = memo(function TimelineGrid({
   const todayMs = atLocalMidnight(today ?? todayStart()).getTime();
 
   return (
-    <div className="absolute inset-x-0 bottom-0 pointer-events-none" style={{ top: DAY_HEADER_HEIGHT, minHeight: `calc(100% - ${DAY_HEADER_HEIGHT}px)`, backgroundColor: "var(--timeline-bg)" }}>
-      {/* Vertical day columns */}
-      <div className="flex" style={{ minHeight: "100%" }}>
-        {days.map((day, index) => {
-          const d = new Date(day);
-          d.setHours(0, 0, 0, 0);
-          const isToday = d.getTime() === todayMs;
-          const dow = d.getDay();
-          const isWeekend = dow === 0 || dow === 6;
-          return (
-            <div
-              key={`col-${index}`}
-              data-day-column
-              data-is-today={isToday ? "true" : "false"}
-              data-is-weekend={isWeekend ? "true" : "false"}
-              className="relative"
-              style={{
-                width: dayWidth,
-                minWidth: dayWidth,
-                flex: `0 0 ${dayWidth}px`,
-                borderLeft:
-                  index === 0
-                    ? undefined
-                    : "1px solid color-mix(in srgb, var(--border) 45%, transparent)",
-                backgroundColor: isToday
-                  ? "color-mix(in srgb, var(--accent) 7%, transparent)"
-                  : isWeekend
-                  ? "var(--weekend-tint)"
-                  : undefined,
-              }}
-            >
-              {isToday && (
-                <div
-                  data-today-indicator
-                  className="absolute inset-y-0"
-                  style={{
-                    left: "50%",
-                    width: 2,
-                    transform: "translateX(-50%)",
-                    backgroundColor: "var(--accent)",
-                    opacity: 0.9,
-                    zIndex: 0,
-                    pointerEvents: "none",
-                  }}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
+    <div
+      className="absolute inset-x-0 bottom-0 pointer-events-none"
+      style={
+        {
+          top: DAY_HEADER_HEIGHT,
+          minHeight: `calc(100% - ${DAY_HEADER_HEIGHT}px)`,
+          backgroundColor: "var(--timeline-bg)",
+          "--prysm-day-w": `${dayWidth}px`,
+        } as CSSProperties
+      }
+    >
+      <DayColumns days={days} todayMs={todayMs} />
     </div>
   );
 });

@@ -53,16 +53,22 @@ describe("TimelineGrid", () => {
     ).toBe(1);
   });
 
-  it("sizes day columns from the DAY_WIDTH constant", () => {
+  it("sizes every day column from one CSS variable so a zoom step never re-renders them", () => {
     const days = [new Date("2026-07-20"), new Date("2026-07-21")];
-    const { container } = render(<TimelineGrid days={days} />);
+    const { container, rerender } = render(<TimelineGrid days={days} />);
+    const wrapper = container.firstElementChild as HTMLElement;
+    expect(wrapper.style.getPropertyValue("--prysm-day-w")).toBe(`${DAY_WIDTH}px`);
     const columns = container.querySelectorAll("[data-day-column]");
     for (const col of columns) {
       const el = col as HTMLElement;
-      expect(el.style.width).toBe(`${DAY_WIDTH}px`);
-      expect(el.style.minWidth).toBe(`${DAY_WIDTH}px`);
-      expect(el.style.flex).toBe(`0 0 ${DAY_WIDTH}px`);
+      // The width lives on the strip, so a zoom step is a single style patch
+      // instead of 260 column re-renders. Reading the var keeps the px widths.
+      expect(el.style.width).toBe("var(--prysm-day-w)");
+      expect(el.style.minWidth).toBe("var(--prysm-day-w)");
+      expect(el.style.flex).toBe("0 0 var(--prysm-day-w)");
     }
+    rerender(<TimelineGrid days={days} dayWidth={72} />);
+    expect(wrapper.style.getPropertyValue("--prysm-day-w")).toBe("72px");
   });
 
   it("positions the grid below the header height constant", () => {

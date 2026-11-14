@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
@@ -15,6 +15,28 @@ function formatResizeRange(start: string, due: string) {
   const fmt = (iso: string) =>
     parseLocalDate(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   return start === due ? fmt(start) : `${fmt(start)} - ${fmt(due)}`;
+}
+
+/**
+ * True on a touch-first device, where there is no hover to reveal the resize
+ * handles, so they have to be there from the start.
+ */
+const COARSE_POINTER_QUERY = "(pointer: coarse)";
+function subscribeCoarsePointer(onChange: () => void) {
+  if (typeof window === "undefined" || !window.matchMedia) return () => {};
+  const query = window.matchMedia(COARSE_POINTER_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+function useCoarsePointer() {
+  return useSyncExternalStore(
+    subscribeCoarsePointer,
+    () =>
+      typeof window !== "undefined" && window.matchMedia
+        ? window.matchMedia(COARSE_POINTER_QUERY).matches
+        : false,
+    () => false
+  );
 }
 
 interface TaskBarProps {
@@ -53,18 +75,25 @@ function ResizeHandle({
   side,
   disabled,
   armed,
+  onActiveChange,
 }: {
   task: Task;
   side: "left" | "right";
   disabled?: boolean;
   armed?: boolean;
+  /** Reports whether a resize gesture is running, so the bar never unmounts a
+   * handle mid-drag (that would drop the pointer capture and strand the drag). */
+  onActiveChange?: (active: boolean) => void;
 }) {
-  const { ref, onPointerDown, resizePreview } = useTimelineBarDrag(
+  const { ref, onPointerDown, resizePreview, dragging } = useTimelineBarDrag(
     task,
     side === "left" ? "resize-left" : "resize-right",
     disabled,
     { touchActivateOnMove: true }
   );
+  useEffect(() => {
+    onActiveChange?.(dragging);
+  }, [dragging, onActiveChange]);
   // The preview badge is portaled to the body and pinned just above the bar
   // using its live rect.
   const [badgePos, setBadgePos] = useState<{ top: number; left: number } | null>(null);
@@ -126,6 +155,18 @@ export const TaskBarView = memo(function TaskBarView({ task, style, onClick, onC
   const { ref, onPointerDown, dragging } = useTimelineBarDrag(task, "move", dragDisabled, {
     onLongPress: () => useAppStore.getState().setMobileActionTaskId(task.id),
   });
+  // Each resize handle is its own pointer engine (its own refs, listeners and
+  // preview state). Mounting both on every bar meant three engines per task and
+  // a third of the whole timeline re-rendering on every zoom step. They are
+  // edge affordances, so they mount while the bar is hovered (which is exactly
+  // when the CSS reveals them), stay mounted through a gesture, and unmount on
+  // leave. Touch devices get them immediately because there is no hover.
+  const coarsePointer = useCoarsePointer();
+  const [handlesVisible, setHandlesVisible] = useState(false);
+  const resizingRef = useRef(false);
+  const handleResizeActive = useCallback((active: boolean) => {
+    resizingRef.current = active;
+  }, []);
   // When this task is armed by a long press, its resize handles stay visible so
   // the finger can grab one without hovering. On desktop they show on hover.
   const armed = useAppStore((s) => s.mobileActionTaskId === task.id);
@@ -202,6 +243,11 @@ export const TaskBarView = memo(function TaskBarView({ task, style, onClick, onC
       data-task-start={task.start_date ?? task.due_date ?? ""}
       draggable={false}
       onDragStart={(e) => e.preventDefault()}
+      onMouseEnter={() => setHandlesVisible(true)}
+      onMouseLeave={() => {
+        if (!resizingRef.current) setHandlesVisible(false);
+      }}
+      onFocusCapture={() => setHandlesVisible(true)}
       onPointerDown={(e) => {
         lastPointerTypeRef.current = e.pointerType || "mouse";
         // The drag engine owns the whole gesture, including the touch hold that
@@ -243,8 +289,24 @@ export const TaskBarView = memo(function TaskBarView({ task, style, onClick, onC
     >
       {/* Resize handles: drag the left edge to move the start date, the right
           edge to move the due date, extending/contracting the task. */}
-      <ResizeHandle task={task} side="left" disabled={dragDisabled} armed={armed} />
-      <ResizeHandle task={task} side="right" disabled={dragDisabled} armed={armed} />
+      {(handlesVisible || coarsePointer || armed) && (
+        <>
+          <ResizeHandle
+            task={task}
+            side="left"
+            disabled={dragDisabled}
+            armed={armed}
+            onActiveChange={handleResizeActive}
+          />
+          <ResizeHandle
+            task={task}
+            side="right"
+            disabled={dragDisabled}
+            armed={armed}
+            onActiveChange={handleResizeActive}
+          />
+        </>
+      )}
       {/* Label is capped so a task spanning many weeks reads as a band with a
           title at its start instead of a wall of text running off-screen. It
           clips its own text since the bar no longer clips (the handles sit
