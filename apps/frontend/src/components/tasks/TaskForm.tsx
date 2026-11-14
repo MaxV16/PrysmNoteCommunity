@@ -8,14 +8,7 @@ import { TIER_LABELS, TIER_VALUES, normalizePriority, type PriorityTier } from "
 import { applyEnd, parseEnd, type RecurrenceEnd } from "@/lib/recurrence";
 import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
-import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
-import { MarkdownImagePreview } from "@/components/ui/MarkdownImagePreview";
-import {
-  imageSourceFrom,
-  insertImageAtCursor,
-  removeMarkdownImage,
-  type ImageInsertSource,
-} from "@/lib/upload";
+import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import {
   TaskReminderFields,
   defaultReminderAt,
@@ -93,7 +86,18 @@ function formatDateInput(dateStr: string): string {
   return `${MONTHS[parseInt(m) - 1]} ${parseInt(d)}, ${y}`;
 }
 
-function CalendarPicker({ value, onChange, placeholder }: { value: string; onChange: (d: string) => void; placeholder: string }) {
+function CalendarPicker({
+  value,
+  onChange,
+  placeholder,
+  bare = false,
+}: {
+  value: string;
+  onChange: (d: string) => void;
+  placeholder: string;
+  /** Renders as plain text for use inside a chip instead of a bordered field. */
+  bare?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [viewDate, setViewDate] = useState(() => {
     if (value) {
@@ -138,7 +142,11 @@ function CalendarPicker({ value, onChange, placeholder }: { value: string; onCha
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="input-field text-left text-xs h-10 flex items-center"
+        className={
+          bare
+            ? "flex h-8 items-center text-left text-xs text-primary"
+            : "input-field text-left text-xs h-10 flex items-center"
+        }
       >
         {value ? formatDateInput(value) : <span className="text-muted">{placeholder}</span>}
       </button>
@@ -200,7 +208,6 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
   const [description, setDescription] = useState(initial?.description || "");
   const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
   const [descriptionUploading, setDescriptionUploading] = useState(false);
-  const [descriptionImageError, setDescriptionImageError] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(initial?.start_date || defaultDate || "");
   const [dueDate, setDueDate] = useState(initial?.due_date || defaultDate || "");
   const [startTime, setStartTime] = useState(initial?.start_time || "");
@@ -288,22 +295,6 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
       : null;
   const validationError = dateError ?? timeError ?? titleError ?? descriptionError;
 
-  const handleDescriptionImage = async (source: ImageInsertSource | null) => {
-    const textarea = descriptionRef.current;
-    if (!textarea || !source) return;
-    setDescriptionImageError(null);
-    setDescriptionUploading(true);
-    try {
-      await insertImageAtCursor(textarea, source, setDescription);
-    } catch (err) {
-      setDescriptionImageError(
-        err instanceof Error ? err.message : "Could not upload that image."
-      );
-    } finally {
-      setDescriptionUploading(false);
-    }
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -356,142 +347,103 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
       className="flex min-h-full flex-col gap-4"
       data-testid="task-form"
     >
-      <div>
-        <label className="text-xs font-medium text-secondary mb-1.5 block">Task Title</label>
-        <input
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="What needs to be done?"
-          className="input-field text-sm placeholder:text-secondary"
-          autoFocus
+      {/* The title is the page: no label, no field chrome. */}
+      <input
+        type="text"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="What needs to be done?"
+        className="w-full border-0 bg-transparent px-0 text-[22px] font-semibold leading-tight text-primary outline-none placeholder:font-normal placeholder:text-secondary sm:text-[26px]"
+        autoFocus
+      />
+      <CharLimitHint value={title} max={TASK_TITLE_MAX} className="-mt-3" />
+
+      {/* The description sits on the panel like notes under a heading, separated
+          by a hairline rather than a second frame. */}
+      <div className="border-t border-border/60 pt-1">
+        <MarkdownEditor
+          value={description}
+          onChange={setDescription}
+          textareaRef={descriptionRef}
+          onUploadingChange={setDescriptionUploading}
+          placeholder="Add details (markdown and images supported)..."
+          ariaLabel="Description"
         />
-        <CharLimitHint value={title} max={TASK_TITLE_MAX} className="mt-1" />
-      </div>
-      <div>
-        <label className="text-xs font-medium text-secondary mb-1.5 block">Description</label>
-        <div className="rounded-lg border border-border/60 bg-elevated/40 p-1.5">
-          <MarkdownToolbar
-            textareaRef={descriptionRef}
-            onChange={setDescription}
-            className="mb-1 border-b border-border/60 pb-1"
-          />
-          <textarea
-            ref={descriptionRef}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onPaste={(e) => {
-              const source = imageSourceFrom(e.clipboardData);
-              if (!source) return;
-              e.preventDefault();
-              void handleDescriptionImage(source);
-            }}
-            onDragOver={(e) => {
-              if (imageSourceFrom(e.dataTransfer)) e.preventDefault();
-            }}
-            onDrop={(e) => {
-              const source = imageSourceFrom(e.dataTransfer);
-              if (!source) return;
-              e.preventDefault();
-              void handleDescriptionImage(source);
-            }}
-            placeholder="Add details (markdown and images supported)..."
-            rows={4}
-            className="input-field w-full resize-none bg-transparent text-xs placeholder:text-secondary"
-          />
-          {descriptionUploading && (
-            <span role="status" className="mt-1 block text-[10px] text-secondary">
-              Uploading image...
-            </span>
-          )}
-          <MarkdownImagePreview
-            text={description}
-            className="mt-1"
-            onRemove={(image) => setDescription((prev) => removeMarkdownImage(prev, image))}
-          />
-        </div>
-        <CharLimitHint value={description} max={TASK_DESCRIPTION_MAX} className="mt-1" />
-        {descriptionImageError && (
-          <p role="alert" className="mt-1 text-[10px] text-danger">
-            {descriptionImageError}
-          </p>
-        )}
+        <CharLimitHint value={description} max={TASK_DESCRIPTION_MAX} />
       </div>
 
-      <SectionLabel>Schedule</SectionLabel>
-      <div className="grid min-w-0 grid-cols-2 gap-2">
-        <div className="min-w-0">
-          <label className="text-xs font-medium text-secondary mb-1.5 block">Start Date</label>
-          <CalendarPicker value={startDate} onChange={setStartDate} placeholder="Not set" />
+      {/* One rail for when and where the task lives. Each control carries its
+          own tiny label, so the form needs no section headings. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Chip label="Start">
+          <CalendarPicker bare value={startDate} onChange={setStartDate} placeholder="Not set" />
+        </Chip>
+        <Chip label="Due">
+          <CalendarPicker bare value={dueDate} onChange={setDueDate} placeholder="Not set" />
+        </Chip>
+        {/* Times only matter once there is a day to sit on, so they stay out of
+            the rail until a date is picked. */}
+        <div className={startDate || dueDate ? "contents" : "hidden"}>
+          <Chip label="At">
+            <input
+              type="time"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              aria-label="Start time"
+              className="h-8 w-[4.6rem] border-0 bg-transparent p-0 text-xs text-primary outline-none"
+            />
+          </Chip>
+          <Chip label="By">
+            <input
+              type="time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              aria-label="End time"
+              className="h-8 w-[4.6rem] border-0 bg-transparent p-0 text-xs text-primary outline-none"
+            />
+          </Chip>
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-border" />
         </div>
-        <div className="min-w-0">
-          <label className="text-xs font-medium text-secondary mb-1.5 block">Due Date</label>
-          <CalendarPicker value={dueDate} onChange={setDueDate} placeholder="Not set" />
-        </div>
-      </div>
-      {dateError && <p className="-mt-2 text-xs text-danger">{dateError}</p>}
-      <div className="grid min-w-0 grid-cols-2 gap-2">
-        <div className="min-w-0">
-          <label className="text-xs font-medium text-secondary mb-1.5 block">Start Time</label>
-          <input
-            type="time"
-            value={startTime}
-            onChange={(e) => setStartTime(e.target.value)}
-            className="input-field text-xs h-10"
-          />
-        </div>
-        <div className="min-w-0">
-          <label className="text-xs font-medium text-secondary mb-1.5 block">End Time</label>
-          <input
-            type="time"
-            value={endTime}
-            onChange={(e) => setEndTime(e.target.value)}
-            className="input-field text-xs h-10"
-          />
-        </div>
-      </div>
-      {timeError && <p className="-mt-2 text-xs text-danger">{timeError}</p>}
-
-      <SectionLabel>Organize</SectionLabel>
-      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
-        <div className="min-w-0">
-          <label className="text-xs font-medium text-secondary mb-1.5 block">List</label>
+        <Chip label="List">
           <select
             value={listId}
             onChange={(e) => setListId(e.target.value)}
-            className="input-field text-xs h-10"
+            aria-label="List"
+            className="h-8 max-w-[8rem] cursor-pointer border-0 bg-transparent p-0 pr-0.5 text-xs text-primary outline-none"
           >
             <option value="">My Tasks</option>
             {lists.map((l) => (
               <option key={l.id} value={l.id}>{l.name}</option>
             ))}
           </select>
-        </div>
-        <div className="min-w-0">
-          <label className="text-xs font-medium text-secondary mb-1.5 block">Status</label>
+        </Chip>
+        <Chip label="Status">
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value as TaskStatus)}
-            className="input-field text-xs h-10"
+            aria-label="Status"
+            className="h-8 cursor-pointer border-0 bg-transparent p-0 pr-0.5 text-xs text-primary outline-none"
           >
             {STATUS_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-        </div>
-        <div className="col-span-2 min-w-0 sm:col-span-1">
-          <label className="text-xs font-medium text-secondary mb-1.5 block">Priority</label>
+        </Chip>
+        <Chip label="Priority">
           <select
             value={priority}
             onChange={(e) => setPriority(Number(e.target.value) as PriorityTier)}
-            className="input-field text-xs h-10"
+            aria-label="Priority"
+            className="h-8 cursor-pointer border-0 bg-transparent p-0 pr-0.5 text-xs text-primary outline-none"
           >
             {TIER_VALUES.map((p) => (
               <option key={p} value={p}>{TIER_LABELS[p]}</option>
             ))}
           </select>
-        </div>
+        </Chip>
       </div>
+      {dateError && <p className="-mt-1 text-xs text-danger">{dateError}</p>}
+      {timeError && <p className="-mt-1 text-xs text-danger">{timeError}</p>}
 
       <div className="border-t border-border/60 pt-3">
         <TaskReminderFields
@@ -659,11 +611,20 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+/**
+ * A control inside the meta rail: a quiet pill that shows what the control is
+ * for in a tiny label and lets the control itself carry the value. One rail of
+ * these replaces the labelled two-column grids, so the form reads as a page
+ * with a line of facts under it instead of a stack of boxes.
+ */
+function Chip({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <h3 className="-mb-1 border-t border-border/60 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted">
+    <div className="flex h-8 items-center gap-1.5 rounded-full border border-border/70 pl-2.5 pr-1.5 transition-colors focus-within:border-accent focus-within:bg-hover/30 hover:bg-hover/30 pointer-coarse:h-10 pointer-coarse:pl-3">
+      <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted">
+        {label}
+      </span>
       {children}
-    </h3>
+    </div>
   );
 }
 

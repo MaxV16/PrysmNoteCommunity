@@ -30,8 +30,7 @@ import { TaskLinks } from "./TaskLinks";
 import { TaskTagsEditor } from "./TaskTagsEditor";
 import { DateRecurrencePopover } from "./DateRecurrencePopover";
 import { describeRule } from "@/lib/recurrence";
-import { MarkdownToolbar } from "@/components/ui/MarkdownToolbar";
-import { MarkdownImagePreview } from "@/components/ui/MarkdownImagePreview";
+import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { Markdown } from "@/components/ai/Markdown";
 import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
@@ -45,7 +44,6 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import {
   imageSourceFrom,
   insertImageAtCursor,
-  removeMarkdownImage,
   type ImageInsertSource,
 } from "@/lib/upload";
 import { toggleTaskListCheckbox } from "@/lib/markdown-task-list";
@@ -755,7 +753,7 @@ const handleUpdate = async (data: {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                 if (e.key === "Escape") setRenaming(false);
               }}
-              className="input-field w-full bg-transparent text-base text-scale-title font-semibold text-primary sm:text-lg"
+              className="w-full border-0 bg-transparent px-0 text-[22px] font-semibold leading-tight text-primary outline-none sm:text-[26px]"
             />
             <CharLimitHint value={draftTitle} max={TASK_TITLE_MAX} className="mt-1" />
           </div>
@@ -766,7 +764,7 @@ const handleUpdate = async (data: {
                 setDraftTitle(task.title);
                 setRenaming(true);
               }}
-              className={task.status === "done" ? "min-w-0 flex-1 text-base text-scale-title font-semibold leading-snug text-muted line-through sm:text-lg" : "min-w-0 flex-1 text-base text-scale-title font-semibold leading-snug text-primary sm:text-lg"}
+              className={task.status === "done" ? "min-w-0 flex-1 text-[22px] font-semibold leading-tight text-muted line-through sm:text-[26px]" : "min-w-0 flex-1 text-[22px] font-semibold leading-tight text-primary sm:text-[26px]"}
             >
               {task.title}
             </h2>
@@ -890,28 +888,26 @@ const handleUpdate = async (data: {
               );
               setReminderOpen(true);
             }}
-            className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-elevated px-3 py-2 text-left transition-colors hover:bg-hover"
+            className="group flex w-full items-center justify-between gap-2 py-1.5 text-left"
             aria-label="Set task reminder"
           >
             <span className="flex min-w-0 items-center gap-2">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                  <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-                </svg>
-              </span>
-              <span className="min-w-0">
-                <span className="block text-sm text-secondary">Remind me</span>
-                <span className="block text-[11px] text-muted">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+              </svg>
+              <span className="min-w-0 truncate text-xs text-secondary">
+                Remind me
+                <span className="ml-1.5 text-[11px] text-muted">
                   {task.reminder_at
                     ? describeReminder(task.reminder_at)
                     : task.reminder_enabled
-                    ? "On"
-                    : "Off"}
+                    ? "on"
+                    : "off"}
                 </span>
               </span>
             </span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted transition-colors group-hover:text-secondary" aria-hidden>
               <polyline points="9 18 15 12 9 6" />
             </svg>
           </button>
@@ -936,86 +932,52 @@ const handleUpdate = async (data: {
         </div>
         <div>
             {editingDescription ? (
-              <div className="rounded-lg border border-border/60 bg-elevated/40 p-1.5">
-                <MarkdownToolbar
-                  textareaRef={descTextareaRef}
-                  onChange={setDescDraft}
-                  className="mb-1 border-b border-border/60 pb-1"
-                />
-                <textarea
-                  ref={descTextareaRef}
-                  autoFocus
-                  value={descDraft}
-                  onChange={(e) => setDescDraft(e.target.value)}
-                  onPaste={(e) => {
-                    const source = imageSourceFrom(e.clipboardData);
-                    if (source) {
-                      e.preventDefault();
-                      void handleDescriptionImage(source);
-                    }
-                  }}
-                  onDragOver={(e) => {
-                    if (imageSourceFrom(e.dataTransfer)) e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    const source = imageSourceFrom(e.dataTransfer);
-                    if (source) {
-                      e.preventDefault();
-                      void handleDescriptionImage(source);
-                    }
-                  }}
-                  onBlur={(e) => {
-                    // Opening the image picker moves focus to its hidden file
-                    // input; don't close the editor before the upload lands.
-                    if (e.relatedTarget instanceof HTMLInputElement && e.relatedTarget.type === "file") return;
-                    // Focus moving to a control inside this editor (the toolbar
-                    // or an image's remove/copy button) is not leaving it.
-                    const next = e.relatedTarget as Node | null;
-                    if (next && e.currentTarget.parentElement?.contains(next)) return;
-                    // Wait for an in-flight image upload; saving now would drop it.
-                    if (descUploading) return;
+              <MarkdownEditor
+                value={descDraft}
+                onChange={setDescDraft}
+                textareaRef={descTextareaRef}
+                autoFocus
+                onUploadingChange={setDescUploading}
+                ariaLabel="Description"
+                placeholder="Write a description (markdown supported)…"
+                onBlur={(e) => {
+                  // Opening the image picker moves focus to its hidden file
+                  // input; don't close the editor before the upload lands.
+                  if (e.relatedTarget instanceof HTMLInputElement && e.relatedTarget.type === "file") return;
+                  // Focus moving to a control inside this editor (the toolbar
+                  // or an image's remove/copy button) is not leaving it.
+                  const next = e.relatedTarget as Node | null;
+                  if (next && e.currentTarget.parentElement?.contains(next)) return;
+                  // Wait for an in-flight image upload; saving now would drop it.
+                  if (descUploading) return;
+                  void handleDescriptionSave();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
                     void handleDescriptionSave();
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      void handleDescriptionSave();
-                    }
-                    if (e.key === "Escape") {
-                      // Revert instead of closing the drawer.
-                      e.stopPropagation();
-                      cancelDescriptionEdit();
-                    }
-                  }}
-                  placeholder="Write a description (markdown supported)…"
-                  rows={6}
-                  className="input-field w-full bg-transparent text-sm"
-                />
-                <MarkdownImagePreview
-                  text={descDraft}
-                  className="mt-1"
-                  onRemove={(image) =>
-                    setDescDraft((prev) => removeMarkdownImage(prev, image))
                   }
-                />
-                <div className="mt-1 flex items-center justify-end gap-2">
-                  {descUploading && (
-                    <span role="status" className="text-[10px] text-secondary">
-                      Uploading image...
-                    </span>
-                  )}
-                  <CharLimitHint value={descDraft} max={TASK_DESCRIPTION_MAX} className="mr-auto" />
-                  <button
-                    onClick={() => void handleDescriptionSave()}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onPointerDown={(e) => e.preventDefault()}
-                    disabled={descUploading}
-                    className="btn btn-primary px-3 py-1 text-xs disabled:opacity-60"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
+                  if (e.key === "Escape") {
+                    // Revert instead of closing the drawer.
+                    e.stopPropagation();
+                    cancelDescriptionEdit();
+                  }
+                }}
+                actions={
+                  <>
+                    <CharLimitHint value={descDraft} max={TASK_DESCRIPTION_MAX} />
+                    <button
+                      onClick={() => void handleDescriptionSave()}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onPointerDown={(e) => e.preventDefault()}
+                      disabled={descUploading}
+                      className="btn btn-primary px-3 py-1 text-xs disabled:opacity-60"
+                    >
+                      Done
+                    </button>
+                  </>
+                }
+              />
             ) : task.description ? (
               <div onClick={startDescriptionEdit} aria-label="Edit description" className="cursor-text">
                 <Markdown
@@ -1035,9 +997,9 @@ const handleUpdate = async (data: {
             ) : (
               <button
                 onClick={startDescriptionEdit}
-                className="w-full rounded-lg border border-dashed border-border/60 px-3 py-4 text-left text-sm text-muted transition-colors hover:border-accent/40 hover:text-secondary"
+                className="w-full py-1 text-left text-sm text-muted transition-colors hover:text-secondary"
               >
-                No description - click to add one
+                Add a description…
               </button>
             )}
         </div>

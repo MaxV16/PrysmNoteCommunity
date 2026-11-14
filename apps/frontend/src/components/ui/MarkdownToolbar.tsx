@@ -269,6 +269,12 @@ interface MarkdownToolbarProps {
    * subtask row cannot grow a block layout.
    */
   variant?: "full" | "inline";
+  /**
+   * Keep every button on one line and scroll horizontally instead of wrapping
+   * onto a second row. Used inside the framed markdown editor, where a wrap
+   * would push the textarea down and break the single-field look.
+   */
+  nowrap?: boolean;
 }
 
 /**
@@ -283,6 +289,7 @@ export function MarkdownToolbar({
   onChange,
   className,
   variant = "full",
+  nowrap = false,
 }: MarkdownToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -320,7 +327,9 @@ export function MarkdownToolbar({
     <div
       role="toolbar"
       aria-label="Formatting"
-      className={`flex flex-wrap items-center gap-0.5 ${className ?? ""}`}
+      className={`flex items-center gap-0.5 ${
+        nowrap ? "scrollbar-none flex-nowrap overflow-x-auto" : "flex-wrap"
+      } ${className ?? ""}`}
     >
       {actions.map((action) => (
         <button
@@ -331,7 +340,7 @@ export function MarkdownToolbar({
           onMouseDown={(e) => e.preventDefault()}
           onPointerDown={(e) => e.preventDefault()}
           onClick={() => run(action.id)}
-          className={ICON_BUTTON}
+          className={`${ICON_BUTTON} shrink-0`}
         >
           {action.icon}
         </button>
@@ -344,7 +353,7 @@ export function MarkdownToolbar({
         onPointerDown={(e) => e.preventDefault()}
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
-        className={ICON_BUTTON}
+        className={`${ICON_BUTTON} shrink-0`}
       >
         {uploading ? (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">

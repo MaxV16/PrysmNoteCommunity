@@ -156,21 +156,17 @@ export function TaskReminderFields({
   };
 
   return (
-    <div className="rounded-xl border border-border bg-elevated">
-      <label className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5">
+    <div>
+      <label className="flex cursor-pointer items-center justify-between gap-3 py-1">
         <span className="flex min-w-0 items-center gap-2">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-            </svg>
-          </span>
-          <span className="min-w-0">
-            <span className="block text-sm text-secondary">Remind me</span>
-            <span className="block text-[11px] text-muted">
-              {value.enabled
-                ? describeReminder(value.at)
-                : "Off by default; only tasks you mark are reminded."}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted" aria-hidden>
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+          </svg>
+          <span className="min-w-0 text-xs text-secondary">
+            Remind me
+            <span className="ml-1.5 text-[11px] text-muted">
+              {value.enabled ? describeReminder(value.at) : "off"}
             </span>
           </span>
         </span>
@@ -178,17 +174,17 @@ export function TaskReminderFields({
           type="checkbox"
           checked={value.enabled}
           onChange={(event) => setEnabled(event.target.checked)}
-          className="h-4 w-4 shrink-0"
+          className="h-3.5 w-3.5 shrink-0"
           style={{ accentColor: "var(--accent)" }}
           data-testid={`${idPrefix}-reminder-toggle`}
         />
       </label>
 
       {value.enabled && (
-        <div className="border-t border-border/60 px-3 py-2.5">
+        <div className="mt-2 pb-1">
           <div className="flex flex-col gap-2 sm:flex-row">
             <div className="flex-1">
-              <label htmlFor={dateId} className="mb-1 block text-[11px] text-muted">
+              <label htmlFor={dateId} className="mb-1 block text-[10px] uppercase tracking-wide text-muted">
                 Date
               </label>
               <input
@@ -201,7 +197,7 @@ export function TaskReminderFields({
               />
             </div>
             <div className="flex-1">
-              <label htmlFor={timeId} className="mb-1 block text-[11px] text-muted">
+              <label htmlFor={timeId} className="mb-1 block text-[10px] uppercase tracking-wide text-muted">
                 Time
               </label>
               <input
@@ -216,7 +212,7 @@ export function TaskReminderFields({
           </div>
 
           <div className="mt-2">
-            <span className="mb-1 block text-[11px] text-muted">How</span>
+            <span className="mb-1 block text-[10px] uppercase tracking-wide text-muted">How</span>
             <div className="inline-flex flex-wrap items-center gap-1 rounded-full bg-surface p-0.5">
               {channels.map((channel) => {
                 const active = value[channel.key];
