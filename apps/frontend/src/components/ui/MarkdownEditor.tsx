@@ -12,6 +12,7 @@ import {
 import { MarkdownToolbar } from "./MarkdownToolbar";
 import { MarkdownImagePreview } from "./MarkdownImagePreview";
 import { imageSourceFrom, insertImageAtCursor, removeMarkdownImage } from "@/lib/upload";
+import { continueMarkdownList } from "@/lib/markdown-continuation";
 
 /** Two lines at rest, never taller than a short note. */
 const MIN_HEIGHT = 60;
@@ -80,6 +81,40 @@ export function MarkdownEditor({
     ta.style.height = `${Math.min(Math.max(ta.scrollHeight, MIN_HEIGHT), MAX_HEIGHT)}px`;
   }, [ref, value]);
 
+  // Enter inside a list continues that list (a checklist becomes the next
+  // `- [ ]`, a bullet the next `- `, a numbered list the next number). The
+  // rewrite goes through setRangeText so the browser's undo still works, and
+  // only a handled Enter is prevented from falling through to the caller.
+  const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+    if (
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey &&
+      !e.nativeEvent.isComposing
+    ) {
+      const ta = e.currentTarget;
+      const continued = continueMarkdownList(
+        ta.value,
+        ta.selectionStart ?? ta.value.length,
+        ta.selectionEnd ?? ta.value.length
+      );
+      if (continued) {
+        e.preventDefault();
+        if (typeof ta.setRangeText === "function") {
+          ta.setRangeText(continued.value, 0, ta.value.length, "end");
+        } else {
+          ta.value = continued.value;
+        }
+        ta.setSelectionRange(continued.caret, continued.caret);
+        onChange(continued.value);
+        return;
+      }
+    }
+    onKeyDown?.(e);
+  };
+
   const handleSource = async (source: ReturnType<typeof imageSourceFrom>) => {
     const ta = ref.current;
     if (!source || !ta) return;
@@ -120,7 +155,7 @@ export function MarkdownEditor({
           void handleSource(source);
         }}
         onBlur={onBlur}
-        onKeyDown={onKeyDown}
+        onKeyDown={handleKeyDown}
         placeholder={placeholder}
         rows={2}
         autoFocus={autoFocus}

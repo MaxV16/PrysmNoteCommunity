@@ -26,6 +26,7 @@ import { SUBTASK_TITLE_MAX, SUBTASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
 import { moveSubtaskById } from "@/lib/subtask-order";
 import { toggleTaskListCheckbox } from "@/lib/markdown-task-list";
+import { continueMarkdownList } from "@/lib/markdown-continuation";
 import {
   imageSourceFrom,
   insertImageAtCursor,
@@ -435,6 +436,32 @@ function SortableRow({ sub, onToggle, onDelete, onRename, onUpdateDescription }:
                   }}
                   onDoubleClick={(e) => e.stopPropagation()}
                   onKeyDown={(e) => {
+                    if (
+                      e.key === "Enter" &&
+                      !e.shiftKey &&
+                      !e.metaKey &&
+                      !e.ctrlKey &&
+                      !e.altKey &&
+                      !e.nativeEvent.isComposing
+                    ) {
+                      const ta = e.currentTarget;
+                      const continued = continueMarkdownList(
+                        ta.value,
+                        ta.selectionStart ?? ta.value.length,
+                        ta.selectionEnd ?? ta.value.length
+                      );
+                      if (continued) {
+                        e.preventDefault();
+                        if (typeof ta.setRangeText === "function") {
+                          ta.setRangeText(continued.value, 0, ta.value.length, "end");
+                        } else {
+                          ta.value = continued.value;
+                        }
+                        ta.setSelectionRange(continued.caret, continued.caret);
+                        setDescDraft(continued.value);
+                        return;
+                      }
+                    }
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                       e.preventDefault();
                       void saveDescription();

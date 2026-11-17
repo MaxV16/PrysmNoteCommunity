@@ -163,11 +163,20 @@ async function fetchIncrementalChanges(seq: number): Promise<Task[] | null> {
 
 function applyIncrementalChanges(changes: Task[]) {
   const store = useAppStore.getState();
+  const byId = new Map(store.tasks.map((t) => [t.id, t]));
   const deletedIds = new Set<string>();
   const live: Task[] = [];
   for (const change of changes) {
     if (change.deleted_at) deletedIds.add(change.id);
-    else live.push(change);
+    else {
+      // Skip rows the store already holds verbatim. Our own PATCH response is
+      // merged first, so the reconcile that follows it a second later returns
+      // the same row again; merging it would swap every task object for a
+      // fresh copy and re-render the whole timeline for nothing.
+      const existing = byId.get(change.id);
+      if (existing && JSON.stringify(existing) === JSON.stringify(change)) continue;
+      live.push(change);
+    }
   }
   if (deletedIds.size > 0) {
     store.setTasks(store.tasks.filter((t) => !deletedIds.has(t.id)));
@@ -295,19 +304,33 @@ export function useTasks() {
 
   const updateTask = useCallback(
     async (id: string, fields: Record<string, unknown>) => {
-      const data = await api.patch<Task>(`/tasks/${id}`, fields);
-      if (fields.status === "done") track("task_completed");
-      // Merge the server's copy immediately so an open editor reflects the save
-      // without waiting on a full snapshot refetch, then reconcile ordering and
-      // derived state in the background. Awaiting `fetchTasks()` here replaced
-      // the whole task object mid-edit, which is why a description edit only
-      // appeared after leaving and reopening the drawer on mobile.
-      useAppStore.getState().mergeTasks([data]);
-      // Clearing the reminder or marking the task done/cancelled cancels the
-      // native OS notification; saving an active one schedules it.
-      void syncNativeReminderForTask(data);
-      scheduleReconcile();
-      return data;
+      // Optimistic write BEFORE the round trip: a status change (done/todo),
+      // priority or date flips in the store on the same tick as the click, so
+      // the bar, the drawer and every lane reading it repaint immediately
+      // instead of waiting on the network. The server copy replaces this
+      // scratch row on success, and a failure puts the exact previous object
+      // back so nothing is lost.
+      const store = useAppStore.getState();
+      const previous = store.tasks.find((t) => t.id === id) ?? null;
+      if (previous) {
+        store.mergeTasks([{ ...previous, ...(fields as Partial<Task>) }]);
+      }
+      try {
+        const data = await api.patch<Task>(`/tasks/${id}`, fields);
+        if (fields.status === "done") track("task_completed");
+        // Merge the server's copy immediately so an open editor reflects the
+        // save without waiting on a full snapshot refetch, then reconcile
+        // ordering and derived state in the background.
+        useAppStore.getState().mergeTasks([data]);
+        // Clearing the reminder or marking the task done/cancelled cancels the
+        // native OS notification; saving an active one schedules it.
+        void syncNativeReminderForTask(data);
+        scheduleReconcile();
+        return data;
+      } catch (error) {
+        if (previous) useAppStore.getState().mergeTasks([previous]);
+        throw error;
+      }
     },
     []
   );
@@ -343,17 +366,22 @@ export function useTasks() {
 
   const deleteTask = useCallback(
     async (id: string) => {
+      // Optimistic removal: the bar/lane leaves the screen on the same tick as
+      // the click instead of after the round trip. The row is put back only if
+      // the server genuinely refused the delete.
+      const previous = useAppStore.getState().tasks.find((t) => t.id === id) ?? null;
+      setTasks(useAppStore.getState().tasks.filter((t) => t.id !== id));
       try {
         await api.delete(`/tasks/${id}`);
       } catch (err) {
         // A 404 means the row is already gone (deleted on another client or by
         // the AI, or a stale cache entry). Treat it as success so the user can
         // always clear a task instead of the delete failing forever.
-        if ((err as { status?: number } | null)?.status !== 404) throw err;
+        if ((err as { status?: number } | null)?.status !== 404) {
+          if (previous) useAppStore.getState().mergeTasks([previous]);
+          throw err;
+        }
       }
-      // Merge out the deleted id so the merge-based refresh below can never
-      // resurrect it while the response is in flight.
-      setTasks(useAppStore.getState().tasks.filter((t) => t.id !== id));
       await fetchTasks();
       // A concurrent incremental page can still carry the pre-delete row; drop
       // it once more after the reconcile so a trashed task can never reappear.
@@ -367,10 +395,20 @@ export function useTasks() {
   const deleteTasksBatch = useCallback(
     async (ids: string[]): Promise<{ deleted: number }> => {
       if (ids.length === 0) return { deleted: 0 };
-      const body = await api.post<{ deleted: number }>("/tasks/batch-delete", { task_ids: ids });
-      const deleted = body?.deleted ?? 0;
       const keep = new Set(ids);
+      const previous = useAppStore.getState().tasks.filter((t) => keep.has(t.id));
+      // Optimistic: all selected bars vanish before the request leaves.
       setTasks(useAppStore.getState().tasks.filter((t) => !keep.has(t.id)));
+      let deleted: number;
+      try {
+        const body = await api.post<{ deleted: number }>("/tasks/batch-delete", {
+          task_ids: ids,
+        });
+        deleted = body?.deleted ?? 0;
+      } catch (error) {
+        if (previous.length > 0) useAppStore.getState().mergeTasks(previous);
+        throw error;
+      }
       await fetchTasks();
       setTasks(useAppStore.getState().tasks.filter((t) => !keep.has(t.id)));
       return { deleted };

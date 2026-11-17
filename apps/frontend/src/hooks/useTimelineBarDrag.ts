@@ -1036,8 +1036,12 @@ export function useTimelineBarDrag(
         if (glide.startWidth) el.style.width = glide.startWidth;
         // Flush the start frame so the browser has a from-value to ease from.
         void el.offsetWidth;
+        // Short on purpose: this only has to bridge the sub-day remainder the
+        // preview already overshot, so 190ms of easing read as the task still
+        // travelling after the drop. 110ms lands it while the release is still
+        // in the eye.
         el.style.transition =
-          "transform 190ms var(--ease-spring, ease-out), width 190ms var(--ease-spring, ease-out)";
+          "transform 110ms var(--ease-spring, ease-out), width 110ms var(--ease-spring, ease-out)";
         if (glide.endTransform) el.style.transform = glide.endTransform;
         if (glide.endWidth) el.style.width = glide.endWidth;
         window.setTimeout(() => {
@@ -1045,7 +1049,7 @@ export function useTimelineBarDrag(
           if (sessionRef.current) return;
           el.style.transition = "";
           resetPreview(el);
-        }, 210);
+        }, 130);
       }
       return;
     }

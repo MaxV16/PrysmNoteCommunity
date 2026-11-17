@@ -58,6 +58,12 @@ export const KNOWN_CSS_VARS: ReadonlySet<string> = new Set([
   "--bg-size",
   "--bg-opacity",
   "--bg-image-display",
+  // Appearance layer surfaces (board/countdown backgrounds), set by the
+  // appearance settings rather than by a theme document.
+  "--surface-board-image",
+  "--surface-board-size",
+  "--surface-countdown-image",
+  "--surface-countdown-size",
   "--font-ui",
   // Layout-only properties that appear in globals.css but must never be
   // importable as theme tokens (see NON_THEME_CSS_VARS below).
@@ -71,6 +77,10 @@ export const KNOWN_CSS_VARS: ReadonlySet<string> = new Set([
 export const NON_THEME_CSS_VARS: ReadonlySet<string> = new Set([
   "--desktop-titlebar",
   "--timeline-bg",
+  "--surface-board-image",
+  "--surface-board-size",
+  "--surface-countdown-image",
+  "--surface-countdown-size",
   "--ui-scale",
   "--font-scale",
   "--dur-fast",

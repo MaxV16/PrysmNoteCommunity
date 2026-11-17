@@ -427,7 +427,7 @@ export function BoardView({ tasks }: BoardViewProps) {
   );
 
   return (
-    <div className="relative flex h-full min-w-0 flex-col bg-base">
+    <div data-surface="board" className="relative flex h-full min-w-0 flex-col bg-base">
       <div
         className="pointer-events-none absolute inset-0"
         aria-hidden="true"

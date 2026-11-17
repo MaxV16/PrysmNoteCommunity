@@ -116,6 +116,28 @@ describe("TaskContextMenu - task menu", () => {
     });
   });
 
+  // Regression: the menu used to close only after the request resolved, so it
+  // hung over the timeline for the whole round trip after a click.
+  it("dismisses the menu on the same tick as the action, not after the request", () => {
+    mocks.updateTask.mockReturnValue(new Promise(() => {}));
+    const { onClose } = renderTaskMenu();
+
+    fireEvent.click(screen.getByText("Mark complete"));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mocks.updateTask).toHaveBeenCalledWith("t1", { status: "done" });
+  });
+
+  it("dismisses the menu before the duplicate request resolves", () => {
+    mocks.createTask.mockReturnValue(new Promise(() => {}));
+    const { onClose } = renderTaskMenu();
+
+    fireEvent.click(screen.getByText("Duplicate"));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mocks.createTask).toHaveBeenCalled();
+  });
+
   it("delete fires immediately and offers an Undo toast with restore", async () => {
     renderTaskMenu();
     fireEvent.click(screen.getByText("Delete task"));

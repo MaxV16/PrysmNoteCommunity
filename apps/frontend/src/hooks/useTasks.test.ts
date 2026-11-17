@@ -5,13 +5,21 @@ import { useTasks } from "./useTasks";
 const h = vi.hoisted(() => ({
   apiPost: vi.fn(),
   apiGet: vi.fn(),
+  apiPatch: vi.fn(),
+  apiDelete: vi.fn(),
   mergeTasks: vi.fn(),
   setTasks: vi.fn(),
   track: vi.fn(),
+  store: { tasks: [] as Record<string, unknown>[] },
 }));
 
 vi.mock("@/lib/api", () => ({
-  api: { get: h.apiGet, post: h.apiPost, patch: vi.fn(), delete: vi.fn() },
+  api: {
+    get: h.apiGet,
+    post: h.apiPost,
+    patch: h.apiPatch,
+    delete: h.apiDelete,
+  },
 }));
 
 vi.mock("@/lib/track", () => ({
@@ -20,7 +28,9 @@ vi.mock("@/lib/track", () => ({
 
 vi.mock("@/stores/app-store", () => {
   const state = {
-    tasks: [] as unknown[],
+    get tasks() {
+      return h.store.tasks;
+    },
     mergeTasks: h.mergeTasks,
     setTasks: h.setTasks,
   };
@@ -93,5 +103,82 @@ describe("useTasks.createTask", () => {
     expect(restored).toEqual({ restored: 1 });
     expect(h.apiPost).toHaveBeenCalledWith("/tasks/batch-delete", { task_ids: ["a", "b"] });
     expect(h.apiPost).toHaveBeenCalledWith("/tasks/batch-restore", { task_ids: ["a", "b"] });
+  });
+});
+
+// Regressions for "marking a task complete/to-do or deleting it waits for the
+// server": the store must flip on the same tick as the call, not on the
+// response, so a slow round trip never shows up as lag on the timeline.
+describe("useTasks optimistic mutations", () => {
+  const row = { ...newTask, id: "t1", status: "todo" };
+
+  beforeEach(() => {
+    h.store.tasks = [{ ...row }];
+    h.apiPatch.mockReset();
+    h.apiDelete.mockReset();
+    h.apiPost.mockReset();
+    h.mergeTasks.mockClear();
+    h.setTasks.mockClear();
+    h.track.mockClear();
+    h.apiGet.mockResolvedValue([]);
+  });
+
+  it("writes a status change to the store before the patch resolves", async () => {
+    let resolvePatch: (value: unknown) => void = () => {};
+    h.apiPatch.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePatch = resolve;
+      })
+    );
+    const { result } = renderHook(() => useTasks());
+
+    let pending: Promise<unknown>;
+    act(() => {
+      pending = result.current.updateTask("t1", { status: "done" });
+    });
+
+    // Already flipped, with the untouched fields carried over.
+    expect(h.mergeTasks).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "t1", status: "done", title: "Buy milk", priority: 2 }),
+    ]);
+    expect(h.apiPatch).toHaveBeenCalledWith("/tasks/t1", { status: "done" });
+
+    await act(async () => {
+      resolvePatch({ ...row, status: "done" });
+      await pending!;
+    });
+  });
+
+  it("puts the previous row back when the patch fails", async () => {
+    h.apiPatch.mockRejectedValue(new Error("offline"));
+    const { result } = renderHook(() => useTasks());
+
+    await act(async () => {
+      await expect(result.current.updateTask("t1", { status: "done" })).rejects.toThrow("offline");
+    });
+
+    expect(h.mergeTasks).toHaveBeenLastCalledWith([row]);
+  });
+
+  it("drops a deleted task from the store before the request resolves", async () => {
+    h.apiDelete.mockReturnValue(new Promise(() => {}));
+    const { result } = renderHook(() => useTasks());
+
+    act(() => {
+      void result.current.deleteTask("t1");
+    });
+
+    expect(h.setTasks).toHaveBeenCalledWith([]);
+  });
+
+  it("drops a batch-deleted task before the request resolves", async () => {
+    h.apiPost.mockReturnValue(new Promise(() => {}));
+    const { result } = renderHook(() => useTasks());
+
+    act(() => {
+      void result.current.deleteTasksBatch(["t1"]);
+    });
+
+    expect(h.setTasks).toHaveBeenCalledWith([]);
   });
 });

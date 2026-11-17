@@ -988,9 +988,13 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     (e: React.PointerEvent) => {
       const body = bodyRef.current;
       if (!body || e.button !== 0) return;
-      // Touch keeps native `pan-x pan-y` scrolling (the custom pan would fight
-      // it); mouse and pen can pan even in a narrow window.
-      if (smallScreen && e.pointerType === "touch") return;
+      // Touch ALWAYS keeps native `pan-x pan-y` scrolling, at every width. The
+      // browser pans on the compositor; running the custom pan as well meant the
+      // same finger movement was applied by both paths and a flick carried the
+      // native momentum, which is why a Windows or macOS touchscreen jumped a
+      // whole week on a tiny touch. A phone already did this (smallScreen), so
+      // wide touch windows now behave like a phone instead of fighting it.
+      if (e.pointerType === "touch") return;
       const target = e.target as HTMLElement;
       // Never pan from an interactive element (task bars, resize handles, buttons, inputs).
       if (target.closest("[data-task-bar], [data-resize-handle], button, input, select, textarea, a")) {
@@ -1047,7 +1051,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       window.addEventListener("pointerup", onNativePanUp);
       window.addEventListener("pointercancel", onNativePanUp);
     },
-    [smallScreen, onNativePanMove, onNativePanUp, onSelectionBoxMove, onSelectionBoxUp]
+    [onNativePanMove, onNativePanUp, onSelectionBoxMove, onSelectionBoxUp]
   );
 
   // Never leave native pan listeners attached after unmount.

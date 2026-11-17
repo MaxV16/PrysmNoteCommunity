@@ -7,10 +7,13 @@ import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
 import { useUiScale } from "@/lib/ui-scale-context";
 import { useApiKeys } from "@/hooks/useApiKeys";
-import { useSubscription } from "@/hooks/use-subscription";
+import { useSubscriptionContext } from "@/lib/subscription-context";
 import { TeamList } from "@/components/collaborate/TeamList";
 import { ImportPanel } from "@/components/import/ImportPanel";
 import { ThemeTokenImport } from "@/components/settings/ThemeTokenImport";
+import { VaultSettings } from "@/components/settings/VaultSettings";
+import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
+import { searchSettings } from "@/lib/settings-search";
 import { PasskeysSettings } from "@/components/settings/PasskeysSettings";
 import { FinanceSettings } from "@/components/finance/FinanceSettings";
 import { McpSettings } from "@/components/mcp/McpSettings";
@@ -76,6 +79,17 @@ function SettingsNav({
   onBack: () => void;
   onLogout: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [activeHit, setActiveHit] = useState(0);
+  const hits = useMemo(() => searchSettings(query), [query]);
+  const searching = query.trim().length > 0;
+
+  const goTo = (tab: SettingsTab) => {
+    onSelectTab(tab);
+    setQuery("");
+    setActiveHit(0);
+  };
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
@@ -93,28 +107,113 @@ function SettingsNav({
           <p className="text-[10px] text-muted">Manage your workspace</p>
         </div>
       </div>
+      <div className="border-b border-border px-3 py-2">
+        <div className="relative">
+          <svg
+            aria-hidden
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <line x1="16.5" y1="16.5" x2="21" y2="21" />
+          </svg>
+          <input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setActiveHit(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setQuery("");
+                return;
+              }
+              if (!searching) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActiveHit((prev) => (hits.length === 0 ? 0 : (prev + 1) % hits.length));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActiveHit((prev) =>
+                  hits.length === 0 ? 0 : (prev - 1 + hits.length) % hits.length
+                );
+              } else if (e.key === "Enter" && hits[activeHit]) {
+                e.preventDefault();
+                goTo(hits[activeHit].tab);
+              }
+            }}
+            placeholder="Search settings"
+            aria-label="Search settings"
+            className="w-full rounded-lg border border-border bg-elevated py-1.5 pl-8 pr-7 text-xs text-primary outline-none transition-colors placeholder:text-muted focus:border-accent"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="absolute right-1 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-muted transition-colors hover:text-primary"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
       <nav className="flex-1 overflow-auto p-2">
-        {TAB_GROUPS.map((group) => (
-          <div key={group.label} className="mb-1">
-            <p className="text-[10px] uppercase tracking-wider font-semibold text-muted px-2 pt-3 pb-1.5">
-              {group.label}
+        {searching ? (
+          hits.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-muted">
+              No setting matches that. Try a word like theme, reminders or vault.
             </p>
-            <div className="space-y-0.5">
-              {group.tabs.map((tab) => (
+          ) : (
+            <div className="space-y-0.5" role="listbox" aria-label="Setting results">
+              {hits.map((hit, index) => (
                 <button
-                  key={tab.id}
-                  onClick={() => onSelectTab(tab.id)}
-                  className={`sidebar-item w-full ${activeTab === tab.id ? "active" : ""}`}
+                  key={`${hit.tab}-${hit.title}`}
+                  role="option"
+                  aria-selected={index === activeHit}
+                  onClick={() => goTo(hit.tab)}
+                  onMouseEnter={() => setActiveHit(index)}
+                  className={`flex w-full flex-col items-start gap-0.5 rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                    index === activeHit ? "bg-hover" : "hover:bg-hover"
+                  }`}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d={tab.svg} />
-                  </svg>
-                  <span>{tab.label}</span>
+                  <span className="text-xs text-primary">{hit.title}</span>
+                  <span className="text-[10px] text-muted">{hit.hint}</span>
                 </button>
               ))}
             </div>
-          </div>
-        ))}
+          )
+        ) : (
+          TAB_GROUPS.map((group) => (
+            <div key={group.label} className="mb-1">
+              <p className="text-[10px] uppercase tracking-wider font-semibold text-muted px-2 pt-3 pb-1.5">
+                {group.label}
+              </p>
+              <div className="space-y-0.5">
+                {group.tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => onSelectTab(tab.id)}
+                    className={`sidebar-item w-full ${activeTab === tab.id ? "active" : ""}`}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d={tab.svg} />
+                    </svg>
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))
+        )}
       </nav>
       <div className="border-t border-border p-3">
         <button
@@ -136,9 +235,11 @@ function SettingsNav({
 type SettingsTab =
   | "account"
   | "features"
+  | "appearance"
   | "preferences"
   | "integrations"
   | "widgets"
+  | "vault"
   | "advanced";
 
 interface TabGroup {
@@ -157,6 +258,7 @@ const TAB_GROUPS: TabGroup[] = [
     label: "Customization",
     tabs: [
       { id: "features", label: "Features", svg: "M12 2L2 7l10 5 10-5-10-5z M2 17l10 5 10-5 M2 12l10 5 10-5" },
+      { id: "appearance", label: "Appearance", svg: "M3 3h18v18H3z M8.5 8.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z M21 15l-5-5L5 21" },
       { id: "preferences", label: "Preferences", svg: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0" },
     ],
   },
@@ -164,6 +266,7 @@ const TAB_GROUPS: TabGroup[] = [
     label: "Integrations & Extras",
     tabs: [
       { id: "integrations", label: "Integrations", svg: "M13 2L3 14h9l-1 8 10-12h-9l1-8z" },
+      { id: "vault", label: "Vault", svg: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20 M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" },
       { id: "widgets", label: "Widgets", svg: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" },
     ],
   },
@@ -274,7 +377,11 @@ function IntegrationRow({ label, description, connected, onConnect, onDisconnect
 
 export default function SettingsPage() {
   const { user, loading, logout, refreshSession } = useAuth();
-  const subscription = useSubscription();
+  // Read the ONE provider mounted in the root layout, which is keyed on the
+  // authenticated user id. Calling `useSubscription()` bare here returned the
+  // free tier for everybody (no auth key means "nothing to fetch"), which is why
+  // a paid Team account still saw the upgrade lock on Collaborate.
+  const subscription = useSubscriptionContext();
   const { themeName, setThemeName, fontFamily, setFontFamily, background, setBackgroundPreset, setBackgroundImage, clearBackground, customTheme, setCustomTheme } =
     useTheme();
   const router = useRouter();
@@ -931,6 +1038,8 @@ export default function SettingsPage() {
               </section>
             </>
           )}
+
+          {activeTab === "appearance" && <AppearanceSettings />}
 
           {/* === SMART LIST === */}
           {activeTab === "features" && (
@@ -1644,6 +1753,8 @@ export default function SettingsPage() {
               </button>
             </section>
           )}
+
+          {activeTab === "vault" && <VaultSettings />}
 
           <Modal isOpen={widgetsOpen} onClose={() => setWidgetsOpen(false)} title="Widgets">
             <WidgetDashboard />
