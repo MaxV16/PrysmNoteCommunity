@@ -13,7 +13,7 @@ import { ImportPanel } from "@/components/import/ImportPanel";
 import { ThemeTokenImport } from "@/components/settings/ThemeTokenImport";
 import { VaultSettings } from "@/components/settings/VaultSettings";
 import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
-import { searchSettings } from "@/lib/settings-search";
+import { searchSettings, type SettingsTabId } from "@/lib/settings-search";
 import { PasskeysSettings } from "@/components/settings/PasskeysSettings";
 import { FinanceSettings } from "@/components/finance/FinanceSettings";
 import { McpSettings } from "@/components/mcp/McpSettings";
@@ -84,8 +84,12 @@ function SettingsNav({
   const hits = useMemo(() => searchSettings(query), [query]);
   const searching = query.trim().length > 0;
 
-  const goTo = (tab: SettingsTab) => {
-    onSelectTab(tab);
+  const goTo = (tab: SettingsTabId) => {
+    // Search entries can name a tab the current build does not render (the
+    // premium tab is stripped from the community build), so only switch to an
+    // id that actually exists in the navigation.
+    if (!TAB_GROUPS.some((group) => group.tabs.some((item) => item.id === tab))) return;
+    onSelectTab(tab as SettingsTab);
     setQuery("");
     setActiveHit(0);
   };
