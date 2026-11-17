@@ -530,3 +530,95 @@ describe("useTimelineBarDrag drop-onto-task uses the pointer column", () => {
     restore();
   });
 });
+
+describe("useTimelineBarDrag resize cleanup", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) =>
+      setTimeout(() => cb(0), 16)
+    );
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  /**
+   * A resize handle nested inside the bar, exactly like TaskBar. The handle's
+   * hook writes its preview to the BAR, which is a different element from the
+   * hook ref. A previous drop left that bar width/transform in place, so the
+   * next drag started from a bar that no longer sat on its own dates and the
+   * drop landed a day off.
+   */
+  function ResizeHarness() {
+    const move = useTimelineBarDrag(makeTask(), "move");
+    const resize = useTimelineBarDrag(makeTask(), "resize-left", false, {
+      touchActivateOnMove: true,
+    });
+    return createElement(
+      "div",
+      { "data-timeline-body": "" },
+      createElement(
+        "div",
+        {
+          ref: move.ref,
+          "data-task-bar": "",
+          "data-testid": "resize-bar",
+          onPointerDown: move.onPointerDown,
+        },
+        createElement("div", {
+          ref: resize.ref,
+          "data-testid": "resize-handle",
+          onPointerDown: resize.onPointerDown,
+        })
+      )
+    );
+  }
+
+  it("clears the bar preview after a committed resize", () => {
+    window.matchMedia = vi.fn((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+
+    const commits: TimelineBarCommit[] = [];
+    const utils = render(
+      createElement(
+        TimelineDragContext.Provider,
+        {
+          value: {
+            dayWidth: 28,
+            sectionIds: new Set<string>(),
+            onCommit: (c: TimelineBarCommit) => commits.push(c),
+          },
+        },
+        createElement(ResizeHarness)
+      )
+    );
+    const bar = utils.getByTestId("resize-bar");
+    const handle = utils.getByTestId("resize-handle");
+
+    down(handle, "mouse", 100, 100);
+    move(44, 100); // two day columns to the left
+    expect(bar.style.width).toBe("84px");
+    expect(bar.style.transform).toContain("translate3d");
+
+    up(44, 100);
+    expect(commits).toHaveLength(1);
+    expect(commits[0].mode).toBe("resize-left");
+    expect(commits[0].days).toBe(-2);
+    // The committed drop must hand the bar back to React with no leftover
+    // preview width or transform.
+    expect(bar.style.width).toBe("");
+    expect(bar.style.transform).toBe("");
+  });
+});

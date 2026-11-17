@@ -293,6 +293,17 @@ export function useTimelineBarDrag(
   // `width` on a move would wipe the React-set percent width.
   const previewTransformRef = useRef(false);
   const previewWidthRef = useRef(false);
+  // The element the last preview actually wrote to. For a move this is the bar
+  // itself, but a resize handle's own ref points at the handle, while its
+  // preview styles are written to the bar. Resetting `ref.current` therefore
+  // left the bar carrying a stale pixel width and a left-resize transform that
+  // shifted it away from React's `left`, so the next drag started from a bar
+  // that sat somewhere other than its own dates and the drop landed a day off.
+  const previewElRef = useRef<HTMLElement | null>(null);
+
+  const markPreviewed = useCallback((el: HTMLElement) => {
+    previewElRef.current = el;
+  }, []);
 
   const resetPreview = useCallback((el: HTMLElement | null) => {
     if (!el) return;
@@ -307,6 +318,7 @@ export function useTimelineBarDrag(
   }, []);
 
   const applyPreview = useCallback((s: DragSession) => {
+    markPreviewed(s.el);
     const offset = s.offsetPx;
     if (s.mode === "move") {
       // Both axes so the bar follows the cursor; the lane it is over sets the
@@ -357,7 +369,7 @@ export function useTimelineBarDrag(
       s.lastWidth = width;
       previewWidthRef.current = true;
     }
-  }, []);
+  }, [markPreviewed]);
 
   // While a resize handle is being dragged, publish the dates the drop would
   // commit so the bar can show a live badge. Only touched when the whole-day
@@ -831,6 +843,7 @@ export function useTimelineBarDrag(
         previewSigRef.current = "";
         setResizePreview(null);
         resetPreview(s.el);
+        if (previewElRef.current === s.el) previewElRef.current = null;
         // A touch gesture that fell through to a canvas pan started on the bar,
         // so swallow the trailing click that would otherwise open its details.
         if (s.panning && s.hasMoved) armClickSuppressor();
@@ -1049,12 +1062,15 @@ export function useTimelineBarDrag(
           if (sessionRef.current) return;
           el.style.transition = "";
           resetPreview(el);
+          if (previewElRef.current === el) previewElRef.current = null;
         }, 130);
       }
       return;
     }
     if (!previewTransformRef.current && !previewWidthRef.current) return;
-    resetPreview(ref.current);
+    // Clear the element the preview wrote to (the bar, not a resize handle).
+    resetPreview(previewElRef.current);
+    previewElRef.current = null;
   }, [dragging, task.start_date, task.due_date, task.board_section_id, resetPreview]);
 
   useEffect(

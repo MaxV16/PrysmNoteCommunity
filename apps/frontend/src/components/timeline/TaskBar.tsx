@@ -110,7 +110,14 @@ function ResizeHandle({
       <div
         ref={ref}
         data-resize-handle={side}
-        onPointerDown={onPointerDown}
+        onPointerDown={(e) => {
+          // A handle sits inside the bar, so the bar's own move engine would
+          // also receive this press. Own it here: one gesture must be either a
+          // resize or a move, never both (two commits on drop moved the task an
+          // extra day and read as a resize landing on the wrong date).
+          e.stopPropagation();
+          onPointerDown(e);
+        }}
         role="separator"
         aria-orientation="vertical"
         aria-label={`${side === "left" ? "Resize start" : "Resize end"}`}
