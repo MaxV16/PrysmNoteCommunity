@@ -207,8 +207,22 @@ export const TaskBarView = memo(function TaskBarView({ task, style, onClick, onC
     ? task.description.replace(/\s+/g, " ").trim().slice(0, 160)
     : "";
 
+  // A resize preview is written to the bar as `--drag-width` by the drag hook,
+  // which keeps the inline `width` React-owned. Clearing the variable then
+  // restores exactly the width React last rendered instead of leaving the
+  // absolutely positioned bar with no width (which fell back to its content and
+  // looked several times too large after a resize).
+  const baseWidth = style?.width;
+  const previewWidth =
+    baseWidth === undefined
+      ? "var(--drag-width, auto)"
+      : typeof baseWidth === "number"
+      ? `var(--drag-width, ${baseWidth}px)`
+      : `var(--drag-width, ${baseWidth})`;
+
   const barStyle = {
     ...style,
+    width: previewWidth,
     position: "absolute",
     height: metrics.barHeight,
     backgroundColor: colors.bg,

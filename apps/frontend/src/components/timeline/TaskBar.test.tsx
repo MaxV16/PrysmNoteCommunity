@@ -133,7 +133,7 @@ describe("TaskBar", () => {
       </DndContext>
     );
     const bar = container.querySelector("[data-task-bar]") as HTMLElement;
-    expect(bar.style.width).toBe("85%");
+    expect(bar.style.width).toBe("var(--drag-width, 85%)");
     expect(bar.style.transform).toBe("");
   });
 });

@@ -312,7 +312,12 @@ export function useTimelineBarDrag(
       previewTransformRef.current = false;
     }
     if (previewWidthRef.current) {
-      el.style.width = "";
+      // The resized width is previewed through a CSS variable (see applyPreview)
+      // because React owns the inline `width`. Clearing that variable restores
+      // the width React set; clearing `style.width` made React skip the write it
+      // thought was still applied, so the bar fell back to its content width and
+      // the next drag measured from a bar three times too wide.
+      el.style.removeProperty("--drag-width");
       previewWidthRef.current = false;
     }
   }, []);
@@ -348,7 +353,7 @@ export function useTimelineBarDrag(
     if (s.mode === "resize-right") {
       const width = `${span.spanDays * s.dayWidth}px`;
       if (width !== s.lastWidth) {
-        s.el.style.width = width;
+        s.el.style.setProperty("--drag-width", width);
         s.lastWidth = width;
         previewWidthRef.current = true;
       }
@@ -365,7 +370,7 @@ export function useTimelineBarDrag(
     }
     const width = `${span.spanDays * s.dayWidth}px`;
     if (width !== s.lastWidth) {
-      s.el.style.width = width;
+      s.el.style.setProperty("--drag-width", width);
       s.lastWidth = width;
       previewWidthRef.current = true;
     }

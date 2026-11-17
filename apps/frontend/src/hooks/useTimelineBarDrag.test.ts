@@ -609,7 +609,7 @@ describe("useTimelineBarDrag resize cleanup", () => {
 
     down(handle, "mouse", 100, 100);
     move(44, 100); // two day columns to the left
-    expect(bar.style.width).toBe("84px");
+    expect(bar.style.getPropertyValue("--drag-width")).toBe("84px");
     expect(bar.style.transform).toContain("translate3d");
 
     up(44, 100);
@@ -617,8 +617,9 @@ describe("useTimelineBarDrag resize cleanup", () => {
     expect(commits[0].mode).toBe("resize-left");
     expect(commits[0].days).toBe(-2);
     // The committed drop must hand the bar back to React with no leftover
-    // preview width or transform.
-    expect(bar.style.width).toBe("");
+    // preview width or transform. The preview lives in `--drag-width` so the
+    // inline width React owns is never cleared.
+    expect(bar.style.getPropertyValue("--drag-width")).toBe("");
     expect(bar.style.transform).toBe("");
   });
 });
