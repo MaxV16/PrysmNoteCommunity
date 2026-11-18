@@ -38,6 +38,8 @@ pub fn safe_paths() -> &'static [&'static str] {
         "/api/health",
         "/api/mcp",
         "/api/mcp/",
+        // Release announcements come from the deploy workflow over a shared
+        // secret, with no browser cookie to echo back.
         "/api/ee/billing/webhook/stripe",
         "/api/ee/mcp-oauth/register",
         "/api/ee/mcp-oauth/token",
