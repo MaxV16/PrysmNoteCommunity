@@ -392,6 +392,13 @@ impl Settings {
         env::var("BREVO_API_KEY").unwrap_or_default()
     }
 
+    /// Shared secret for the release announcement endpoint. Empty disables the
+    /// endpoint, so a self-hosted instance cannot be made to mail its users by
+    /// anyone who does not also run the deploy pipeline.
+    pub fn release_announce_secret(&self) -> String {
+        env::var("RELEASE_ANNOUNCE_SECRET").unwrap_or_default()
+    }
+
     /// Public sender address (also the SMTP From); empty disables email.
     pub fn admin_email(&self) -> String {
         env::var("ADMIN_EMAIL").unwrap_or_default()
