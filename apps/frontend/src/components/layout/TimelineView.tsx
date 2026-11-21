@@ -1912,7 +1912,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
         <TaskContextMenu menu={menu?.state ?? null} onClose={() => setMenu(null)} onNewTask={handleEmptyNewTask} />
       </ContextMenu>
 
-      {/* Bottom-left floating squircle for creating a task on every device, so
+      {/* Bottom-right floating squircle for creating a task on every device, so
           the primary action never hides behind the toolbar or the More menu. */}
       {selectedTaskIds.length === 0 && (
         <button
@@ -1920,7 +1920,7 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           aria-label="New task"
           data-testid="new-task-fab"
           title="New task"
-          className="pointer-coarse:h-14 pointer-coarse:w-14 gradient-bg fixed bottom-[calc(env(safe-area-inset-bottom)+3rem)] left-4 z-40 flex h-14 w-14 shrink-0 items-center justify-center rounded-[22px] text-[var(--on-gradient)] shadow-lg transition-transform hover:brightness-110 md:bottom-6 md:left-6"
+          className="pointer-coarse:h-14 pointer-coarse:w-14 gradient-bg fixed bottom-[calc(env(safe-area-inset-bottom)+3rem)] right-4 z-40 flex h-14 w-14 shrink-0 items-center justify-center rounded-[22px] text-[var(--on-gradient)] shadow-lg transition-transform hover:brightness-110 md:bottom-6 md:right-6"
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19" />
