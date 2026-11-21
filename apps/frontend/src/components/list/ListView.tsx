@@ -3,33 +3,23 @@
 import { useState, useMemo, useCallback } from "react";
 import { useAppStore } from "@/stores/app-store";
 import type { Task } from "@/types/task";
-import type { TaskStatus } from "@/types/task";
 import { useTasks } from "@/hooks/useTasks";
 import { useVisibleTasks } from "@/hooks/useVisibleTasks";
 import { useToast } from "@/lib/toast-context";
-import { useBoardSections } from "@/hooks/useBoardSections";
 import { useBatchDelete } from "@/hooks/useBatchDelete";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import { Modal } from "@/components/ui/Modal";
 import { ContextMenu } from "@/components/ui/ContextMenu";
 import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 import { SelectionActionBar } from "@/components/tasks/SelectionActionBar";
+import { useSelectionBatchActions } from "@/components/tasks/SelectionBatchActions";
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { formatDate } from "@/lib/dates";
 import { taskTimeLabel } from "@/lib/task-time";
-import { api } from "@/lib/api";
 import { useLongPress } from "@/lib/use-long-press";
 
 const PRIORITY_COLORS: Record<number, string> = TIER_COLORS;
-
-const STATUS_LABELS: Record<TaskStatus, string> = {
-  backlog: "Backlog",
-  todo: "To Do",
-  in_progress: "In Progress",
-  done: "Done",
-  cancelled: "Cancelled",
-};
 
 export function ListView() {
   const tasks = useAppStore((s) => s.tasks);
@@ -41,21 +31,20 @@ export function ListView() {
   const searchQuery = useAppStore((s) => s.searchQuery);
   const setSearchQuery = useAppStore((s) => s.setSearchQuery);
   const activeListId = useAppStore((s) => s.activeListId);
-  const { updateTask, createTask, fetchTasks } = useTasks();
+  const { updateTask, createTask } = useTasks();
   const { busy: batchDeleting, softDeleteWithUndo } = useBatchDelete();
   const { showToast } = useToast();
-  const { sections: boardSections } = useBoardSections("board");
-  const { sections: kanbanSections } = useBoardSections("kanban");
+  const {
+    extra: batchExtra,
+    modals: batchModals,
+    busy: batchBusy,
+    actionError: batchActionError,
+  } = useSelectionBatchActions();
   const soundOn = useLocalBool("prysm_notif_sound", true);
   const rewardsOn = useLocalBool("prysm_rewards", true);
   const [sortBy, setSortBy] = useState<"date" | "priority">("date");
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [menu, setMenu] = useState<{ state: ContextMenuState; x: number; y: number } | null>(null);
-  const [showMoveModal, setShowMoveModal] = useState(false);
-  const [showDateModal, setShowDateModal] = useState(false);
-  const [moveDate, setMoveDate] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [expandedSubtasks, setExpandedSubtasks] = useState<Set<string>>(new Set());
 
   const visible = useVisibleTasks();
@@ -169,44 +158,6 @@ export function ListView() {
     setShowTaskForm(true);
   }, []);
 
-  const runBatch = async (request: () => Promise<unknown>) => {
-    setBusy(true);
-    setActionError(null);
-    try {
-      await request();
-      await fetchTasks();
-      clearTaskSelection();
-      return true;
-    } catch {
-      setActionError("The batch operation failed. Try again.");
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleMoveTo = async (sectionId: string | null) => {
-    const ok = await runBatch(() =>
-      api.post("/tasks/batch-board-move", {
-        task_ids: selectedTaskIds,
-        section_id: sectionId,
-        index: 0,
-      })
-    );
-    if (ok) setShowMoveModal(false);
-  };
-
-  const handleSetDate = async () => {
-    if (!moveDate) return;
-    const ok = await runBatch(() =>
-      api.post("/tasks/batch-set-date", {
-        task_ids: selectedTaskIds,
-        date: moveDate,
-      })
-    );
-    if (ok) setShowDateModal(false);
-  };
-
   const handleDelete = async () => {
     const ids = [...selectedTaskIds];
     if (ids.length === 0) return;
@@ -215,8 +166,6 @@ export function ListView() {
       clearTaskSelection();
     }
   };
-
-  const statusSections = kanbanSections.filter((s) => s.status);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-base">
@@ -276,28 +225,11 @@ export function ListView() {
       {selectedTaskIds.length > 0 && (
         <SelectionActionBar
           count={selectedTaskIds.length}
-          busy={busy || batchDeleting}
+          busy={batchBusy || batchDeleting}
           onDelete={() => void handleDelete()}
           onClear={clearTaskSelection}
-          actionError={actionError}
-          extra={
-            <>
-              <button
-                onClick={() => setShowMoveModal(true)}
-                disabled={busy}
-                className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-md"
-              >
-                Move to…
-              </button>
-              <button
-                onClick={() => setShowDateModal(true)}
-                disabled={busy}
-                className="btn bg-elevated border border-border px-3 py-1 text-[11px] text-secondary hover:text-primary rounded-md"
-              >
-                Set date
-              </button>
-            </>
-          }
+          actionError={batchActionError}
+          extra={batchExtra}
         />
       )}
 
@@ -450,88 +382,7 @@ export function ListView() {
         )}
       </div>
 
-      <Modal
-        isOpen={showMoveModal}
-        onClose={() => setShowMoveModal(false)}
-        title={`Move ${selectedTaskIds.length} task${selectedTaskIds.length === 1 ? "" : "s"}`}
-      >
-        <div className="space-y-3">
-          {statusSections.length > 0 && (
-            <div>
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">By Status</p>
-              <div className="space-y-1">
-                {statusSections.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => void handleMoveTo(s.id)}
-                    disabled={busy}
-                    className="block w-full rounded-lg px-3 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary disabled:opacity-50"
-                  >
-                    {STATUS_LABELS[s.status as TaskStatus] ?? s.title}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {boardSections.length > 0 && (
-            <div>
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted">Board Sections</p>
-              <div className="space-y-1">
-                {boardSections.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => void handleMoveTo(s.id)}
-                    disabled={busy}
-                    className="block w-full rounded-lg px-3 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary disabled:opacity-50"
-                  >
-                    {s.title}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <button
-            onClick={() => void handleMoveTo(null)}
-            disabled={busy}
-            className="block w-full rounded-lg px-3 py-2 text-left text-xs text-secondary transition-colors hover:bg-hover hover:text-primary disabled:opacity-50"
-          >
-            Unsorted
-          </button>
-          {actionError && <p className="text-xs text-danger">{actionError}</p>}
-        </div>
-      </Modal>
-
-      <Modal
-        isOpen={showDateModal}
-        onClose={() => setShowDateModal(false)}
-        title={`Set date for ${selectedTaskIds.length} task${selectedTaskIds.length === 1 ? "" : "s"}`}
-      >
-        <div className="space-y-3">
-          <input
-            type="date"
-            value={moveDate}
-            onChange={(e) => setMoveDate(e.target.value)}
-            className="input-field"
-            aria-label="Date to assign"
-          />
-          {actionError && <p className="text-xs text-danger">{actionError}</p>}
-          <div className="flex gap-2">
-            <button
-              onClick={() => void handleSetDate()}
-              disabled={busy || !moveDate}
-              className="btn btn-gradient px-5 py-2 text-sm rounded-xl disabled:opacity-50"
-            >
-              Apply
-            </button>
-            <button
-              onClick={() => setShowDateModal(false)}
-              className="btn bg-elevated border border-border text-secondary px-4 py-2 text-sm rounded-xl"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </Modal>
+      {batchModals}
 
       <Modal
         isOpen={showTaskForm}

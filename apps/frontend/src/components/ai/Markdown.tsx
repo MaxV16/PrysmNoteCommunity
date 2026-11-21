@@ -235,6 +235,11 @@ export function Markdown({
                 disabled={!interactive}
                 readOnly={!interactive}
                 aria-label={isChecked ? "Mark checklist item not done" : "Mark checklist item done"}
+                onClick={(e) => {
+                  // The description is wrapped in a click-to-edit container, so a
+                  // checkbox click must not bubble up and open the editor.
+                  if (interactive) e.stopPropagation();
+                }}
                 onChange={(e) => {
                   if (lineIndex === undefined || !onToggleChecklist) return;
                   const next = e.target.checked;

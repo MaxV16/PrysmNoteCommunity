@@ -44,6 +44,7 @@ import { TimelineDragContext, type TimelineBarCommit } from "@/hooks/useTimeline
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useToast } from "@/lib/toast-context";
 import { SelectionActionBar } from "@/components/tasks/SelectionActionBar";
+import { useSelectionBatchActions } from "@/components/tasks/SelectionBatchActions";
 import { LeftLabelsCol } from "@/components/timeline/LeftLabelsCol";
 import { useBoardSections } from "@/hooks/useBoardSections";
 import { useSyncScroll } from "@/hooks/useSyncScroll";
@@ -1185,6 +1186,14 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   }, [softDeleteWithUndo]);
   const selectedCount = selectedTaskIds.length;
 
+  // Shared group actions (Move to..., Set date) for the floating/mobile bars.
+  const {
+    extra: batchExtra,
+    modals: batchModals,
+    busy: batchBusy,
+    actionError: batchActionError,
+  } = useSelectionBatchActions(timelineSections);
+
   const filterBadge = navFilter
     ? navFilterLabel(navFilter)
     : activeListId
@@ -1373,60 +1382,9 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           </div>
         )}
 
-        {/* Secondary actions: inline on wide screens, in the More menu below
-            on narrower ones so the row never wraps or clips. */}
-        {!smallScreen && (
-          <div className="hidden shrink-0 items-center gap-x-2 lg:flex">
-            <button
-              onClick={() => {
-                void refreshTasksPreservingWindow();
-                window.dispatchEvent(new CustomEvent(FOREGROUND_REFRESH_EVENT));
-              }}
-              className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-md text-secondary hover:text-primary shrink-0"
-              aria-label="Refresh tasks"
-              data-testid="refresh-tasks"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-              Refresh
-            </button>
-            {safeMode === "timeline" && (
-              <button
-                onClick={() => {
-                  void addTimelineSection({ title: `Section ${timelineSections.length + 1}` });
-                }}
-                className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-md text-secondary hover:text-primary shrink-0"
-                aria-label="Add section"
-              >
-                + Section
-              </button>
-            )}
-            <button onClick={() => router.push("/settings")} className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-md text-secondary hover:text-primary shrink-0" aria-label="Settings" data-tour="settings">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-            {stickyOn && (
-              <button
-                onClick={() => openStickyNote()}
-                className="btn bg-elevated border border-border text-xs px-3 py-1.5 rounded-md text-secondary hover:text-primary shrink-0"
-                aria-label="Notes"
-              >
-                Notes
-              </button>
-            )}
-          </div>
-        )}
-
-        <button
-          onClick={() => openTaskForm()}
-          className="pointer-coarse:h-11 pointer-coarse:w-11 btn btn-primary flex h-8 w-8 shrink-0 items-center justify-center rounded-md p-0"
-          aria-label="New task"
-          data-testid="new-task-button"
-          title="New task"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </button>
+        {/* Secondary actions (refresh, add section, email summaries, settings,
+            notes) live in the More menu on every screen size, so the bar stays
+            a single tidy row that never overflows on mobile or desktop. */}
 
         <button onClick={() => onToggleRight?.()} className="pointer-coarse:h-11 pointer-coarse:w-11 gradient-bg flex h-8 w-8 shrink-0 min-w-8 items-center justify-center rounded-full text-[var(--on-gradient)] shadow-glow hover:brightness-110" aria-label="AI" data-tour="ai-panel">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -1468,17 +1426,6 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
           onClose={() => setMobileMenuOpen(false)}
           className="w-60 max-w-[calc(100vw-1rem)]"
         >
-          <button
-            onClick={() => { setMobileMenuOpen(false); openTaskForm(); }}
-            className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-primary transition-colors hover:bg-hover"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            New task
-          </button>
-
           <p className="menu-section-label">View</p>
           {timelineOn && (
             <button
@@ -1911,28 +1858,31 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
 
       {/* Desktop floating batch-action bar covers the timeline/kanban/board/calendar
           modes (list has its own inline toolbar). Always visible while a selection
-          exists so Delete is never keyboard-only on desktop. */}
+          exists so Delete and group actions are never keyboard-only on desktop. */}
       {safeMode !== "list" && selectedTaskIds.length > 0 && (
         <SelectionActionBar
           floating
           count={selectedTaskIds.length}
-          busy={batchDeleting}
+          busy={batchDeleting || batchBusy}
           onDelete={() => void handleBatchDelete()}
           onClear={() => useAppStore.getState().clearTaskSelection()}
+          extra={batchExtra}
+          actionError={batchActionError}
         />
       )}
 
   {/* Mobile batch action bar (select mode on the timeline) */}
       {selectionMode && selectedCount > 0 && (
         <div className="pointer-events-none fixed inset-x-0 bottom-[calc(env(safe-area-inset-bottom)+3rem)] z-40 flex justify-center px-4">
-          <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 shadow-lg">
+          <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-3 rounded-full border border-border bg-surface px-4 py-2 shadow-lg">
             <span className="text-xs font-medium text-secondary">{selectedCount} selected</span>
+            {batchExtra}
             <button
               onClick={() => void handleBatchDelete()}
-              disabled={batchDeleting}
+              disabled={batchDeleting || batchBusy}
               className="btn bg-elevated border border-danger/30 px-3 py-1 text-xs text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
             >
-              {batchDeleting ? "Deleting…" : "Delete"}
+              {batchDeleting || batchBusy ? "Deleting…" : "Delete"}
             </button>
             <button
               onClick={() => useAppStore.getState().clearTaskSelection()}
@@ -1940,9 +1890,12 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
             >
               Clear
             </button>
+            {batchActionError && <span className="w-full text-center text-[11px] text-danger">{batchActionError}</span>}
           </div>
         </div>
       )}
+
+      {batchModals}
 
       {/* Task detail drawer */}
       {selectedTask && (
@@ -1958,6 +1911,23 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       >
         <TaskContextMenu menu={menu?.state ?? null} onClose={() => setMenu(null)} onNewTask={handleEmptyNewTask} />
       </ContextMenu>
+
+      {/* Bottom-left floating squircle for creating a task on every device, so
+          the primary action never hides behind the toolbar or the More menu. */}
+      {selectedTaskIds.length === 0 && (
+        <button
+          onClick={() => openTaskForm()}
+          aria-label="New task"
+          data-testid="new-task-fab"
+          title="New task"
+          className="pointer-coarse:h-14 pointer-coarse:w-14 gradient-bg fixed bottom-[calc(env(safe-area-inset-bottom)+3rem)] left-4 z-40 flex h-14 w-14 shrink-0 items-center justify-center rounded-[22px] text-[var(--on-gradient)] shadow-lg transition-transform hover:brightness-110 md:bottom-6 md:left-6"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
