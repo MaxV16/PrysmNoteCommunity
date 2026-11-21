@@ -36,6 +36,9 @@ const MAX_PROPERTIES_BYTES: usize = 4096;
 const MAX_SESSION_LENGTH: usize = 64;
 const MAX_QUEUE_SIZE: usize = 10_000;
 const FLUSH_BATCH: usize = 500;
+/// Rows per multi-row INSERT. 25 keeps each statement small enough to stay far
+/// from the parameter ceiling (4 params per row).
+const ANALYTICS_INSERT_BATCH: usize = 25;
 const TRACK_LIMIT: u32 = 60;
 const TRACK_WINDOW: Duration = Duration::from_secs(60);
 
@@ -114,8 +117,8 @@ pub fn enqueue_event(
 }
 
 /// Drain the in-memory queue into `analytics_events`, returning how many events
-/// were written. Each row is attempted independently so one failure cannot abort
-/// the batch.
+/// were written. Events are written in small batches, and a batch that fails is
+/// retried row by row so one bad event cannot discard the whole run.
 pub async fn flush_pending(pool: &PgPool) -> Result<usize, sqlx::Error> {
     let batch: Vec<PendingEvent> = {
         let a = analytics();
@@ -127,23 +130,47 @@ pub async fn flush_pending(pool: &PgPool) -> Result<usize, sqlx::Error> {
         return Ok(0);
     }
     let mut count = 0usize;
-    for item in batch {
-        let result = sqlx::query(
-            "INSERT INTO analytics_events (user_id, event, properties, session_id) \
-             VALUES ($1, $2, $3::jsonb, $4)",
-        )
-        .bind(item.user_id)
-        .bind(&item.event)
-        .bind(&item.properties)
-        .bind(&item.session_id)
-        .execute(pool)
-        .await;
-        match result {
-            Ok(_) => count += 1,
-            Err(err) => tracing::warn!("analytics flush skipped an event: {err}"),
+    for chunk in batch.chunks(ANALYTICS_INSERT_BATCH) {
+        if insert_batch(pool, chunk).await.is_ok() {
+            count += chunk.len();
+            continue;
+        }
+        for item in chunk {
+            let result = sqlx::query(
+                "INSERT INTO analytics_events (user_id, event, properties, session_id) \
+                 VALUES ($1, $2, $3::jsonb, $4)",
+            )
+            .bind(item.user_id)
+            .bind(&item.event)
+            .bind(&item.properties)
+            .bind(&item.session_id)
+            .execute(pool)
+            .await;
+            match result {
+                Ok(_) => count += 1,
+                Err(err) => tracing::warn!("analytics flush skipped an event: {err}"),
+            }
         }
     }
     Ok(count)
+}
+
+/// One multi-row INSERT for a chunk of events.
+async fn insert_batch(pool: &PgPool, chunk: &[PendingEvent]) -> Result<(), sqlx::Error> {
+    use sqlx::types::Json;
+    use sqlx::{Postgres, QueryBuilder};
+
+    let mut qb = QueryBuilder::<Postgres>::new(
+        "INSERT INTO analytics_events (user_id, event, properties, session_id) ",
+    );
+    qb.push_values(chunk, |mut row, item| {
+        row.push_bind(item.user_id)
+            .push_bind(&item.event)
+            .push_bind(Json(&item.properties))
+            .push_bind(&item.session_id);
+    });
+    qb.build().execute(pool).await?;
+    Ok(())
 }
 
 /// Background loop: drain the queue whenever it is non-empty, otherwise wait up

@@ -2223,18 +2223,27 @@ async fn reorder_subtasks(
         children.insert(child_id, ());
     }
     let mut ordered: Vec<Value> = Vec::new();
+    let mut ordered_ids: Vec<Uuid> = Vec::new();
+    let mut ranks: Vec<i32> = Vec::new();
     for (rank, raw) in body.ordered_ids.iter().enumerate() {
         let child_id = match Uuid::parse_str(raw) {
             Ok(parsed) if children.contains_key(&parsed) => parsed,
             _ => continue,
         };
-        sqlx::query("UPDATE tasks SET sort_order = $2 WHERE id = $1")
-            .bind(child_id)
-            .bind(rank as i32)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
+        ordered_ids.push(child_id);
+        ranks.push(rank as i32);
         ordered.push(json!({ "id": child_id.to_string(), "sort_order": rank }));
+    }
+    if !ordered_ids.is_empty() {
+        sqlx::query(
+            "UPDATE tasks AS t SET sort_order = v.rank \
+             FROM unnest($1::uuid[], $2::int[]) AS v(id, rank) WHERE t.id = v.id",
+        )
+        .bind(&ordered_ids)
+        .bind(&ranks)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
     }
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({ "status": "ok", "subtasks": ordered })))

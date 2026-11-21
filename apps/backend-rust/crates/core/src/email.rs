@@ -12,6 +12,18 @@ use crate::config::Settings;
 /// Brevo transactional email endpoint.
 const BREVO_SEND_URL: &str = "https://api.brevo.com/v3/smtp/email";
 
+/// Mask a recipient address for logs. Delivery failures are worth logging, a
+/// full address is personal data that should not sit in a log file.
+fn mask_email(address: &str) -> String {
+    match address.split_once('@') {
+        Some((local, domain)) if !local.is_empty() => {
+            let first: String = local.chars().take(1).collect();
+            format!("{first}***@{domain}")
+        }
+        _ => "***".to_string(),
+    }
+}
+
 /// Total attempts for one send. Three covers the common edge blip (a reset
 /// connection, a one-off 502) without holding a request open for long.
 const BREVO_ATTEMPTS: u32 = 3;
@@ -159,7 +171,7 @@ async fn send_brevo(settings: &Settings, to_address: &str, subject: &str, body: 
                     tokio::time::sleep(retry_delay(attempt)).await;
                     continue;
                 }
-                tracing::warn!(to = %to_address, status, detail = %detail.trim(), "Brevo rejected an email");
+                tracing::warn!(to = %mask_email(to_address), status, detail = %detail.trim(), "Brevo rejected an email");
                 return false;
             }
             Err(err) => {
@@ -171,7 +183,7 @@ async fn send_brevo(settings: &Settings, to_address: &str, subject: &str, body: 
             }
         }
     }
-    tracing::warn!(to = %to_address, error = %last_error, "Brevo send failed after retries");
+    tracing::warn!(to = %mask_email(to_address), error = %last_error, "Brevo send failed after retries");
     false
 }
 
@@ -190,7 +202,7 @@ async fn send_smtp(settings: &Settings, to_address: &str, subject: &str, body: &
     let to: Mailbox = match to_address.parse() {
         Ok(mailbox) => mailbox,
         Err(err) => {
-            tracing::warn!("Invalid To address {to_address}: {err}");
+            tracing::warn!("Invalid To address {}: {err}", mask_email(to_address));
             return false;
         }
     };

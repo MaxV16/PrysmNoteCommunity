@@ -523,6 +523,14 @@ fn chunk_text(title: &str, body: &str) -> Vec<String> {
     chunks
 }
 
+fn embedding_permits() -> &'static tokio::sync::Semaphore {
+    // Embedding is best-effort work off the request path. Two in flight is
+    // plenty for one user saving notes, and it stops a 500-note import from
+    // opening 500 provider calls at once on a single small VM.
+    static PERMITS: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+    PERMITS.get_or_init(|| tokio::sync::Semaphore::new(2))
+}
+
 fn spawn_embedding(
     pool: PgPool,
     encryption_key: String,
@@ -532,7 +540,17 @@ fn spawn_embedding(
     body: String,
 ) {
     tokio::spawn(async move {
+        let permit = match tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            embedding_permits().acquire(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            _ => return,
+        };
         let _ = embed_note(&pool, &encryption_key, user_id, note_id, &title, &body).await;
+        drop(permit);
     });
 }
 

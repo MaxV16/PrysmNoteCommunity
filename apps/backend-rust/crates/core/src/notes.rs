@@ -266,96 +266,38 @@ async fn update_note(
         return Err(ApiError::NotFound("Note not found".to_string()));
     }
 
-    if let Some(title) = &payload.title {
-        sqlx::query("UPDATE notes SET title = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(title)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
-    if let Some(content) = &payload.content {
-        sqlx::query("UPDATE notes SET content = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(content)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
-    if let Some(color) = &payload.color {
-        sqlx::query("UPDATE notes SET color = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(color)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
-    if let Some(x) = payload.x {
-        sqlx::query("UPDATE notes SET x = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(x)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
-    if let Some(y) = payload.y {
-        sqlx::query("UPDATE notes SET y = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(y)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
-    if let Some(width) = payload.width {
-        sqlx::query("UPDATE notes SET width = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(width)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
-    if let Some(height) = payload.height {
-        sqlx::query("UPDATE notes SET height = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(height)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
-    if let Some(minimized) = payload.minimized {
-        sqlx::query("UPDATE notes SET minimized = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(minimized)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
-    if let Some(open) = payload.open {
-        sqlx::query("UPDATE notes SET open = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(open)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
-    if let Some(sort) = payload.sort {
-        sqlx::query("UPDATE notes SET sort = $1, updated_at = now() WHERE id = $2 AND user_id = $3")
-            .bind(sort)
-            .bind(&note_id)
-            .bind(user.user_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(db_error)?;
-    }
+    // One statement for the whole patch: COALESCE keeps every field that was
+    // not sent. Nine separate UPDATEs meant nine round trips per save.
+    sqlx::query(
+        "UPDATE notes SET \
+           title = COALESCE($1, title), \
+           content = COALESCE($2, content), \
+           color = COALESCE($3, color), \
+           x = COALESCE($4, x), \
+           y = COALESCE($5, y), \
+           width = COALESCE($6, width), \
+           height = COALESCE($7, height), \
+           minimized = COALESCE($8, minimized), \
+           open = COALESCE($9, open), \
+           sort = COALESCE($10, sort), \
+           updated_at = now() \
+         WHERE id = $11 AND user_id = $12",
+    )
+    .bind(&payload.title)
+    .bind(&payload.content)
+    .bind(&payload.color)
+    .bind(payload.x)
+    .bind(payload.y)
+    .bind(payload.width)
+    .bind(payload.height)
+    .bind(payload.minimized)
+    .bind(payload.open)
+    .bind(payload.sort)
+    .bind(&note_id)
+    .bind(user.user_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db_error)?;
 
     let note = fetch_note(&mut *tx, &note_id, user.user_id)
         .await

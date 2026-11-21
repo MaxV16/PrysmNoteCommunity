@@ -74,6 +74,7 @@ pub mod feature_guide;
 pub mod fernet;
 pub mod finance;
 pub mod habits;
+pub mod http;
 pub mod imports;
 pub mod jwt;
 pub mod keys;

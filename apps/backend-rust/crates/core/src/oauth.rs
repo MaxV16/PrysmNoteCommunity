@@ -701,7 +701,7 @@ async fn fetch_identity(state: &AppState, provider: &str, code: &str) -> Result<
 
 async fn exchange_google(state: &AppState, code: &str) -> Result<Identity, ()> {
     let s = &state.settings;
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let token_response = client
         .post("https://oauth2.googleapis.com/token")
         .header(reqwest::header::ACCEPT, "application/json")
@@ -773,7 +773,7 @@ async fn verify_google_id_token(
 
 async fn exchange_github(state: &AppState, code: &str) -> Result<Identity, ()> {
     let s = &state.settings;
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let token_json: Value = client
         .post("https://github.com/login/oauth/access_token")
         .header(reqwest::header::ACCEPT, "application/json")

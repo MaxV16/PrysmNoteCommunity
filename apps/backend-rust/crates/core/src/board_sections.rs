@@ -1134,6 +1134,8 @@ pub(crate) async fn svc_organize_timeline(
         created += 1;
     }
     let mut assigned = 0i64;
+    let mut assign_ids: Vec<Uuid> = Vec::new();
+    let mut assign_sections: Vec<Uuid> = Vec::new();
     for task in &tasks {
         let Some(topic) = assignments.get(&task.id.to_string()) else {
             continue;
@@ -1141,17 +1143,22 @@ pub(crate) async fn svc_organize_timeline(
         let Some(section_id) = by_title.get(&topic.to_lowercase()) else {
             continue;
         };
-        let result =
-            sqlx::query("UPDATE tasks SET board_section_id = $1 WHERE id = $2 AND user_id = $3")
-                .bind(section_id)
-                .bind(task.id)
-                .bind(user_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(db_error)?;
-        if result.rows_affected() > 0 {
-            assigned += 1;
-        }
+        assign_ids.push(task.id);
+        assign_sections.push(*section_id);
+    }
+    if !assign_ids.is_empty() {
+        let result = sqlx::query(
+            "UPDATE tasks AS t SET board_section_id = v.section_id \
+             FROM unnest($1::uuid[], $2::uuid[]) AS v(id, section_id) \
+             WHERE t.id = v.id AND t.user_id = $3",
+        )
+        .bind(&assign_ids)
+        .bind(&assign_sections)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        assigned = result.rows_affected() as i64;
     }
     tx.commit().await.map_err(db_error)?;
 

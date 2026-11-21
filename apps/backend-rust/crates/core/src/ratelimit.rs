@@ -10,15 +10,22 @@
 //! at most one connection manager.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::cache::RedisPool;
 
+/// How many `count` calls pass between full sweeps of the fallback map.
+/// Expired entries are harmless (a fresh hit replaces them), so pruning on
+/// every request only burned CPU on a hot path.
+const SWEEP_EVERY: u64 = 512;
+
 pub struct RateLimiter {
     name: &'static str,
     entries: Mutex<BTreeMap<String, (Instant, u32)>>,
     blocks: Mutex<BTreeMap<String, Instant>>,
+    calls: AtomicU64,
     redis: Option<RedisPool>,
 }
 
@@ -29,6 +36,7 @@ impl RateLimiter {
             name,
             entries: Mutex::new(BTreeMap::new()),
             blocks: Mutex::new(BTreeMap::new()),
+            calls: AtomicU64::new(0),
             redis: None,
         }
     }
@@ -44,6 +52,7 @@ impl RateLimiter {
             name,
             entries: Mutex::new(BTreeMap::new()),
             blocks: Mutex::new(BTreeMap::new()),
+            calls: AtomicU64::new(0),
             redis,
         }
     }
@@ -103,8 +112,12 @@ impl RateLimiter {
         };
         // Self-prune expired keys so the fallback map cannot grow without bound.
         // This replaces the Python `_prune_rate_limits` background task (the
-        // Redis path expires counters on its own, via TTLs).
-        guard.retain(|_, (started, _)| now.duration_since(*started) < window);
+        // Redis path expires counters on its own, via TTLs). Pruning is
+        // amortised: a sweep every SWEEP_EVERY calls keeps the map bounded
+        // without making every request walk every key.
+        if self.calls.fetch_add(1, Ordering::Relaxed) % SWEEP_EVERY == 0 {
+            guard.retain(|_, (started, _)| now.duration_since(*started) < window);
+        }
         let entry = guard.entry(full).or_insert((now, 0));
         if now.duration_since(entry.0) >= window {
             *entry = (now, 0);

@@ -448,30 +448,25 @@ pub async fn send_task_reminders(
 
 /// Fast per-task reminder loop (email + Web Push). Runs every minute so a
 /// reminder set for a specific time is not delayed by the slower due-alert /
-/// digest interval. Per-pass transaction, per-item tolerant.
+/// digest interval. Per-pass pooled connection, per-item tolerant, and no
+/// transaction is held across the outbound send (see the notification loop).
 pub async fn task_reminder_background_loop(pool: PgPool, settings: Settings) {
     loop {
         if settings.notifications_enabled {
-            match pool.begin().await {
-                Ok(mut tx) => {
-                    match send_task_reminders(&mut *tx, &settings).await {
+            match pool.acquire().await {
+                Ok(mut conn) => {
+                    match send_task_reminders(&mut conn, &settings).await {
                         Ok(count) if count > 0 => {
                             tracing::info!("task reminders: sent {count} scheduled reminder(s)")
                         }
                         Ok(_) => {}
                         Err(err) => {
                             tracing::warn!(error = %err, "task reminder pass failed");
-                            let _ = tx.rollback().await;
-                            tokio::time::sleep(Duration::from_secs(60)).await;
-                            continue;
                         }
-                    }
-                    if let Err(err) = tx.commit().await {
-                        tracing::warn!(error = %err, "task reminder pass commit failed");
                     }
                 }
                 Err(err) => {
-                    tracing::warn!(error = %err, "task reminder loop could not begin a transaction");
+                    tracing::warn!(error = %err, "task reminder loop could not check out a connection");
                 }
             }
         }
@@ -578,9 +573,14 @@ pub async fn send_daily_digests(
 }
 
 /// Background loop: due alerts every interval, daily digest at `digest_hour`.
-/// No-op when `notifications_enabled` is off (safe on dev/community builds). One
-/// pass is one transaction, committed on success and rolled back on error, so a
-/// failure never kills the loop (Python `notification_background_loop`).
+/// No-op when `notifications_enabled` is off (safe on dev/community builds).
+///
+/// Each pass runs on one pooled connection, deliberately NOT inside a
+/// transaction: the pass delivers email and Web Push, and a provider that hangs
+/// (Brevo retries for a minute) must not pin a transaction and a pool slot for
+/// that long. The app pool has only six connections, so a held transaction here
+/// starved request handlers. Dedupe still holds because every send writes its
+/// `notification_logs` row immediately.
 pub async fn notification_background_loop(
     pool: PgPool,
     settings: Settings,
@@ -588,29 +588,19 @@ pub async fn notification_background_loop(
 ) {
     loop {
         if settings.notifications_enabled {
-            match pool.begin().await {
-                Ok(mut tx) => {
-                    let mut failed = false;
-                    if let Err(err) = send_due_alerts(&mut *tx, &settings).await {
+            match pool.acquire().await {
+                Ok(mut conn) => {
+                    if let Err(err) = send_due_alerts(&mut conn, &settings).await {
                         tracing::warn!(error = %err, "notification due-alert pass failed");
-                        failed = true;
                     }
-                    if !failed
-                        && chrono::Local::now().hour() == settings.digest_hour
-                    {
-                        if let Err(err) = send_daily_digests(&mut *tx, &settings, None).await {
+                    if chrono::Local::now().hour() == settings.digest_hour {
+                        if let Err(err) = send_daily_digests(&mut conn, &settings, None).await {
                             tracing::warn!(error = %err, "notification digest pass failed");
-                            failed = true;
                         }
-                    }
-                    if failed {
-                        let _ = tx.rollback().await;
-                    } else if let Err(err) = tx.commit().await {
-                        tracing::warn!(error = %err, "notification pass commit failed");
                     }
                 }
                 Err(err) => {
-                    tracing::warn!(error = %err, "notification loop could not begin a transaction");
+                    tracing::warn!(error = %err, "notification loop could not check out a connection");
                 }
             }
         }

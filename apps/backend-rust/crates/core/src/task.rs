@@ -522,12 +522,16 @@ pub async fn move_tasks_to_section(
         .await?;
     }
 
-    for (position, id) in order.iter().enumerate() {
-        sqlx::query("UPDATE tasks SET board_order = $2, updated_at = now() WHERE id = $1")
-            .bind(id)
-            .bind(position as i32)
-            .execute(&mut *conn)
-            .await?;
+    if !order.is_empty() {
+        let positions: Vec<i32> = (0..order.len() as i32).collect();
+        sqlx::query(
+            "UPDATE tasks AS t SET board_order = v.position, updated_at = now() \
+             FROM unnest($1::uuid[], $2::int[]) AS v(id, position) WHERE t.id = v.id",
+        )
+        .bind(&order)
+        .bind(&positions)
+        .execute(&mut *conn)
+        .await?;
     }
 
     Ok(moved.len() as u64)

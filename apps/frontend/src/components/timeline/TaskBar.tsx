@@ -22,19 +22,26 @@ function formatResizeRange(start: string, due: string) {
  * handles, so they have to be there from the start.
  */
 const COARSE_POINTER_QUERY = "(pointer: coarse)";
+// One MediaQueryList for the whole timeline: every bar used to build its own
+// on every render, which is thousands of allocations while scrolling.
+let coarsePointerQuery: MediaQueryList | null = null;
+function getCoarsePointerQuery(): MediaQueryList | null {
+  if (typeof window === "undefined" || !window.matchMedia) return null;
+  if (!coarsePointerQuery) {
+    coarsePointerQuery = window.matchMedia(COARSE_POINTER_QUERY);
+  }
+  return coarsePointerQuery;
+}
 function subscribeCoarsePointer(onChange: () => void) {
-  if (typeof window === "undefined" || !window.matchMedia) return () => {};
-  const query = window.matchMedia(COARSE_POINTER_QUERY);
+  const query = getCoarsePointerQuery();
+  if (!query) return () => {};
   query.addEventListener("change", onChange);
   return () => query.removeEventListener("change", onChange);
 }
 function useCoarsePointer() {
   return useSyncExternalStore(
     subscribeCoarsePointer,
-    () =>
-      typeof window !== "undefined" && window.matchMedia
-        ? window.matchMedia(COARSE_POINTER_QUERY).matches
-        : false,
+    () => getCoarsePointerQuery()?.matches ?? false,
     () => false
   );
 }

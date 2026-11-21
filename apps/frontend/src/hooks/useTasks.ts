@@ -161,6 +161,17 @@ async function fetchIncrementalChanges(seq: number): Promise<Task[] | null> {
   return all;
 }
 
+function sameTask(a: Task, b: Task): boolean {
+  if (a.updated_at !== b.updated_at) return false;
+  const at = a.tags ?? [];
+  const bt = b.tags ?? [];
+  if (at.length !== bt.length) return false;
+  for (let i = 0; i < at.length; i += 1) {
+    if (at[i].id !== bt[i].id) return false;
+  }
+  return true;
+}
+
 function applyIncrementalChanges(changes: Task[]) {
   const store = useAppStore.getState();
   const byId = new Map(store.tasks.map((t) => [t.id, t]));
@@ -172,9 +183,12 @@ function applyIncrementalChanges(changes: Task[]) {
       // Skip rows the store already holds verbatim. Our own PATCH response is
       // merged first, so the reconcile that follows it a second later returns
       // the same row again; merging it would swap every task object for a
-      // fresh copy and re-render the whole timeline for nothing.
+      // fresh copy and re-render the whole timeline for nothing. Comparing
+      // updated_at plus tag ids is enough: the server bumps updated_at on
+      // every field change, and tags are the one thing that can change without
+      // touching the task row.
       const existing = byId.get(change.id);
-      if (existing && JSON.stringify(existing) === JSON.stringify(change)) continue;
+      if (existing && sameTask(existing, change)) continue;
       live.push(change);
     }
   }

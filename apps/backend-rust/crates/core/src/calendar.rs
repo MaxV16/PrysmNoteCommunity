@@ -320,7 +320,7 @@ pub async fn exchange_code(
     redirect_uri: &str,
     code: &str,
 ) -> Result<OAuthTokens, ApiError> {
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let params = [
         ("code", code),
         ("client_id", client_id),
@@ -374,7 +374,7 @@ pub async fn revoke_google_token(token: &str) -> bool {
     if token.is_empty() {
         return false;
     }
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let resp = client
         .post(REVOKE_URI)
         .form(&[("token", token)])
@@ -424,7 +424,7 @@ fn google_error_reason(status: u16, body: &str) -> String {
 }
 
 async fn google_get(access_token: &str, url: &str) -> Result<(u16, Value), ApiError> {
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let resp = client
         .get(url)
         .bearer_auth(access_token)
@@ -486,7 +486,7 @@ async fn upsert_event_blocking(
     event_body: &Value,
     google_event_id: Option<&str>,
 ) -> Result<(String, String), ApiError> {
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let url = match google_event_id {
         Some(id) => format!("{CALENDAR_API}/calendars/primary/events/{}", enc(id)),
         None => format!("{CALENDAR_API}/calendars/primary/events"),
