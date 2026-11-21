@@ -320,30 +320,29 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   // Exact lane height per section, computed with the same algorithm the lane
   // renders with (including its minimum), so the left swimlane labels stay
   // aligned with their lanes. Also keeps the per-section task arrays stable so
-  // a memoized lane is not re-rendered by an unrelated parent render.
-  const { sectionLaneHeights, sectionTasksById } = useMemo(() => {
+  // a memoized lane is not re-rendered by an unrelated parent render. One pass
+  // buckets the tasks instead of filtering the whole list once per section.
+  const { sectionLaneHeights, sectionTasksById, unsortedTasks } = useMemo(() => {
     const heights: Record<string, number> = {};
     const byId: Record<string, Task[]> = {};
+    for (const section of timelineSections) byId[section.id] = [];
+    const unsorted: Task[] = [];
+    for (const task of visibleTasks) {
+      const bucket = task.board_section_id ? byId[task.board_section_id] : undefined;
+      if (bucket) bucket.push(task);
+      else unsorted.push(task);
+    }
     for (const section of timelineSections) {
-      const sectionTasks = visibleTasks.filter((t) => t.board_section_id === section.id);
-      byId[section.id] = sectionTasks;
       heights[section.id] = Math.max(
-        computeLaneLayout(sectionTasks, days).height,
+        computeLaneLayout(byId[section.id], days).height,
         MIN_LANE_HEIGHT
       );
     }
-    return { sectionLaneHeights: heights, sectionTasksById: byId };
+    return { sectionLaneHeights: heights, sectionTasksById: byId, unsortedTasks: unsorted };
   }, [timelineSections, visibleTasks, days]);
 
   // Tasks that belong to no section. They render in one extra lane under the
   // sections, so the label column gets a matching "Unsorted" row.
-  const unsortedTasks = useMemo(
-    () =>
-      visibleTasks.filter(
-        (t) => !t.board_section_id || !timelineSections.some((s) => s.id === t.board_section_id)
-      ),
-    [visibleTasks, timelineSections]
-  );
   const unsortedLaneHeight = useMemo(
     () => Math.max(computeLaneLayout(unsortedTasks, days).height, MIN_LANE_HEIGHT),
     [unsortedTasks, days]

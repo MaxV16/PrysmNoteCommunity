@@ -237,12 +237,12 @@ export function BoardView({ tasks }: BoardViewProps) {
 
   const cardsBySection = useMemo(() => {
     const map = new Map<string, Task[]>();
-    for (const section of sections) {
-      map.set(
-        section.id,
-        cards.filter((t) => t.board_section_id === section.id).sort(comparator)
-      );
+    for (const section of sections) map.set(section.id, []);
+    for (const task of cards) {
+      const bucket = task.board_section_id ? map.get(task.board_section_id) : undefined;
+      if (bucket) bucket.push(task);
     }
+    for (const bucket of map.values()) bucket.sort(comparator);
     return map;
   }, [cards, sections, comparator]);
 
@@ -369,6 +369,7 @@ export function BoardView({ tasks }: BoardViewProps) {
   );
 
   const selectedTaskIds = useAppStore((s) => s.selectedTaskIds);
+  const selectedTaskIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds]);
 
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -475,7 +476,7 @@ export function BoardView({ tasks }: BoardViewProps) {
                 tasks={cardsBySection.get(section.id) ?? []}
                 childrenByParent={childrenByParent}
                 overrides={overrides}
-                selectedTaskIds={new Set(selectedTaskIds)}
+                selectedTaskIds={selectedTaskIdSet}
                 onOpen={setSelectedTaskId}
                 onToggleSubtask={(sub) => void handleToggleSubtask(sub)}
                 onToggleTask={(t) => void handleToggleTask(t)}
@@ -497,7 +498,7 @@ export function BoardView({ tasks }: BoardViewProps) {
               tasks={unsorted}
               childrenByParent={childrenByParent}
               overrides={overrides}
-              selectedTaskIds={new Set(selectedTaskIds)}
+              selectedTaskIds={selectedTaskIdSet}
               onOpen={setSelectedTaskId}
               onToggleSubtask={(sub) => void handleToggleSubtask(sub)}
               onToggleTask={(t) => void handleToggleTask(t)}
