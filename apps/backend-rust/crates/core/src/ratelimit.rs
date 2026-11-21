@@ -242,7 +242,9 @@ mod tests {
         let window = Duration::from_millis(10);
         limiter.count("stale", window).await;
         std::thread::sleep(Duration::from_millis(20));
-        // A later count on a different key sweeps the expired one.
+        // Sweeps are amortised, so put the counter on the next sweep boundary
+        // instead of waiting SWEEP_EVERY calls: the following count prunes.
+        limiter.calls.store(SWEEP_EVERY, Ordering::Relaxed);
         limiter.count("fresh", window).await;
 
         let guard = limiter.entries.lock().unwrap();
