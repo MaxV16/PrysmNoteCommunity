@@ -474,20 +474,9 @@ export function useTasks() {
       const body = await api.post<{ restored: number }>("/tasks/batch-restore", { task_ids: ids });
       forceSnapshot = true;
       syncCursor = null;
-      // Merge every restored row straight from the server so a batch restore
-      // never depends on the incremental cursor seeing it.
-      const restoredRows = await Promise.all(
-        ids.map(async (id) => {
-          try {
-            const task = await api.get<Task>(`/tasks/${id}`);
-            return task && !Array.isArray(task) && !task.deleted_at ? task : null;
-          } catch {
-            return null;
-          }
-        })
-      );
-      const found = restoredRows.filter((task): task is Task => task !== null);
-      if (found.length > 0) useAppStore.getState().mergeTasks(found);
+      // The forced snapshot below is authoritative and the restore stamps a
+      // fresh updated_at, so the rows land in its first page. Reading each id
+      // back here would add one request per row for data the snapshot returns.
       await fetchTasks();
       return { restored: body?.restored ?? 0 };
     },
