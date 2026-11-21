@@ -215,7 +215,7 @@ async fn create_note(
         return Err(ApiError::Conflict("Note already exists".to_string()));
     }
 
-    sqlx::query(
+    if let Err(err) = sqlx::query(
         "INSERT INTO notes (id, user_id, title, content, color, x, y, width, height, minimized, open, sort)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
     )
@@ -233,7 +233,16 @@ async fn create_note(
     .bind(payload.sort)
     .execute(&mut *tx)
     .await
-    .map_err(db_error)?;
+    {
+        tx.rollback().await.ok();
+        // The id is a client-generated key with a global primary key, so a
+        // collision with another account's note would otherwise surface as a
+        // 500 even though RLS hides that row from the existence check.
+        if err.as_database_error().and_then(|e| e.code()).as_deref() == Some("23505") {
+            return Err(ApiError::Conflict("Note id is already in use".to_string()));
+        }
+        return Err(db_error(err));
+    }
 
     let note = fetch_note(&mut *tx, &payload.id, user.user_id)
         .await

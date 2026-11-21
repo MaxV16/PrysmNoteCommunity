@@ -105,14 +105,30 @@ async function fetchTaskSnapshot(seq: number): Promise<Task[] | null> {
   const full = forceSnapshot || !fullSnapshotLoaded || useAppStore.getState().tasks.length === 0;
   const pages = full ? SNAPSHOT_MAX_PAGES : 1;
   const all: Task[] = [];
-  for (let page = 0; page < pages; page += 1) {
-    const batch = await api.get<Task[]>(
-      `/tasks/?limit=${TASK_PAGE_SIZE}&offset=${page * TASK_PAGE_SIZE}`
+  const first = await api.get<Task[]>(`/tasks/?limit=${TASK_PAGE_SIZE}&offset=0`);
+  if (seq !== fetchSeq) return null; // a newer fetch superseded this one
+  if (!Array.isArray(first) || first.length === 0) {
+    if (seq === fetchSeq) forceSnapshot = false;
+    fullSnapshotLoaded = true;
+    return [];
+  }
+  all.push(...first);
+  // Fetch the rest of the window concurrently instead of walking ten pages
+  // serially: the first load used to wait ten round trips before paint.
+  if (full && first.length === TASK_PAGE_SIZE && pages > 1) {
+    const rest = await Promise.all(
+      Array.from({ length: pages - 1 }, (_, index) =>
+        api
+          .get<Task[]>(`/tasks/?limit=${TASK_PAGE_SIZE}&offset=${(index + 1) * TASK_PAGE_SIZE}`)
+          .catch(() => [] as Task[])
+      )
     );
-    if (seq !== fetchSeq) return null; // a newer fetch superseded this one
-    if (!Array.isArray(batch) || batch.length === 0) break;
-    all.push(...batch);
-    if (batch.length < TASK_PAGE_SIZE) break;
+    if (seq !== fetchSeq) return null;
+    for (const batch of rest) {
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      all.push(...batch);
+      if (batch.length < TASK_PAGE_SIZE) break;
+    }
   }
   if (seq === fetchSeq) forceSnapshot = false;
   fullSnapshotLoaded = true;
