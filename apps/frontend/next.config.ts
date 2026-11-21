@@ -14,6 +14,9 @@ const uploadedImageOrigin = (() => {
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // The framework version is not useful to clients and only helps fingerprint
+  // the stack, so do not advertise it.
+  poweredByHeader: false,
   // Serve future raster content as modern formats first. Icons deliberately
   // stay PNG (favicon/apple-touch/PWA): WebP is not a valid <link rel="icon">
   // for every browser.

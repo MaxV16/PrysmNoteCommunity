@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useAppStore, type NavFilter } from "@/stores/app-store";
 import { matchesSearchQuery } from "@/lib/task-search";
 import { applyNavFilter, isVisibleTask } from "@/lib/task-filters";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import type { Task } from "@/types/task";
 
 export interface VisibleTaskFilters {
@@ -39,9 +40,18 @@ export function useVisibleTasks(): Task[] {
   const activeListId = useAppStore((s) => s.activeListId);
   const selectedTagId = useAppStore((s) => s.selectedTagId);
   const searchQuery = useAppStore((s) => s.searchQuery);
+  // Filtering is O(tasks) across every view; a fast typist on a large workspace
+  // would otherwise re-run the whole pipeline on each keystroke.
+  const debouncedQuery = useDebouncedValue(searchQuery);
 
   return useMemo(
-    () => filterVisibleTasks(tasks, { navFilter, activeListId, selectedTagId, searchQuery }),
-    [tasks, navFilter, activeListId, selectedTagId, searchQuery]
+    () =>
+      filterVisibleTasks(tasks, {
+        navFilter,
+        activeListId,
+        selectedTagId,
+        searchQuery: debouncedQuery,
+      }),
+    [tasks, navFilter, activeListId, selectedTagId, debouncedQuery]
   );
 }

@@ -454,6 +454,17 @@ export function useTimelineBarDrag(
         s.edgeRefAt = now();
       }
       const dwelled = now() - s.edgeRefAt >= EDGE_DWELL_MS;
+
+      // Sample the canvas scroll LIVE at the start of the frame. This is the
+      // one place the gesture learns where the content is, so:
+      // - a native Windows touchscreen pan / momentum that happened during the
+      //   drag is included exactly once,
+      // - the edge auto-scroll written below is picked up on the next frame
+      //   (one frame of latency, invisible) instead of forcing the browser to
+      //   flush a layout by reading `scrollLeft` right after writing it.
+      const liveScrollLeft = s.body ? s.body.scrollLeft : s.startScrollLeft;
+      const liveScrollTop = s.body ? s.body.scrollTop : s.startScrollTop;
+
       const width = s.bodyClientWidth;
       const edgeZoneX = Math.min(MAX_EDGE_ZONE, Math.max(MIN_EDGE_ZONE, width * 0.2));
       const xInBody = s.latestX - s.bodyLeft;
@@ -466,11 +477,10 @@ export function useTimelineBarDrag(
         velocityX = intensity * intensity * s.dayWidth * EDGE_MAX_DAYS_PER_FRAME;
       }
       if (velocityX !== 0 && s.body) {
-        // The scroll write is the only source of truth. The offset below reads
-        // the live `scrollLeft` AFTER this write, so the preview and the drop
-        // both see it exactly once (never accumulated on top of a native
-        // scroll).
-        s.body.scrollLeft += velocityX;
+        // The scroll write is the only source of truth. It is derived from the
+        // frame-start sample above, so this never accumulates on top of a
+        // native scroll.
+        s.body.scrollLeft = liveScrollLeft + velocityX;
       }
 
       // Vertical edge auto-scroll so a lane off-screen can be reached, but only
@@ -490,18 +500,10 @@ export function useTimelineBarDrag(
           velocityY = intensity * intensity * EDGE_MAX_PX_PER_FRAME;
         }
         if (velocityY !== 0 && s.body) {
-          s.body.scrollTop += velocityY;
+          s.body.scrollTop = liveScrollTop + velocityY;
         }
       }
 
-      // Sample the canvas scroll LIVE every frame. This is the one place the
-      // gesture learns where the content is, so:
-      // - edge auto-scroll (written just above) is included exactly once,
-      // - a native Windows touchscreen pan / momentum that happened during the
-      //   drag is included exactly once,
-      // - nothing is ever re-applied on top of a stale press-time baseline.
-      const liveScrollLeft = s.body ? s.body.scrollLeft : s.startScrollLeft;
-      const liveScrollTop = s.body ? s.body.scrollTop : s.startScrollTop;
       s.scrollDelta = liveScrollLeft - s.startScrollLeft;
       s.scrollTopDelta = liveScrollTop - s.startScrollTop;
       const pointerX = pointerContentX({
