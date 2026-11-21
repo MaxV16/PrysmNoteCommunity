@@ -75,6 +75,12 @@ async function main() {
     body: JSON.stringify({ email, password, display_name: "Smoke Tester" }),
   });
   cookies = mergeCookies(cookies, reg.cookies);
+  if (!cookies.access_token && reg.body?.requires_verification) {
+    throw new Error(
+      "register requires email verification on this deployment, so it sets no session cookie; " +
+        "run smoke:api against a dev or preprod instance where verification is off",
+    );
+  }
   assert(cookies.access_token, "register set an access_token cookie");
 
   console.log("[2/5] login");
