@@ -40,9 +40,10 @@ pub async fn hash_password_async(password: &str) -> Result<String, PasswordError
 pub async fn verify_password_async(password: &str, hash: &str) -> bool {
     let password = password.to_string();
     let hash = hash.to_string();
-    tokio::task::spawn_blocking(move || verify_password(&password, &hash))
-        .await
-        .unwrap_or(false)
+    match tokio::task::spawn_blocking(move || verify_password(&password, &hash)).await {
+        Ok(ok) => ok,
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]

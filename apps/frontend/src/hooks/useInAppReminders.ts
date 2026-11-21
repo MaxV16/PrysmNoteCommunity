@@ -180,7 +180,6 @@ async function reminderCandidates(tasks: Task[], before: string): Promise<Remind
  * separate optional channel.
  */
 export function useInAppReminders() {
-  const tasks = useAppStore((s) => s.tasks);
   const { prefs, loaded } = useNotificationPrefs();
   const { updateTask } = useTasks();
   const [reminders, setReminders] = useState<InAppReminder[]>([]);
@@ -206,7 +205,7 @@ export function useInAppReminders() {
     try {
       pruneStorage(today);
       const before = tomorrowISO();
-      const candidates = await reminderCandidates(tasks, before);
+      const candidates = await reminderCandidates(useAppStore.getState().tasks, before);
       const fresh = candidates.filter(
         (c) => !safeGet(`${REMINDED_PREFIX}${c.id}_${today}`)
       );
@@ -248,7 +247,7 @@ export function useInAppReminders() {
     } finally {
       evaluatingRef.current = false;
     }
-  }, [tasks, prefs.inapp_reminders, prefs.reminder_time, prefs.sound, prefs.push_enabled]);
+  }, [prefs.inapp_reminders, prefs.reminder_time, prefs.sound, prefs.push_enabled]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -275,7 +274,9 @@ export function useInAppReminders() {
         );
         rows = Array.isArray(response) ? response : [];
       } catch {
-        rows = tasks
+        rows = useAppStore
+          .getState()
+          .tasks
           .filter(
             (t) =>
               !!t.reminder_at &&
@@ -355,7 +356,7 @@ export function useInAppReminders() {
     } finally {
       evaluatingScheduledRef.current = false;
     }
-  }, [tasks, prefs.inapp_reminders, prefs.push_enabled, prefs.sound]);
+  }, [prefs.inapp_reminders, prefs.push_enabled, prefs.sound]);
 
   useEffect(() => {
     if (!loaded) return;

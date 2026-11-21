@@ -138,8 +138,8 @@ async fn stream_events(
     let user_id = user.user_id;
 
     let initial = tokio_stream::iter(vec![
-        Ok(Event::default().retry(Duration::from_secs(5))),
-        Ok(Event::default().comment("connected")),
+        Ok::<Event, Infallible>(Event::default().retry(Duration::from_secs(5))),
+        Ok::<Event, Infallible>(Event::default().comment("connected")),
     ]);
     let changes = BroadcastStream::new(state.events.subscribe()).filter_map(move |msg| match msg {
         Ok(event) if event.user_id == user_id => {

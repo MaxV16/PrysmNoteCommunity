@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useEffect, useRef, useState } from "react";
 import type { ChatMessage as ChatMessageType } from "@/types/ai";
 import { Avatar } from "@/components/ui/Avatar";
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -16,8 +17,59 @@ function formatTime(iso: string): string {
   return formatTimePref(iso);
 }
 
-export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
+/**
+ * Markdown parsing is quadratic-ish while a reply streams: every token renders
+ * the whole growing string. Coalescing updates to ~12fps keeps the text visibly
+ * streaming while cutting processor builds and re-parses by an order of
+ * magnitude. The final content is always rendered immediately once streaming
+ * ends (`active` false), so nothing is lost.
+ */
+function useThrottledContent(content: string, active: boolean): string {
+  const [shown, setShown] = useState(content);
+  const latest = useRef(content);
+  latest.current = content;
+  const lastAt = useRef(0);
+  const timer = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!active) {
+      setShown(content);
+      return;
+    }
+    const elapsed = Date.now() - lastAt.current;
+    if (elapsed >= 80) {
+      lastAt.current = Date.now();
+      setShown(content);
+      return;
+    }
+    if (timer.current !== null) return;
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      lastAt.current = Date.now();
+      setShown(latest.current);
+    }, 80 - elapsed);
+  }, [content, active]);
+
+  useEffect(
+    () => () => {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  return active ? shown : content;
+}
+
+export const ChatMessage = memo(function ChatMessage({
+  message,
+  streaming,
+  isLast,
+}: ChatMessageProps) {
   const isUser = message.role === "user";
+  const shownContent = useThrottledContent(
+    message.content,
+    Boolean(streaming && isLast && message.role === "assistant"),
+  );
 
   if (message.role === "tool") {
     return <ToolCallCard message={message} />;
@@ -67,7 +119,7 @@ export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
               message.content
             ) : (
               <>
-                <Markdown ai>{message.content}</Markdown>
+                <Markdown ai>{shownContent}</Markdown>
                 {message.aborted && (
                   <span
                     className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-hover px-1.5 py-0.5 text-[10px] font-medium text-muted"
@@ -92,7 +144,7 @@ export function ChatMessage({ message, streaming, isLast }: ChatMessageProps) {
       )}
     </div>
   );
-}
+});
 
 function ToolCallCard({ message }: { message: ChatMessageType }) {
   return (

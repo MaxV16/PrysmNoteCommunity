@@ -454,6 +454,22 @@ export function useAIChat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The AI panel is dynamically imported and unmounts when it closes. Without
+  // this, closing the panel left the 2.5s background-status poll running (up to
+  // 5 minutes of requests) and an in-flight SSE reader alive. Deliberately does
+  // NOT cancel the server turn: a background turn is meant to keep running.
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      if (backgroundPollRef.current) {
+        clearInterval(backgroundPollRef.current);
+        backgroundPollRef.current = null;
+      }
+    },
+    [],
+  );
+
   const newChat = useCallback(
     async () => {
       stopBackgroundPoll();

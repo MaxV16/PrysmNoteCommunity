@@ -19,8 +19,9 @@ pub fn normalize_database_url(database_url: &str) -> String {
         .replace("postgres+asyncpg://", "postgres://")
 }
 
-/// Build a bounded Postgres pool. On the small production VM one worker keeps a
-/// small pool (about 16 connections total), mirroring the Python sizing.
+/// Build a bounded Postgres pool. The process runs one server plus background
+/// loops, so it keeps 6 app connections (the system pool adds 4, maintenance 2
+/// and EE billing 2), well under Postgres's max_connections on the small VM.
 pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
     PgPoolOptions::new()
         .max_connections(6)

@@ -11,6 +11,13 @@ import {
 } from "@/lib/ai-format";
 import { taskListLineIndexes } from "@/lib/markdown-task-list";
 
+// Module constants: react-markdown rebuilds its whole unified processor when the
+// options object identity changes. Recreating these literals inside the component
+// meant every render (every streamed token) re-parsed the entire transcript.
+const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+const DATA_URL_TRANSFORM = (url: string) =>
+  url.startsWith("data:image/") ? url : defaultUrlTransform(url);
+
 // Thin, theme-aware wrapper around react-markdown. Renders markdown produced
 // by AI replies safely (react-markdown never injects raw HTML). Sloppy model
 // output (emphasis with stray spaces, spaces around punctuation) is cleaned up
@@ -214,8 +221,8 @@ export function Markdown({
   return (
     <div className="markdown-body">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        urlTransform={(url) => (url.startsWith("data:image/") ? url : defaultUrlTransform(url))}
+        remarkPlugins={REMARK_PLUGINS}
+        urlTransform={DATA_URL_TRANSFORM}
         components={{
           input({ type, checked, disabled, className }) {
             if (type !== "checkbox") {

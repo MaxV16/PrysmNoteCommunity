@@ -9,13 +9,39 @@ import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useTheme } from "@/lib/theme-context";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { getNotes, minimizeNote, syncNotesFromServer } from "@/lib/notes";
-import { FinancialWorkspace } from "@/components/finance/FinancialWorkspace";
-import { HabitsWorkspace } from "@/components/habits/HabitsWorkspace";
-import { QuadrantWorkspace } from "@/components/quadrant/QuadrantWorkspace";
-import { FocusWorkspace } from "@/components/focus/FocusWorkspace";
-import { CountdownWorkspace } from "@/components/countdown/CountdownWorkspace";
-import { VaultWorkspace } from "@/components/vault/VaultWorkspace";
-import { WatchlistView } from "@/components/watchlist/WatchlistView";
+
+// These workspaces are mutually exclusive with the timeline, so bundling all of
+// them (finance alone is ~54KB, vault ~34KB) into the initial route payload
+// made first load slower for a view the user may never open. `ssr: false` also
+// keeps their browser-only state out of the server render.
+const FinancialWorkspace = dynamic(
+  () => import("@/components/finance/FinancialWorkspace").then((m) => m.FinancialWorkspace),
+  { ssr: false },
+);
+const HabitsWorkspace = dynamic(
+  () => import("@/components/habits/HabitsWorkspace").then((m) => m.HabitsWorkspace),
+  { ssr: false },
+);
+const QuadrantWorkspace = dynamic(
+  () => import("@/components/quadrant/QuadrantWorkspace").then((m) => m.QuadrantWorkspace),
+  { ssr: false },
+);
+const FocusWorkspace = dynamic(
+  () => import("@/components/focus/FocusWorkspace").then((m) => m.FocusWorkspace),
+  { ssr: false },
+);
+const CountdownWorkspace = dynamic(
+  () => import("@/components/countdown/CountdownWorkspace").then((m) => m.CountdownWorkspace),
+  { ssr: false },
+);
+const VaultWorkspace = dynamic(
+  () => import("@/components/vault/VaultWorkspace").then((m) => m.VaultWorkspace),
+  { ssr: false },
+);
+const WatchlistView = dynamic(
+  () => import("@/components/watchlist/WatchlistView").then((m) => m.WatchlistView),
+  { ssr: false },
+);
 import {
   PREF_DEFAULT_VIEW,
   PREF_LIST_VIEWS,

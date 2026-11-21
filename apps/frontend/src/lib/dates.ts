@@ -91,16 +91,32 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+// Creating an Intl.DateTimeFormat is expensive (locale data + formatter
+// construction). The sidebar recomputes today's date for every task on every
+// store change, so a fresh formatter per call was the hot path. One formatter
+// per timezone is enough (the preference changes rarely); the day value itself
+// is memoised per minute so a burst of tasks costs one formatToParts call.
+let formatterCache: { timeZone: string | undefined; fmt: Intl.DateTimeFormat } | null = null;
+let todayCache: { timeZone: string | undefined; minute: number; value: string } | null = null;
+
+function formatterFor(timeZone: string | undefined): Intl.DateTimeFormat {
+  if (formatterCache && formatterCache.timeZone === timeZone) {
+    return formatterCache.fmt;
+  }
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  });
+  formatterCache = { timeZone, fmt };
+  return fmt;
+}
+
 function tzParts(d: Date): { y: string; m: string; dd: string } {
   const { timeZone } = getDatePrefs();
   try {
-    const fmt = new Intl.DateTimeFormat("en-CA", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      timeZone,
-    });
-    const parts = fmt.formatToParts(d);
+    const parts = formatterFor(timeZone).formatToParts(d);
     const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
     const y = get("year"), m = get("month"), dd = get("day");
     const ny = Number(y), nm = Number(m), nd = Number(dd);
@@ -115,8 +131,15 @@ function tzParts(d: Date): { y: string; m: string; dd: string } {
 
 /** Today's date (YYYY-MM-DD) in the user's configured timezone. */
 export function todayISO(): string {
+  const { timeZone } = getDatePrefs();
+  const minute = Math.floor(Date.now() / 60_000);
+  if (todayCache && todayCache.timeZone === timeZone && todayCache.minute === minute) {
+    return todayCache.value;
+  }
   const p = tzParts(new Date());
-  return `${p.y}-${p.m}-${p.dd}`;
+  const value = `${p.y}-${p.m}-${p.dd}`;
+  todayCache = { timeZone, minute, value };
+  return value;
 }
 
 /** A local Date at midnight of "today" in the user's timezone - used as the
@@ -160,13 +183,7 @@ export function formatDate(date: Date | string, opts?: { includeYear?: boolean }
   const { timeZone } = getDatePrefs();
   if (timeZone) {
     try {
-      const fmt = new Intl.DateTimeFormat("en-CA", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        timeZone,
-      });
-      const parts = fmt.formatToParts(d);
+      const parts = formatterFor(timeZone).formatToParts(d);
       const get = (t: string) => parts.find((p) => p.type === t)?.value || "";
       return render(get("day"), get("month"), get("year"));
     } catch {

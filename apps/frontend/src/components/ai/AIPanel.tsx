@@ -149,13 +149,31 @@ export function AIPanel({ onClose, view }: ChatPanelProps) {
     }
   }, [hasLoaded]);
 
+  const messagesRef = useRef(chatMessages);
+  messagesRef.current = chatMessages;
+
   useEffect(() => {
     if (hasLoaded && chatMessages.length > 0) {
       // Never persist a streamed-but-aborted empty assistant bubble: only
       // messages with content reach the local active-chat cache.
-      saveMessages(chatMessages.filter((m) => m.content));
+      const payload = chatMessages.filter((m) => m.content);
+      // This effect runs on every streamed token, and JSON.stringify + a
+      // synchronous localStorage write of a long transcript blocks the main
+      // thread. Coalesce the writes; the unmount/pagehide flush below saves the
+      // final state so a reload or panel close loses nothing.
+      const timer = window.setTimeout(() => saveMessages(payload), 750);
+      return () => window.clearTimeout(timer);
     }
   }, [chatMessages, hasLoaded]);
+
+  useEffect(() => {
+    const flush = () => saveMessages(messagesRef.current.filter((m) => m.content));
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => {

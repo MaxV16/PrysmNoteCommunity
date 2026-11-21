@@ -8,9 +8,16 @@ import { todayStart } from "@/lib/dates";
 import { TimelineHeader } from "@/components/timeline/TimelineHeader";
 import { TimelineGrid } from "@/components/timeline/TimelineGrid";
 import { TimelineLane } from "@/components/timeline/TimelineLane";
-import { TaskDetailDrawer } from "@/components/tasks/TaskDetailDrawer";
 import { TaskForm } from "@/components/tasks/TaskForm";
 import dynamic from "next/dynamic";
+
+// TaskDetailDrawer pulls in the whole markdown renderer (react-markdown +
+// remark-gfm), which used to land in the initial timeline chunk even though the
+// drawer only renders for a selected task.
+const TaskDetailDrawer = dynamic(
+  () => import("@/components/tasks/TaskDetailDrawer").then((m) => m.TaskDetailDrawer),
+  { ssr: false },
+);
 
 const KanbanBoard = dynamic(() => import("@/components/kanban/KanbanBoard").then((m) => ({ default: m.KanbanBoard })), { ssr: false });
 const CalendarView = dynamic(() => import("@/components/calendar/CalendarView").then((m) => ({ default: m.CalendarView })), { ssr: false });
