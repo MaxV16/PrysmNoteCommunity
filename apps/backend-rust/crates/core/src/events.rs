@@ -11,14 +11,15 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use axum::extract::State;
-use axum::http::HeaderMap;
+use axum::http::{header, HeaderMap, HeaderValue};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use serde_json::json;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::StreamExt;
 use uuid::Uuid;
 
 use crate::auth;
@@ -130,7 +131,7 @@ pub fn router() -> Router<AppState> {
 async fn stream_events(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+) -> Result<Response, ApiError> {
     let token = auth::token_from_headers(&headers)
         .ok_or_else(|| ApiError::Unauthorized("Could not validate credentials".to_string()))?;
     let user = auth::authenticate(&state.settings.jwt_secret_key, &token)?;
@@ -148,8 +149,18 @@ async fn stream_events(
         _ => None,
     });
 
-    Ok(Sse::new(initial.chain(changes))
-        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("ping")))
+    // nginx buffers proxied responses by default; without this header a change
+    // signal can sit in a proxy buffer instead of reaching the browser now.
+    let mut response = Sse::new(initial.chain(changes))
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("ping"))
+        .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response
+        .headers_mut()
+        .insert("x-accel-buffering", HeaderValue::from_static("no"));
+    Ok(response)
 }
 
 #[cfg(test)]

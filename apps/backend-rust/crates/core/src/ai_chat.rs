@@ -11,14 +11,15 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use axum::extract::State;
-use axum::http::HeaderMap;
+use axum::http::{header, HeaderMap, HeaderValue};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::StreamExt;
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -511,7 +512,7 @@ async fn chat_stream(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<ChatRequest>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+) -> Result<Response, ApiError> {
     let user = require_user(&state, &headers)?;
     check_ai_rate_limit(user.user_id).await?;
 
@@ -581,11 +582,24 @@ async fn chat_stream(
         Ok::<_, Infallible>(frame)
     });
 
-    Ok(Sse::new(stream).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(15))
-            .text("ping"),
-    ))
+    // Tokens are only useful if they leave the process immediately. nginx
+    // buffers proxied responses by default, which turns a token stream into one
+    // burst per 4k buffer; `X-Accel-Buffering: no` disables it for this
+    // response (and any other proxy that honours the header).
+    let mut response = Sse::new(stream)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(15))
+                .text("ping"),
+        )
+        .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response
+        .headers_mut()
+        .insert("x-accel-buffering", HeaderValue::from_static("no"));
+    Ok(response)
 }
 
 /// GET /api/ai/turn/status
