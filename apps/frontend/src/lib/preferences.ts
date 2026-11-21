@@ -126,3 +126,10 @@ export async function savePreference(key: string, value: unknown): Promise<void>
   writePreferenceCache(merged);
   await api.put(`/preferences/${encodeURIComponent(key)}`, { value });
 }
+
+/** Push several preferences in one request (one transaction on the server). */
+export async function savePreferences(updates: Record<string, unknown>): Promise<void> {
+  const merged = { ...readPreferenceCache(), ...updates };
+  writePreferenceCache(merged);
+  await api.put("/preferences", { updates });
+}

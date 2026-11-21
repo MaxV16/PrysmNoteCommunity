@@ -3,6 +3,7 @@ import {
   getPrefSync,
   loadPreferencesFromServer,
   savePreference,
+  savePreferences,
   PREFERENCES_KEY,
   PREF_DEFAULT_VIEW,
   PREF_DEFAULT_LIST,
@@ -61,6 +62,21 @@ describe("preferences", () => {
     // The cache was still updated optimistically (the store rolls back its state).
     expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY) as string)).toEqual({
       default_view: "board",
+    });
+  });
+
+  it("savePreferences sends every key in one request and merges the cache", async () => {
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({ keep: true }));
+    apiMock.put.mockResolvedValue({ updated: 2 });
+    await savePreferences({ nav_filter: "today", search_query: "tax" });
+    expect(apiMock.put).toHaveBeenCalledTimes(1);
+    expect(apiMock.put).toHaveBeenCalledWith("/preferences", {
+      updates: { nav_filter: "today", search_query: "tax" },
+    });
+    expect(JSON.parse(localStorage.getItem(PREFERENCES_KEY) as string)).toEqual({
+      keep: true,
+      nav_filter: "today",
+      search_query: "tax",
     });
   });
 

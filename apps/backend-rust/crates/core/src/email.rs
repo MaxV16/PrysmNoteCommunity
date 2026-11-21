@@ -79,7 +79,7 @@ pub async fn send_email(
         _ => settings.admin_email(),
     };
     if sender.is_empty() {
-        tracing::warn!("No ADMIN_EMAIL configured, skipping email to {to_address}: {subject}");
+        tracing::warn!("No ADMIN_EMAIL configured, skipping email to {}: {subject}", mask_email(to_address));
         return false;
     }
 
@@ -88,7 +88,7 @@ pub async fn send_email(
     }
 
     if settings.smtp_host().is_empty() {
-        tracing::warn!("SMTP not configured, skipping email to {to_address}: {subject}");
+        tracing::warn!("SMTP not configured, skipping email to {}: {subject}", mask_email(to_address));
         return false;
     }
     send_smtp(settings, to_address, subject, body, &sender).await
@@ -210,7 +210,7 @@ async fn send_smtp(settings: &Settings, to_address: &str, subject: &str, body: &
     let message = match Message::builder().from(from).to(to).subject(subject).body(body.to_string()) {
         Ok(message) => message,
         Err(err) => {
-            tracing::warn!("Could not build email to {to_address}: {err}");
+            tracing::warn!("Could not build email to {}: {err}", mask_email(to_address));
             return false;
         }
     };
@@ -241,7 +241,7 @@ async fn send_smtp(settings: &Settings, to_address: &str, subject: &str, body: &
     match mailer.send(message).await {
         Ok(_) => true,
         Err(err) => {
-            tracing::warn!("Failed to send email via SMTP to {to_address}: {err}");
+            tracing::warn!("Failed to send email via SMTP to {}: {err}", mask_email(to_address));
             false
         }
     }

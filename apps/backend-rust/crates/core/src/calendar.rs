@@ -10,6 +10,7 @@
 //! routes; the premium calendar routes (connect, callback, sync, import,
 //! settings, calendars, disconnect) live in the Enterprise crate.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -737,11 +738,6 @@ pub async fn sync_all_tasks_tracked(
 ) -> Value {
     let _ = enc_key;
     let empty = || json!({ "pushed": 0, "failed": 0, "total": 0, "remaining": 0 });
-    let mut conn = match pool.acquire().await {
-        Ok(conn) => conn,
-        Err(_) => return empty(),
-    };
-    let _ = crate::db::set_rls_user(&mut conn, user_id, "").await;
     let sql = format!(
         "SELECT {} FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
          AND start_date IS NOT NULL AND status NOT IN ('cancelled'::task_status) \
@@ -751,59 +747,44 @@ pub async fn sync_all_tasks_tracked(
          ORDER BY updated_at DESC LIMIT $2",
         crate::task::COLUMNS
     );
-    let rows = match sqlx::query(&sql)
-        .bind(user_id)
-        .bind(MAX_SYNC_TASKS)
-        .fetch_all(&mut *conn)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(_) => return empty(),
+    // Load the batch in a short transaction and release the connection before
+    // the network calls: one slow Google request must never pin a connection
+    // from the six-slot app pool for the whole batch.
+    let tasks: Vec<crate::task::Task> = {
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(_) => return empty(),
+        };
+        if crate::db::set_rls_user(&mut *tx, user_id, "").await.is_err() {
+            return empty();
+        }
+        let rows = match sqlx::query(&sql)
+            .bind(user_id)
+            .bind(MAX_SYNC_TASKS)
+            .fetch_all(&mut *tx)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(_) => return empty(),
+        };
+        let tasks = rows
+            .iter()
+            .filter_map(|row| crate::task::Task::from_row(row).ok())
+            .collect();
+        let _ = tx.rollback().await;
+        tasks
     };
-    let tasks: Vec<crate::task::Task> = rows
-        .iter()
-        .filter_map(|row| crate::task::Task::from_row(row).ok())
-        .collect();
+    let existing_events = load_push_event_ids(pool, user_id, &tasks).await;
     let total = tasks.len() as i64;
     let mut pushed = 0i64;
     let mut failed = 0i64;
     let mut first_error: Option<String> = None;
     for task in &tasks {
         let body = task_event_body(task);
-        let existing: Option<String> = sqlx::query_scalar(
-            "SELECT google_event_id FROM calendar_events \
-             WHERE user_id = $1 AND task_id = $2 AND sync_action = 'push' LIMIT 1",
-        )
-        .bind(user_id)
-        .bind(task.id)
-        .fetch_optional(&mut *conn)
-        .await
-        .ok()
-        .flatten();
-        match upsert_event_blocking(access_token, &body, existing.as_deref()).await {
+        let existing = existing_events.get(&task.id);
+        match upsert_event_blocking(access_token, &body, existing.map(String::as_str)).await {
             Ok((gid, _link)) => {
-                let result = if existing.is_some() {
-                    sqlx::query(
-                        "UPDATE calendar_events SET last_synced_at = now() \
-                         WHERE user_id = $1 AND task_id = $2 AND sync_action = 'push'",
-                    )
-                    .bind(user_id)
-                    .bind(task.id)
-                    .execute(&mut *conn)
-                    .await
-                } else {
-                    sqlx::query(
-                        "INSERT INTO calendar_events \
-                         (user_id, task_id, google_event_id, calendar_id, sync_action) \
-                         VALUES ($1, $2, $3, 'primary', 'push')",
-                    )
-                    .bind(user_id)
-                    .bind(task.id)
-                    .bind(gid)
-                    .execute(&mut *conn)
-                    .await
-                };
-                if result.is_ok() {
+                if save_push_result(pool, user_id, task.id, &gid, existing.is_some()).await {
                     pushed += 1;
                 } else {
                     failed += 1;
@@ -832,6 +813,87 @@ pub async fn sync_all_tasks_tracked(
         "remaining": (total - (pushed + failed)).max(0),
         "error": first_error,
     })
+}
+
+/// Existing push rows for a batch of tasks, keyed by task id. Uses its own
+/// short transaction so the caller can release the connection before calling
+/// Google.
+async fn load_push_event_ids(
+    pool: &PgPool,
+    user_id: Uuid,
+    tasks: &[crate::task::Task],
+) -> HashMap<Uuid, String> {
+    if tasks.is_empty() {
+        return HashMap::new();
+    }
+    let ids: Vec<Uuid> = tasks.iter().map(|task| task.id).collect();
+    let Ok(mut tx) = pool.begin().await else {
+        return HashMap::new();
+    };
+    if crate::db::set_rls_user(&mut *tx, user_id, "").await.is_err() {
+        return HashMap::new();
+    }
+    let rows = sqlx::query(
+        "SELECT task_id, google_event_id FROM calendar_events \
+         WHERE user_id = $1 AND sync_action = 'push' AND task_id = ANY($2)",
+    )
+    .bind(user_id)
+    .bind(&ids)
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap_or_default();
+    let _ = tx.rollback().await;
+    let mut existing = HashMap::new();
+    for row in rows {
+        let task_id: Option<Uuid> = row.try_get("task_id").ok();
+        let event_id: Option<String> = row.try_get("google_event_id").ok();
+        if let (Some(task_id), Some(event_id)) = (task_id, event_id) {
+            existing.insert(task_id, event_id);
+        }
+    }
+    existing
+}
+
+/// Record one successful push in a short transaction, so no connection is held
+/// across the Google request.
+async fn save_push_result(
+    pool: &PgPool,
+    user_id: Uuid,
+    task_id: Uuid,
+    google_event_id: &str,
+    update: bool,
+) -> bool {
+    let Ok(mut tx) = pool.begin().await else {
+        return false;
+    };
+    if crate::db::set_rls_user(&mut *tx, user_id, "").await.is_err() {
+        return false;
+    }
+    let result = if update {
+        sqlx::query(
+            "UPDATE calendar_events SET last_synced_at = now() \
+             WHERE user_id = $1 AND task_id = $2 AND sync_action = 'push'",
+        )
+        .bind(user_id)
+        .bind(task_id)
+        .execute(&mut *tx)
+        .await
+    } else {
+        sqlx::query(
+            "INSERT INTO calendar_events \
+             (user_id, task_id, google_event_id, calendar_id, sync_action) \
+             VALUES ($1, $2, $3, 'primary', 'push')",
+        )
+        .bind(user_id)
+        .bind(task_id)
+        .bind(google_event_id)
+        .execute(&mut *tx)
+        .await
+    };
+    match result {
+        Ok(_) => tx.commit().await.is_ok(),
+        Err(_) => false,
+    }
 }
 
 /// Expose the inner message of an [`ApiError`] so the EE router can render the

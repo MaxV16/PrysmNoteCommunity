@@ -17,7 +17,7 @@ const MAX_KEY_LENGTH: usize = 64;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/preferences", get(list_prefs))
+        .route("/api/preferences", get(list_prefs).put(set_prefs_bulk))
         .route("/api/preferences/", get(list_prefs))
         .route("/api/preferences/{key}", axum::routing::put(set_pref).delete(delete_pref))
 }
@@ -25,6 +25,11 @@ pub fn router() -> Router<AppState> {
 #[derive(Deserialize)]
 struct PreferenceUpdate {
     value: Value,
+}
+
+#[derive(Deserialize)]
+struct BulkPreferenceUpdate {
+    updates: Map<String, Value>,
 }
 
 fn db_error(err: sqlx::Error) -> ApiError {
@@ -73,11 +78,7 @@ async fn set_pref(
 ) -> Result<Json<Value>, ApiError> {
     let user = require_user(&state, &headers)?;
 
-    if key.is_empty() || key.chars().count() > MAX_KEY_LENGTH {
-        return Err(ApiError::Unprocessable(format!(
-            "Key must be at most {MAX_KEY_LENGTH} characters"
-        )));
-    }
+    validate_key(&key)?;
 
     let mut tx = state.pool.begin().await.map_err(db_error)?;
     db::set_rls_user(&mut *tx, user.user_id, "")
@@ -100,6 +101,55 @@ async fn set_pref(
 
     let stored: Option<Value> = row.try_get("value").unwrap();
     Ok(Json(json!({ "key": key, "value": stored.unwrap_or(Value::Null) })))
+}
+
+fn validate_key(key: &str) -> Result<(), ApiError> {
+    if key.is_empty() || key.chars().count() > MAX_KEY_LENGTH {
+        return Err(ApiError::Unprocessable(format!(
+            "Key must be at most {MAX_KEY_LENGTH} characters"
+        )));
+    }
+    Ok(())
+}
+
+/// Write several preferences in one request and one transaction. The frontend
+/// used to send four PUTs whenever the filter or search changed, which cost
+/// four round trips and four connections for a single user action.
+async fn set_prefs_bulk(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<BulkPreferenceUpdate>,
+) -> Result<Json<Value>, ApiError> {
+    let user = require_user(&state, &headers)?;
+    if body.updates.len() > 50 {
+        return Err(ApiError::Unprocessable(
+            "Update at most 50 preferences per request".to_string(),
+        ));
+    }
+    for key in body.updates.keys() {
+        validate_key(key)?;
+    }
+
+    let mut tx = state.pool.begin().await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
+    let mut updated = 0usize;
+    for (key, value) in &body.updates {
+        sqlx::query(
+            "INSERT INTO user_preferences (user_id, key, value) VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
+        )
+        .bind(user.user_id)
+        .bind(key)
+        .bind(value)
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        updated += 1;
+    }
+    tx.commit().await.map_err(db_error)?;
+    Ok(Json(json!({ "updated": updated })))
 }
 
 async fn delete_pref(

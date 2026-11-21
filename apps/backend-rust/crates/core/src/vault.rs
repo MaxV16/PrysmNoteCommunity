@@ -1729,20 +1729,44 @@ async fn import_bundle(
             "Import at most 500 notes per request".to_string(),
         ));
     }
+    // One transaction for the whole bundle: a 500-note import used to open 500
+    // transactions (plus a title lookup each), which queued on the small pool.
+    let mut tx = state.pool.begin().await.map_err(db_error)?;
+    db::set_rls_user(&mut *tx, user.user_id, "")
+        .await
+        .map_err(db_error)?;
+    let existing: Vec<String> = sqlx::query_scalar(
+        "SELECT lower(title) FROM vault_notes WHERE user_id = $1",
+    )
+    .bind(user.user_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(db_error)?;
+    let mut seen: std::collections::HashSet<String> = existing.into_iter().collect();
+
     let mut created = 0usize;
     let mut skipped = 0usize;
+    let mut embedding_jobs: Vec<(Uuid, String, String)> = Vec::new();
     for note in payload.notes.iter().take(500) {
         let tags = clean_list(&note.tags, MAX_TAGS, "tags")?;
         let aliases = clean_list(&note.aliases, MAX_ALIASES, "aliases")?;
         // Import is a restore, not a copy: a note that already exists by title
         // is skipped, so importing the same bundle twice (or importing your own
         // export into a populated vault) never doubles the notebook.
-        if title_exists(&state, user.user_id, &note.title).await? {
+        let title = note.title.trim();
+        if title.is_empty() || !seen.insert(title.to_lowercase()) {
             skipped += 1;
             continue;
         }
-        match svc_create(
-            &state,
+        // A failed statement poisons the surrounding transaction, so wrap each
+        // note in a savepoint: one bad note is skipped without discarding the
+        // notes imported before it.
+        sqlx::query("SAVEPOINT import_note")
+            .execute(&mut *tx)
+            .await
+            .map_err(db_error)?;
+        match insert_note(
+            &mut tx,
             user.user_id,
             &note.title,
             &note.body,
@@ -1753,38 +1777,55 @@ async fn import_bundle(
         )
         .await
         {
-            Ok(_) => created += 1,
+            Ok(note_id) => {
+                sqlx::query("RELEASE SAVEPOINT import_note")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+                created += 1;
+                embedding_jobs.push((
+                    note_id,
+                    title.to_string(),
+                    clean_body(&note.body).unwrap_or_default(),
+                ));
+            }
             Err(ApiError::Conflict(_)) => {
+                sqlx::query("ROLLBACK TO SAVEPOINT import_note")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+                sqlx::query("RELEASE SAVEPOINT import_note")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
                 skipped += 1;
                 break;
             }
-            Err(_) => skipped += 1,
+            Err(_) => {
+                sqlx::query("ROLLBACK TO SAVEPOINT import_note")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+                sqlx::query("RELEASE SAVEPOINT import_note")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_error)?;
+                skipped += 1;
+            }
         }
     }
-    Ok(Json(json!({ "created": created, "skipped": skipped })))
-}
-
-/// Whether a note with this title already exists for the user (case
-/// insensitive). Used by import to stay idempotent.
-async fn title_exists(state: &AppState, user_id: Uuid, title: &str) -> Result<bool, ApiError> {
-    let title = title.trim();
-    if title.is_empty() {
-        return Ok(false);
-    }
-    let mut tx = state.pool.begin().await.map_err(db_error)?;
-    db::set_rls_user(&mut *tx, user_id, "")
-        .await
-        .map_err(db_error)?;
-    let found: Option<i64> = sqlx::query_scalar(
-        "SELECT 1::bigint FROM vault_notes WHERE user_id = $1 AND lower(title) = lower($2) LIMIT 1",
-    )
-    .bind(user_id)
-    .bind(title)
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
-    Ok(found.is_some())
+    for (note_id, title, body) in embedding_jobs {
+        spawn_embedding(
+            state.pool.clone(),
+            state.settings.encryption_key.clone(),
+            user.user_id,
+            note_id,
+            title,
+            body,
+        );
+    }
+    Ok(Json(json!({ "created": created, "skipped": skipped })))
 }
 
 // ---------------------------------------------------------------------------

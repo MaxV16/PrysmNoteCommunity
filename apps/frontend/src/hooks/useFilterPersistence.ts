@@ -10,7 +10,7 @@ import {
   getPrefSync,
   isNavDefault,
   readDefaultList,
-  savePreference,
+  savePreferences,
 } from "@/lib/preferences";
 
 const PERSIST_DELAY_MS = 600;
@@ -68,10 +68,12 @@ export function useFilterPersistence(enabled = true): void {
       return;
     }
     const id = window.setTimeout(() => {
-      void savePreference(PREF_NAV_FILTER, navFilter).catch(() => {});
-      void savePreference(PREF_ACTIVE_LIST, activeListId).catch(() => {});
-      void savePreference(PREF_SELECTED_TAG, selectedTagId).catch(() => {});
-      void savePreference(PREF_SEARCH_QUERY, searchQuery).catch(() => {});
+      void savePreferences({
+        [PREF_NAV_FILTER]: navFilter,
+        [PREF_ACTIVE_LIST]: activeListId,
+        [PREF_SELECTED_TAG]: selectedTagId,
+        [PREF_SEARCH_QUERY]: searchQuery,
+      }).catch(() => {});
     }, PERSIST_DELAY_MS);
     return () => window.clearTimeout(id);
   }, [enabled, navFilter, activeListId, selectedTagId, searchQuery]);
