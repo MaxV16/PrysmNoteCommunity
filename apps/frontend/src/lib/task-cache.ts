@@ -31,6 +31,24 @@ export function readTaskCache(): Task[] | null {
   return parsed.tasks;
 }
 
+/**
+ * Read the cached tasks and the sync cursor together. The first paint needs
+ * both, and reading them separately parsed the same JSON blob twice on the
+ * critical path.
+ */
+export function readTaskCacheSnapshot(): {
+  tasks: Task[];
+  lastSyncAt: number | null;
+} | null {
+  const parsed = readPayload();
+  if (!parsed) return null;
+  if (Date.now() - parsed.fetchedAt > MAX_AGE_MS) return null;
+  return {
+    tasks: parsed.tasks,
+    lastSyncAt: typeof parsed.lastSyncAt === "number" ? parsed.lastSyncAt : null,
+  };
+}
+
 export function readTaskCacheCursor(): number | null {
   const parsed = readPayload();
   if (!parsed) return null;

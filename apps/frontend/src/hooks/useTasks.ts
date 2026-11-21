@@ -3,7 +3,7 @@
 import { useCallback } from "react";
 import { api } from "@/lib/api";
 import { track } from "@/lib/track";
-import { readTaskCache, readTaskCacheCursor, writeTaskCache } from "@/lib/task-cache";
+import { readTaskCacheSnapshot, writeTaskCache } from "@/lib/task-cache";
 import { useAppStore } from "@/stores/app-store";
 import { syncNativeReminderForTask } from "@/lib/capbridge";
 import type { Task } from "@/types/task";
@@ -57,19 +57,18 @@ let cachePersistTimer: ReturnType<typeof setTimeout> | null = null;
 let cachedTasksRef: Task[] | null = null;
 
 if (typeof window !== "undefined") {
-  const cachedCursor = readTaskCacheCursor();
+  // One read of the cache for both the tasks and the cursor.
+  const cached = readTaskCacheSnapshot();
+  const cachedCursor = cached?.lastSyncAt ?? null;
   // Never trust a cached cursor from the future (a previous client clock, or a
   // clock change since the cache was written): it would hide every newer row.
   syncCursor =
     cachedCursor !== null && cachedCursor <= Date.now() + SYNC_OVERLAP_MS
       ? cachedCursor
       : null;
-  if (useAppStore.getState().tasks.length === 0) {
-    const cached = readTaskCache();
-    if (cached && cached.length > 0) {
-      useAppStore.getState().mergeTasks(cached);
-      cachedTasksRef = useAppStore.getState().tasks;
-    }
+  if (cached && cached.tasks.length > 0 && useAppStore.getState().tasks.length === 0) {
+    useAppStore.getState().mergeTasks(cached.tasks);
+    cachedTasksRef = useAppStore.getState().tasks;
   }
   useAppStore.subscribe((state) => {
     if (state.tasks === cachedTasksRef) return;
