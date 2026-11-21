@@ -843,6 +843,16 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   );
 
   // Selection box (Ctrl/Cmd + drag on empty canvas)
+  // Coalesce pointer moves to one state write per animation frame: the overlay
+  // only needs the newest rect, and a state write here re-renders the whole
+  // timeline.
+  const selectionFrameRef = useRef<number | null>(null);
+  const pendingSelectionRect = useRef<{
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const onSelectionBoxMove = useCallback(
     (e: PointerEvent) => {
       const box = selectionBoxRef.current;
@@ -857,11 +867,17 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       const y1 = box.startY - rect.top + body.scrollTop;
       const x2 = box.currentX - rect.left + body.scrollLeft;
       const y2 = box.currentY - rect.top + body.scrollTop;
-      setSelectionRect({
+      pendingSelectionRect.current = {
         left: Math.min(x1, x2),
         top: Math.min(y1, y2),
         width: Math.abs(x2 - x1),
         height: Math.abs(y2 - y1),
+      };
+      if (selectionFrameRef.current !== null) return;
+      selectionFrameRef.current = requestAnimationFrame(() => {
+        selectionFrameRef.current = null;
+        const next = pendingSelectionRect.current;
+        if (next) setSelectionRect(next);
       });
     },
     []
@@ -899,6 +915,11 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
       }
 
       selectionBoxRef.current = null;
+      if (selectionFrameRef.current !== null) {
+        cancelAnimationFrame(selectionFrameRef.current);
+        selectionFrameRef.current = null;
+      }
+      pendingSelectionRect.current = null;
       setSelectionRect(null);
       window.removeEventListener("pointermove", onSelectionBoxMove);
       window.removeEventListener("pointerup", onSelectionBoxUp);
