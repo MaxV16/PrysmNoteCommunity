@@ -410,27 +410,47 @@ async fn reindex_links(
         .bind(note_id)
         .execute(&mut *tx)
         .await?;
-    for target in parse_wikilinks(body) {
-        let resolved: Option<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM vault_notes WHERE user_id = $1 \
-             AND (lower(title) = lower($2) OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE lower(a) = lower($2))) \
-             ORDER BY (lower(title) = lower($2)) DESC, updated_at DESC LIMIT 1",
-        )
-        .bind(user_id)
-        .bind(&target)
-        .fetch_optional(&mut *tx)
-        .await?;
-        sqlx::query(
-            "INSERT INTO vault_links (user_id, source_note_id, target_title, target_note_id) \
-             VALUES ($1, $2, $3, $4)",
-        )
-        .bind(user_id)
-        .bind(note_id)
-        .bind(&target)
-        .bind(resolved)
-        .execute(&mut *tx)
-        .await?;
+    let targets = parse_wikilinks(body);
+    if targets.is_empty() {
+        return Ok(());
     }
+    // Resolve every target in one statement (title matches win over alias
+    // matches, newest note breaks ties) and insert the links in one more, so a
+    // note with 250 wikilinks costs two queries instead of 500.
+    let rows = sqlx::query(
+        "SELECT requested, id FROM unnest($2::text[]) AS wanted(requested) \
+         JOIN LATERAL ( \
+             SELECT id FROM vault_notes \
+             WHERE user_id = $1 AND (lower(title) = lower(wanted.requested) \
+                 OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE lower(a) = lower(wanted.requested))) \
+             ORDER BY (lower(title) = lower(wanted.requested)) DESC, updated_at DESC LIMIT 1 \
+         ) resolved ON true",
+    )
+    .bind(user_id)
+    .bind(&targets)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut resolved: std::collections::HashMap<String, Uuid> = std::collections::HashMap::new();
+    for row in rows {
+        let requested: String = sqlx::Row::try_get(&row, "requested")?;
+        let id: Uuid = sqlx::Row::try_get(&row, "id")?;
+        resolved.insert(requested, id);
+    }
+    let resolved_ids: Vec<Option<Uuid>> = targets
+        .iter()
+        .map(|target| resolved.get(target).copied())
+        .collect();
+    sqlx::query(
+        "INSERT INTO vault_links (user_id, source_note_id, target_title, target_note_id) \
+         SELECT $1, $2, link.target, link.target_id \
+         FROM unnest($3::text[], $4::uuid[]) AS link(target, target_id)",
+    )
+    .bind(user_id)
+    .bind(note_id)
+    .bind(&targets)
+    .bind(&resolved_ids)
+    .execute(&mut *tx)
+    .await?;
     Ok(())
 }
 
