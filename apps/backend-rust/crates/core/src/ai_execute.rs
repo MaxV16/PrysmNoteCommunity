@@ -4315,7 +4315,7 @@ mod tests {
             .await
             .expect("create user");
 
-        let mut rx = state.events.subscribe();
+        let mut rx = state.events.subscribe(user.id);
         let args = json!({ "title": "Event task" });
         let (_, committed) = execute_tool_calls_outcome(
             &state,

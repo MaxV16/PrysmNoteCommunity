@@ -1172,7 +1172,7 @@ mod tests {
         assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 29);
 
         // tools/call create_task
-        let mut event_rx = state.events.subscribe();
+        let mut event_rx = state.events.subscribe(user.id);
         let (status, bytes) = post(json!({
             "jsonrpc":"2.0","id":3,"method":"tools/call",
             "params":{"name":"create_task","arguments":{"title":"MCP integration task"}}

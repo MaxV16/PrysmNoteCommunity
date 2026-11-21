@@ -90,28 +90,53 @@ pub struct UserEvent {
     pub resource: String,
 }
 
-/// In-process, per-user change bus. Cheap to clone (shared broadcast sender).
+/// In-process, per-user change bus. Cheap to clone (the channel map is shared).
 #[derive(Clone)]
 pub struct EventBus {
-    tx: broadcast::Sender<UserEvent>,
+    channels: std::sync::Arc<Mutex<std::collections::HashMap<Uuid, broadcast::Sender<UserEvent>>>>,
 }
 
 impl EventBus {
     pub fn new() -> Self {
-        let (tx, _rx) = broadcast::channel(256);
-        Self { tx }
+        Self {
+            channels: std::sync::Arc::new(Mutex::new(std::collections::HashMap::new())),
+        }
     }
 
-    /// Fire-and-forget publish; never fails the caller.
+    /// Fire-and-forget publish; never fails the caller. Users with no live
+    /// subscriber are skipped, so a quiet account costs nothing.
     pub fn publish(&self, user_id: Uuid, resource: &str) {
-        let _ = self.tx.send(UserEvent {
-            user_id,
-            resource: resource.to_string(),
-        });
+        let sender = {
+            let mut channels = self
+                .channels
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            // Drop channels whose stream has closed so the map cannot grow with
+            // every account that ever connected.
+            channels.retain(|_, tx| tx.receiver_count() > 0);
+            channels.get(&user_id).cloned()
+        };
+        if let Some(sender) = sender {
+            let _ = sender.send(UserEvent {
+                user_id,
+                resource: resource.to_string(),
+            });
+        }
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<UserEvent> {
-        self.tx.subscribe()
+    /// Subscribe to one user's signals. Each account gets its own bounded
+    /// buffer, so a slow reader (a sleeping laptop) cannot evict another
+    /// account's changes the way one global channel could.
+    pub fn subscribe(&self, user_id: Uuid) -> broadcast::Receiver<UserEvent> {
+        let mut channels = self
+            .channels
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        channels.retain(|_, tx| tx.receiver_count() > 0);
+        let sender = channels
+            .entry(user_id)
+            .or_insert_with(|| broadcast::channel(64).0);
+        sender.subscribe()
     }
 }
 
@@ -141,12 +166,12 @@ async fn stream_events(
         Ok::<Event, Infallible>(Event::default().retry(Duration::from_secs(5))),
         Ok::<Event, Infallible>(Event::default().comment("connected")),
     ]);
-    let changes = BroadcastStream::new(state.events.subscribe()).filter_map(move |msg| match msg {
-        Ok(event) if event.user_id == user_id => {
+    let changes = BroadcastStream::new(state.events.subscribe(user_id)).filter_map(move |msg| match msg {
+        Ok(event) => {
             let payload = json!({ "resource": event.resource, "ids": [] }).to_string();
             Some(Ok(Event::default().event("change").data(payload)))
         }
-        _ => None,
+        Err(_) => None,
     });
 
     // nginx buffers proxied responses by default; without this header a change
@@ -201,25 +226,26 @@ mod tests {
     #[tokio::test]
     async fn events_are_delivered_only_to_the_owning_user() {
         let bus = EventBus::new();
-        let mine = bus.subscribe();
-        let theirs = bus.subscribe();
         let me = Uuid::new_v4();
         let other = Uuid::new_v4();
+        let mut mine = bus.subscribe(me);
+        let mut theirs = bus.subscribe(other);
 
         bus.publish(me, "tasks");
         bus.publish(other, "habits");
 
-        let received: Vec<UserEvent> = BroadcastStream::new(mine)
-            .filter_map(|m| m.ok())
-            .take(2)
-            .collect()
-            .await;
-        let mine_count = received.iter().filter(|e| e.user_id == me).count();
-        let other_count = received.iter().filter(|e| e.user_id == other).count();
-        assert_eq!(mine_count, 1);
-        assert_eq!(other_count, 1);
+        let mine_event = tokio::time::timeout(Duration::from_millis(500), mine.recv())
+            .await
+            .expect("an event must arrive")
+            .expect("channel must stay open");
+        assert_eq!(mine_event.user_id, me);
+        assert_eq!(mine_event.resource, "tasks");
 
-        let theirs_first = BroadcastStream::new(theirs).next().await.unwrap().unwrap();
-        assert_eq!(theirs_first.resource, "tasks");
+        let theirs_event = tokio::time::timeout(Duration::from_millis(500), theirs.recv())
+            .await
+            .expect("an event must arrive")
+            .expect("channel must stay open");
+        assert_eq!(theirs_event.user_id, other);
+        assert_eq!(theirs_event.resource, "habits");
     }
 }
