@@ -21,6 +21,30 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
     bcrypt::verify(password, hash).unwrap_or(false)
 }
 
+/// Async wrapper around [`hash_password`].
+///
+/// bcrypt is deliberately CPU-heavy (cost 12 is ~250-400ms on this class of
+/// VM). Running it directly inside an axum handler blocks a tokio worker
+/// thread, and the server runs ONE process: a few concurrent logins could
+/// starve every other request, including the SSE heartbeats. `spawn_blocking`
+/// moves the work onto the blocking pool, which is exactly what it is for.
+pub async fn hash_password_async(password: &str) -> Result<String, PasswordError> {
+    let password = password.to_string();
+    tokio::task::spawn_blocking(move || hash_password(&password))
+        .await
+        .map_err(|_| PasswordError::Hash)?
+}
+
+/// Async wrapper around [`verify_password`] (see [`hash_password_async`] for
+/// why this must not run on a worker thread).
+pub async fn verify_password_async(password: &str, hash: &str) -> bool {
+    let password = password.to_string();
+    let hash = hash.to_string();
+    tokio::task::spawn_blocking(move || verify_password(&password, &hash))
+        .await
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{hash_password, verify_password};

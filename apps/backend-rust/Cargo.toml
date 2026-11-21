@@ -37,3 +37,13 @@ rrule = "0.14"
 redis = { version = "0.27", default-features = false, features = ["tokio-comp", "connection-manager"] }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
 regex = "1"
+
+# Production binary profile. Thin LTO across the workspace lets the compiler
+# inline across crate boundaries (the router and services are split across
+# crates), while one codegen unit trades some build time for better code. The
+# binary is stripped because the deploy only needs the stripped image.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

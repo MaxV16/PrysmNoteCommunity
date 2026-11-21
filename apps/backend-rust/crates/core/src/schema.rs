@@ -163,6 +163,19 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_parent ON public.tasks USING btree (recurrence_parent_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_parent_start_date ON public.tasks USING btree (recurrence_parent_id, start_date);
 
+-- Incremental sync pages by (user_id, updated_at); without this every sync
+-- tick sorts the user's whole task set. Partial on live rows because the sync
+-- query filters deleted_at.
+CREATE INDEX IF NOT EXISTS ix_tasks_user_updated_at ON public.tasks USING btree (user_id, updated_at) WHERE deleted_at IS NULL;
+-- Reminder dedupe probes notification_logs per reminder task.
+CREATE INDEX IF NOT EXISTS ix_notification_logs_task_kind ON public.notification_logs USING btree (task_id, kind, sent_at DESC);
+-- Calendar reconciliation looks events up by user + task + action.
+CREATE INDEX IF NOT EXISTS ix_calendar_events_user_task_action ON public.calendar_events USING btree (user_id, task_id, sync_action);
+-- Tag reuse is looked up by (user, name) on every task write.
+CREATE INDEX IF NOT EXISTS ix_tags_user_name ON public.tags USING btree (user_id, name);
+-- The workflow sweep reads every row for one preference key on the system pool.
+CREATE INDEX IF NOT EXISTS ix_user_preferences_key ON public.user_preferences USING btree (key);
+
 -- Backfill existing occurrence rows from parent_task_id into
 -- recurrence_parent_id. A real subtask never has a start_date (insert_subtask
 -- does not set one) while an occurrence always does, so start_date IS NOT NULL

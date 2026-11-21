@@ -598,6 +598,8 @@ pub async fn svc_list(
     db::set_rls_user(&mut *tx, user_id, "")
         .await
         .map_err(db_error)?;
+    let tag = tag.filter(|value| !value.is_empty());
+    let folder = folder.filter(|value| !value.is_empty());
     let rows = sqlx::query(&format!(
         "SELECT {NOTE_COLUMNS} FROM vault_notes WHERE user_id = $1 \
          AND ($2::text IS NULL OR $2 = ANY(tags)) \
@@ -605,18 +607,26 @@ pub async fn svc_list(
          ORDER BY pinned DESC, updated_at DESC LIMIT $4 OFFSET $5"
     ))
     .bind(user_id)
-    .bind(tag.filter(|value| !value.is_empty()))
-    .bind(folder.filter(|value| !value.is_empty()))
+    .bind(tag)
+    .bind(folder)
     .bind(clamp_limit(Some(limit.max(1))))
     .bind(offset.max(0))
     .fetch_all(&mut *tx)
     .await
     .map_err(db_error)?;
-    let total: i64 = sqlx::query_scalar("SELECT count(*) FROM vault_notes WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(db_error)?;
+    // The total must honour the same tag/folder filters as the page; a plain
+    // count(*) made pagination lie whenever a filter was active.
+    let total: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM vault_notes WHERE user_id = $1 \
+         AND ($2::text IS NULL OR $2 = ANY(tags)) \
+         AND ($3::text IS NULL OR folder = $3)",
+    )
+    .bind(user_id)
+    .bind(tag)
+    .bind(folder)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_error)?;
     tx.commit().await.map_err(db_error)?;
     let notes: Vec<Value> = rows.iter().map(note_json).collect();
     Ok(json!({ "notes": notes, "count": notes.len(), "total": total }))

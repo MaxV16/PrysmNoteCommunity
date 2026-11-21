@@ -28,6 +28,17 @@ use crate::error::ApiError;
 use crate::task::{self, Task, COLUMNS};
 use crate::AppState;
 
+/// Read endpoints (`/tasks?date_from=...` and `/tasks/range`) materialise
+/// recurring occurrences as a side effect. The caller chooses the range, so cap
+/// how much of it may be expanded: the SELECT still returns every existing row,
+/// but one request can no longer write years of occurrences. 92 days covers the
+/// widest timeline slice the UI requests with room to spare.
+const MAX_READ_EXPANSION_DAYS: i64 = 92;
+
+fn expansion_end(from: NaiveDate, to: NaiveDate) -> NaiveDate {
+    to.min(from + chrono::Duration::days(MAX_READ_EXPANSION_DAYS))
+}
+
 const TITLE_MAX: usize = 5000;
 const DESCRIPTION_MAX: usize = 100_000;
 const TRASH_RETENTION_DAYS: i64 = 14;
@@ -1025,9 +1036,14 @@ async fn list_tasks(
                 "date_to must not be before date_from".to_string(),
             ));
         }
-        crate::recurring::expand_recurring_for_range(&mut *tx, Some(user.user_id), from, to)
-            .await
-            .map_err(db_error)?;
+        crate::recurring::expand_recurring_for_range(
+            &mut *tx,
+            Some(user.user_id),
+            from,
+            expansion_end(from, to),
+        )
+        .await
+        .map_err(db_error)?;
         let access = task::access_condition(1);
         let sql = format!(
             "SELECT {COLUMNS} FROM tasks WHERE {access} AND deleted_at IS NULL AND ( \
@@ -1325,9 +1341,10 @@ pub(crate) async fn svc_delete_task_permanent(
     if trashed.is_none() {
         return Err(ApiError::NotFound("Task not found in trash".to_string()));
     }
-    let access = task::access_condition(2);
+    // Owner-only, for the same reason as empty_trash: a teammate must not be
+    // able to permanently erase a task shared with the team.
     let sql = format!(
-        "WITH RECURSIVE tree AS (SELECT id FROM tasks WHERE id = $1 AND {access} \
+        "WITH RECURSIVE tree AS (SELECT id FROM tasks WHERE id = $1 AND user_id = $2 \
          UNION ALL SELECT t.id FROM tasks t JOIN tree \
            ON t.parent_task_id = tree.id OR t.recurrence_parent_id = tree.id) \
          DELETE FROM tasks WHERE id IN (SELECT id FROM tree)"
@@ -1582,8 +1599,11 @@ async fn empty_trash(
     db::set_rls_user(&mut *tx, user.user_id, "")
         .await
         .map_err(db_error)?;
-    let access = task::access_condition(1);
-    let sql = format!("DELETE FROM tasks WHERE {access} AND deleted_at IS NOT NULL");
+    // Hard delete is owner-only. Team sharing makes a task visible (and
+    // collaborative), but erasing it forever must never be possible for a
+    // teammate: `access_condition` here would let any member of the team wipe
+    // another user's trashed tasks.
+    let sql = "DELETE FROM tasks WHERE user_id = $1 AND deleted_at IS NOT NULL";
     let result = sqlx::query(&sql)
         .bind(user.user_id)
         .execute(&mut *tx)
@@ -1939,13 +1959,23 @@ async fn date_range(
             "date_from and date_to must be valid YYYY-MM-DD dates".to_string(),
         ));
     };
+    if to < from {
+        return Err(ApiError::Unprocessable(
+            "date_to must not be before date_from".to_string(),
+        ));
+    }
     let mut tx = state.pool.begin().await.map_err(db_error)?;
     db::set_rls_user(&mut *tx, user.user_id, "")
         .await
         .map_err(db_error)?;
-    crate::recurring::expand_recurring_for_range(&mut *tx, Some(user.user_id), from, to)
-        .await
-        .map_err(db_error)?;
+    crate::recurring::expand_recurring_for_range(
+        &mut *tx,
+        Some(user.user_id),
+        from,
+        expansion_end(from, to),
+    )
+    .await
+    .map_err(db_error)?;
     let access = task::access_condition(1);
     let sql = format!(
         "SELECT {COLUMNS} FROM tasks WHERE {access} AND deleted_at IS NULL \

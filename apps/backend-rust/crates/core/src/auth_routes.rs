@@ -512,7 +512,8 @@ async fn register(
         return Err(ApiError::Conflict("Email already registered".into()));
     }
 
-    let hash = password::hash_password(&req.password)
+    let hash = password::hash_password_async(&req.password)
+        .await
         .map_err(|_| ApiError::Internal("failed to hash password".into()))?;
     let display_name = req
         .display_name
@@ -599,7 +600,7 @@ async fn login(
         .as_ref()
         .and_then(|row| row.password_hash.clone())
         .unwrap_or_else(|| DUMMY_PASSWORD_HASH.to_string());
-    let ok = password::verify_password(&req.password, &hash);
+    let ok = password::verify_password_async(&req.password, &hash).await;
     let user = match (found, ok) {
         (Some(row), true) => row,
         _ => {
@@ -696,18 +697,18 @@ async fn change_password(
         .await
         .map_err(db_error)?
         .ok_or_else(|| ApiError::Unauthorized("Could not validate credentials".into()))?;
-    let current_ok = user
-        .password_hash
-        .as_deref()
-        .map(|hash| password::verify_password(&req.current_password, hash))
-        .unwrap_or(false);
+    let current_ok = match user.password_hash.as_deref() {
+        Some(hash) => password::verify_password_async(&req.current_password, hash).await,
+        None => false,
+    };
     if !current_ok {
         return Err(ApiError::Unauthorized(
             "Current password is incorrect".into(),
         ));
     }
 
-    let new_hash = password::hash_password(&req.new_password)
+    let new_hash = password::hash_password_async(&req.new_password)
+        .await
         .map_err(|_| ApiError::Internal("failed to hash password".into()))?;
     let updated = user::update_password(&state.pool, auth_user.user_id, &new_hash)
         .await
@@ -899,7 +900,8 @@ async fn reset_password(
         }
     }
 
-    let new_hash = password::hash_password(&req.new_password)
+    let new_hash = password::hash_password_async(&req.new_password)
+        .await
         .map_err(|_| ApiError::Internal("failed to hash password".into()))?;
     user::update_password(&state.pool, account.id, &new_hash)
         .await

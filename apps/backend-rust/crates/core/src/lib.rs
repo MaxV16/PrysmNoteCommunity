@@ -209,7 +209,14 @@ pub fn build_router(state: AppState, ee: Option<&dyn EeExtension>) -> Router {
     // CORS -> CSRF -> rate limit -> security headers -> body limit -> event
     // publish, matching the Python middleware registration order (CORS
     // outermost so it can answer preflight requests before the CSRF gate).
+    // axum's default body limit is 2 MiB, which rejects the 5 MiB image upload
+    // and the 10 MiB import before a handler's own size check can run. The
+    // Content-Length middleware only covers declared sizes; this also bounds a
+    // chunked body.
     router
+        .layer(axum::extract::DefaultBodyLimit::max(
+            middleware::MAX_BODY_SIZE,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::reject_revoked,

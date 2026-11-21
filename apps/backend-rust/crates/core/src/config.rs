@@ -2,7 +2,7 @@ use std::env;
 
 /// Runtime configuration, read from the same environment variables as the
 /// Python backend so the two can run side by side during the port.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Settings {
     pub database_url: String,
     pub jwt_secret_key: String,
@@ -39,9 +39,32 @@ pub struct Settings {
     pub digest_hour: u32,
 }
 
+/// Never derive `Debug` for this type: it holds the JWT signing key, the
+/// Fernet key, OAuth client secrets, the VAPID private key, the database URL
+/// (with its password) and the Redis URL. A stray `{:?}` in a log or an error
+/// message would leak all of them, so the implementation prints only the
+/// non-secret operational fields.
+impl std::fmt::Debug for Settings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Settings")
+            .field("port", &self.port)
+            .field("git_sha", &self.git_sha)
+            .field("environment", &self.environment)
+            .field("app_origin", &self.app_origin)
+            .field("webauthn_rp_id", &self.webauthn_rp_id)
+            .field("csrf_enabled", &self.csrf_enabled)
+            .field("api_rate_limit_enabled", &self.api_rate_limit_enabled)
+            .field("api_rate_limit_per_min", &self.api_rate_limit_per_min)
+            .field("notifications_enabled", &self.notifications_enabled)
+            .field("notification_loop_interval", &self.notification_loop_interval)
+            .field("digest_hour", &self.digest_hour)
+            .field("secrets", &"<redacted>")
+            .finish()
+    }
+}
+
 impl Settings {
-    pub fn from_env() -> Self {
-        let database_url = env::var("DATABASE_URL")
+    pub fn from_env() -> Self {        let database_url = env::var("DATABASE_URL")
             .unwrap_or_else(|_| "postgresql://prysm:prysm@localhost:5432/prysm_note".to_string());
         let jwt_secret_key = env::var("JWT_SECRET_KEY").unwrap_or_default();
         let encryption_key = env::var("ENCRYPTION_KEY").unwrap_or_default();
