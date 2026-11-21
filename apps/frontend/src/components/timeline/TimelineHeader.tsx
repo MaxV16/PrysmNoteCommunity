@@ -78,11 +78,14 @@ export const TimelineHeader = memo(function TimelineHeader({
     const current = new Date(today ?? todayStart());
     current.setHours(0, 0, 0, 0);
     const currentMs = current.getTime();
+    // One formatter for the whole slice: `toLocaleDateString` with options
+    // builds/looks up an Intl.DateTimeFormat per call, 260 times per slice.
+    const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short" });
     return days.map((day) => {
       const d = new Date(day);
       d.setHours(0, 0, 0, 0);
       return {
-        dayName: d.toLocaleDateString("en-US", { weekday: "short" }),
+        dayName: weekday.format(d),
         dayNum: d.getDate(),
         isToday: d.getTime() === currentMs,
         isWeekend: d.getDay() === 0 || d.getDay() === 6,

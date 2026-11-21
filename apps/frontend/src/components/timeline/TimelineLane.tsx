@@ -266,7 +266,7 @@ export const TimelineLane = memo(function TimelineLane({ tasks, days, dayWidth =
 
   return (
     <div
-      className="relative border-b border-border/30 hover:bg-hover/10 transition-colors"
+      className="relative border-b border-border/30 hover:bg-hover/10"
       style={{ minHeight: MIN_LANE_HEIGHT, height: laneHeight }}
     >
       {(onDayDoubleClick || onDayAdd) && (
