@@ -886,8 +886,8 @@ mod tests {
         sqlx::query(
             "INSERT INTO user_notification_prefs \
              (user_id, inapp_reminders, reminder_time, email_reminders, due_alerts, email_digest, push_enabled, sound) \
-             VALUES ($1, true, '20:00', true, true, false, false, true) \
-             ON CONFLICT (user_id) DO UPDATE SET email_reminders = true, push_enabled = false",
+             VALUES ($1, true, '20:00', true, true, false, true, true) \
+             ON CONFLICT (user_id) DO UPDATE SET email_reminders = true, push_enabled = true",
         )
         .bind(user.id)
         .execute(&pool)
@@ -918,11 +918,14 @@ mod tests {
         .unwrap();
 
         // The newest reminder, due right now. It sorts after every delivered
-        // row, so the old LIMIT would have pushed it out of the scan.
+        // row, so the old LIMIT would have pushed it out of the scan. Push is
+        // selected with no subscriptions, so the pass can record an attempt
+        // without a network call (CI has no mail transport; an email-only
+        // reminder would be logged as a failure instead).
         let pending_id: Uuid = sqlx::query(
             "INSERT INTO tasks \
-             (user_id, parent_task_id, title, description, status, priority, start_date, due_date, start_time, end_time, is_all_day, is_archived, sort_order, reminder_enabled, reminder_at, reminder_inapp, reminder_email) \
-             VALUES ($1, NULL, 'Pending reminder', NULL, 'todo'::task_status, 0, NULL, NULL, NULL, NULL, false, false, 0, true, now() - interval '1 minute', true, true) \
+             (user_id, parent_task_id, title, description, status, priority, start_date, due_date, start_time, end_time, is_all_day, is_archived, sort_order, reminder_enabled, reminder_at, reminder_inapp, reminder_email, reminder_push) \
+             VALUES ($1, NULL, 'Pending reminder', NULL, 'todo'::task_status, 0, NULL, NULL, NULL, NULL, false, false, 0, true, now() - interval '1 minute', true, true, true) \
              RETURNING id",
         )
         .bind(user.id)
