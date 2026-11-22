@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { buildCsp } from "@/lib/csp";
 
 const PUBLIC_PREFIXES = ["/marketing", "/privacy", "/tos", "/privacy-policy", "/terms-of-service", "/cookie-policy", "/pricing", "/about", "/contact", "/docs", "/version"];
 // Auth-adjacent public pages: visible when logged out, redirected home when logged in.
@@ -33,48 +32,8 @@ function isAccessTokenValid(token: string | undefined): boolean {
   }
 }
 
-/**
- * One nonce per request. Next.js inlines its bootstrap scripts, so a policy
- * without a nonce has to allow `script-src 'unsafe-inline'`; the nonce is what
- * lets production drop it. Development keeps `'unsafe-inline'` (see
- * `lib/csp.ts`) because the dev runtime injects scripts without one.
- */
-const IS_PRODUCTION = process.env.NODE_ENV === "production";
-
-function newNonce(): string | undefined {
-  if (!IS_PRODUCTION) return undefined;
-  const source = globalThis.crypto;
-  if (!source || typeof source.randomUUID !== "function") return undefined;
-  return source.randomUUID().replace(/-/g, "");
-}
-
-/**
- * Attaches the policy to the response and forwards the nonce on the request, so
- * the policy and the markup agree: Next reads the nonce out of the request's
- * `Content-Security-Policy` header when it renders its own scripts.
- */
-function withCsp(response: NextResponse, nonce: string | undefined, csp: string): NextResponse {
-  response.headers.set("Content-Security-Policy", csp);
-  if (nonce) response.headers.set("x-nonce", nonce);
-  return response;
-}
-
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const nonce = newNonce();
-  const csp = buildCsp({
-    nonce,
-    isProd: IS_PRODUCTION,
-    uploadedImages: process.env.NEXT_PUBLIC_API_URL,
-  });
-
-  const next = (): NextResponse => {
-    const requestHeaders = new Headers(request.headers);
-    requestHeaders.set("Content-Security-Policy", csp);
-    if (nonce) requestHeaders.set("x-nonce", nonce);
-    return NextResponse.next({ request: { headers: requestHeaders } });
-  };
-
   // A session is "present" with EITHER cookie. The access token lives only 15
   // minutes while the refresh token lives 7 days, so keying off access_token
   // alone bounces a perfectly valid session to /login as soon as the short
@@ -92,7 +51,7 @@ export function middleware(request: NextRequest) {
     PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
 
   if (isPublic) {
-    return withCsp(next(), nonce, csp);
+    return NextResponse.next();
   }
 
   if (AUTH_PATHS.some((p) => pathname.startsWith(p))) {
@@ -101,14 +60,14 @@ export function middleware(request: NextRequest) {
     // expired cookie redirected /login back to the landing page forever, so
     // they could never sign in again (browser or desktop app).
     if (isAccessTokenValid(accessToken)) {
-      return withCsp(NextResponse.redirect(new URL("/", request.url)), nonce, csp);
+      return NextResponse.redirect(new URL("/", request.url));
     }
-    const response = next();
+    const response = NextResponse.next();
     if (accessToken) {
       // Clear the dead access cookie so the next navigation is unauthenticated.
       response.cookies.delete("access_token");
     }
-    return withCsp(response, nonce, csp);
+    return response;
   }
 
   if (!hasSession && PROTECTED_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
@@ -116,10 +75,10 @@ export function middleware(request: NextRequest) {
     // visitor to the page they asked for instead of the app home.
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
-    return withCsp(NextResponse.redirect(loginUrl), nonce, csp);
+    return NextResponse.redirect(loginUrl);
   }
 
-  return withCsp(next(), nonce, csp);
+  return NextResponse.next();
 }
 
 export const config = {
