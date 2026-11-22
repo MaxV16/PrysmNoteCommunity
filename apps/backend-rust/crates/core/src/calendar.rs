@@ -76,6 +76,11 @@ pub fn decrypt_token(key: &str, value: &str) -> String {
             if let Ok(text) = String::from_utf8(bytes) {
                 return text;
             }
+            tracing::warn!("google calendar token decrypted to invalid utf-8");
+        } else {
+            tracing::warn!(
+                "google calendar token could not be decrypted, the stored value no longer matches ENCRYPTION_KEY"
+            );
         }
         return value.to_string();
     }
