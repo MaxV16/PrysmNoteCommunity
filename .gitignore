@@ -71,3 +71,7 @@ apps/frontend/.turbo/
 # deploy ssh key
 .deploy-ssh/
 .community-build/
+
+# Playwright MCP artifacts (page snapshots, console logs)
+.playwright-mcp/
+/app.yml

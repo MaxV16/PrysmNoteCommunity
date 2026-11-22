@@ -1389,6 +1389,18 @@ mod tests {
     fn unmet_action_flags_hallucinated_plan_without_tools() {
         assert!(unmet_action("Let me try deleting it", "delete the task", false));
         assert!(!unmet_action("Let me try deleting it", "delete the task", true));
+        // Live regression: the hosted model claimed a reschedule with no tool
+        // call, and the old verb list only covered create/delete family words.
+        assert!(unmet_action(
+            "I've moved the rent payment to December 5th.",
+            "move the rent thing to the 5th",
+            false
+        ));
+        assert!(!unmet_action(
+            "I've moved the rent payment to December 5th.",
+            "move the rent thing to the 5th",
+            true
+        ));
         assert!(!unmet_action("It is sunny today", "what is the weather", false));
         assert!(!unmet_action("", "delete the task", false));
     }

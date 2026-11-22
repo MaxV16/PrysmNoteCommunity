@@ -229,7 +229,7 @@ fn hallucinated_action_patterns() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
         Regex::new(
-            r"(?i)(?:(?:i'?ve )?(?:created|deleted|removed|scheduled|completed|added|marked)|(?:let me|i will|going to|i'?ll|i'?m going to)\s+(?:(?:try|attempt|start|begin|go ahead and|now)\s+)?(?:creat(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|schedul(?:e|es|ed|ing)|complet(?:e|es|ed|ing)|updat(?:e|es|ed|ing)|chang(?:e|es|ed|ing)|reschedul(?:e|es|ed|ing)|cancell?(?:s|ed|ing)?|add(?:s|ed|ing)?|mark(?:s|ed|ing)?|mov(?:e|es|ed|ing))\b)",
+            r"(?i)(?:(?:i'?ve |i have |i just )?(?:created|deleted|removed|scheduled|completed|added|marked|updated|changed|moved|rescheduled|renamed|cancell?ed|assigned|tagged|untagged|linked|unlinked|duplicated|split|merged|archived|restored|paused|resumed|started|stopped|paid|fixed|cleared|set)\b|(?:let me|i will|going to|i'?ll|i'?m going to)\s+(?:(?:try|attempt|start|begin|go ahead and|now)\s+)?(?:creat(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|schedul(?:e|es|ed|ing)|complet(?:e|es|ed|ing)|updat(?:e|es|ed|ing)|chang(?:e|es|ed|ing)|reschedul(?:e|es|ed|ing)|cancell?(?:s|ed|ing)?|add(?:s|ed|ing)?|mark(?:s|ed|ing)?|mov(?:e|es|ed|ing))\b)",
         )
         .expect("valid hallucination regex")
     })
@@ -648,6 +648,13 @@ mod tests {
     fn hallucinated_action_is_flagged() {
         assert!(has_hallucinated_action("I've created the task for you."));
         assert!(has_hallucinated_action("Done! I scheduled it."));
+        // Past-tense claims that are not in the create/delete family used to slip
+        // through, so a model could say it moved a task without calling a tool.
+        assert!(has_hallucinated_action(
+            "I've moved the rent payment to December 5th."
+        ));
+        assert!(has_hallucinated_action("Updated the due date to Friday."));
+        assert!(has_hallucinated_action("I have renamed the list."));
     }
 
     #[test]
