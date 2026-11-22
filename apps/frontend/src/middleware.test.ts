@@ -7,11 +7,12 @@ import type { NextRequest } from "next/server";
 vi.mock("next/server", () => {
   class MockNextResponse {
     cookies = { delete: (_name: string) => {} };
+    headers = { set: (_name: string, _value: string) => {} };
     constructor(
       public status: number,
       public location: string | null,
     ) {}
-    static next() {
+    static next(_init?: unknown) {
       return new MockNextResponse(200, null);
     }
     static redirect(url: URL) {
