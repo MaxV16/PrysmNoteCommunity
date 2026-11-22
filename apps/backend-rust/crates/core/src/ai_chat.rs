@@ -389,6 +389,15 @@ async fn chat(
         }
 
         if tool_calls.is_none() && ai_tools::needs_tool_retry(&content, &req.message) {
+            // Nudge on the current model first. Bumping down the chain costs a
+            // full 16k-token prefill per attempt and the fallback models are
+            // weaker at tool use, which is how a "mark it done" request ended
+            // up answered with a capability denial.
+            if !nudged {
+                nudged = true;
+                messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
+                continue;
+            }
             if ai_turn_runner::should_bump_model(
                 premium,
                 &provider,
@@ -397,11 +406,6 @@ async fn chat(
             ) {
                 current_model_index += 1;
                 client = build_bumped_client(&state, &api_key, &chain_list, current_model_index)?;
-                continue;
-            }
-            if !nudged {
-                nudged = true;
-                messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
                 continue;
             }
         }

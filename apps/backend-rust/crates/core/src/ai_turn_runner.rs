@@ -492,6 +492,14 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
         }
 
         if tool_calls.is_none() && ai_tools::needs_tool_retry(&content, &job.user_message) {
+            // Nudge on the current model before spending another full prompt on
+            // a fallback model; the weaker end of the chain is what produced
+            // "I don't have the ability to mark tasks as done".
+            if !tool_nudged {
+                tool_nudged = true;
+                messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
+                continue;
+            }
             if should_bump_model(premium, &job.provider, current_model_index, job.chain.len()) {
                 if premium
                     && !money_nudged
@@ -503,12 +511,6 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
                 }
                 current_model_index += 1;
                 client = build_turn_client(state, job, current_model_index)?;
-                continue;
-            }
-
-            if !tool_nudged {
-                tool_nudged = true;
-                messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
                 continue;
             }
         }
@@ -1075,9 +1077,10 @@ pub fn unmet_action(content: &str, user_message: &str, action_succeeded: bool) -
     if action_succeeded || content.is_empty() {
         return false;
     }
-    ai_tools::has_mutation_intent(user_message)
-        && ai_tools::has_hallucinated_action(content)
-        && !ai_tools::is_confirmation_question(content)
+    if !ai_tools::has_mutation_intent(user_message) || ai_tools::is_confirmation_question(content) {
+        return false;
+    }
+    ai_tools::has_hallucinated_action(content) || ai_tools::denies_capability(content)
 }
 
 /// Reply when the final stream died: prefer the tool-round content, else a
@@ -1400,6 +1403,19 @@ mod tests {
             "I've moved the rent payment to December 5th.",
             "move the rent thing to the 5th",
             true
+        ));
+        // Live regression: a completion request answered with a false
+        // capability denial ("I currently don't have the ability to mark tasks
+        // as done") must never reach the user as-is.
+        assert!(unmet_action(
+            "I'm sorry, but I currently don't have the ability to mark tasks as done.",
+            "mark buy milk as done pls",
+            false
+        ));
+        assert!(!unmet_action(
+            "I could not find a task called rent.",
+            "mark rent as done",
+            false
         ));
         assert!(!unmet_action("It is sunny today", "what is the weather", false));
         assert!(!unmet_action("", "delete the task", false));

@@ -339,6 +339,20 @@ pub fn is_tool_refusal(content: &str) -> bool {
     refusal_patterns().is_match(content)
 }
 
+/// True when the reply claims a capability the app actually has ("I don't have
+/// the ability to mark tasks as done"). Kept separate from the broader refusal
+/// patterns so a useful "I could not find that task" still reaches the user.
+pub fn denies_capability(content: &str) -> bool {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?:i (?:currently )?(?:do not|don't) have (?:the )?(?:ability|capability|permission|access)|i(?:'m| am) not (?:able|capable|equipped|designed) to|i (?:cannot|can't) (?:do that|help with that|mark|update|change|move|delete|complete|create|add|schedule))",
+        )
+        .expect("valid capability denial regex")
+    })
+    .is_match(content)
+}
+
 /// True when the model narrated an action it never actually took (mirrors the
 /// Python `_HALLUCINATED_ACTION_PATTERNS.search`).
 pub fn has_hallucinated_action(content: &str) -> bool {
@@ -479,6 +493,18 @@ mod tests {
         assert!(money_intent("I spent $250"));
         assert!(!money_intent("what is the weather"));
         assert!(!money_intent(""));
+    }
+
+    #[test]
+    fn capability_denials_are_detected_but_misses_are_not() {
+        assert!(denies_capability(
+            "I'm sorry, but I currently don't have the ability to mark tasks as done."
+        ));
+        assert!(denies_capability(
+            "I can't update tasks on your behalf right now."
+        ));
+        assert!(!denies_capability("I could not find a task called rent."));
+        assert!(!denies_capability("I've marked it done."));
     }
 
     #[test]
