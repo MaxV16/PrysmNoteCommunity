@@ -387,12 +387,19 @@ impl Settings {
     /// files, but no DeepSeek model is used anymore.
     pub fn prysm_ai_deepseek_chain(&self) -> String {
         env::var("PRYSM_AI_DEEPSEEK_CHAIN").unwrap_or_else(|_| {
-            format!(
-                "{},{},{}",
+            // The primary is also the EU model today, so drop duplicates: a
+            // repeated entry would burn the same prefill twice on a retry.
+            let mut seen: Vec<&str> = Vec::new();
+            for model in [
                 crate::llm::PRYSMAI_MODEL,
                 crate::llm::PRYSMAI_FALLBACK_MODEL,
-                crate::llm::PRYSMAI_EU_MODEL
-            )
+                crate::llm::PRYSMAI_EU_MODEL,
+            ] {
+                if !seen.contains(&model) {
+                    seen.push(model);
+                }
+            }
+            seen.join(",")
         })
     }
 

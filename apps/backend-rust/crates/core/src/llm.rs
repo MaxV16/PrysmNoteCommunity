@@ -24,15 +24,19 @@ pub const OPENROUTER_DEFAULT_MODEL: &str = "google/gemini-2.5-flash-lite";
 
 /// Default hosted PrysmAI model. A fast, low-latency model used by the hosted
 /// gateway everywhere: the region default, the primary chain's first entry,
-/// and the region-routing fallback. It supports function/tool calling and the
-/// MCP tool surface, so no `:free` model is ever configured. Chosen for speed
-/// and cost after DeepSeek proved too slow; see `deploy/development.md` 7.3e
-/// for the hosted budget math behind the per-plan allowances.
-pub const PRYSMAI_MODEL: &str = "google/gemini-2.5-flash-lite";
+/// and the region-routing fallback. It is Mistral's 24B instruct model, chosen
+/// because it is explicitly tuned for function calling (the tool-selection
+/// failures that made "rename X to Y" answer in prose were model behaviour,
+/// not wiring), it is hosted in the EU by an EU provider, and at $0.075/M in
+/// and $0.20/M out it is cheaper than the Gemini Flash-Lite it replaced
+/// ($0.10/$0.40). A `:free` variant is never configured. See
+/// `deploy/development.md` 7.3e for the hosted budget math behind the per-plan
+/// allowances.
+pub const PRYSMAI_MODEL: &str = "mistralai/mistral-small-3.2-24b-instruct";
 
 /// Hosted fallback model, used when the primary is unavailable or refuses a
 /// tool call. Cheap, fast, and tool-capable; supports ZDR routing.
-pub const PRYSMAI_FALLBACK_MODEL: &str = "openai/gpt-5-nano";
+pub const PRYSMAI_FALLBACK_MODEL: &str = "google/gemini-2.5-flash-lite";
 
 /// Hosted EU-chain model. The EU/EEA/UK and unknown/missing-header regions use
 /// this EU-compliant, tool-capable model (Mistral, France). Also the last
