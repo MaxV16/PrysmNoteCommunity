@@ -7,7 +7,12 @@ import type { NextRequest } from "next/server";
 vi.mock("next/server", () => {
   class MockNextResponse {
     cookies = { delete: (_name: string) => {} };
-    headers = { set: (_name: string, _value: string) => {} };
+    headerValues: Record<string, string> = {};
+    headers = {
+      set: (name: string, value: string) => {
+        this.headerValues[name] = value;
+      },
+    };
     constructor(
       public status: number,
       public location: string | null,
@@ -115,5 +120,35 @@ describe("middleware session handling", () => {
   it("still guards protected deep links for a logged-out visitor", () => {
     const res = middleware(makeRequest("/notes/deleted-note"));
     expect(redirectLocation(res)).toContain("/login?next=");
+  });
+});
+
+describe("middleware content security policy", () => {
+  it("serves a nonce-bound script-src in production with no unsafe-inline", async () => {
+    // A production build must let Next's inline bootstrap run via a per-request
+    // nonce instead of blanket-allowing inline script. The middleware is what
+    // carries that nonce to the markup, so this asserts both halves agree.
+    vi.resetModules();
+    vi.stubEnv("NODE_ENV", "production");
+    const originalCrypto = globalThis.crypto;
+    if (!originalCrypto?.randomUUID) {
+      vi.stubGlobal("crypto", { randomUUID: () => "00000000-1111-2222-3333-444444444444" });
+    }
+    try {
+      const { middleware: prodMiddleware } = await import("./middleware");
+      const res = prodMiddleware(makeRequest("/login")) as unknown as {
+        headerValues: Record<string, string>;
+      };
+      const csp = res.headerValues["Content-Security-Policy"];
+      const scriptSrc = csp.split(";").map((s) => s.trim()).find((s) => s.startsWith("script-src"));
+      expect(scriptSrc).toContain("'nonce-");
+      expect(scriptSrc).toContain("'strict-dynamic'");
+      expect(scriptSrc).not.toContain("'unsafe-inline'");
+      expect(res.headerValues["x-nonce"]).toMatch(/^[0-9a-f]+$/);
+      expect(csp).toContain("frame-ancestors 'none'");
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
   });
 });
