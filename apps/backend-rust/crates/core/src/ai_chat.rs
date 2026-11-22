@@ -229,6 +229,7 @@ pub fn build_llm_client(
         .map_err(|_| ApiError::BadRequest("Please provide an API key in Settings.".to_string()))
 }
 
+#[allow(dead_code)] // kept for a future stronger-model retry; the chain bump is off
 fn build_bumped_client(
     state: &AppState,
     api_key: &str,
@@ -398,16 +399,10 @@ async fn chat(
                 messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
                 continue;
             }
-            if ai_turn_runner::should_bump_model(
-                premium,
-                &provider,
-                current_model_index,
-                chain_list.len(),
-            ) {
-                current_model_index += 1;
-                client = build_bumped_client(&state, &api_key, &chain_list, current_model_index)?;
-                continue;
-            }
+            // One nudge is the whole retry budget. Bumping down the chain used to
+            // cost three more full ~17k-token prefills per failed turn and the
+            // weaker models answered even less reliably, so a turn that still
+            // refuses ends here and the honest fallback below replies instead.
         }
 
         let Some(calls) = tool_calls.clone() else {

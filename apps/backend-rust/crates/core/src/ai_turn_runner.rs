@@ -500,19 +500,10 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
                 messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
                 continue;
             }
-            if should_bump_model(premium, &job.provider, current_model_index, job.chain.len()) {
-                if premium
-                    && !money_nudged
-                    && ai_tools::money_intent(&job.user_message)
-                    && ai_tools::is_tool_refusal(&content)
-                {
-                    money_nudged = true;
-                    messages.push(json!({"role": "system", "content": ai_prompts::MONEY_NUDGE}));
-                }
-                current_model_index += 1;
-                client = build_turn_client(state, job, current_model_index)?;
-                continue;
-            }
+            // One nudge is the whole retry budget: bumping down the chain cost
+            // three more full prefills per failed turn and the weaker models
+            // answered even less reliably, so a turn that still refuses ends
+            // here and the honest fallback replies instead.
         }
 
         if should_money_nudge(
