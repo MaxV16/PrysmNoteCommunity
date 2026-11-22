@@ -62,6 +62,33 @@ pub async fn set_rls_user(
     Ok(())
 }
 
+/// Set the RLS identity for the whole session instead of one transaction.
+///
+/// This exists for background work that must run in autocommit (a long poll
+/// that talks to an external provider must not pin a transaction and delay
+/// vacuum). Because `false` survives commits, the caller MUST call
+/// [`clear_rls_session`] before the connection goes back to the pool, and must
+/// close the connection if clearing fails, so one user's identity can never
+/// leak into another user's request.
+pub async fn set_rls_user_session(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT set_config('app.user_id', $1, false), set_config('app.user_email', '', false)")
+        .bind(user_id.to_string())
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
+/// Clear a session-scoped RLS identity set by [`set_rls_user_session`].
+pub async fn clear_rls_session(conn: &mut sqlx::PgConnection) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT set_config('app.user_id', '', false), set_config('app.user_email', '', false)")
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
