@@ -483,19 +483,25 @@ export function useTimelineBarDrag(
         s.body.scrollLeft = liveScrollLeft + velocityX;
       }
 
-      // Vertical edge auto-scroll so a lane off-screen can be reached, but only
-      // when the canvas can actually scroll vertically: a horizontal drag near
-      // the bottom of a non-overflowing canvas must never nudge lanes. Also move
-      // only: a resize never changes the section, so it must never scroll lanes.
+      // Vertical edge auto-scroll so a lane off-screen can be reached. The
+      // overflow test is LIVE, not the flag captured at drag start: a canvas can
+      // gain rows mid-gesture (another tab, a section change), and a stale
+      // `false` then blocked lane scrolling for the whole drag. Also move only:
+      // a resize never changes the section, so it must never scroll lanes.
       const height = s.bodyClientHeight;
-      if (s.mode === "move" && height > 0 && s.bodyHasVerticalOverflow) {
+      const canScrollY = !!s.body && s.body.scrollHeight > s.body.clientHeight + 1;
+      if (s.mode === "move" && height > 0 && canScrollY) {
         const edgeZoneY = Math.min(120, Math.max(48, height * 0.12));
         const yInBody = s.latestY - s.bodyTop;
+        // Lanes are a coarse target, so vertical starts on a shorter hold than
+        // horizontal: dragging up or down should reach the lane under the
+        // pointer promptly instead of feeling dead for a quarter second.
+        const dwelledY = now() - s.edgeRefAt >= EDGE_DWELL_MS / 2;
         let velocityY = 0;
-        if (dwelled && yInBody < edgeZoneY) {
+        if (dwelledY && yInBody < edgeZoneY) {
           const intensity = Math.min(1, Math.max(0, (edgeZoneY - yInBody) / edgeZoneY));
           velocityY = -intensity * intensity * EDGE_MAX_PX_PER_FRAME;
-        } else if (dwelled && yInBody > height - edgeZoneY) {
+        } else if (dwelledY && yInBody > height - edgeZoneY) {
           const intensity = Math.min(1, Math.max(0, (yInBody - (height - edgeZoneY)) / edgeZoneY));
           velocityY = intensity * intensity * EDGE_MAX_PX_PER_FRAME;
         }
