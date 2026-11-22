@@ -432,9 +432,6 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
     let mut action_succeeded = false;
     let mut money_nudged = false;
     let mut tool_nudged = false;
-    // Forces `tool_choice: "required"` on the retry round so the model cannot
-    // answer an action request with prose alone.
-    let mut require_tools = false;
     let mut current_model_index = 0usize;
 
     for round in 0..MAX_TOOL_ROUNDS {
@@ -472,10 +469,8 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
                 &messages,
                 Some(&tools),
                 model.as_deref(),
-                require_tools,
             ) => res?,
         };
-        require_tools = false;
 
         let choice = LlmClient::first_choice(&response);
         let assistant = choice.get("message").cloned().unwrap_or_else(|| json!({}));
@@ -503,7 +498,6 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
             if !tool_nudged {
                 tool_nudged = true;
                 messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
-                require_tools = true;
                 continue;
             }
             if should_bump_model(premium, &job.provider, current_model_index, job.chain.len()) {
@@ -837,57 +831,35 @@ pub(crate) async fn chat_with_cache(
     messages: &[Value],
     tools: Option<&Value>,
     model: Option<&str>,
-    require_tools: bool,
 ) -> Result<Value, RunnerError> {
     let model_owned = match model {
         Some(m) if !m.is_empty() => m.to_string(),
         _ => client.model().to_string(),
     };
     let messages_value = Value::Array(messages.to_vec());
+    let key = ai_cache::make_cache_key(user_id, provider, &model_owned, &messages_value, tools);
 
-    // A forced-tool call is never served from (or written to) the cache: the
-    // prompt is the same as the cached one, so a hit would hand back the
-    // text-only answer the retry exists to replace, and caching a forced
-    // answer would poison the normal path.
-    if !require_tools {
-        let key = ai_cache::make_cache_key(user_id, provider, &model_owned, &messages_value, tools);
-        {
-            let mut tx = begin_tx(state, user_id).await?;
-            let cached = ai_cache::get_cached_response(&mut *tx, user_id, provider, &key).await?;
-            tx.commit().await?;
-            if let Some(hit) = cached {
-                return Ok(hit);
-            }
-        }
-        let response = client.chat(&messages_value, tools, None, None).await?;
-        {
-            let mut tx = begin_tx(state, user_id).await?;
-            // Cache write is best-effort: a cache failure must not fail the turn.
-            let _ = ai_cache::cache_response(&mut *tx, user_id, provider, &key, &response).await;
-            if provider == "prysmai" {
-                record_response_usage_conn(&mut *tx, user_id, &response).await?;
-            }
-            tx.commit().await?;
-        }
-        return Ok(response);
-    }
-
-    let response = match tools {
-        Some(tools) => match client.chat_requiring_tools(&messages_value, tools).await {
-            Ok(value) => value,
-            // Never fail the turn because a provider rejects
-            // `tool_choice: "required"`; fall back to an ordinary call.
-            Err(_) => client.chat(&messages_value, Some(tools), None, None).await?,
-        },
-        None => client.chat(&messages_value, None, None, None).await?,
-    };
     {
         let mut tx = begin_tx(state, user_id).await?;
+        let cached = ai_cache::get_cached_response(&mut *tx, user_id, provider, &key).await?;
+        tx.commit().await?;
+        if let Some(hit) = cached {
+            return Ok(hit);
+        }
+    }
+
+    let response = client.chat(&messages_value, tools, None, None).await?;
+
+    {
+        let mut tx = begin_tx(state, user_id).await?;
+        // Cache write is best-effort: a cache failure must not fail the turn.
+        let _ = ai_cache::cache_response(&mut *tx, user_id, provider, &key, &response).await;
         if provider == "prysmai" {
             record_response_usage_conn(&mut *tx, user_id, &response).await?;
         }
         tx.commit().await?;
     }
+
     Ok(response)
 }
 
