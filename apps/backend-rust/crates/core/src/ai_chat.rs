@@ -350,6 +350,9 @@ async fn chat(
     let mut content = String::new();
     let mut tool_calls: Option<Value> = None;
     let mut nudged = false;
+    // Forces `tool_choice: "required"` on the retry round so the model cannot
+    // answer an action request with prose alone.
+    let mut require_tools = false;
     // True once a mutating tool call actually committed; used below so a failed
     // (or read-only) tool call cannot be narrated as a completed action.
     let mut action_succeeded = false;
@@ -364,9 +367,11 @@ async fn chat(
             &messages,
             Some(&tools),
             model.as_deref(),
+            require_tools,
         )
         .await
         .map_err(|err| err.into_api_error(&provider))?;
+        require_tools = false;
 
         let choice = LlmClient::first_choice(&response);
         let assistant = choice.get("message").cloned().unwrap_or_else(|| json!({}));
@@ -396,6 +401,7 @@ async fn chat(
             if !nudged {
                 nudged = true;
                 messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
+                require_tools = true;
                 continue;
             }
             if ai_turn_runner::should_bump_model(

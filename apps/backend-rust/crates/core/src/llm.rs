@@ -220,6 +220,37 @@ impl LlmClient {
                 .await;
         }
         let body = self.openai_body(messages, tools, temperature, max_tokens, false);
+        self.send_chat(body).await
+    }
+
+    /// Non-streaming chat that REQUIRES the model to call a tool.
+    ///
+    /// Used for the retry after a turn answered an action request with prose
+    /// only. `tool_choice: "required"` makes the provider reject a text-only
+    /// answer, so the model has to pick a tool instead of telling the user it
+    /// cannot do something the app can do. Only the OpenAI-compatible wire
+    /// format supports it, so the Gemini wire path stays on `auto`.
+    pub async fn chat_requiring_tools(
+        &self,
+        messages: &Value,
+        tools: &Value,
+    ) -> Result<Value, LlmError> {
+        let body = self.requiring_tools_body(messages, tools);
+        self.send_chat(body).await
+    }
+
+    /// Request body for a forced-tool call. Kept separate from the request so
+    /// the wire shape is unit-testable without a network call.
+    fn requiring_tools_body(&self, messages: &Value, tools: &Value) -> Value {
+        let mut body = self.openai_body(messages, Some(tools), None, None, false);
+        if self.provider != Provider::Gemini {
+            body["tool_choice"] = json!("required");
+        }
+        body
+    }
+
+    /// POST a prepared chat body and return the OpenAI-shaped response.
+    async fn send_chat(&self, body: Value) -> Result<Value, LlmError> {
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
         let response = self
             .http
@@ -624,6 +655,16 @@ mod tests {
         assert_eq!(body["model"], PRYSMAI_MODEL);
         assert_eq!(body["models"][1], "m2");
         assert_eq!(body["provider"]["data_collection"], "deny");
+    }
+
+    #[test]
+    fn requiring_tools_forces_the_provider_to_call_one() {
+        let client =
+            LlmClient::prysm_ai("k", "https://example.test/v1", "", Vec::<String>::new(), false);
+        let tools = json!([{ "type": "function", "function": { "name": "complete_task", "description": "d", "parameters": {"type":"object","properties":{}} } }]);
+        let body = client.requiring_tools_body(&json!([{"role":"user","content":"mark it done"}]), &tools);
+        assert_eq!(body["tool_choice"], "required");
+        assert_eq!(body["tools"][0]["function"]["name"], "complete_task");
     }
 
     #[test]
