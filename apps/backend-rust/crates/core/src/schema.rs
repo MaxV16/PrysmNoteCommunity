@@ -176,6 +176,27 @@ CREATE INDEX IF NOT EXISTS ix_tags_user_name ON public.tags USING btree (user_id
 -- The workflow sweep reads every row for one preference key on the system pool.
 CREATE INDEX IF NOT EXISTS ix_user_preferences_key ON public.user_preferences USING btree (key);
 
+-- Notes used to be keyed on the client-supplied id alone, so two accounts that
+-- happened to use the same id collided (the second insert failed). Every note
+-- query is already scoped by user_id, so the primary key belongs on
+-- (user_id, id). Only rewrite it once: the DO block no-ops on later boots.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'public'
+          AND t.relname = 'notes'
+          AND c.conname = 'notes_pkey'
+          AND array_length(c.conkey, 1) = 1
+    ) THEN
+        ALTER TABLE public.notes DROP CONSTRAINT notes_pkey;
+        ALTER TABLE public.notes ADD CONSTRAINT notes_pkey PRIMARY KEY (user_id, id);
+    END IF;
+END $$;
+
 -- Backfill existing occurrence rows from parent_task_id into
 -- recurrence_parent_id. A real subtask never has a start_date (insert_subtask
 -- does not set one) while an occurrence always does, so start_date IS NOT NULL
@@ -424,5 +445,14 @@ mod tests {
         assert!(!CORE_SCHEMA_SQL.contains("user_tokens FORCE ROW LEVEL SECURITY"));
         assert!(CORE_MIGRATIONS_SQL.contains("user_tokens NO FORCE ROW LEVEL SECURITY"));
         assert!(CORE_MIGRATIONS_SQL.contains("user_tokens DISABLE ROW LEVEL SECURITY"));
+    }
+
+    /// Note ids come from the client, so they are only unique per account: the
+    /// primary key must include `user_id` or two accounts using the same id
+    /// collide on insert.
+    #[test]
+    fn notes_primary_key_is_scoped_to_the_user() {
+        assert!(CORE_SCHEMA_SQL.contains("ADD CONSTRAINT notes_pkey PRIMARY KEY (user_id, id)"));
+        assert!(CORE_MIGRATIONS_SQL.contains("PRIMARY KEY (user_id, id)"));
     }
 }

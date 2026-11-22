@@ -920,7 +920,7 @@ ALTER TABLE ONLY public.lists
 --
 
 ALTER TABLE ONLY public.notes
-    ADD CONSTRAINT notes_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT notes_pkey PRIMARY KEY (user_id, id);
 
 
 --
