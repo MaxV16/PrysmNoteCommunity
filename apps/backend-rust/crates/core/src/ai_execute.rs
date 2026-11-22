@@ -612,7 +612,7 @@ async fn resolve_task_id(
     let exact = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
          AND parent_task_id IS NULL AND lower(title) = lower($2) \
-         ORDER BY (title = $2) DESC, created_at DESC LIMIT 1",
+         ORDER BY (title = $2) DESC, (recurrence_parent_id IS NOT NULL) ASC, created_at DESC LIMIT 1",
     )
     .bind(user_id)
     .bind(title)
@@ -624,7 +624,8 @@ async fn resolve_task_id(
     }
     let exact = sqlx::query_scalar::<_, Uuid>(
         "SELECT id FROM tasks WHERE user_id = $1 AND deleted_at IS NULL \
-         AND lower(title) = lower($2) ORDER BY (title = $2) DESC, created_at DESC LIMIT 1",
+         AND lower(title) = lower($2) \
+         ORDER BY (title = $2) DESC, (recurrence_parent_id IS NOT NULL) ASC, created_at DESC LIMIT 1",
     )
     .bind(user_id)
     .bind(title)
