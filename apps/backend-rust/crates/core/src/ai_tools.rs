@@ -189,6 +189,170 @@ pub fn tools_for_user(premium: bool) -> Vec<Value> {
     all
 }
 
+/// Coarse tool families used to trim the per-turn tool payload.
+///
+/// Sending all 48 core definitions costs about 30 KB of JSON (plus the EE
+/// modules), and that prefill is the dominant time-to-first-token cost, so a
+/// turn only carries the families its message plausibly needs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ToolFamily {
+    Scheduling,
+    Subtasks,
+    Tags,
+    Lists,
+    Bulk,
+    Misc,
+    Watchlist,
+    Habits,
+    Notes,
+}
+
+/// Tools every turn carries: the generic task reads and the mutations users ask
+/// for in plain language without naming a family ("mark the report done",
+/// "move it to friday", "rename X to Y", "what is on friday").
+const STOCK_TOOLS: &[&str] = &[
+    "search_tasks",
+    "create_task",
+    "update_task",
+    "complete_task",
+    "delete_task",
+    "get_task_details",
+    "list_tasks_by_date_range",
+    "rename_task",
+    "reschedule_task",
+];
+
+impl ToolFamily {
+    /// The family a tool belongs to, or `None` when it is unknown.
+    ///
+    /// Unknown tools are always sent: a new tool (or an EE module the core
+    /// cannot see) must never become unreachable just because nobody added it
+    /// here.
+    fn of(tool_name: &str) -> Option<ToolFamily> {
+        if tool_name.starts_with("vault_") {
+            return Some(ToolFamily::Notes);
+        }
+        match tool_name {
+            "check_calendar" | "detect_conflicts" | "suggest_best_time" | "add_event"
+            | "get_upcoming_deadlines" => Some(ToolFamily::Scheduling),
+            "get_subtasks" | "create_subtask" | "update_subtask" | "delete_subtask"
+            | "reorder_subtasks" | "convert_description_to_subtasks"
+            | "convert_subtasks_to_description" | "suggest_subtasks" => Some(ToolFamily::Subtasks),
+            "list_tags" | "add_tag_to_task" => Some(ToolFamily::Tags),
+            "create_list" | "list_lists" | "rename_list" | "delete_list" => Some(ToolFamily::Lists),
+            "batch_create_tasks" | "batch_delete_tasks" | "delete_matching_tasks"
+            | "cancel_task_by_keywords" | "organize_timeline_into_sections" => Some(ToolFamily::Bulk),
+            "duplicate_task" | "restore_task" | "link_tasks" | "get_task_stats" => {
+                Some(ToolFamily::Misc)
+            }
+            "search_titles" | "list_watchlist" | "add_watchlist_item" | "update_watchlist_item"
+            | "remove_watchlist_item" => Some(ToolFamily::Watchlist),
+            "list_habits" | "create_habit" | "update_habit" | "delete_habit" | "toggle_habit_log"
+            | "get_habit_logs" => Some(ToolFamily::Habits),
+            _ => None,
+        }
+    }
+
+    /// Words that make a message plausibly need this family. Deliberately broad:
+    /// a false positive only costs prefill, a false negative costs a wrong turn.
+    fn pattern(self) -> &'static str {
+        match self {
+            ToolFamily::Scheduling => {
+                r"(?i)\b(?:today|tonight|tomorrow|morning|afternoon|evening|week|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun|calendar|schedul\w*|reschedul\w*|due|deadline|conflicts?|overlap\w*|clash\w*|double.?book\w*|busy|free|slot|time off|remind\w*|o'?clock|a\.?m\b|p\.?m\b|\d{1,2}:\d{2})"
+            }
+            ToolFamily::Subtasks => {
+                r"(?i)(?:sub.?tasks?|check.?lists?|break\s?(?:it\s?)?down|breakdown|step by step|\bsteps?\b|convert\w*|\bsplit\b|\bitemi[sz]e\b|\boutline\b)"
+            }
+            ToolFamily::Tags => r"(?i)\b(?:tags?|tagged|label\w*|categor(?:y|ies|i[sz]e))\b",
+            ToolFamily::Lists => r"(?i)\b(?:lists?|projects?|folders?|workspaces?)\b",
+            ToolFamily::Bulk => {
+                r"(?i)\b(?:batch|multiple|several|everything|matching|organi[sz]e\w*|sections?|timeline|sort\w*|group\w*|clean\s?up|bulk)\b|\b(?:all|every|each|both)\b.{0,24}\b(?:tasks?|items?|entries|events?|things?|todos?)\b|\b(?:delete|clear|remove)\s+(?:all|everything)\b"
+            }
+            ToolFamily::Misc => {
+                r"(?i)\b(?:duplicat\w*|cop(?:y|ies)|restore\w*|undo|links?|linked|attach\w*|stats?|statistics|how many|progress|summary|count\w*)\b"
+            }
+            ToolFamily::Watchlist => {
+                r"(?i)\b(?:watchlist|watch(?:ed|ing)?|movies?|films?|tv|tv shows?|series|episodes?|seasons?|imdb|tmdb|netflix|trailer)\b"
+            }
+            ToolFamily::Habits => {
+                r"(?i)\b(?:habits?|streaks?|routines?|check.?ins?|work(?:ed)?\s?out|workouts?|gym|meditat\w*|journal\w*|floss\w*|water|read(?:ing)?|slept|sleep|steps)\b"
+            }
+            ToolFamily::Notes => {
+                r"(?i)\b(?:notes?|notebooks?|vaults?|backlinks?|wiki\w*|journal|memor(?:y|ies|i[sz]e)|remember|capture|jot)\b|\bwrite\s+(?:it|this|that)\s+down\b"
+            }
+        }
+    }
+}
+
+fn family_patterns() -> &'static [(ToolFamily, Regex)] {
+    static PATTERNS: OnceLock<Vec<(ToolFamily, Regex)>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        const FAMILIES: [ToolFamily; 9] = [
+            ToolFamily::Scheduling,
+            ToolFamily::Subtasks,
+            ToolFamily::Tags,
+            ToolFamily::Lists,
+            ToolFamily::Bulk,
+            ToolFamily::Misc,
+            ToolFamily::Watchlist,
+            ToolFamily::Habits,
+            ToolFamily::Notes,
+        ];
+        FAMILIES
+            .into_iter()
+            .map(|family| {
+                (
+                    family,
+                    Regex::new(family.pattern()).expect("valid tool-family regex"),
+                )
+            })
+            .collect()
+    })
+}
+
+/// The families a message plausibly needs.
+fn tool_families(message: &str) -> Vec<ToolFamily> {
+    family_patterns()
+        .iter()
+        .filter(|(_, pattern)| pattern.is_match(message))
+        .map(|(family, _)| *family)
+        .collect()
+}
+
+fn tool_name_of(tool: &Value) -> &str {
+    tool.get("function")
+        .and_then(|f| f.get("name"))
+        .and_then(|n| n.as_str())
+        .unwrap_or("")
+}
+
+/// Tool definitions for one turn: the stock task tools plus the families the
+/// message points at, keeping every tool with no known family (EE modules, new
+/// tools) so nothing becomes unreachable.
+///
+/// The caller must fall back to [`tools_for_user`] when the turn gets nudged
+/// after a refusal, otherwise a message whose intent was not recognised would
+/// stay locked out of its family for the whole turn.
+pub fn tools_for_message(premium: bool, message: &str) -> Vec<Value> {
+    let all = tools_for_user(premium);
+    let wanted = tool_families(message);
+    // No recognised family: send the stock set. It covers the plain task
+    // reads/writes, and a miss is repaired by the nudge path, which resends the
+    // full set.
+    all.into_iter()
+        .filter(|tool| {
+            let name = tool_name_of(tool);
+            if STOCK_TOOLS.contains(&name) {
+                return true;
+            }
+            match ToolFamily::of(name) {
+                None => true,
+                Some(family) => wanted.contains(&family),
+            }
+        })
+        .collect()
+}
+
 /// Premium-check provider installed by the private build. The community build
 /// registers none, so every user is treated as eligible for the full core set.
 pub trait AiPremiumCheck: Send + Sync {
@@ -468,6 +632,84 @@ mod tests {
         let full = tool_definitions().len() + crate::vault::tool_definitions().len();
         assert_eq!(tools_for_user(true).len(), full);
         assert_eq!(tools_for_user(false).len(), full);
+    }
+
+    fn names_of(tools: &[Value]) -> Vec<&str> {
+        tools.iter().map(|t| tool_name_of(t)).collect()
+    }
+
+    #[test]
+    fn tools_for_message_without_a_family_is_the_stock_set() {
+        // "mark the report done" names no family: the stock task tools must
+        // still be there, and the families it cannot need must not be.
+        let tools = tools_for_message(true, "mark the report done");
+        let names = names_of(&tools);
+        for stock in STOCK_TOOLS {
+            assert!(names.contains(stock), "missing stock tool {stock}");
+        }
+        assert!(names.contains(&"complete_task"));
+        assert!(!names.contains(&"add_watchlist_item"));
+        assert!(!names.contains(&"create_habit"));
+        assert!(!names.contains(&"create_subtask"));
+        assert!(!names.contains(&"add_event"));
+        // The Vault tools are a family, so a task-only message drops them.
+        assert!(!names.iter().any(|n| n.starts_with("vault_")));
+    }
+
+    #[test]
+    fn tools_for_message_selects_the_family_it_hears() {
+        let watchlist_tools = tools_for_message(
+            true,
+            "mark severance as watched, that show was great",
+        );
+        let watchlist = names_of(&watchlist_tools);
+        assert!(watchlist.contains(&"list_watchlist"));
+        assert!(watchlist.contains(&"update_watchlist_item"));
+        assert!(!watchlist.contains(&"create_habit"));
+
+        let habit_tools = tools_for_message(true, "did my workout");
+        let habits = names_of(&habit_tools);
+        assert!(habits.contains(&"toggle_habit_log"));
+        assert!(!habits.contains(&"search_titles"));
+
+        let subtask_tools = tools_for_message(true, "break this down into smaller steps");
+        let subtasks = names_of(&subtask_tools);
+        assert!(subtasks.contains(&"suggest_subtasks"));
+        assert!(subtasks.contains(&"convert_description_to_subtasks"));
+
+        let tag_tools = tools_for_message(true, "tag the budget task as urgent");
+        let tags = names_of(&tag_tools);
+        assert!(tags.contains(&"add_tag_to_task"));
+        assert!(tags.contains(&"list_tags"));
+
+        let note_tools = tools_for_message(true, "remember that the plumber comes Tuesday");
+        let notes = names_of(&note_tools);
+        assert!(notes.iter().any(|n| n.starts_with("vault_")));
+    }
+
+    #[test]
+    fn tools_for_message_keeps_unknown_tools_and_stays_cheaper() {
+        // A tool with no known family is never filtered out, so a future tool
+        // (or an EE module) cannot silently become unreachable.
+        let tools = tools_for_message(true, "mark the report done");
+        let unknown: Vec<&str> = names_of(&tools)
+            .into_iter()
+            .filter(|n| !STOCK_TOOLS.contains(n) && ToolFamily::of(n).is_none())
+            .collect();
+        let all_unknown = names_of(&tools_for_user(true))
+            .into_iter()
+            .filter(|n| !STOCK_TOOLS.contains(n) && ToolFamily::of(n).is_none())
+            .count();
+        assert_eq!(unknown.len(), all_unknown);
+
+        // The whole point: a plain task turn must carry far less JSON than the
+        // full set.
+        let trimmed: usize = tools.iter().map(|t| t.to_string().len()).sum();
+        let full: usize = tools_for_user(true).iter().map(|t| t.to_string().len()).sum();
+        assert!(
+            trimmed * 2 < full,
+            "expected a large trim, got {trimmed} vs {full}"
+        );
     }
 
     #[test]

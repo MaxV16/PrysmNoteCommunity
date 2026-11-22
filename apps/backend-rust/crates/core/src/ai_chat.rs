@@ -330,7 +330,7 @@ async fn chat(
     let (current_summary, memories) =
         load_summary_and_memories(&state, user.user_id, session_id, &req.message).await?;
     let premium = ai_tools::is_premium_for(&state.pool, user.user_id).await;
-    let tools = Value::Array(ai_tools::tools_for_user(premium));
+    let mut tools = Value::Array(ai_tools::tools_for_message(premium, &req.message));
     let mut messages = ai_prompt::build_messages(
         &sanitized,
         &req.message,
@@ -396,6 +396,10 @@ async fn chat(
             // up answered with a capability denial.
             if !nudged {
                 nudged = true;
+                // The turn started with the trimmed payload; a refusal means the
+                // message needed a family we did not select, so the retry gets
+                // everything before the model answers again.
+                tools = Value::Array(ai_tools::tools_for_user(premium));
                 messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
                 continue;
             }

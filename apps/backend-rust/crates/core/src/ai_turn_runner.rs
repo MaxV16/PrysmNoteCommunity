@@ -397,7 +397,7 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
     };
 
     let premium = ai_tools::is_premium_for(&state.pool, user_id).await;
-    let tools = Value::Array(ai_tools::tools_for_user(premium));
+    let mut tools = Value::Array(ai_tools::tools_for_message(premium, &job.user_message));
     let mut messages = ai_prompt::build_messages(
         &job.sanitized_history,
         &job.user_message,
@@ -497,6 +497,10 @@ async fn run_turn_inner(state: &AppState, job: &Arc<TurnJob>) -> Result<(), Runn
             // "I don't have the ability to mark tasks as done".
             if !tool_nudged {
                 tool_nudged = true;
+                // The turn started with the trimmed payload; a refusal means the
+                // message needed a family we did not select, so the retry gets
+                // everything before the model answers again.
+                tools = Value::Array(ai_tools::tools_for_user(premium));
                 messages.push(json!({"role": "system", "content": ai_prompts::TOOL_NUDGE}));
                 continue;
             }
