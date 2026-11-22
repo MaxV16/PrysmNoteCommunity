@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
 import { track } from "@/lib/track";
 import { readTaskCacheSnapshot, writeTaskCache } from "@/lib/task-cache";
@@ -56,19 +56,26 @@ function isoDaysAgo(days: number): string {
 let cachePersistTimer: ReturnType<typeof setTimeout> | null = null;
 let cachedTasksRef: Task[] | null = null;
 
+// Cached tasks are held here rather than merged during module import: merging
+// at import time made the client's very first render contain tasks the server
+// render could not have, which React reports as a hydration mismatch (#418) on
+// every load. `useTasks` applies them immediately after mount instead.
+let cacheSeedTasks: Task[] | null = null;
+let cacheSeedCursor: number | null = null;
+let cacheSeeded = false;
+
 if (typeof window !== "undefined") {
   // One read of the cache for both the tasks and the cursor.
   const cached = readTaskCacheSnapshot();
   const cachedCursor = cached?.lastSyncAt ?? null;
   // Never trust a cached cursor from the future (a previous client clock, or a
   // clock change since the cache was written): it would hide every newer row.
-  syncCursor =
+  cacheSeedCursor =
     cachedCursor !== null && cachedCursor <= Date.now() + SYNC_OVERLAP_MS
       ? cachedCursor
       : null;
-  if (cached && cached.tasks.length > 0 && useAppStore.getState().tasks.length === 0) {
-    useAppStore.getState().mergeTasks(cached.tasks);
-    cachedTasksRef = useAppStore.getState().tasks;
+  if (cached && cached.tasks.length > 0) {
+    cacheSeedTasks = cached.tasks;
   }
   useAppStore.subscribe((state) => {
     if (state.tasks === cachedTasksRef) return;
@@ -79,6 +86,20 @@ if (typeof window !== "undefined") {
       writeTaskCache(useAppStore.getState().tasks, syncCursor);
     }, 1000);
   });
+}
+
+/// Apply the on-disk task cache once, after the first client render has
+/// hydrated against the server markup.
+function seedTaskCacheFromDisk() {
+  if (cacheSeeded) return;
+  cacheSeeded = true;
+  if (cacheSeedCursor !== null) syncCursor = cacheSeedCursor;
+  const pending = cacheSeedTasks;
+  cacheSeedTasks = null;
+  if (pending && pending.length > 0 && useAppStore.getState().tasks.length === 0) {
+    useAppStore.getState().mergeTasks(pending);
+    cachedTasksRef = useAppStore.getState().tasks;
+  }
 }
 
 // A full snapshot has to page: GET /tasks/ caps limit at 200, so a single
@@ -278,6 +299,11 @@ export function useTasks() {
   const tasks = useAppStore((s) => s.tasks);
   const mergeTasks = useAppStore((s) => s.mergeTasks);
   const setTasks = useAppStore((s) => s.setTasks);
+
+  // Seed the cached tasks after hydration, never during the first render.
+  useEffect(() => {
+    seedTaskCacheFromDisk();
+  }, []);
 
   const fetchRange = useCallback(
     (from: string, to: string) => fetchRangeImpl(from, to, mergeTasks),
