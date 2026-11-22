@@ -27,6 +27,7 @@
     "smoke:panels": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/panels-smoke.mjs",
     "smoke:content": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/content-smoke.mjs",
     "smoke:404": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/not-found-smoke.mjs",
+    "smoke:hydration": "BASE_URL=${BASE_URL:-http://localhost:3000} node scripts/smoke/hydration-smoke.mjs",
     "ui:audit": "node scripts/ui-audit.mjs",
     "build:desktop": "node scripts/build-desktop.mjs"
   },

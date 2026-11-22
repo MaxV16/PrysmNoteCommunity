@@ -65,13 +65,24 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
+      <body>
+        {/*
+          These resource hints and the font stylesheet are rendered inside the
+          body tree on purpose: React hoists them into <head> on both the server
+          and the client. Hand-writing a <head> element here made Next's
+          metadata tags and React's hoisted resources disagree between the SSR
+          HTML and the hydrating client, which surfaced as "Minified React error
+          #418 ... args[]=HTML" on every page load (and a duplicated stylesheet
+          link). Keep them in the React tree, not in a literal <head>.
+        */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         {/* eslint-disable-next-line @next/next/no-page-custom-font -- optional Google Fonts primer for the default UI font */}
-        <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-      </head>
-      <body>
+        <link
+          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+          rel="stylesheet"
+          precedence="default"
+        />
         <DesktopTitlebar />
         <CapbridgeInit />
         <ThemeProvider>
