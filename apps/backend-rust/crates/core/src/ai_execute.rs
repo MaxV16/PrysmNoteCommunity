@@ -303,6 +303,7 @@ async fn dispatch(state: &AppState, user_id: Uuid, name: &str, args: &Value) -> 
             tool_convert_subtasks_to_description(state, user_id, args).await
         }
         "complete_task" => tool_complete_task(state, user_id, args).await,
+        "rename_task" => tool_rename_task(state, user_id, args).await,
         "duplicate_task" => tool_duplicate_task(state, user_id, args).await,
         "list_tags" => tool_list_tags(state, user_id).await,
         "add_tag_to_task" => tool_add_tag_to_task(state, user_id, args).await,
@@ -1316,6 +1317,31 @@ fn update_fields_from_args(args: &Value, valid_fields: &[&str]) -> Map<String, V
         }
     }
     fields
+}
+
+/// Rename a task.
+///
+/// A dedicated flat tool on purpose: the hosted model reliably picks the
+/// dedicated verbs (`complete_task`, `reschedule_task`) but answered "rename X
+/// to Y" with prose instead of calling the generic `update_task`, whose payload
+/// is a nested `fields` object. This forwards to the same update path.
+async fn tool_rename_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {
+    let new_title = args
+        .get("new_title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let Some(new_title) = new_title else {
+        return ok_obj(json!({
+            "updated": false,
+            "error": "new_title is required",
+        }));
+    };
+    let mut forwarded = args.clone();
+    if let Some(obj) = forwarded.as_object_mut() {
+        obj.insert("fields".to_string(), json!({ "title": new_title }));
+    }
+    tool_update_task(state, user_id, &forwarded).await
 }
 
 async fn tool_update_task(state: &AppState, user_id: Uuid, args: &Value) -> ToolResult {

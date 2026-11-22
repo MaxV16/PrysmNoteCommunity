@@ -775,6 +775,28 @@
   {
     "type": "function",
     "function": {
+      "name": "rename_task",
+      "description": "Rename an existing task (changes its title only, keeping its date, status, list and everything else). Use this whenever the user says to rename, retitle, or call a task something else. task_id accepts the task id OR the exact title; new_title is the replacement title.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "new_title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "new_title"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "duplicate_task",
       "description": "Create a copy of an existing task (same title, description, priority, dates, recurrence, tags). Returns the new task.",
       "parameters": {

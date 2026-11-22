@@ -96,6 +96,7 @@ pub fn mutation_resource(tool_name: &str) -> Option<&'static str> {
         | "add_event"
         | "cancel_task_by_keywords"
         | "complete_task"
+        | "rename_task"
         | "duplicate_task"
         | "restore_task"
         | "add_tag_to_task"
@@ -918,6 +919,7 @@ mod tests {
             ("update_task", "tasks"),
             ("delete_task", "tasks"),
             ("complete_task", "tasks"),
+            ("rename_task", "tasks"),
             ("duplicate_task", "tasks"),
             ("add_tag_to_task", "tasks"),
             ("create_subtask", "tasks"),
