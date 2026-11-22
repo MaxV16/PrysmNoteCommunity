@@ -6,7 +6,7 @@
 //! messages to feed back to the model. Payload shapes match the Python backend
 //! so the agent behaves identically after the Rust cutover.
 //!
-//! This unit covers the 47 CORE tools (tasks, tags, lists, subtasks, watchlist
+//! This unit covers the 48 CORE tools (tasks, tags, lists, subtasks, watchlist
 //! and habits). EE tools (finance, countdown, quadrant, focus, GitHub, Slack,
 //! workflow, OpenClaw) are registered elsewhere and are out of scope here.
 

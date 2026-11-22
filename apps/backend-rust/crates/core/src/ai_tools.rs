@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::ai_execute::ToolResult;
 use crate::AppState;
 
-/// The tool definitions shipped by the open core (47 tools).
+/// The tool definitions shipped by the open core (48 tools).
 pub const TOOL_DEFINITIONS_JSON: &str = include_str!("ai_tools.json");
 
 static TOOL_DEFINITIONS: OnceLock<Vec<Value>> = OnceLock::new();
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn tool_definitions_are_well_formed() {
         let defs = tool_definitions();
-        assert_eq!(defs.len(), 47);
+        assert_eq!(defs.len(), 48);
         for def in defs {
             let name = def
                 .get("function")
