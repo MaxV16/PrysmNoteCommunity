@@ -92,9 +92,10 @@ describe("TaskBar", () => {
     expect(left.className).not.toContain("pointer-events-none");
     expect(left.className).toContain("opacity-0");
     expect(left.className).toContain("pointer-coarse:opacity-60");
-    expect(left.style.left).toBe("-12px");
-    expect(right.style.right).toBe("-12px");
-    expect(left.style.width).toBe("24px");
+    expect(left.style.left).toBe("0px");
+    expect(right.style.right).toBe("0px");
+    expect(left.style.width).toBe("18px");
+    expect(left.style.maxWidth).toBe("45%");
 
     // Once the task is armed via long-press, the handles stay solid.
     act(() => useAppStore.setState({ mobileActionTaskId: task.id }));
@@ -108,7 +109,7 @@ describe("TaskBar", () => {
     ) as HTMLElement;
     expect(armedLeft.className).toContain("opacity-100");
     expect(armedLeft.className).toContain("pointer-events-auto");
-    expect(armedLeft.style.width).toBe("24px");
+    expect(armedLeft.style.width).toBe("18px");
   });
 
   it("marks done tasks semi-transparent", () => {

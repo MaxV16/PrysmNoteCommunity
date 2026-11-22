@@ -10,6 +10,23 @@ export const DAY_WIDTH = 120;
 export const DAY_HEADER_HEIGHT = 56;
 export const BAR_HEIGHT = 40;
 export const BAR_GAP = 8;
+/**
+ * Horizontal breathing room between a task bar and the day-column borders it
+ * spans. Bars used to be drawn flush against the column edges, so two tasks in
+ * the same row met exactly on a day boundary and their grab areas overlapped:
+ * a press near the seam could resize the wrong task. Every bar keeps this gap
+ * on both sides, and the resize handles stay fully inside the bar.
+ */
+export const BAR_INSET_X = 4;
+/**
+ * The inset actually used for a column width. A very narrow zoomed-out column
+ * keeps at most a quarter of its width as gutter, so a one-day bar never
+ * collapses to nothing. Layout and the resize preview both call this, or the
+ * bar would jump by the difference when a resize starts.
+ */
+export function barInsetX(dayWidth: number): number {
+  return Math.min(BAR_INSET_X, dayWidth / 4);
+}
 export const TOP_PADDING = 5;
 /**
  * Extra space below the last bar in a lane. It keeps a section's empty area a

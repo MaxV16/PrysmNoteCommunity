@@ -1,7 +1,7 @@
 import type { Task } from "@/types/task";
 import { parseLocalDate } from "@/lib/utils";
 import { todayStart } from "@/lib/dates";
-import { BAR_HEIGHT, BAR_GAP, DAY_WIDTH, TOP_PADDING, SECTION_BOTTOM_PADDING, type TimelineMetrics } from "./constants";
+import { BAR_HEIGHT, BAR_GAP, barInsetX, DAY_WIDTH, TOP_PADDING, SECTION_BOTTOM_PADDING, type TimelineMetrics } from "./constants";
 
 export interface PositionedTask {
   task: Task;
@@ -165,14 +165,21 @@ export function computeLaneLayout(
 
   const totalRows = assigned.reduce((m, a) => Math.max(m, a.row + 1), 0);
 
+  // A bar keeps a small inset from the day columns it spans. This is what stops
+  // two tasks in the same row from touching on a shared day boundary: without
+  // it, the resize grabs used to overlap exactly at the seam and a press could
+  // pick either task. The inset shrinks with the column so a narrow phone
+  // column never loses most of its bar.
+  const inset = barInsetX(dayWidth);
+
   const positioned: PositionedTask[] = assigned.map(({ task, info, row }) => ({
     task,
     pos: {
       // Pixel geometry keeps bars aligned with the integer-pixel day columns.
       // Percentages produced fractional widths at some zoom levels, which made
       // dragged bars shimmer against the grid and header.
-      left: info.index * dayWidth,
-      width: (info.endIndex - info.index + 1) * dayWidth,
+      left: info.index * dayWidth + inset,
+      width: Math.max(1, (info.endIndex - info.index + 1) * dayWidth - inset * 2),
       dayIndex: info.index,
       top: topPadding + row * (barHeight + barGap),
     },

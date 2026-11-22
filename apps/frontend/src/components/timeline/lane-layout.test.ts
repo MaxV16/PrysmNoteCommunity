@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeLaneLayout } from "./lane-layout";
-import { BAR_HEIGHT, BAR_GAP, TOP_PADDING, SECTION_BOTTOM_PADDING } from "./constants";
+import { BAR_HEIGHT, BAR_GAP, BAR_INSET_X, TOP_PADDING, SECTION_BOTTOM_PADDING } from "./constants";
 import type { Task } from "@/types/task";
 
 function makeTask(partial: Partial<Task>): Task {
@@ -98,9 +98,10 @@ describe("computeLaneLayout", () => {
     const inner = computeLaneLayout([long, oneDay], inside, undefined, 120);
     expect(inner.positioned.map((p) => p.task.id).sort()).toEqual(["long", "one"]);
     const longPos = inner.positioned.find((p) => p.task.id === "long")!;
-    // Clamped to the rendered window, never negative or past its width.
-    expect(longPos.pos.left).toBe(0);
-    expect(longPos.pos.width).toBe(inside.length * 120);
+    // Clamped to the rendered window, never negative or past its width, and
+    // inset from the column borders like every other bar.
+    expect(longPos.pos.left).toBe(BAR_INSET_X);
+    expect(longPos.pos.width).toBe(inside.length * 120 - BAR_INSET_X * 2);
 
     // Scroll later: the start is far behind, the end is still ahead.
     const later = daysFor("2026-11-01", 14);
@@ -121,8 +122,8 @@ describe("computeLaneLayout", () => {
     const slice = daysFor("2026-09-10", 10);
     const { positioned } = computeLaneLayout([spanning], slice, undefined, 120);
     expect(positioned).toHaveLength(1);
-    expect(positioned[0].pos.left).toBe(0);
-    expect(positioned[0].pos.width).toBe(slice.length * 120);
+    expect(positioned[0].pos.left).toBe(BAR_INSET_X);
+    expect(positioned[0].pos.width).toBe(slice.length * 120 - BAR_INSET_X * 2);
   });
 
   it("keeps a partially overlapping bar anchored to the correct leading columns", () => {
@@ -130,8 +131,8 @@ describe("computeLaneLayout", () => {
     const slice = daysFor("2026-09-10", 10); // task's last 3 days are inside
     const { positioned } = computeLaneLayout([task], slice, undefined, 120);
     expect(positioned).toHaveLength(1);
-    expect(positioned[0].pos.left).toBe(0);
-    expect(positioned[0].pos.width).toBe(3 * 120); // Sep 10, 11, 12
+    expect(positioned[0].pos.left).toBe(BAR_INSET_X);
+    expect(positioned[0].pos.width).toBe(3 * 120 - BAR_INSET_X * 2); // Sep 10, 11, 12
   });
 
   it("uses exact pixel geometry instead of fractional percentages", () => {
@@ -139,11 +140,28 @@ describe("computeLaneLayout", () => {
     const slice = daysFor("2026-09-10", 10);
     const dayWidth = 137;
     const { positioned } = computeLaneLayout([task], slice, undefined, dayWidth);
-    expect(positioned[0].pos.left).toBe(2 * dayWidth);
-    expect(positioned[0].pos.width).toBe(3 * dayWidth);
-    // The bar sits exactly on the same 137px grid as the day columns.
-    expect((positioned[0].pos.left as number) % dayWidth).toBe(0);
-    expect((positioned[0].pos.width as number) % dayWidth).toBe(0);
+    expect(positioned[0].pos.left).toBe(2 * dayWidth + BAR_INSET_X);
+    expect(positioned[0].pos.width).toBe(3 * dayWidth - BAR_INSET_X * 2);
+    // The bar sits on the same 137px grid as the day columns, offset by the
+    // gutter on each side.
+    expect((positioned[0].pos.left as number) - BAR_INSET_X).toBe(2 * dayWidth);
+    expect((positioned[0].pos.width as number) + BAR_INSET_X * 2).toBe(3 * dayWidth);
+  });
+
+  // Regression: adjacent same-row tasks used to meet exactly on a day boundary,
+  // and their resize grabs overlapped there, so a press could resize either
+  // task. Bars now keep a gutter on both sides.
+  it("leaves a gutter between adjacent same-row bars", () => {
+    const a = makeTask({ id: "a", title: "Alpha", start_date: "2026-08-03", due_date: "2026-08-03" });
+    const b = makeTask({ id: "b", title: "Beta", start_date: "2026-08-04", due_date: "2026-08-04" });
+    const layout = computeLaneLayout([a, b], daysFor("2026-08-03", 4), undefined, 120);
+    const first = layout.positioned.find((p) => p.task.id === "a")!;
+    const second = layout.positioned.find((p) => p.task.id === "b")!;
+    expect(first.pos.top).toBe(second.pos.top);
+    expect(second.pos.left - (first.pos.left + first.pos.width)).toBe(BAR_INSET_X * 2);
+    // Each bar is also inset from its own day column, never flush to the grid.
+    expect(first.pos.left).toBe(BAR_INSET_X);
+    expect(first.pos.width).toBe(120 - BAR_INSET_X * 2);
   });
 
   it("keeps row assignment stable while the slice slides", () => {

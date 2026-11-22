@@ -21,6 +21,7 @@ import {
   taskSpanDays,
   type BarDragMode,
 } from "@/lib/timeline-drag";
+import { barInsetX } from "@/components/timeline/constants";
 
 export interface TimelineBarCommit {
   task: Task;
@@ -350,8 +351,13 @@ export function useTimelineBarDrag(
       dayDelta,
       s.mode === "resize-left" ? "left" : "right"
     );
+    // The bar keeps the same gutter it renders with, so the preview width is
+    // already the exact slot the drop commits instead of jumping by 2*inset
+    // when the gesture starts.
+    const inset = barInsetX(s.dayWidth);
+    const previewWidth = Math.max(1, span.spanDays * s.dayWidth - inset * 2);
     if (s.mode === "resize-right") {
-      const width = `${span.spanDays * s.dayWidth}px`;
+      const width = `${previewWidth}px`;
       if (width !== s.lastWidth) {
         s.el.style.setProperty("--drag-width", width);
         s.lastWidth = width;
@@ -368,7 +374,7 @@ export function useTimelineBarDrag(
       s.lastTransform = transform;
       previewTransformRef.current = true;
     }
-    const width = `${span.spanDays * s.dayWidth}px`;
+    const width = `${previewWidth}px`;
     if (width !== s.lastWidth) {
       s.el.style.setProperty("--drag-width", width);
       s.lastWidth = width;

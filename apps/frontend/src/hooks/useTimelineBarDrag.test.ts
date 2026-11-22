@@ -7,6 +7,7 @@ import {
   type TimelineBarCommit,
 } from "./useTimelineBarDrag";
 import type { BarDragMode } from "@/lib/timeline-drag";
+import { BAR_INSET_X } from "@/components/timeline/constants";
 import type { Task } from "@/types/task";
 
 function makeTask(partial: Partial<Task> = {}): Task {
@@ -609,7 +610,7 @@ describe("useTimelineBarDrag resize cleanup", () => {
 
     down(handle, "mouse", 100, 100);
     move(44, 100); // two day columns to the left
-    expect(bar.style.getPropertyValue("--drag-width")).toBe("84px");
+    expect(bar.style.getPropertyValue("--drag-width")).toBe(`${84 - BAR_INSET_X * 2}px`);
     expect(bar.style.transform).toContain("translate3d");
 
     up(44, 100);

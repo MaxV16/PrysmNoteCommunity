@@ -67,15 +67,17 @@ interface TaskBarViewProps extends TaskBarProps {
 
 /**
  * A resize handle on the left or right edge of a task bar. It shares the bar's
- * pointer engine (so move/resize/auto-scroll all behave the same) and is a
- * touch-sized hit area that sits just outside the bar edge, so a finger can
- * grab it on a phone. It is always interactive: grabbing an edge must resize,
- * never fall through to the bar's long-press (which would start a move). On a
- * fine pointer (desktop) it is hidden until the bar is hovered; on a coarse
- * pointer (touch) it stays faintly visible so it can be found, and turns solid
- * while the task is armed by a long press. It activates on movement like a
- * mouse (touchActivateOnMove), so a touch grab resizes immediately and a tap
- * with no movement commits nothing.
+ * pointer engine (so move/resize/auto-scroll all behave the same) and stays
+ * fully inside the bar edge, so two tasks that meet at a day boundary can
+ * never have overlapping grab areas. Its width is capped at a fraction of the
+ * bar so even a one-day task at minimum zoom keeps two distinct handles. It is
+ * always interactive: grabbing an edge must resize, never fall through to the
+ * bar's long-press (which would start a move). On a fine pointer (desktop) it
+ * is hidden until the bar is hovered; on a coarse pointer (touch) it stays
+ * faintly visible so it can be found, and turns solid while the task is armed
+ * by a long press. It activates on movement like a mouse
+ * (touchActivateOnMove), so a touch grab resizes immediately and a tap with no
+ * movement commits nothing.
  */
 function ResizeHandle({
   task,
@@ -134,9 +136,13 @@ function ResizeHandle({
             : "opacity-0 group-hover/bar:opacity-100 group-focus-within/bar:opacity-100 pointer-coarse:opacity-60"
         }`}
         style={{
-          [side]: side === "left" ? "-12px" : undefined,
-          right: side === "right" ? "-12px" : undefined,
-          width: 24,
+          [side]: 0,
+          width: 18,
+          // A bar can be a single narrow day column at minimum zoom. Capping the
+          // grab at a fraction of the bar keeps the left and right handles from
+          // meeting in the middle (which would make the edge hit-test ambiguous
+          // again).
+          maxWidth: "45%",
           cursor: side === "left" ? "w-resize" : "e-resize",
           touchAction: "none",
         }}

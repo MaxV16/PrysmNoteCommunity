@@ -95,12 +95,13 @@ async function main() {
   await page.waitForURL((url) => !url.pathname.startsWith("/register"), { timeout: 20000 });
   console.log("      landed on", page.url());
 
-  console.log("[2/5] open the new-task form via the toolbar + New button");
-  // The primary new-task action is the icon-only plus in the timeline toolbar.
-  const newButton = page.getByTestId("new-task-button");
+  console.log("[2/5] open the new-task form via the floating New task button");
+  // The primary new-task action is the floating action button (new-task-fab).
+  const newButton = page.getByTestId("new-task-fab");
   await newButton.waitFor({ state: "visible" });
   await newButton.click();
-  await page.getByText("Task Title").waitFor({ state: "visible" });
+  const form = page.getByTestId("task-form");
+  await form.waitFor({ state: "visible" });
 
   console.log("[3/5] create a task (no date picked → should default to today)");
   await page.getByPlaceholder("What needs to be done?").fill(title);
@@ -110,8 +111,7 @@ async function main() {
   // The create handler awaits the API round-trip plus a task refetch before the
   // timeline re-renders. Wait for the form to close (indicates the create call
   // resolved), then give the list a beat to refresh before asserting.
-  await page
-    .getByText("Task Title")
+  await form
     .waitFor({ state: "hidden", timeout: 20000 })
     .catch(() => undefined);
   let bar = page.getByText(title, { exact: true });
