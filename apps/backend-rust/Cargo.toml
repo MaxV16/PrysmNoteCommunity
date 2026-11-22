@@ -22,7 +22,7 @@ base64 = "0.22"
 thiserror = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10.3", default-features = false, features = ["rust_crypto"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "rust_decimal", "derive"] }
 webauthn-rs-core = "0.5"
 serde_cbor = { package = "serde_cbor_2", version = "0.13" }
