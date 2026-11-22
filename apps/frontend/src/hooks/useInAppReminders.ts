@@ -360,9 +360,26 @@ export function useInAppReminders() {
 
   useEffect(() => {
     if (!loaded) return;
-    void evaluateScheduled();
-    const id = setInterval(() => void evaluateScheduled(), CHECK_INTERVAL);
-    return () => clearInterval(id);
+    // Poll only while the tab is visible: a background tab kept waking up every
+    // interval just to fail an unauthenticated request (an expired access
+    // cookie logs a 401 in the console) and burn CPU. Coming back to the tab
+    // runs one pass immediately, so reminders never lag behind the user.
+    const runIfVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
+      void evaluateScheduled();
+    };
+    runIfVisible();
+    const id = setInterval(runIfVisible, CHECK_INTERVAL);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") runIfVisible();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [loaded, evaluateScheduled]);
 
   /**
