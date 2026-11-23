@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAppStore } from "@/stores/app-store";
 import type { Task, TaskStatus } from "@/types/task";
 import { toLocalDateString } from "@/lib/utils";
-import { TIER_LABELS, TIER_VALUES, normalizePriority, type PriorityTier } from "@/lib/priority";
+import { normalizePriority, type PriorityTier } from "@/lib/priority";
 import { applyEnd, parseEnd, type RecurrenceEnd } from "@/lib/recurrence";
 import { TASK_TITLE_MAX, TASK_DESCRIPTION_MAX } from "@/lib/char-limits";
 import { CharLimitHint } from "@/components/ui/CharLimitHint";
@@ -17,6 +17,7 @@ import {
   type ReminderChannel,
   type TaskReminderDraft,
 } from "./TaskReminderFields";
+import { PriorityPicker } from "./PriorityPicker";
 import {
   requestNotificationPermission,
   useNotificationPrefs,
@@ -422,13 +423,7 @@ export function TaskForm({ onSubmit, onCancel, initial, defaultDate, defaultStat
           onChange={(next) => setStatus(next as TaskStatus)}
           options={STATUS_OPTIONS}
         />
-        <ChipSelect
-          label="Priority"
-          ariaLabel="Priority"
-          value={String(priority)}
-          onChange={(next) => setPriority(Number(next) as PriorityTier)}
-          options={TIER_VALUES.map((p) => ({ value: String(p), label: TIER_LABELS[p] }))}
-        />
+        <PriorityPicker value={priority} onChange={setPriority} />
       </div>
       {dateError && <p className="-mt-1 text-xs text-danger">{dateError}</p>}
       {timeError && <p className="-mt-1 text-xs text-danger">{timeError}</p>}

@@ -383,6 +383,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   @keyframes barSettle { 0% { transform: scale(1.05); } 100% { transform: scale(1); } }
   .animate-bar-settle { animation: barSettle var(--dur-base, 180ms) var(--ease-spring, ease-out); }
 
+  /* Priority picker: a single halo that expands and fades around the chosen
+     tier. Transform and opacity only, so it runs on the compositor and never
+     affects layout. */
+  @keyframes priorityRing {
+    0% { opacity: 0.55; transform: scale(0.72); }
+    100% { opacity: 0; transform: scale(1.45); }
+  }
+  .animate-priority-ring { animation: priorityRing 320ms ease-out forwards; }
+
   /* Respect the OS "reduce motion" setting: drop the decorative loops (which
      also burn CPU/battery on low-end devices) and make the entrance
      animations effectively instant. Layout and color are unchanged. */
@@ -391,7 +400,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
     .animate-glow,
     .animate-pulse-subtle,
     .animate-bar-settle,
-    .animate-pop {
+    .animate-pop,
+    .animate-priority-ring {
       animation: none;
     }
     .fade-in,

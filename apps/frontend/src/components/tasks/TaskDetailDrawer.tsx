@@ -29,6 +29,7 @@ import { TaskChecklist } from "./TaskChecklist";
 import { TaskLinks } from "./TaskLinks";
 import { TaskTagsEditor } from "./TaskTagsEditor";
 import { DateRecurrencePopover } from "./DateRecurrencePopover";
+import { PriorityPicker } from "./PriorityPicker";
 import { describeRule } from "@/lib/recurrence";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { Markdown } from "@/components/ai/Markdown";
@@ -49,9 +50,6 @@ import {
 import { toggleTaskListCheckbox } from "@/lib/markdown-task-list";
 
 import {
-  TIER_COLORS,
-  TIER_LABELS,
-  TIER_VALUES,
   normalizePriority,
   type PriorityTier,
 } from "@/lib/priority";
@@ -115,7 +113,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const [draftTitle, setDraftTitle] = useState(task.title);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
-  const [priorityOpen, setPriorityOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [teamList, setTeamList] = useState<ShareTeam[]>([]);
   const [sharedTeamIds, setSharedTeamIds] = useState<Set<string>>(new Set());
@@ -189,7 +186,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   const { prefs: notifPrefs, update: updateNotifPrefs } = useNotificationPrefs();
   const datePillRef = useRef<HTMLButtonElement | null>(null);
   const titleOptionsRef = useRef<HTMLButtonElement | null>(null);
-  const priorityRef = useRef<HTMLButtonElement | null>(null);
   const statusRef = useRef<HTMLButtonElement | null>(null);
   const shareRef = useRef<HTMLButtonElement | null>(null);
   const descSectionRef = useRef<HTMLDivElement | null>(null);
@@ -320,7 +316,6 @@ export function TaskDetailDrawer({ task, onClose }: TaskDetailDrawerProps) {
   };
 
   const handlePriorityChange = async (value: PriorityTier) => {
-    setPriorityOpen(false);
     if (value !== tier) {
       await updateTask(task.id, { priority: value });
     }
@@ -683,35 +678,7 @@ const handleUpdate = async (data: {
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {isNote && <span className="badge bg-elevated text-muted">Note</span>}
-          <div className="relative">
-            <button
-              ref={priorityRef}
-              onClick={() => {
-                setOptionsOpen(false);
-                setPriorityOpen((v) => !v);
-              }}
-              className="flex h-5 w-5 items-center justify-center rounded-full border border-border/40 p-1 transition-transform hover:scale-110"
-              aria-label="Change priority"
-            >
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: TIER_COLORS[tier] }} />
-            </button>
-            <PopoverMenu
-              open={priorityOpen}
-              triggerRef={priorityRef}
-              align="right"
-              onClose={() => setPriorityOpen(false)}
-              className="w-40"
-            >
-              {TIER_VALUES.map((p) => (
-                <MenuItem key={p} onClick={() => handlePriorityChange(p)}>
-                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: TIER_COLORS[p] }} />
-                    {TIER_LABELS[p]}
-                  </span>
-                </MenuItem>
-              ))}
-            </PopoverMenu>
-          </div>
+          <PriorityPicker variant="dot" value={tier} onChange={handlePriorityChange} />
           <button
             onClick={onClose}
             className="pointer-coarse:h-11 pointer-coarse:w-11 flex h-7 w-7 items-center justify-center rounded-lg p-1.5 text-secondary transition-colors hover:bg-hover hover:text-primary"

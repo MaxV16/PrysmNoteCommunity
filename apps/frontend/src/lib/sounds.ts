@@ -64,6 +64,35 @@ export function playAiReplyPing(): void {
   playTone(1568, 0.09, 0.18, 0.06);
 }
 
+// A tiny pluck for a priority change. Each tier has its own note (High is the
+// brightest, Low the warmest), so the choice is audible as well as visible. The
+// quick downward pitch bend keeps it reading as a soft tick instead of a beep.
+export function playPriorityTick(tier: 1 | 2 | 3): void {
+  const audio = getCtx();
+  if (!audio) return;
+  if (audio.state === "suspended") audio.resume();
+
+  const now = audio.currentTime;
+  const freq = tier === 1 ? 659.25 : tier === 2 ? 523.25 : 392;
+  const playTone = (f: number, gain: number, duration: number) => {
+    const osc = audio.createOscillator();
+    const g = audio.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(f, now);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.94, now + duration);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(gain, now + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    osc.connect(g);
+    g.connect(audio.destination);
+    osc.start(now);
+    osc.stop(now + duration + 0.02);
+  };
+
+  playTone(freq, 0.06, 0.14);
+  playTone(freq * 2, 0.018, 0.09);
+}
+
 // A gentle reminder ping for in-app task reminders: two soft descending notes,
 // distinct from the completion chime and the AI reply ping. Synthesized so no
 // audio asset is required.
