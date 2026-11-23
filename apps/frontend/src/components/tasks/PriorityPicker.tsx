@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
-import { playPriorityTick } from "@/lib/sounds";
+import { PrioritySignal, playPriorityFeedback } from "./PrioritySignal";
 import {
   TIER_COLORS,
   TIER_LABELS,
@@ -24,37 +24,7 @@ const TIER_HINTS: Record<PriorityTier, string> = {
   3: "When there is room",
 };
 
-const BAR_HEIGHTS = [6, 10, 14];
-const BAR_HEIGHTS_COMPACT = [5, 8, 11];
 const CLOSE_DELAY_MS = 260;
-
-/**
- * A three-bar "signal" glyph: three bars for High, two for Medium, one for Low.
- * It reads faster than a coloured dot alone, and the shape still makes sense if
- * the palette is hard to distinguish.
- */
-function SignalGlyph({ tier, compact = false }: { tier: PriorityTier; compact?: boolean }) {
-  const color = TIER_COLORS[tier];
-  const filled = 4 - tier;
-  const heights = compact ? BAR_HEIGHTS_COMPACT : BAR_HEIGHTS;
-
-  return (
-    <span aria-hidden="true" className="flex items-end gap-[2px]">
-      {heights.map((height, index) => (
-        <span
-          key={height}
-          className="rounded-full"
-          style={{
-            width: 2.5,
-            height,
-            backgroundColor: color,
-            opacity: index < filled ? 1 : 0.22,
-          }}
-        />
-      ))}
-    </span>
-  );
-}
 
 function CheckIcon() {
   return (
@@ -133,13 +103,7 @@ export function PriorityPicker({
   const choose = (next: PriorityTier) => {
     if (next !== value) onChange(next);
     setPulse((n) => n + 1);
-    playPriorityTick(next);
-    if (
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(pointer: coarse)")?.matches
-    ) {
-      navigator.vibrate?.(8);
-    }
+    playPriorityFeedback(next);
     if (closeTimer.current) clearTimeout(closeTimer.current);
     closeTimer.current = setTimeout(() => setOpen(false), CLOSE_DELAY_MS);
   };
@@ -163,7 +127,7 @@ export function PriorityPicker({
         style={{ backgroundColor: `${color}14`, borderColor: `${color}4d` }}
       >
         <span key={`${value}-${pulse}`} className={pulse > 0 ? "animate-pop" : undefined}>
-          <SignalGlyph tier={value} compact />
+          <PrioritySignal tier={value} compact decorative />
         </span>
       </button>
     ) : (
@@ -186,7 +150,7 @@ export function PriorityPicker({
           key={`${value}-${pulse}`}
           className={`flex h-4 w-4 items-center justify-center ${pulse > 0 ? "animate-pop" : ""}`}
         >
-          <SignalGlyph tier={value} compact />
+          <PrioritySignal tier={value} compact decorative />
         </span>
         <span className="flex items-baseline gap-1">
           <span className="text-[10px] uppercase tracking-wide text-muted">Priority</span>
@@ -239,7 +203,7 @@ export function PriorityPicker({
                       style={{ borderColor: `${tierColor}99` }}
                     />
                   )}
-                  <SignalGlyph tier={tier} compact />
+                  <PrioritySignal tier={tier} compact decorative />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-xs font-semibold text-primary">

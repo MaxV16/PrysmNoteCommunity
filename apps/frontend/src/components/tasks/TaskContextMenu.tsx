@@ -11,6 +11,8 @@ import { useUiModule } from "@/lib/ui-module-registry";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { formatDate } from "@/lib/dates";
 import { ContextMenuItem, ContextMenuDivider } from "@/components/ui/ContextMenu";
+import { normalizePriority, type PriorityTier } from "@/lib/priority";
+import { PriorityMenuOptions } from "./PrioritySignal";
 import { buildDuplicatePayload } from "./task-duplicate";
 
 
@@ -42,6 +44,7 @@ function TaskMenu({ task, onClose }: { task: Task; onClose: () => void }) {
   const soundOn = useLocalBool("prysm_notif_sound", true);
   const rewardsOn = useLocalBool("prysm_rewards", true);
   const { showToast } = useToast();
+  const tier = normalizePriority(task.priority);
 
   const handleEdit = () => {
     setSelectedTaskId(task.id);
@@ -72,6 +75,14 @@ function TaskMenu({ task, onClose }: { task: Task; onClose: () => void }) {
         showToast("Could not update the task", "error");
       }
     })();
+  };
+
+  const handlePriority = (next: PriorityTier) => {
+    onClose();
+    if (next === tier) return;
+    void updateTask(task.id, { priority: next }).catch(() => {
+      showToast("Could not update priority", "error");
+    });
   };
 
   const handleDuplicate = () => {
@@ -133,6 +144,9 @@ function TaskMenu({ task, onClose }: { task: Task; onClose: () => void }) {
       <ContextMenuItem onClick={handleToggleStatus}>
         {task.status === "done" ? "Mark as to-do" : "Mark complete"}
       </ContextMenuItem>
+      <ContextMenuDivider />
+      <PriorityMenuOptions value={tier} onSelect={handlePriority} />
+      <ContextMenuDivider />
       <ContextMenuItem onClick={handleDuplicate}>Duplicate</ContextMenuItem>
       {stickyOn && (
         <ContextMenuItem onClick={handleSticky}>Add as sticky note</ContextMenuItem>

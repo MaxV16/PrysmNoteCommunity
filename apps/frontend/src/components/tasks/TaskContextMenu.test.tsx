@@ -99,6 +99,16 @@ describe("TaskContextMenu - task menu", () => {
     expect(screen.getByText("Add as sticky note")).toBeInTheDocument();
     expect(screen.getByText("Break down into subtasks (AI)")).toBeInTheDocument();
     expect(screen.getByText("Delete task")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Priority" })).toBeInTheDocument();
+  });
+
+  it("sets priority from the menu and closes immediately", () => {
+    const { onClose } = renderTaskMenu();
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "High" }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mocks.updateTask).toHaveBeenCalledWith("t1", { priority: 1 });
   });
 
   it("duplicate calls createTask with the clone payload", () => {

@@ -548,7 +548,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 /* Glass mode is deliberately app-wide: every elevated surface, card, board
    card, list row and task bar becomes translucent over a soft accent wash, so
    switching it on is obvious in every view instead of only where a custom
-   background happens to sit behind a card. */
+   background happens to sit behind a card. The tint is cheap on purpose: a
+   backdrop blur on rows, cards or task bars would create one compositor layer
+   per element, and a long timeline or list would then ask the browser to blur
+   hundreds of layers every scroll frame. */
 :root[data-glass="true"] body {
   background-image:
     radial-gradient(60% 55% at 10% 0%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 70%),
@@ -574,8 +577,17 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   background-color: color-mix(in srgb, var(--bg-surface) 52%, transparent) !important;
   border-color: color-mix(in srgb, var(--text-primary) 12%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 7%, transparent);
-  backdrop-filter: blur(18px) saturate(1.18);
-  -webkit-backdrop-filter: blur(18px) saturate(1.18);
+}
+
+/* Blur is reserved for the few surfaces that float above the page (menus,
+   dialogs, glass panels), so at most a handful of blurred layers exist at once.
+   Everything that repeats gets the translucent tint above without a filter. */
+:root[data-glass="true"] .glass-panel,
+:root[data-glass="true"] [data-glass-blur],
+:root[data-glass="true"] [role="dialog"],
+:root[data-glass="true"] [role="menu"] {
+  backdrop-filter: blur(10px) saturate(1.08);
+  -webkit-backdrop-filter: blur(10px) saturate(1.08);
 }
 
 /* Rows and bars are the two places that repeat hundreds of times, so they get
@@ -630,8 +642,6 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   background-color: color-mix(in srgb, var(--bg-surface) 45%, transparent) !important;
   background-image: linear-gradient(160deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%) !important;
   border-color: color-mix(in srgb, var(--border) 60%, transparent);
-  backdrop-filter: blur(10px) saturate(1.08);
-  -webkit-backdrop-filter: blur(10px) saturate(1.08);
 }
 
 :root[data-task-style="glass"] [data-list-row] {

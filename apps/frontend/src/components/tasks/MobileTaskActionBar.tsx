@@ -7,6 +7,8 @@ import { useBatchDelete } from "@/hooks/useBatchDelete";
 import { useBoardSections } from "@/hooks/useBoardSections";
 import { api } from "@/lib/api";
 import { buildDuplicatePayload } from "@/components/tasks/task-duplicate";
+import { normalizePriority, type PriorityTier } from "@/lib/priority";
+import { PriorityMenuOptions } from "./PrioritySignal";
 import { useToast } from "@/lib/toast-context";
 import { registerBackHandler } from "@/lib/back-nav";
 
@@ -84,6 +86,19 @@ export function MobileTaskActionBar({ sectionKind = "timeline" }: MobileTaskActi
     } finally {
       setBusy(false);
       close();
+    }
+  };
+
+  const handlePriority = async (next: PriorityTier) => {
+    if (next === normalizePriority(task.priority)) return;
+    setBusy(true);
+    try {
+      await updateTask(task.id, { priority: next });
+      showToast("Priority updated", "success");
+    } catch {
+      showToast("Could not update priority", "error");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -168,9 +183,16 @@ export function MobileTaskActionBar({ sectionKind = "timeline" }: MobileTaskActi
         </div>
 
         {mode === "actions" ? (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              onClick={() => void handleDone()}
+          <div className="space-y-1.5">
+            <PriorityMenuOptions
+              value={normalizePriority(task.priority)}
+              onSelect={(next) => void handlePriority(next)}
+              inMenu={false}
+              disabled={busy}
+            />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={() => void handleDone()}
               disabled={busy}
               className="btn btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
             >
@@ -203,6 +225,7 @@ export function MobileTaskActionBar({ sectionKind = "timeline" }: MobileTaskActi
             >
               Cancel
             </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-2 p-1">

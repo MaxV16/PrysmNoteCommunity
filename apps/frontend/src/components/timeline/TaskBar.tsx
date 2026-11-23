@@ -4,7 +4,8 @@ import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } 
 import { createPortal } from "react-dom";
 import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
-import { TIER_COLORS, TIER_LABELS, normalizePriority, type PriorityTier } from "@/lib/priority";
+import { TIER_COLORS, normalizePriority, type PriorityTier } from "@/lib/priority";
+import { PrioritySignal } from "@/components/tasks/PrioritySignal";
 import { taskTimeLabel } from "@/lib/task-time";
 import { parseLocalDate } from "@/lib/utils";
 import { useTimelineBarDrag } from "@/hooks/useTimelineBarDrag";
@@ -358,11 +359,12 @@ export const TaskBarView = memo(function TaskBarView({ task, style, onClick, onC
             {timeLabel}
           </span>
         )}
-        {tier === 1 && (
-          <span className="hidden shrink-0 text-[9px] font-semibold uppercase tracking-wide sm:inline" style={{ color: "var(--bar-ink-muted)", fontSize: Math.max(9, Math.round(metrics.labelPx * 0.82)) }}>
-            {TIER_LABELS[tier]}
-          </span>
-        )}
+        <PrioritySignal
+          tier={tier}
+          compact
+          decorative
+          className="hidden shrink-0 sm:inline-flex"
+        />
         <span className="task-bar-label truncate font-medium" style={{ color: "var(--bar-ink)" }}>
           {task.title}
         </span>

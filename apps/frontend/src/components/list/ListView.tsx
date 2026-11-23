@@ -13,13 +13,12 @@ import { ContextMenu } from "@/components/ui/ContextMenu";
 import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskContextMenu";
 import { SelectionActionBar } from "@/components/tasks/SelectionActionBar";
 import { useSelectionBatchActions } from "@/components/tasks/SelectionBatchActions";
-import { TIER_COLORS, normalizePriority } from "@/lib/priority";
+import { normalizePriority } from "@/lib/priority";
+import { PrioritySignal } from "@/components/tasks/PrioritySignal";
 import { useLocalBool } from "@/lib/use-local-bool";
 import { formatDate } from "@/lib/dates";
 import { taskTimeLabel } from "@/lib/task-time";
 import { useLongPress } from "@/lib/use-long-press";
-
-const PRIORITY_COLORS: Record<number, string> = TIER_COLORS;
 
 export function ListView() {
   const tasks = useAppStore((s) => s.tasks);
@@ -310,10 +309,7 @@ export function ListView() {
                       </svg>
                     )}
                   </button>
-                  <span
-                    className="h-2 w-2 rounded-full shrink-0"
-                    style={{ backgroundColor: PRIORITY_COLORS[normalizePriority(task.priority)] || "var(--text-muted)" }}
-                  />
+                  <PrioritySignal tier={normalizePriority(task.priority)} compact className="shrink-0" />
                   <div className="flex-1 min-w-0">
                     <span className={`text-sm text-scale-sm truncate block transition-colors duration-[var(--dur-slow)] ${isDone ? "line-through text-muted" : "text-primary"}`}>
                       {task.title}

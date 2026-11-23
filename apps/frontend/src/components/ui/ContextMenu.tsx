@@ -64,7 +64,9 @@ export function ContextMenu({ open, x, y, onClose, children, className = "" }: C
 
     const items = () =>
       Array.from(
-        menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? []
+        menuRef.current?.querySelectorAll<HTMLElement>(
+          '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])'
+        ) ?? []
       );
 
     const moveFocus = (dir: 1 | -1) => {

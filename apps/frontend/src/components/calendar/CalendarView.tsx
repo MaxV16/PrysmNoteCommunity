@@ -23,6 +23,7 @@ import { useToast } from "@/lib/toast-context";
 import { useLongPress } from "@/lib/use-long-press";
 import { api } from "@/lib/api";
 import { TIER_COLORS, normalizePriority } from "@/lib/priority";
+import { PrioritySignal } from "@/components/tasks/PrioritySignal";
 import { taskTimeLabel } from "@/lib/task-time";
 import { calendarOffset, daysBetweenISO, weekdayHeaders } from "@/lib/dates";
 import { toLocalDateString } from "@/lib/utils";
@@ -184,6 +185,12 @@ function CalendarDayCell({
                   : {}),
               }}
             >
+              <PrioritySignal
+                tier={normalizePriority(task.priority)}
+                compact
+                decorative
+                className="mr-1 inline-flex align-middle"
+              />
               {task.start_time ? (
                 <span className="font-semibold text-[var(--text-muted)] mr-0.5">
                   {taskTimeLabel(task)?.split(" - ")[0]} ·

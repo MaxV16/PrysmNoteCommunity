@@ -70,6 +70,31 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
+describe("TaskDetailDrawer options menu", () => {
+  it("changes priority from the options menu", async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 120,
+      height: 32,
+      top: 100,
+      left: 20,
+      right: 140,
+      bottom: 132,
+      x: 20,
+      y: 100,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    const user = userEvent.setup();
+    renderDrawer({ priority: 2 });
+
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "High" }));
+
+    expect(mocks.updateTask).toHaveBeenCalledWith("t1", { priority: 1 });
+    rectSpy.mockRestore();
+  });
+});
+
 describe("TaskDetailDrawer description editing", () => {
   it("opens the description editor with the formatting toolbar from the footer T", async () => {
     const user = userEvent.setup();

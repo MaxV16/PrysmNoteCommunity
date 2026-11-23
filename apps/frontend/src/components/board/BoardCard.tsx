@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "@/types/task";
+import { normalizePriority } from "@/lib/priority";
+import { PrioritySignal } from "@/components/tasks/PrioritySignal";
 import { useAppStore } from "@/stores/app-store";
 import { useLongPress } from "@/lib/use-long-press";
 import { formatDate } from "@/lib/dates";
@@ -211,6 +213,7 @@ export function BoardCard({
           <h3 className={`min-w-0 flex-1 text-sm text-scale-sm font-semibold leading-snug line-clamp-2 ${isDone ? "line-through text-muted" : "text-primary"}`}>
             {task.title}
           </h3>
+          <PrioritySignal tier={normalizePriority(task.priority)} compact className="mt-1 shrink-0" />
           <RoundCheckbox
             checked={isDone}
             label={isDone ? `Mark ${task.title} not done` : `Mark ${task.title} done`}

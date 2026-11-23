@@ -82,6 +82,19 @@ describe("MobileTaskActionBar", () => {
     await waitFor(() => expect(useAppStore.getState().mobileActionTaskId).toBeNull());
   });
 
+  it("sets priority from the action bar", async () => {
+    const task = makeTask();
+    useAppStore.setState({ tasks: [task], mobileActionTaskId: task.id });
+
+    render(<MobileTaskActionBar />);
+    fireEvent.click(screen.getByRole("button", { name: "High" }));
+
+    await waitFor(() => expect(h.updateTask).toHaveBeenCalledWith("t1", { priority: 1 }));
+    await waitFor(() =>
+      expect(h.showToast).toHaveBeenCalledWith("Priority updated", "success")
+    );
+  });
+
   it("deletes via the undo flow", async () => {
     const task = makeTask();
     useAppStore.setState({ tasks: [task], mobileActionTaskId: task.id });

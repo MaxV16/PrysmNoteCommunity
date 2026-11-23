@@ -7,10 +7,10 @@ import type { Task } from "@/types/task";
 import { useAppStore } from "@/stores/app-store";
 import { useTasks } from "@/hooks/useTasks";
 import { useLongPress } from "@/lib/use-long-press";
-import { TIER_COLORS, normalizePriority } from "@/lib/priority";
+import { normalizePriority } from "@/lib/priority";
+import { PrioritySignal } from "@/components/tasks/PrioritySignal";
 import { formatDate } from "@/lib/dates";
 
-const PRIORITY_COLORS = TIER_COLORS;
 const VISIBLE_SUBTASKS = 2;
 
 function formatDueDate(dateStr: string): string {
@@ -115,10 +115,7 @@ export function KanbanCard({ task, subtasks = [], sectionId, onContextMenu, sele
         onPointerUp={longPress.onPointerUp}
         onPointerCancel={longPress.onPointerCancel}
       >
-        <span
-          className="mt-0.5 block h-2 w-2 shrink-0 rounded-full"
-          style={{ backgroundColor: PRIORITY_COLORS[normalizePriority(task.priority)] || "var(--text-muted)" }}
-        />
+        <PrioritySignal tier={normalizePriority(task.priority)} compact className="mt-0.5 shrink-0" />
         <span className="text-sm text-scale-sm text-primary leading-snug">{task.title}</span>
       </div>
 

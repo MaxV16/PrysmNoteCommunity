@@ -30,6 +30,7 @@ import { TaskLinks } from "./TaskLinks";
 import { TaskTagsEditor } from "./TaskTagsEditor";
 import { DateRecurrencePopover } from "./DateRecurrencePopover";
 import { PriorityPicker } from "./PriorityPicker";
+import { PriorityMenuOptions } from "./PrioritySignal";
 import { describeRule } from "@/lib/recurrence";
 import { MarkdownEditor } from "@/components/ui/MarkdownEditor";
 import { Markdown } from "@/components/ai/Markdown";
@@ -782,6 +783,11 @@ const handleUpdate = async (data: {
                 setEditing(true);
               }}
               onDelete={handleDelete}
+              priority={tier}
+              onPriorityChange={(next) => {
+                setOptionsOpen(false);
+                void handlePriorityChange(next);
+              }}
             />
           </PopoverMenu>
         </div>
@@ -1235,6 +1241,8 @@ interface OptionsMenuContentProps {
   onSticky: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  priority: PriorityTier;
+  onPriorityChange: (tier: PriorityTier) => void;
 }
 
 function OptionsMenuContent({
@@ -1246,9 +1254,13 @@ function OptionsMenuContent({
   onSticky,
   onEdit,
   onDelete,
+  priority,
+  onPriorityChange,
 }: OptionsMenuContentProps) {
   return (
     <>
+      <PriorityMenuOptions value={priority} onSelect={onPriorityChange} />
+      <div className="my-1 h-px bg-border/60" />
       <MenuItem onClick={onConvertToSubtasks} disabled={busy}>
         Convert description to subtasks
       </MenuItem>
