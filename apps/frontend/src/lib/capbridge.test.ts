@@ -222,6 +222,12 @@ describe("native reminder notifications", () => {
     await reconcileNativeReminders([
       { id: "keep", title: "Keep me", reminder_at: "2030-01-01T09:00:00Z" },
       { id: "past", title: "Too late", reminder_at: "2020-01-01T09:00:00Z" },
+      {
+        id: "in-app-only",
+        title: "No OS reminder",
+        reminder_at: "2030-01-01T09:00:00Z",
+        reminder_push: false,
+      },
     ]);
 
     expect(plugin.cancel).toHaveBeenCalledTimes(1);

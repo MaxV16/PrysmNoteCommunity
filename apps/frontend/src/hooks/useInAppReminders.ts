@@ -11,6 +11,7 @@ import {
   syncDesktopReminders,
 } from "@/lib/desktop-bridge";
 import {
+  ensureNativeNotificationPermission,
   nativeNotificationsSupported,
   reconcileNativeReminders,
   type NativeReminderRow,
@@ -389,6 +390,9 @@ export function useInAppReminders() {
    */
   const reconcileNative = useCallback(async () => {
     if (!nativeNotificationsSupported()) return;
+    // The first signed-in launch asks once for the OS permission; without it
+    // every schedule call is a silent no-op on Android 13+.
+    await ensureNativeNotificationPermission();
     try {
       const rows = await api.get<NativeReminderRow[]>(
         "/notifications/upcoming-reminders?limit=200"

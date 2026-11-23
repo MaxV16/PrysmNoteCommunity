@@ -247,6 +247,22 @@ export interface NativeReminderRow {
   id: string;
   title: string;
   reminder_at: string;
+  /** Server flag for the Device channel; false means in-app only. */
+  reminder_push?: boolean;
+}
+
+/**
+ * Ask for notification permission at most once per app session, after the user
+ * is signed in. An app that never asks can schedule nothing, which is why
+ * Android reminders silently did nothing on a fresh install.
+ */
+let permissionPrompted = false;
+export async function ensureNativeNotificationPermission(): Promise<boolean> {
+  const plugin = getLocalNotifications();
+  if (!plugin) return false;
+  if (permissionPrompted) return permissionGranted(plugin);
+  permissionPrompted = true;
+  return requestNativeNotificationPermission();
 }
 
 /**
@@ -263,6 +279,9 @@ export async function reconcileNativeReminders(rows: NativeReminderRow[]): Promi
   const upcoming = (rows || [])
     .filter((row) => {
       if (!row || typeof row.id !== "string" || !row.reminder_at) return false;
+      // The endpoint also returns in-app-only reminders; only the Device
+      // channel belongs in the OS schedule.
+      if (row.reminder_push === false) return false;
       const at = new Date(row.reminder_at).getTime();
       return !Number.isNaN(at) && at > now;
     })
@@ -443,6 +462,9 @@ export function initCapbridge(): void {
   // a notification for a task outside the loaded timeline window still resolves.
   const localNotifications = c.Plugins.LocalNotifications;
   if (localNotifications) {
+    // Create the channel immediately so the OS has a valid target even before
+    // the user grants permission or the first reminder is saved.
+    void ensureReminderChannel(localNotifications);
     void localNotifications.addListener("localNotificationActionPerformed", (event) => {
       const notification = event?.notification as
         | { extra?: Record<string, unknown> }

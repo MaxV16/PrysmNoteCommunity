@@ -98,7 +98,7 @@ async function assertToolbarControlsInViewport(page) {
   await page.getByTestId("timeline-toolbar").evaluate((el) => { el.scrollLeft = 0; });
   const controls = [
     ["view switcher", page.getByTestId("view-mode-toggle")],
-    ["+ New", page.getByTestId("new-task-button")],
+    ["+ New", page.getByTestId("new-task-fab")],
   ];
   for (const [name, locator] of controls) {
     const box = await locator.boundingBox();
@@ -255,14 +255,14 @@ async function main() {
   console.log("[3/7] create a task via + New (defaults to today)");
   await dismissCookieBanner(page);
   await dismissTour(page);
-  const newButton = page.getByTestId("new-task-button");
+  const newButton = page.getByTestId("new-task-fab");
   await newButton.waitFor({ state: "visible" });
   await newButton.click();
-  await page.getByText("Task Title").waitFor({ state: "visible" });
+  const taskForm = page.getByTestId("task-form");
+  await taskForm.waitFor({ state: "visible" });
   await page.getByPlaceholder("What needs to be done?").fill(title);
   await page.getByRole("button", { name: "Create Task" }).click();
-  await page
-    .getByText("Task Title")
+  await taskForm
     .waitFor({ state: "hidden", timeout: 20000 })
     .catch(() => undefined);
   let bar = page.locator('[data-task-bar]', { hasText: title });

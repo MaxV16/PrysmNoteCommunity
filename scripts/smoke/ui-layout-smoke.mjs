@@ -174,7 +174,7 @@ async function main() {
   );
 
   console.log("[3/7] New Task sheet: one scroll region, visible action bar");
-  await page.getByTestId("new-task-button").click();
+  await page.getByTestId("new-task-fab").click();
   const dialog = page.getByRole("dialog");
   await dialog.waitFor({ state: "visible", timeout: 10000 });
   const createButton = page.getByRole("button", { name: "Create Task" });
@@ -199,8 +199,15 @@ async function main() {
         // "second scroll region" defect (which was a wrapping div).
         if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") continue;
         const overflowY = getComputedStyle(el).overflowY;
-        if (overflowY === "auto" || overflowY === "scroll") {
-          offenders.push(`${el.tagName.toLowerCase()}:${overflowY}`);
+        // `overflow-x: auto` computes overflow-y to auto as well, so a horizontal
+        // chip rail would otherwise look like a second vertical scroller. Only a
+        // container that actually overflows vertically is a nested scroll region.
+        if (
+          (overflowY === "auto" || overflowY === "scroll") &&
+          el.scrollHeight > el.clientHeight + 1
+        ) {
+          const cls = typeof el.className === "string" ? el.className : "";
+          offenders.push(`${el.tagName.toLowerCase()}${cls ? `.${cls}` : ""}:${overflowY}`);
         }
       }
       return offenders;

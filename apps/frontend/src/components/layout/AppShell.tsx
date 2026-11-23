@@ -53,7 +53,6 @@ import { useSyncTimezone } from "@/hooks/useSyncTimezone";
 import { track } from "@/lib/track";
 import { initErrorTracking } from "@/lib/error-track";
 import { MobileTabBar } from "@/components/layout/MobileTabBar";
-import { InstallBanner } from "@/components/pwa/InstallBanner";
 import { useInAppReminders } from "@/hooks/useInAppReminders";
 import { ReminderStack } from "@/components/notifications/ReminderStack";
 import { MobileTaskActionBar } from "@/components/tasks/MobileTaskActionBar";
@@ -250,20 +249,6 @@ export function AppShell() {
     if (!smallScreen) setSidebarCollapsed(v);
   };
 
-  // Cross-browser PWA install surface (native dialog on Chromium, manual
-  // Share/menu steps on iOS, Brave, Firefox and other non-supporting browsers).
-  // The marketing "Install on your phone" link sets ?install=1 to open the guide.
-  const [installRequested, setInstallRequested] = useState(false);
-  useEffect(() => {
-    try {
-      if (new URLSearchParams(window.location.search).get("install") === "1") {
-        setInstallRequested(true);
-      }
-    } catch {
-      /* ignore malformed URLs */
-    }
-  }, []);
-
   const handleSelectView = (v: WorkspaceView) => {
     setView(v);
     if (smallScreen) setSidebarOpen(false);
@@ -385,8 +370,6 @@ export function AppShell() {
       className="flex h-dvh max-h-dvh w-screen flex-col overflow-hidden bg-base"
       style={{ "--tabbar-h": `${tabBarHeight}px` } as React.CSSProperties}
     >
-      <InstallBanner smallScreen={smallScreen} autoOpenGuide={installRequested} />
-
       <div className="flex min-h-0 min-w-0 flex-1">
       {sidebarOn && !smallScreen && (
         <SidebarLeft

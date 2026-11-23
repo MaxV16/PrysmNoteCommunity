@@ -22,7 +22,7 @@ side; the source is at https://github.com/MaxV16/PrysmNoteCommunity.
 
 - [Product](https://prysmnote.com/marketing/features): what the app does
 - [Pricing](https://prysmnote.com/marketing/pricing): plans and what they include
-- [Downloads](https://prysmnote.com/marketing/downloads): desktop apps for macOS, Windows and Linux
+- [Downloads](https://prysmnote.com/marketing/downloads): desktop apps for macOS, Windows and Linux, and the Android app on Google Play
 - [Learn](https://prysmnote.com/marketing/learn): explainers about notes, tasks, planning and AI
 - [Use cases](https://prysmnote.com/marketing/use-cases): how people use it
 - [Comparisons](https://prysmnote.com/marketing/vs): how it differs from other tools

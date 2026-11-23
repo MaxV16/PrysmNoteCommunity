@@ -65,6 +65,8 @@ plans/
 .turbo/
 apps/frontend/.turbo/
 
+# Android signing material and build output (the upload key never ships)
+
 # Rust build output
 /apps/backend-rust/target/
 
