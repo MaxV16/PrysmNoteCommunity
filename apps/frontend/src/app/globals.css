@@ -653,3 +653,27 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   opacity: 0.92;
 }
 
+/* Glass is a mood, not a reading test. Anything that carries task text keeps a
+   near-opaque surface so a board card over a photo, a kanban card, a list row
+   or the task sheet never lets the wash compete with the title. The ambient
+   page wash and the floating menus and dialogs still read as glass. */
+:root[data-glass="true"] [data-list-row],
+:root[data-glass="true"] [data-board-card],
+:root[data-glass="true"] [data-kanban-card][class],
+:root[data-task-style="glass"] [data-list-row],
+:root[data-task-style="glass"] [data-board-card],
+:root[data-task-style="glass"] [data-kanban-card][class] {
+  background-color: color-mix(in srgb, var(--bg-surface) 94%, transparent) !important;
+}
+
+:root[data-glass="true"] [data-testid="task-drawer"] [class*="bg-surface"] {
+  background-color: var(--bg-surface) !important;
+}
+
+/* Dialogs carry forms and confirmation copy, so they get the same near-opaque
+   treatment as task surfaces. The blur stays, but the text never sits on a
+   moving board or timeline behind it. */
+:root[data-glass="true"] [role="dialog"] {
+  background-color: color-mix(in srgb, var(--bg-surface) 96%, transparent) !important;
+}
+
