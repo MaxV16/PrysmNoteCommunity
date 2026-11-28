@@ -64,6 +64,15 @@ export const KNOWN_CSS_VARS: ReadonlySet<string> = new Set([
   "--surface-board-size",
   "--surface-countdown-image",
   "--surface-countdown-size",
+  // Glass frost knobs: surface opacity and blur radius per layer. They are
+  // layout/appearance values, never theme colors, so they are also listed in
+  // NON_THEME_CSS_VARS to block theme imports.
+  "--glass-surface-soft",
+  "--glass-surface-task",
+  "--glass-surface-floating",
+  "--glass-blur-soft",
+  "--glass-blur-task",
+  "--glass-blur-floating",
   "--font-ui",
   // Layout-only properties that appear in globals.css but must never be
   // importable as theme tokens (see NON_THEME_CSS_VARS below).
@@ -81,6 +90,12 @@ export const NON_THEME_CSS_VARS: ReadonlySet<string> = new Set([
   "--surface-board-size",
   "--surface-countdown-image",
   "--surface-countdown-size",
+  "--glass-surface-soft",
+  "--glass-surface-task",
+  "--glass-surface-floating",
+  "--glass-blur-soft",
+  "--glass-blur-task",
+  "--glass-blur-floating",
   "--ui-scale",
   "--font-scale",
   "--dur-fast",
