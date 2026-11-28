@@ -12,16 +12,19 @@ import { OfflineBanner } from "@/components/ui/OfflineBanner";
 import { CookieBanner } from "@/components/ui/CookieBanner";
 import { DesktopTitlebar } from "@/components/desktop/DesktopTitlebar";
 import { CapbridgeInit } from "@/components/capbridge/CapbridgeInit";
+import { OG_IMAGE } from "@/lib/seo";
 import Script from "next/script";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://prysmnote.com"),
+  applicationName: "Prysm Note",
+  category: "productivity",
   title: {
-    default: "Prysm Note",
+    default: "Prysm Note: AI task manager for plans, notes and habits",
     template: "%s | Prysm Note",
   },
   description:
-    "Prysm Note is an AI-powered task manager that turns what you type or say into a plan. It remembers your commitments, keeps your schedule, and syncs across every device.",
+    "Prysm Note turns what you type or say into tasks, a timeline and notes. An AI task manager with calendar, habits, focus and a linked vault. Start free.",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/prysm-icon.png", apple: "/icons/apple-touch-icon.png" },
   appleWebApp: {
@@ -32,16 +35,18 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: "Prysm Note",
-    title: "Prysm Note",
+    title: "Prysm Note: AI task manager for plans, notes and habits",
     description:
-      "An AI-powered task manager that turns what you type or say into a plan, keeps your schedule, and syncs across every device.",
+      "Turn what you type or say into tasks, a timeline and notes. An AI task manager with habits, focus and a linked vault.",
     url: "/",
+    images: [OG_IMAGE],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Prysm Note",
+    title: "Prysm Note: AI task manager for plans, notes and habits",
     description:
-      "An AI-powered task manager that turns what you type or say into a plan, keeps your schedule, and syncs across every device.",
+      "Turn what you type or say into tasks, a timeline and notes. An AI task manager with habits, focus and a linked vault.",
+    images: [OG_IMAGE.url],
   },
 };
 
