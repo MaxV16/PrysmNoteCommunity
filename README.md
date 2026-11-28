@@ -1,6 +1,12 @@
-﻿# Prysm Note 🔮
+# Prysm Note
 
-AI-powered task management with a 3-pane interface (sidebar, timeline, AI chat). Built as a folder-based monorepo.
+Prysm Note is an AI task manager with a real timeline, linked notes, habits, focus and a self-hostable open core. Use the hosted app at [prysmnote.com](https://prysmnote.com), get the Android app on [Google Play](https://play.google.com/store/apps/details?id=com.prysmnote.app), or run the community edition yourself.
+
+[Website](https://prysmnote.com) | [Pricing](https://prysmnote.com/pricing) | [Guides](https://prysmnote.com/marketing/learn) | [Discord](https://discord.gg/ywBxaWVuXC)
+
+![Prysm Note](https://prysmnote.com/og-image.png)
+
+The hosted product adds the assistant, the Vault, finance, Slack, GitHub and calendar sync. This repository is the open core: tasks, the timeline, notes, watchlist, habits, countdowns and the assistant with your own AI key (BYOK).
 
 ## Quick Start
 
@@ -10,16 +16,15 @@ The open-core build is published to Docker Hub on every release, so you can run 
 without cloning anything:
 
 ```bash
-curl -O https://raw.githubusercontent.com/PrysmNoteCommunity/prysm-note/main/docker-compose.community.yml
-curl -O https://raw.githubusercontent.com/PrysmNoteCommunity/prysm-note/main/docker/db/init.sql
-curl -O https://raw.githubusercontent.com/PrysmNoteCommunity/prysm-note/main/docker/db/zz-init-roles.sh
+curl -O https://raw.githubusercontent.com/MaxV16/PrysmNoteCommunity/main/docker-compose.community.yml
+curl -O https://raw.githubusercontent.com/MaxV16/PrysmNoteCommunity/main/docker/db/init.sql
+curl -O https://raw.githubusercontent.com/MaxV16/PrysmNoteCommunity/main/docker/db/zz-init-roles.sh
 docker compose -f docker-compose.community.yml up -d
 # open http://localhost:3000
 ```
 
-That stack is the open-core edition: tasks, notes, timeline, watchlist, habits,
-countdowns and the assistant with your own AI key (BYOK). The team and billing
-features (finance dashboards, Slack, GitHub, calendar sync) are not part of it.
+That stack is the open-core edition. The team and billing features (finance
+dashboards, Slack, GitHub, calendar sync) are not part of it.
 
 The defaults in that file are development defaults. Before exposing it to the
 internet, set `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, the database passwords,
@@ -35,7 +40,7 @@ cp .env.example .env
 docker-compose up
 ```
 
-### Option 2: Local Development
+### Option 3: Local Development
 
 **Prerequisites:** Node.js 20+, Rust 1.83+, PostgreSQL 16 with pgvector
 
