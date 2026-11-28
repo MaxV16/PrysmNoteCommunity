@@ -725,3 +725,36 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   -webkit-backdrop-filter: blur(var(--glass-blur-floating)) saturate(1.4);
 }
 
+/* Marketing reads as a publication, not a product template. Headings get the
+   serif display face, page titles stay in text ink instead of accent purple,
+   and cards lose the lift so the writing carries the page. The landing hero
+   keeps its accent phrase through an inline span, not a second colour system. */
+[data-marketing] {
+  --font-marketing-display: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+}
+
+[data-marketing] h1 {
+  font-family: var(--font-marketing-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+[data-marketing] h1.gradient-text {
+  color: var(--text-primary);
+}
+
+[data-marketing] h2 {
+  letter-spacing: -0.015em;
+}
+
+[data-marketing] .card {
+  box-shadow: none;
+}
+
+/* The learn hub can hold hundreds of guides. Grouping alone does not stop the
+   browser painting every row, so each group opts into content-visibility. The
+   intrinsic size keeps the scrollbar honest while a group is off screen. */
+.seo-group {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 520px;
+}

@@ -74,6 +74,9 @@ export const KNOWN_CSS_VARS: ReadonlySet<string> = new Set([
   "--glass-blur-task",
   "--glass-blur-floating",
   "--font-ui",
+  // Marketing display face. It is a presentation knob, not a theme color, so
+  // it is also listed in NON_THEME_CSS_VARS to block theme imports.
+  "--font-marketing-display",
   // Layout-only properties that appear in globals.css but must never be
   // importable as theme tokens (see NON_THEME_CSS_VARS below).
   "--desktop-titlebar",
@@ -96,6 +99,7 @@ export const NON_THEME_CSS_VARS: ReadonlySet<string> = new Set([
   "--glass-blur-soft",
   "--glass-blur-task",
   "--glass-blur-floating",
+  "--font-marketing-display",
   "--ui-scale",
   "--font-scale",
   "--dur-fast",

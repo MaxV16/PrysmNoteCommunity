@@ -42,7 +42,6 @@ import { TaskContextMenu, type ContextMenuState } from "@/components/tasks/TaskC
 import { BoardCard } from "./BoardCard";
 import {
   cardColor,
-  isWideCard,
   loadColorOverrides,
   pickDecoration,
   saveColorOverrides,
@@ -148,7 +147,6 @@ function BoardGroup({
                 subtasks={childrenByParent.get(task.id) ?? []}
                 color={cardColor(task.id, overrides)}
                 decoration={pickDecoration(task.id)}
-                spanClass={isWideCard(task.id) ? "sm:col-span-2" : ""}
                 selected={selectedTaskIds.has(task.id)}
                 onOpen={onOpen}
                 onToggleSubtask={(sub) => onToggleSubtask(sub)}

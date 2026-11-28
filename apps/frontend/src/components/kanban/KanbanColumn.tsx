@@ -133,6 +133,12 @@ export function KanbanColumn({
           onEmptyContextMenu?.(e, section);
         }}
       >
+        {tasks.length === 0 && (
+          <div className="flex flex-col items-center gap-1 px-4 py-9 text-center">
+            <p className="text-xs font-medium text-secondary">No tasks in this section</p>
+            <p className="text-[11px] text-muted">Drop a task here, or add one below.</p>
+          </div>
+        )}
         <SortableContext items={tasks.map((t) => t.id)} strategy={strategy}>
           {cardLayout === "side_by_side" ? (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-3">

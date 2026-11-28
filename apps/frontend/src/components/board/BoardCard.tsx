@@ -285,7 +285,7 @@ export function BoardCard({
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 opacity-100 transition-opacity focus-within:opacity-100 md:opacity-0 md:group-hover:opacity-100">
+        <div className="hidden items-center gap-1.5 opacity-0 transition-opacity focus-within:opacity-100 md:flex md:group-hover:opacity-100">
           {MUTED_PALETTE.map((c) => (
             <button
               key={c}
