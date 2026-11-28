@@ -555,35 +555,47 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
    deeper blur than a long list of rows. */
 :root[data-glass="true"],
 :root[data-task-style="glass"] {
-  --glass-surface-soft: 78%;
-  --glass-surface-task: 86%;
-  --glass-surface-floating: 92%;
-  --glass-blur-soft: 18px;
-  --glass-blur-task: 16px;
-  --glass-blur-floating: 36px;
+  --glass-surface-soft: 62%;
+  --glass-surface-task: 70%;
+  --glass-surface-floating: 78%;
+  --glass-blur-soft: 26px;
+  --glass-blur-task: 24px;
+  --glass-blur-floating: 40px;
 }
 
 :root[data-glass="true"] body {
   background-image:
-    radial-gradient(60% 55% at 10% 0%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 70%),
-    radial-gradient(55% 50% at 100% 8%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
-    radial-gradient(45% 45% at 50% 100%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 75%);
+    radial-gradient(60% 55% at 10% 0%, color-mix(in srgb, var(--accent) 36%, transparent), transparent 70%),
+    radial-gradient(55% 50% at 100% 8%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%),
+    radial-gradient(45% 45% at 50% 100%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 75%);
   background-attachment: fixed;
 }
 
 /* The wash can only show through if the base panes stop painting an opaque
-   fill over it. Keeping them slightly translucent is the difference between
-   "glass does nothing" and glass you can actually see, while 86% still gives
-   body copy a stable backdrop. Only the root utility class is touched, not
-   every bg-base-ish variant. */
-:root[data-glass="true"] .bg-base {
-  background-color: color-mix(in srgb, var(--bg-base) 86%, transparent) !important;
+   fill over it. The shell is the one canvas: it paints a soft accent wash, and
+   every nested bg-base pane goes transparent so the wash is continuous behind
+   the timeline, sidebar, chat and any sheet opened over them. Without this the
+   panes stack into a flat dark rectangle and glass has nothing to refract. */
+:root[data-glass="true"] .bg-base,
+:root[data-task-style="glass"] .bg-base {
+  background-color: transparent !important;
 }
 
-/* Every repeating surface gets a real frosted layer now. The previous version
-   left these at 52% with no filter, which let a board photo or the page wash
-   show through the text. A moderate blur plus a firmer fill keeps the glass
-   look and makes the content legible on both a phone and a large monitor. */
+:root[data-glass="true"] [data-glass-canvas],
+:root[data-task-style="glass"] [data-glass-canvas] {
+  background-color: color-mix(in srgb, var(--bg-base) 78%, transparent) !important;
+  background-image:
+    radial-gradient(70% 62% at 6% 0%, color-mix(in srgb, var(--accent) 40%, transparent), transparent 72%),
+    radial-gradient(58% 54% at 100% 6%, color-mix(in srgb, var(--grad-via) 26%, transparent), transparent 72%),
+    radial-gradient(60% 55% at 58% 100%, color-mix(in srgb, var(--grad-to) 20%, transparent), transparent 76%);
+  background-repeat: no-repeat;
+}
+
+/* Every repeating surface gets a real frosted layer now. The fill stays light
+   enough that the wash and the content behind it read through, while a wide
+   blur and a bright top edge make the surface look like glass instead of a
+   solid panel. Text stays legible because the blur smears whatever sits
+   behind it, not because the fill hides it. */
 :root[data-glass="true"] .card,
 :root[data-glass="true"] .card-glow,
 :root[data-glass="true"] [data-board-card],
@@ -594,17 +606,23 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 :root[data-task-style="glass"] [data-board-card],
 :root[data-task-style="glass"] [class*="bg-surface"]:where(:not(button):not(input):not(select):not(textarea)),
 :root[data-task-style="glass"] [class*="bg-elevated"]:where(:not(button):not(input):not(select):not(textarea)) {
-  background-color: color-mix(in srgb, var(--bg-surface) var(--glass-surface-soft), transparent) !important;
-  border-color: color-mix(in srgb, var(--text-primary) 16%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 9%, transparent);
-  backdrop-filter: blur(var(--glass-blur-soft)) saturate(1.16);
-  -webkit-backdrop-filter: blur(var(--glass-blur-soft)) saturate(1.16);
+  background-color: color-mix(in srgb, var(--bg-elevated) var(--glass-surface-soft), transparent) !important;
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 10%, transparent),
+    transparent 42%
+  );
+  border-color: color-mix(in srgb, var(--text-primary) 18%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 12%, transparent);
+  backdrop-filter: blur(var(--glass-blur-soft)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--glass-blur-soft)) saturate(1.3);
 }
 
 /* Anything that opens above the page gets the deepest frost. Menus, dialogs,
    popovers, the command palette and the task sheet need to read as a single
-   surface, so their fill is firmer and the blur is more than double the card
-   value. This is the layer that used to look like a see-through pane. */
+   surface, so their fill is firmer and the blur is much wider than the card
+   value. The lit top edge is what makes a floating pane read as glass rather
+   than as a flat rectangle. */
 :root[data-glass="true"] .glass-panel,
 :root[data-glass="true"] [data-glass-blur],
 :root[data-glass="true"] [role="dialog"],
@@ -613,9 +631,16 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 :root[data-task-style="glass"] [data-glass-blur],
 :root[data-task-style="glass"] [role="dialog"],
 :root[data-task-style="glass"] [role="menu"] {
-  background-color: color-mix(in srgb, var(--bg-surface) var(--glass-surface-floating), transparent) !important;
-  backdrop-filter: blur(var(--glass-blur-floating)) saturate(1.28);
-  -webkit-backdrop-filter: blur(var(--glass-blur-floating)) saturate(1.28);
+  background-color: color-mix(in srgb, var(--bg-hover) var(--glass-surface-floating), transparent) !important;
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 14%, transparent),
+    transparent 38%
+  );
+  border-color: color-mix(in srgb, var(--text-primary) 20%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 14%, transparent);
+  backdrop-filter: blur(var(--glass-blur-floating)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur-floating)) saturate(1.4);
 }
 
 /* List rows, board cards and kanban cards repeat the most, so they get the
@@ -626,10 +651,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
 :root[data-task-style="glass"] [data-list-row],
 :root[data-task-style="glass"] [data-board-card],
 :root[data-task-style="glass"] [data-kanban-card][class] {
-  background-color: color-mix(in srgb, var(--bg-surface) var(--glass-surface-task), transparent) !important;
-  border-color: color-mix(in srgb, var(--text-primary) 14%, transparent);
-  backdrop-filter: blur(var(--glass-blur-task)) saturate(1.14);
-  -webkit-backdrop-filter: blur(var(--glass-blur-task)) saturate(1.14);
+  background-color: color-mix(in srgb, var(--bg-elevated) var(--glass-surface-task), transparent) !important;
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 8%, transparent),
+    transparent 46%
+  );
+  border-color: color-mix(in srgb, var(--text-primary) 16%, transparent);
+  backdrop-filter: blur(var(--glass-blur-task)) saturate(1.24);
+  -webkit-backdrop-filter: blur(var(--glass-blur-task)) saturate(1.24);
 }
 
 :root[data-glass="true"] [data-board-card],
@@ -679,18 +709,19 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline: non
   opacity: 0.97;
 }
 
-/* The task sheet is the main reading surface on a phone, so it is frosted but
-   nearly solid. Nested fields keep their own firmer fill and stay crisp while
-   the panel edge still reads as glass over the timeline. */
-:root[data-glass="true"] [data-testid="task-drawer"] [class*="bg-surface"],
-:root[data-task-style="glass"] [data-testid="task-drawer"] [class*="bg-surface"] {
-  background-color: color-mix(in srgb, var(--bg-surface) 96%, transparent) !important;
-}
-
+/* The task sheet is the main reading surface on a phone. It gets the same deep
+   frost as a floating menu, and its fields keep their own solid fills so the
+   content stays crisp while the panel edge reads as glass over the timeline. */
 :root[data-glass="true"] [data-testid="task-drawer"] > div:last-child,
 :root[data-task-style="glass"] [data-testid="task-drawer"] > div:last-child {
-  background-color: color-mix(in srgb, var(--bg-surface) var(--glass-surface-floating), transparent) !important;
-  backdrop-filter: blur(var(--glass-blur-floating)) saturate(1.24);
-  -webkit-backdrop-filter: blur(var(--glass-blur-floating)) saturate(1.24);
+  background-color: color-mix(in srgb, var(--bg-hover) var(--glass-surface-floating), transparent) !important;
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--text-primary) 12%, transparent),
+    transparent 32%
+  );
+  border-color: color-mix(in srgb, var(--text-primary) 20%, transparent);
+  backdrop-filter: blur(var(--glass-blur-floating)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur-floating)) saturate(1.4);
 }
 

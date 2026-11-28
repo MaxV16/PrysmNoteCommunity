@@ -367,6 +367,7 @@ export function AppShell() {
   return (
     <div
       data-app-shell
+      data-glass-canvas
       className="flex h-dvh max-h-dvh w-screen flex-col overflow-hidden bg-base"
       style={{ "--tabbar-h": `${tabBarHeight}px` } as React.CSSProperties}
     >
