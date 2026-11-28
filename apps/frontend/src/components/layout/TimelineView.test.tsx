@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TimelineView, type TimelineViewMode } from "./TimelineView";
 import { ToastProvider } from "@/lib/toast-context";
@@ -217,6 +217,20 @@ describe("TimelineView selection action bar", () => {
   it("does not render the floating bar when nothing is selected", () => {
     renderTimeline("timeline");
     expect(screen.queryByTestId("selection-action-bar")).not.toBeInTheDocument();
+  });
+
+  it("leaves browser zoom shortcuts and Ctrl + wheel to the browser", () => {
+    renderTimeline("timeline");
+    const body = document.querySelector("[data-timeline-body]") as HTMLElement;
+    expect(body).not.toBeNull();
+
+    // The app used to swallow these and zoom only the timeline, which meant
+    // Ctrl +/- never scaled the rest of the interface. Returning true means the
+    // event was not cancelled and the browser still handles page zoom.
+    expect(fireEvent.keyDown(window, { key: "=", ctrlKey: true })).toBe(true);
+    expect(fireEvent.keyDown(window, { key: "-", ctrlKey: true })).toBe(true);
+    expect(fireEvent.keyDown(window, { key: "0", ctrlKey: true })).toBe(true);
+    expect(fireEvent.wheel(body, { deltaY: -120, ctrlKey: true })).toBe(true);
   });
 
   it("suppresses the native browser menu on blank-canvas right-click", async () => {

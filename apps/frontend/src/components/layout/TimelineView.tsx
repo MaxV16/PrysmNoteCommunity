@@ -384,36 +384,6 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
   const lastWheelZoomRef = useRef(0);
   const zoomAnchorRef = useRef<{ dayIndex: number; offsetX: number } | null>(null);
 
-  // Keyboard zoom: Ctrl/Cmd + = / - steps the ladder, Ctrl/Cmd + 0 resets. It is
-  // disabled while typing so a search field never eats the shortcut.
-  useEffect(() => {
-    if (safeMode !== "timeline") return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT" ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
-      if (e.key === "=" || e.key === "+") {
-        e.preventDefault();
-        zoomIn();
-      } else if (e.key === "-" || e.key === "_") {
-        e.preventDefault();
-        zoomOut();
-      } else if (e.key === "0") {
-        e.preventDefault();
-        resetZoom();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [safeMode, zoomIn, zoomOut, resetZoom]);
   useEffect(() => {
     if (safeMode !== "timeline") {
       hasParkedRef.current = false;
@@ -562,17 +532,18 @@ export function TimelineView({ onToggleRight, onOpenSidebar, viewMode, onViewMod
     // actually scroll; this maps Shift+wheel and horizontal trackpad deltas to
     // the timeline so a Windows mouse can pan without dragging, and normalizes
     // deltaMode because Windows reports line/page deltas rather than pixels.
-    // Ctrl/Cmd + wheel zooms the timeline (discrete levels).
+    // Alt + wheel zooms the timeline. Ctrl/Cmd + wheel is left to the browser,
+    // so page zoom scales the whole interface instead of only the day columns.
     const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return;
       const canScrollVertically = body.scrollHeight > body.clientHeight + 1;
       const shift = e.shiftKey;
-      const ctrlOrMeta = e.ctrlKey || e.metaKey;
       const horizontal = shift || Math.abs(e.deltaX) > Math.abs(e.deltaY);
 
-      // Ctrl/Cmd + wheel = zoom. One step per burst, anchored on the day under
-      // the pointer, so a trackpad flick changes the zoom exactly once and the
-      // content stays put instead of racing to the end and jumping.
-      if (ctrlOrMeta && e.deltaY !== 0) {
+      // Alt + wheel = timeline zoom. One step per burst, anchored on the day
+      // under the pointer, so a trackpad flick changes the zoom exactly once and
+      // the content stays put instead of racing to the end and jumping.
+      if (e.altKey && e.deltaY !== 0) {
         e.preventDefault();
         const now = performance.now();
         if (now - lastWheelZoomRef.current < 140) return;

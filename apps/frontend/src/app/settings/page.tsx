@@ -1486,7 +1486,8 @@ export default function SettingsPage() {
               <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider pt-2">Interface Size</h3>
               <div className="space-y-3">
                 <p className="text-xs text-muted">
-                  Scale the timeline and text to fit your screen. Smaller fits more on a phone, larger is easier to
+                  Use your browser zoom (Ctrl + plus or minus) to scale the whole interface. This slider is a separate,
+                  device-only size for the timeline and app text. Smaller fits more on a phone, larger is easier to
                   read. Saved on this device only.
                 </p>
                 <div className="flex items-center gap-3">
